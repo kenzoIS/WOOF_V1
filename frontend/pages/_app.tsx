@@ -10,7 +10,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const auth = Boolean(localStorage.getItem("userType"));
+    const auth = localStorage.getItem("woofAuth") === "true";
     setIsAuthenticated(auth);
     setCheckedAuth(true);
 

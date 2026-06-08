@@ -1,105 +1,281 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
-import { Button } from "../components/ui/button";
-import logoImg from "../../imports/happytailslogo-removebg-preview.png";
-import { Mail, Lock, AlertCircle } from "lucide-react";
+import { Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "../components/ui/button";
+import { Toaster } from "../components/ui/sonner";
+import logoImg from "../../imports/happytailslogo-removebg-preview.png";
+
+type ForgotPasswordStep = "email" | "otp" | "newPassword";
 
 interface ForgotPasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
-  userType: "owner" | "staff";
+  onPasswordReset: () => void;
 }
 
-function ForgotPasswordModal({ isOpen, onClose, userType }: ForgotPasswordModalProps) {
+function ForgotPasswordModal({
+  isOpen,
+  onClose,
+  onPasswordReset,
+}: ForgotPasswordModalProps) {
+  const [step, setStep] = useState<ForgotPasswordStep>("email");
   const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = () => {
-    if (!email) {
+  const resetModal = () => {
+    setEmail("");
+    setOtp("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setStep("email");
+  };
+
+  const handleClose = () => {
+    resetModal();
+    onClose();
+  };
+
+  const handleEmailSubmit = () => {
+    if (!email.trim()) {
       toast.error("Please enter your email address");
       return;
     }
 
     setIsSubmitting(true);
 
-    // Simulate sending email
     setTimeout(() => {
-      if (userType === "owner") {
-        toast.success("Password reset link sent!", {
-          description: "Check your email for instructions to reset your password.",
-        });
-      } else {
-        toast.success("Password reset request sent to owner", {
-          description: "The business owner will contact you shortly via email.",
-        });
-      }
+      toast.success("OTP sent!", {
+        description: "Check your email for the 6-digit OTP code.",
+      });
       setIsSubmitting(false);
-      setEmail("");
-      onClose();
+      setStep("otp");
     }, 1500);
   };
 
-  if (!isOpen) return null;
+  const handleOtpSubmit = () => {
+    if (otp.length !== 6) {
+      toast.error("Please enter a valid 6-digit OTP");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    setTimeout(() => {
+      toast.success("OTP verified!");
+      setIsSubmitting(false);
+      setStep("newPassword");
+    }, 1000);
+  };
+
+  const handlePasswordSubmit = () => {
+    if (!newPassword || !confirmPassword) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    setTimeout(() => {
+      toast.success("Password reset successful!", {
+        description: "Please log in with your new password.",
+      });
+      setIsSubmitting(false);
+      resetModal();
+      onClose();
+      onPasswordReset();
+    }, 1500);
+  };
+
+  if (!isOpen) {
+    return null;
+  }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full p-8 space-y-6">
-        <div className="space-y-2">
-          <h2 className="text-2xl font-bold text-[#223047]">Forgot Password?</h2>
-          <p className="text-sm text-[#223047] opacity-60">
-            {userType === "owner"
-              ? "Enter your email address and we'll send you a link to reset your password."
-              : "Enter your email address and we'll notify the business owner to help you reset your password."}
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-[#223047]">Email Address</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#223047] opacity-40" />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="your.email@example.com"
-                className="w-full pl-11 pr-4 py-3 border-2 border-[#FFD9EC] rounded-xl focus:outline-none focus:border-[#F53799] transition-colors"
-              />
-            </div>
-          </div>
-
-          {userType === "staff" && (
-            <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-4 flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-[#F53799] flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-[#223047] opacity-70">
-                The business owner will receive an email notification about your password reset request and will contact you directly.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md space-y-6 rounded-2xl bg-white p-8 shadow-2xl">
+        {step === "email" && (
+          <>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-[#223047]">
+                Forgot Password?
+              </h2>
+              <p className="text-sm text-[#223047] opacity-60">
+                Enter your email address and we'll send you a 6-digit OTP code.
               </p>
             </div>
-          )}
-        </div>
 
-        <div className="flex gap-3">
-          <Button
-            onClick={onClose}
-            variant="outline"
-            className="flex-1 border-[#FFD9EC]"
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            className="flex-1 bg-[#F53799] hover:bg-[#D42A7D]"
-            disabled={isSubmitting}
-          >
-            {isSubmitting
-              ? "Sending..."
-              : userType === "owner"
-              ? "Send Reset Link"
-              : "Contact Owner"}
-          </Button>
-        </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-[#223047]">
+                Email Address
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="your.email@example.com"
+                  className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                type="button"
+                onClick={handleClose}
+                variant="outline"
+                className="flex-1 rounded-xl border-[#FFD9EC]"
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleEmailSubmit}
+                className="flex-1 rounded-xl bg-[#F53799] text-white hover:bg-[#D42A7D]"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Sending..." : "Send OTP"}
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step === "otp" && (
+          <>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-[#223047]">Enter OTP</h2>
+              <p className="text-sm text-[#223047] opacity-60">
+                We've sent a 6-digit OTP code to {email}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-[#223047]">
+                6-Digit OTP
+              </label>
+              <input
+                type="text"
+                value={otp}
+                onChange={(event) =>
+                  setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))
+                }
+                placeholder="000000"
+                className="w-full rounded-xl border-2 border-[#FFD9EC] px-4 py-3 text-center text-2xl font-bold tracking-widest transition-colors focus:border-[#F53799] focus:outline-none"
+                disabled={isSubmitting}
+                inputMode="numeric"
+                maxLength={6}
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                type="button"
+                onClick={handleClose}
+                variant="outline"
+                className="flex-1 rounded-xl border-[#FFD9EC]"
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleOtpSubmit}
+                className="flex-1 rounded-xl bg-[#F53799] text-white hover:bg-[#D42A7D]"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Verifying..." : "Verify OTP"}
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step === "newPassword" && (
+          <>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-[#223047]">
+                Create New Password
+              </h2>
+              <p className="text-sm text-[#223047] opacity-60">
+                Enter your new password below
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[#223047]">
+                  New Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    placeholder="Enter new password"
+                    className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[#223047]">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(event) =>
+                      setConfirmPassword(event.target.value)
+                    }
+                    placeholder="Confirm new password"
+                    className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                type="button"
+                onClick={handleClose}
+                variant="outline"
+                className="flex-1 rounded-xl border-[#FFD9EC]"
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handlePasswordSubmit}
+                className="flex-1 rounded-xl bg-[#F53799] text-white hover:bg-[#D42A7D]"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Resetting..." : "Reset Password"}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -107,39 +283,42 @@ function ForgotPasswordModal({ isOpen, onClose, userType }: ForgotPasswordModalP
 
 export function Login() {
   const router = useRouter();
-  const [userType, setUserType] = useState<"owner" | "staff">("owner");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = (event: React.FormEvent) => {
+    event.preventDefault();
 
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       toast.error("Please fill in all fields");
       return;
     }
 
     setIsLoggingIn(true);
 
-    // Simulate login
     setTimeout(() => {
-      localStorage.setItem("userType", userType);
-      localStorage.setItem("userEmail", email);
-      toast.success(`Welcome back!`, {
-        description: `Logged in as ${userType === "owner" ? "Owner" : "Staff Member"}`,
+      localStorage.removeItem("userType");
+      localStorage.setItem("woofAuth", "true");
+      localStorage.setItem("userEmail", email.trim());
+      toast.success("Welcome back!", {
+        description: "Signed in to WOOF.",
       });
       router.push("/");
     }, 1000);
   };
 
+  const handlePasswordReset = () => {
+    setEmail("");
+    setPassword("");
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#FFF2FA] via-white to-[#FFF7FB] flex items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#FFF2FA] via-white to-[#FFF7FB] p-4">
       <div className="w-full max-w-md">
-        {/* Logo and Header */}
-        <div className="text-center mb-8 space-y-4">
-          <div className="flex justify-center mb-6">
+        <div className="mb-8 space-y-4 text-center">
+          <div className="mb-6 flex justify-center">
             <img
               src={logoImg.src}
               alt="Happy Tails Logo"
@@ -147,77 +326,44 @@ export function Login() {
             />
           </div>
           <h1 className="text-3xl font-extrabold text-[#223047]">
-            Welcome to WOOF AI
+            Welcome to WOOF!
           </h1>
           <p className="text-[#223047] opacity-60">
-            Your omnichannel intelligence platform
+            Your Cross-Channel Intelligence Platform
           </p>
         </div>
 
-        {/* Login Card */}
-        <div className="bg-white border-2 border-[#FFD9EC] rounded-3xl p-8 shadow-xl space-y-6">
-          {/* User Type Selector */}
-          <div className="space-y-3">
-            <label className="text-sm font-semibold text-[#223047]">Login As</label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setUserType("owner")}
-                className={`p-4 rounded-xl border-2 transition-all ${
-                  userType === "owner"
-                    ? "border-[#F53799] bg-[#FFF2FA]"
-                    : "border-[#FFD9EC] hover:border-[#F53799]/50"
-                }`}
-              >
-                <div className="text-center">
-                  <div className="text-lg font-bold text-[#223047]">Owner</div>
-                  <div className="text-xs text-[#223047] opacity-60">Full Access</div>
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => setUserType("staff")}
-                className={`p-4 rounded-xl border-2 transition-all ${
-                  userType === "staff"
-                    ? "border-[#F53799] bg-[#FFF2FA]"
-                    : "border-[#FFD9EC] hover:border-[#F53799]/50"
-                }`}
-              >
-                <div className="text-center">
-                  <div className="text-lg font-bold text-[#223047]">Staff</div>
-                  <div className="text-xs text-[#223047] opacity-60">Team Member</div>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Login Form */}
+        <div className="space-y-6 rounded-3xl border-2 border-[#FFD9EC] bg-white p-8 shadow-xl">
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-[#223047]">Email Address</label>
+              <label className="text-sm font-medium text-[#223047]">
+                Email Address
+              </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#223047] opacity-40" />
+                <Mail className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
                 <input
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(event) => setEmail(event.target.value)}
                   placeholder="your.email@example.com"
-                  className="w-full pl-11 pr-4 py-3 border-2 border-[#FFD9EC] rounded-xl focus:outline-none focus:border-[#F53799] transition-colors"
+                  className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
                   disabled={isLoggingIn}
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-[#223047]">Password</label>
+              <label className="text-sm font-medium text-[#223047]">
+                Password
+              </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#223047] opacity-40" />
+                <Lock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
                 <input
                   type="password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(event) => setPassword(event.target.value)}
                   placeholder="Enter your password"
-                  className="w-full pl-11 pr-4 py-3 border-2 border-[#FFD9EC] rounded-xl focus:outline-none focus:border-[#F53799] transition-colors"
+                  className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
                   disabled={isLoggingIn}
                 />
               </div>
@@ -227,7 +373,8 @@ export function Login() {
               <button
                 type="button"
                 onClick={() => setShowForgotPassword(true)}
-                className="text-sm text-[#F53799] hover:text-[#D42A7D] font-medium transition-colors"
+                className="text-sm font-medium text-[#F53799] transition-colors hover:text-[#D42A7D]"
+                disabled={isLoggingIn}
               >
                 Forgot Password?
               </button>
@@ -235,28 +382,27 @@ export function Login() {
 
             <Button
               type="submit"
-              className="w-full bg-[#F53799] hover:bg-[#D42A7D] py-6 text-base font-semibold"
+              className="w-full rounded-xl bg-[#F53799] py-6 text-base font-semibold text-white hover:bg-[#D42A7D]"
               disabled={isLoggingIn}
             >
               {isLoggingIn ? "Signing In..." : "Sign In"}
             </Button>
           </form>
 
-          {/* Footer Note */}
-          <div className="pt-4 border-t border-[#FFD9EC]">
-            <p className="text-xs text-center text-[#223047] opacity-50">
+          <div className="border-t border-[#FFD9EC] pt-4">
+            <p className="text-center text-xs text-[#223047] opacity-50">
               Powered by WOOF AI Analytics Engine
             </p>
           </div>
         </div>
       </div>
 
-      {/* Forgot Password Modal */}
       <ForgotPasswordModal
         isOpen={showForgotPassword}
         onClose={() => setShowForgotPassword(false)}
-        userType={userType}
+        onPasswordReset={handlePasswordReset}
       />
+      <Toaster />
     </div>
   );
 }

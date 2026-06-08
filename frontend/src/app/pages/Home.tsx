@@ -432,9 +432,9 @@ export function Home() {
       </div>
 
       {/* SECTION 5 — CHANNEL EQUILIBRIUM + SALES INTENSITY HEATMAP */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+      <div className="flex flex-col gap-4 md:gap-6">
         {/* Channel Equilibrium Monitor */}
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7">
           <div>
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               Offline vs. Online Channel Balance
@@ -448,7 +448,7 @@ export function Home() {
             <BarChart
               data={equilibriumData}
               layout="vertical"
-              margin={{ left: 80, right: 80 }}
+              margin={{ top: 8, right: 40, bottom: 8, left: 24 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
               <XAxis type="number" stroke="#223047" style={{ fontSize: "12px" }} />
@@ -482,8 +482,8 @@ export function Home() {
         </div>
 
         {/* Sales Intensity Heatmap */}
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
+        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 md:gap-6">
             <div className="flex-1 min-w-0">
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                 Sales Intensity Map
@@ -493,7 +493,7 @@ export function Home() {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 md:justify-end">
               {["All Sectors", "Cafe", "Services", "Retail"].map((filter) => (
                 <Button
                   key={filter}
@@ -512,17 +512,17 @@ export function Home() {
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             {heatmapHours.map((hour) => (
-              <div key={hour} className="flex items-center gap-2">
-                <div className="w-16 text-xs text-[#223047] opacity-60">{hour}</div>
-                <div className="flex-1 grid grid-cols-7 gap-1">
+              <div key={hour} className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3">
+                <div className="text-xs text-[#223047] opacity-60">{hour}</div>
+                <div className="grid grid-cols-7 gap-1.5 md:gap-2">
                   {heatmapDays.map((day) => {
                     const value = Math.random() * 100;
                     return (
                       <div
                         key={`${hour}-${day}`}
-                        className="aspect-square rounded cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
+                        className="h-8 md:h-10 lg:h-12 rounded cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
                         style={{ backgroundColor: getHeatmapColor(value) }}
                         title={`${day} ${hour}: ${value.toFixed(0)}% capacity`}
                       />
@@ -531,12 +531,15 @@ export function Home() {
                 </div>
               </div>
             ))}
-            <div className="flex justify-center gap-2 pt-2">
-              {heatmapDays.map((day) => (
-                <div key={day} className="w-full text-center text-xs text-[#223047] opacity-60">
-                  {day}
-                </div>
-              ))}
+            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 pt-1">
+              <div aria-hidden="true" />
+              <div className="grid grid-cols-7 gap-1.5 md:gap-2">
+                {heatmapDays.map((day) => (
+                  <div key={day} className="text-center text-xs text-[#223047] opacity-60">
+                    {day}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

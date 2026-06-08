@@ -32,10 +32,15 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
 
-  // Get user info from localStorage
-  const userType = localStorage.getItem("userType") || "owner";
   const userEmail = localStorage.getItem("userEmail") || "user@happytails.com";
-  const userInitials = userType === "owner" ? "OW" : "ST";
+  const userInitials = userEmail
+    .split("@")[0]
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "WU";
   const [notifications, setNotifications] = useState<Notification[]>([
     {
       id: "1",
@@ -84,6 +89,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   };
 
   const handleSignOut = () => {
+    localStorage.removeItem("woofAuth");
     localStorage.removeItem("userType");
     localStorage.removeItem("userEmail");
     toast.success("Signed out successfully");
@@ -237,8 +243,8 @@ export function Header({ onMenuClick }: HeaderProps) {
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
-                  <div className="text-sm font-bold text-[#223047] capitalize">
-                    {userType}
+                  <div className="text-sm font-bold text-[#223047]">
+                    WOOF User
                   </div>
                   <div className="text-xs text-[#223047] opacity-60">
                     Happy Tails
