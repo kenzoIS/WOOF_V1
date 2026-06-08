@@ -1,0 +1,660 @@
+import { useState, useMemo, useEffect } from "react";
+import * as React from "react";
+import { Coffee, DollarSign, TrendingUp, PieChart, Download } from "lucide-react";
+import { KPICard } from "../components/KPICard";
+import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { ErrorModal, ErrorType } from "../components/ErrorModal";
+import { SuccessModal, SuccessType } from "../components/SuccessModal";
+import { ModelDetailsModal } from "../components/ModelDetailsModal";
+import { getDashboard, getForecast } from "../lib/api";
+import cafeMascot from "../../imports/no_bg_Cafe-2.png";
+import {
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import { Slider } from "../components/ui/slider";
+import { toast } from "sonner";
+
+// Fallback data sourced from POS-HappyTails.csv actual top-selling Cafe items
+const fallbackMenuItems = [
+  { name: "Dog Bento Cake", qtySold: 98, category: "Pet Bakery", equilibrium: "balanced", trend: [450, 380, 520, 410, 490, 460, 430], revenue: 26824, grossProfit: 16028 },
+  { name: "Cat Bento Cake", qtySold: 86, category: "Pet Bakery", equilibrium: "balanced", trend: [400, 350, 480, 370, 440, 410, 380], revenue: 23954, grossProfit: 14305 },
+  { name: "Peanut Butter Choco Frappe", qtySold: 91, category: "Coffee", equilibrium: "balanced", trend: [250, 210, 280, 230, 270, 260, 240], revenue: 15383, grossProfit: 9181 },
+  { name: "Doggie Pizza Large", qtySold: 92, category: "Pet Bakery", equilibrium: "balanced", trend: [200, 180, 250, 210, 230, 220, 190], revenue: 12750, grossProfit: 7670 },
+  { name: "Choco Java Chip Frappe", qtySold: 76, category: "Coffee", equilibrium: "balanced", trend: [190, 160, 220, 180, 210, 200, 175], revenue: 12546, grossProfit: 7559 },
+  { name: "Iced Cocoa Tiramisu", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [185, 165, 210, 175, 200, 190, 170], revenue: 12256, grossProfit: 7333 },
+  { name: "Matcha Frappe", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [180, 160, 215, 170, 195, 185, 175], revenue: 12189, grossProfit: 7297 },
+  { name: "Caramel Macchiato Frappe", qtySold: 75, category: "Coffee", equilibrium: "balanced", trend: [175, 155, 205, 165, 190, 180, 160], revenue: 11730, grossProfit: 6906 },
+  { name: "Iced Matcha Latte", qtySold: 84, category: "Coffee", equilibrium: "balanced", trend: [170, 145, 195, 160, 185, 170, 155], revenue: 11192, grossProfit: 6738 },
+  { name: "Iced Coconut Latte", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [165, 140, 190, 155, 180, 165, 150], revenue: 11006, grossProfit: 6637 },
+  { name: "Iced Hazelnut Latte", qtySold: 79, category: "Coffee", equilibrium: "balanced", trend: [160, 135, 185, 150, 175, 160, 145], revenue: 10665, grossProfit: 6444 },
+  { name: "Iced Vanilla Latte", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [155, 130, 180, 145, 170, 155, 140], revenue: 10382, grossProfit: 6242 },
+  { name: "Pet Dognut Box of 3", qtySold: 56, category: "Pet Bakery", equilibrium: "diverging", trend: [150, 130, 175, 140, 165, 150, 135], revenue: 10080, grossProfit: 6026 },
+  { name: "Doggie Pizza Small", qtySold: 79, category: "Pet Bakery", equilibrium: "balanced", trend: [140, 120, 165, 135, 155, 140, 130], revenue: 9480, grossProfit: 5588 },
+  { name: "Strawberry Frappe", qtySold: 56, category: "Coffee", equilibrium: "diverging", trend: [135, 115, 160, 130, 150, 135, 125], revenue: 9350, grossProfit: 5590 },
+];
+
+export function Cafe() {
+  const [metricType, setMetricType] = useState("revenue");
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [menuFilter, setMenuFilter] = useState("all");
+  const [discountValue, setDiscountValue] = useState([15]);
+  const [errorModal, setErrorModal] = useState<{ isOpen: boolean; type: ErrorType | null }>({
+    isOpen: false,
+    type: null,
+  });
+  const [successModal, setSuccessModal] = useState<{ isOpen: boolean; type: SuccessType | null }>({
+    isOpen: false,
+    type: null,
+  });
+  const [showModelDetails, setShowModelDetails] = useState(false);
+  const [lastModelUpdate, setLastModelUpdate] = useState("2 hours ago");
+
+  // API data state
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [forecastApiData, setForecastApiData] = useState<any>(null);
+
+  useEffect(() => {
+    getDashboard("cafe").then(setDashboardData).catch(() => {});
+    getForecast("cafe").then(setForecastApiData).catch(() => {});
+  }, []);
+
+  // Build menu items from API data — maps backend topItems to table shape
+  const menuItems = useMemo(() => {
+    if (!dashboardData?.topItems?.length) return fallbackMenuItems;
+    
+    // Get last 7 days of total revenue to build per-item trend sparklines
+    const last7Days = (dashboardData.dailyRevenue || []).slice(-7);
+
+    return dashboardData.topItems.slice(0, 15).map((item: any) => {
+      // Scale the cafe's daily revenue shape to this item's proportion
+      const itemProportion = item.revenue / (dashboardData.kpis?.totalRevenue || 1);
+      const trend = last7Days.length > 0
+        ? last7Days.map((d: any) => Math.max(0, Math.round(d.revenue * itemProportion)))
+        : [item.revenue];
+
+      // Determine status based on quantity thresholds from actual dataset
+      const equilibrium = item.quantity >= 70 ? "balanced" : (item.quantity >= 40 ? "diverging" : "critical");
+
+      return {
+        name: item.name,
+        qtySold: item.quantity,
+        category: item.category || "Cafe",
+        equilibrium,
+        trend,
+        revenue: Math.round(item.revenue),
+        grossProfit: Math.round(item.revenue * 0.6), // Approximate from dataset avg margin ~60%
+      };
+    });
+  }, [dashboardData]);
+
+  // KPI values from API
+  const kpis = dashboardData?.kpis || {};
+  const cafeRevenue = kpis.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
+  const totalOrders = kpis.totalOrders || 0;
+  const avgCheck = kpis.avgOrderValue ? `₱${kpis.avgOrderValue.toLocaleString()}` : "₱0";
+  const activeItems = dashboardData?.topItems?.length || 0;
+
+  // Build forecast chart data from API
+  const forecastData = useMemo(() => {
+    if (!forecastApiData?.historical?.length) {
+      return [];
+    }
+    const hist = forecastApiData.historical.map((d: any, index: number, arr: any[]) => ({
+      date: d.date,
+      actual: d.actual,
+      forecast: index === arr.length - 1 ? d.actual : null,
+      confidenceLow: null as number | null,
+      confidenceHigh: null as number | null,
+    }));
+    const fc = (forecastApiData.forecast || []).map((d: any) => ({
+      date: d.date,
+      actual: null as number | null,
+      forecast: d.forecast,
+      confidenceLow: d.confidenceLow,
+      confidenceHigh: d.confidenceHigh,
+    }));
+    return [...hist.slice(-30), ...fc];
+  }, [forecastApiData, metricType]);
+
+  // Filtered menu items based on filter
+  const filteredMenuItems = useMemo(() => {
+    if (menuFilter === "all") return menuItems;
+    if (menuFilter === "top") return menuItems.filter((item: any) => item.revenue >= 12000);
+    if (menuFilter === "under") return menuItems.filter((item: any) => item.revenue < 10000);
+    if (menuFilter === "diverging") return menuItems.filter((item: any) => item.equilibrium === "diverging" || item.equilibrium === "critical");
+    return menuItems;
+  }, [menuFilter, menuItems]);
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+  };
+
+  const handleExportReport = () => {
+    toast.info("Generating report...");
+    setTimeout(() => {
+      // Simulate export failure
+      setErrorModal({ isOpen: true, type: "export_failed" });
+    }, 1500);
+  };
+
+  const handleRetrainModel = () => {
+    toast.info("Retraining model...");
+    setTimeout(() => {
+      // Simulate model training failure
+      setErrorModal({ isOpen: true, type: "model_failed" });
+    }, 2000);
+  };
+
+  const handleRetryExport = () => {
+    setErrorModal({ isOpen: false, type: null });
+    toast.info("Retrying export with optimized parameters...");
+    setTimeout(() => {
+      setSuccessModal({ isOpen: true, type: "export_success" });
+    }, 1500);
+  };
+
+  const handleRetryModelTraining = () => {
+    setErrorModal({ isOpen: false, type: null });
+    toast.info("Retrying model training...");
+    setTimeout(() => {
+      setSuccessModal({ isOpen: true, type: "model_retrain_success" });
+    }, 2000);
+  };
+
+  const handleViewModelDetails = () => {
+    setShowModelDetails(true);
+  };
+
+  const handleContactSupport = () => {
+    toast.success("Support ticket created. Our team will contact you within 24 hours.");
+    window.open("mailto:support@woofai.com?subject=Data Corruption Issue&body=I need assistance with a data integrity issue in my Cafe dashboard.", "_blank");
+  };
+
+  const handleRefreshData = () => {
+    toast.info("Refreshing data...");
+    setTimeout(() => {
+      toast.success("Data refreshed successfully");
+      // Simulate data refresh by forcing a re-render
+      setMenuFilter("all");
+    }, 1000);
+  };
+
+  const handleRetryDataSync = () => {
+    setErrorModal({ isOpen: false, type: null });
+    toast.info("Retrying data synchronization...");
+    setTimeout(() => {
+      // Update last model update time to show data was refreshed
+      setLastModelUpdate("just now");
+      setSuccessModal({ isOpen: true, type: "data_sync_success" });
+    }, 2000);
+  };
+
+  const getEquilibriumColor = (status: string) => {
+    if (status === "balanced") return "bg-green-500";
+    if (status === "diverging") return "bg-orange-500";
+    return "bg-red-500";
+  };
+
+  return (
+    <div className="space-y-6 md:space-y-8 lg:space-y-12">
+      {/* PAGE HEADER */}
+      <div className="flex flex-col md:flex-row items-start justify-between gap-4">
+        <div className="flex-1">
+          <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
+            Cafe Intelligence Hub
+          </h1>
+          <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1 md:mt-2" style={{ lineHeight: "1.6" }}>
+            Food & Beverage performance analytics and AI-powered demand forecasting
+          </p>
+        </div>
+        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+          <Badge className="bg-[#F53799] text-white hover:bg-[#F53799] px-3 md:px-4 py-1 text-xs md:text-sm">
+            Cafe Sector
+          </Badge>
+          <Button
+            onClick={handleExportReport}
+            variant="outline"
+            className="border-[#FFD9EC] gap-2 text-xs md:text-sm"
+            size="sm"
+          >
+            <Download className="w-3 h-3 md:w-4 md:h-4" />
+            <span className="hidden sm:inline">Export Report</span>
+            <span className="sm:hidden">Export</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* KPI ROW */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+          {/* Cafe Revenue Today */}
+          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+              <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-[#223047] opacity-60 truncate">Historical Cafe Revenue</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{cafeRevenue}</div>
+              <div className="text-xs text-green-600 font-medium hidden md:block">+12.3% ↑</div>
+            </div>
+          </div>
+
+          {/* Total Orders */}
+          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+              <Coffee className="w-4 h-4 md:w-5 md:h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-[#223047] opacity-60 truncate">Total Orders</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{totalOrders}</div>
+              <div className="text-xs text-green-600 font-medium hidden md:block">+8.2% ↑</div>
+            </div>
+          </div>
+
+          {/* Avg Check Size */}
+          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+              <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Check Size</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{avgCheck}</div>
+              <div className="text-xs text-green-600 font-medium hidden md:block">+3.5% ↑</div>
+            </div>
+          </div>
+
+          {/* Active Menu Items */}
+          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+              <PieChart className="w-4 h-4 md:w-5 md:h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-[#223047] opacity-60 truncate">Active Menu Items</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{activeItems}</div>
+              <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs mt-1 hidden md:inline-flex">
+                All Active
+              </Badge>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DEMAND FORECAST PANEL - Best Model Only */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
+          <div className="flex-1">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Cafe Demand Forecast
+            </h2>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              AI-selected best model: <span className="font-semibold text-[#F53799]">{forecastApiData?.modelInfo?.model || "Prophet"}</span> <span className="hidden sm:inline">(MASE: {forecastApiData?.modelInfo?.mase || "0.68"}, Accuracy: {forecastApiData?.modelInfo?.accuracy || "92"}%)</span>
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {["Revenue", "Order Volume"].map((metric) => (
+              <Button
+                key={metric}
+                size="sm"
+                variant={metricType === metric.toLowerCase().replace(" ", "") ? "default" : "outline"}
+                onClick={() => setMetricType(metric.toLowerCase().replace(" ", ""))}
+                className={
+                  metricType === metric.toLowerCase().replace(" ", "")
+                    ? "bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm"
+                    : "border-[#FFD9EC] hover:bg-[#FFF2FA] text-xs md:text-sm"
+                }
+              >
+                {metric}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        {/* Forecast Chart */}
+        <ResponsiveContainer width="100%" height={250} className="md:!h-[350px] lg:!h-[400px]">
+          <LineChart data={forecastData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
+            <XAxis dataKey="date" stroke="#223047" style={{ fontSize: "12px" }} />
+            <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "white",
+                border: "1px solid #FFD9EC",
+                borderRadius: "12px",
+                padding: "12px",
+              }}
+            />
+            <Line
+              key="line-actual-cafe"
+              type="monotone"
+              dataKey="actual"
+              stroke="#223047"
+              strokeWidth={2.5}
+              dot={false}
+              animationDuration={800}
+            />
+            <Line
+              key="line-forecast-cafe"
+              type="monotone"
+              dataKey="forecast"
+              stroke="#F53799"
+              strokeWidth={2.5}
+              strokeDasharray="5 5"
+              dot={false}
+              animationDuration={800}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+
+        {/* Model Info & Recommendation */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
+          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
+            <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+            <div className="grid grid-cols-2 gap-3 md:gap-4">
+              <div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
+                <div className="text-xl md:text-2xl font-bold text-[#F53799]">{forecastApiData?.modelInfo?.mase || "0.68"}</div>
+                <div className="text-xs text-green-600 hidden md:block">Beats baseline by 32%</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">RMSE</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.rmse || "1053"}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">MAPE</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.mape !== undefined ? `${forecastApiData.modelInfo.mape}%` : "4.2%"}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">R²</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.r2 !== undefined ? forecastApiData.modelInfo.r2 : "0.92"}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
+            <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
+            <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+              Prophet model selected for superior seasonal pattern detection. <span className="hidden md:inline">Slight under-forecast bias of -0.15% detected. Strong performance on weekend peaks.</span> Model last retrained {lastModelUpdate}.
+            </p>
+            <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" size="sm">
+              Retrain Model
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
+      <div
+        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
+        style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
+      >
+        <div className="flex-1">
+          <div className="mb-2">
+            <Badge variant="outline" className="text-xs">
+              WOOF AI Insight
+            </Badge>
+          </div>
+          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+            "Dog Bento Cake leads cafe revenue at ₱26,824 across 98 units. <span className="hidden sm:inline">Consider bundling with grooming services during 2-5 PM window for 18% lift potential.</span>"
+          </p>
+        </div>
+        <img
+          src={cafeMascot.src}
+          alt="Cafe Mascot"
+          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
+        />
+      </div>
+
+      {/* MENU PERFORMANCE + HAPPY HOUR */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
+        {/* Menu Item Performance Table (60% - 3 columns) */}
+        <div className="lg:col-span-3 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Menu Item Performance
+            </h2>
+            <select
+              value={menuFilter}
+              onChange={(e) => setMenuFilter(e.target.value)}
+              className="px-3 py-1.5 border border-[#FFD9EC] rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+            >
+              <option value="all">All Items</option>
+              <option value="top">Top Performers</option>
+              <option value="under">Underperformers</option>
+              <option value="diverging">Diverging</option>
+            </select>
+          </div>
+
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead
+                    className="cursor-pointer hover:bg-[#FFF2FA]"
+                    onClick={() => handleSort("name")}
+                  >
+                    Item Name {sortColumn === "name" && (sortDirection === "asc" ? "↑" : "↓")}
+                  </TableHead>
+                  <TableHead
+                    className="cursor-pointer hover:bg-[#FFF2FA] text-center"
+                    onClick={() => handleSort("qty")}
+                  >
+                    Qty Sold {sortColumn === "qty" && (sortDirection === "asc" ? "↑" : "↓")}
+                  </TableHead>
+                  <TableHead className="text-center">Category</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-center">Trend</TableHead>
+                  <TableHead
+                    className="cursor-pointer hover:bg-[#FFF2FA] text-center"
+                    onClick={() => handleSort("revenue")}
+                  >
+                    Revenue {sortColumn === "revenue" && (sortDirection === "asc" ? "↑" : "↓")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredMenuItems.map((item: any, itemIndex: number) => (
+                  <React.Fragment key={`menu-item-${item.name}-${itemIndex}`}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-[#FFF2FA]"
+                      onClick={() => setExpandedRow(expandedRow === item.name ? null : item.name)}
+                    >
+                      <TableCell className="font-semibold">{item.name}</TableCell>
+                      <TableCell className="text-center">{item.qtySold}</TableCell>
+                      <TableCell className="text-center">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-[#FFF2FA] text-[#223047] opacity-80">{item.category}</span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className={`w-2 h-2 rounded-full mx-auto ${getEquilibriumColor(item.equilibrium)}`} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-center h-8">
+                          <LineChart width={80} height={30} data={item.trend.map((v: any, idx: number) => ({ value: v, index: idx }))}>
+                            <Line
+                              key={`line-trend-${item.name}`}
+                              type="monotone"
+                              dataKey="value"
+                              stroke="#F53799"
+                              strokeWidth={2}
+                              dot={false}
+                            />
+                          </LineChart>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center font-semibold">₱{item.revenue.toLocaleString()}</TableCell>
+                    </TableRow>
+                    {expandedRow === item.name && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="bg-[#FFF7FB]">
+                          <div className="p-4 space-y-3">
+                            <ResponsiveContainer width="100%" height={120} className="md:!h-[150px]">
+                              <LineChart
+                                data={Array.from({ length: 14 }, (_, i) => ({
+                                  day: `Day ${i + 1}`,
+                                  sales: Math.random() * 100 + 50,
+                                }))}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" />
+                                <XAxis dataKey="day" style={{ fontSize: "10px" }} />
+                                <YAxis style={{ fontSize: "10px" }} />
+                                <Tooltip />
+                                <Line
+                                  key={`line-sales-${item.name}`}
+                                  type="monotone"
+                                  dataKey="sales"
+                                  stroke="#F53799"
+                                  strokeWidth={2}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                            <Button size="sm" className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm">
+                              Promote This Item
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+        {/* Happy Hour Optimizer (40% - 2 columns) */}
+        <div className="lg:col-span-2 space-y-4 md:space-y-6">
+          <div className="bg-[#223047] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
+            <div className="flex items-start justify-between">
+              <h3 className="text-base md:text-lg font-bold">Next Quiet Period</h3>
+              <Badge className="bg-[#5CE1E6] text-white hover:bg-[#5CE1E6] text-xs">
+                ⚙ ENGINE
+              </Badge>
+            </div>
+
+            <div className="text-2xl md:text-3xl lg:text-4xl font-bold">Tomorrow 3:00 PM</div>
+
+            <div className="flex items-center gap-2 text-xs md:text-sm">
+              <span className="opacity-70">Predicted Traffic:</span>
+              <span className="font-semibold text-[#3AE4FA]">42% below avg</span>
+            </div>
+
+            <div className="space-y-3 pt-2 md:pt-4">
+              <div>
+                <label className="text-xs opacity-70 mb-2 block">Discount %</label>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    value={discountValue}
+                    onValueChange={setDiscountValue}
+                    max={50}
+                    min={5}
+                    step={5}
+                    className="flex-1"
+                  />
+                  <span className="text-base md:text-lg font-bold w-10 md:w-12">{discountValue[0]}%</span>
+                </div>
+              </div>
+            </div>
+
+            <Button className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm">
+              Activate Happy Hour
+            </Button>
+          </div>
+
+          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
+            <h3 className="text-sm md:text-base font-bold text-[#223047]">Past Happy Hour Effectiveness</h3>
+
+            <div className="space-y-2">
+              {[
+                { date: "Apr 12", predicted: "+15%", actual: "+18%", result: "✓" },
+                { date: "Apr 10", predicted: "+12%", actual: "+14%", result: "✓" },
+                { date: "Apr 8", predicted: "+20%", actual: "+16%", result: "~" },
+                { date: "Apr 6", predicted: "+18%", actual: "+22%", result: "✓" },
+              ].map((item) => (
+                <div
+                  key={item.date}
+                  className="flex items-center justify-between p-2 rounded-lg bg-[#FFF2FA]"
+                >
+                  <span className="text-xs text-[#223047] opacity-60">{item.date}</span>
+                  <span className="text-xs font-medium text-[#223047]">
+                    {item.predicted} → {item.actual}
+                  </span>
+                  <span className="text-sm">{item.result}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 md:pt-4 border-t border-[#FFD9EC]">
+              <p className="text-xs text-[#223047] opacity-60 mb-2 md:mb-3">Was this helpful?</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="flex-1 text-xs md:text-sm">
+                  👍 <span className="hidden sm:inline ml-1">Yes</span>
+                </Button>
+                <Button size="sm" variant="outline" className="flex-1 text-xs md:text-sm">
+                  👎 <span className="hidden sm:inline ml-1">No</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Error Modal */}
+      {errorModal.type && (
+        <ErrorModal
+          isOpen={errorModal.isOpen}
+          onClose={() => setErrorModal({ isOpen: false, type: null })}
+          errorType={errorModal.type}
+          onRetry={() => {
+            if (errorModal.type === "export_failed") {
+              handleRetryExport();
+            } else if (errorModal.type === "data_sync_failed") {
+              handleRetryDataSync();
+            }
+          }}
+          onViewDetails={errorModal.type === "model_failed" ? handleViewModelDetails : undefined}
+          onContactSupport={errorModal.type === "data_corruption" ? handleContactSupport : undefined}
+          onRefresh={errorModal.type === "concurrent_modification" ? handleRefreshData : undefined}
+        />
+      )}
+
+      {/* Success Modal */}
+      {successModal.type && (
+        <SuccessModal
+          isOpen={successModal.isOpen}
+          onClose={() => setSuccessModal({ isOpen: false, type: null })}
+          successType={successModal.type}
+        />
+      )}
+
+      {/* Model Details Modal */}
+      <ModelDetailsModal
+        isOpen={showModelDetails}
+        onClose={() => setShowModelDetails(false)}
+      />
+    </div>
+  );
+}

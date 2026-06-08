@@ -1,0 +1,58 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+
+export type TransactionDocument = Transaction & Document;
+
+@Schema({ timestamps: true })
+export class Transaction {
+  @Prop({ type: Types.ObjectId, ref: 'CsvUpload', required: true })
+  csvUploadId: Types.ObjectId;
+
+  @Prop({ required: true })
+  date: Date;
+
+  @Prop({ required: true })
+  transactionId: string;
+
+  @Prop({ required: true })
+  productName: string;
+
+  @Prop()
+  sku: string;
+
+  @Prop({ required: true })
+  category: string; // Coffee, Grooming, Pet Supplies, etc.
+
+  @Prop({ required: true })
+  sector: string; // "Cafe" | "Retail" | "Services"
+
+  @Prop({ required: true, default: 1 })
+  quantity: number;
+
+  @Prop({ default: 0 })
+  unitPrice: number;
+
+  @Prop({ default: 0 })
+  totalAmount: number;
+
+  @Prop({ default: 0 })
+  discount: number;
+
+  @Prop({ default: 0 })
+  netSales: number;
+
+  @Prop({ required: true })
+  channel: string; // "POS" | "Shopee" | "TikTok Shop"
+
+  @Prop()
+  paymentType: string;
+}
+
+export const TransactionSchema = SchemaFactory.createForClass(Transaction);
+
+// Add indexes for performance
+TransactionSchema.index({ csvUploadId: 1 });
+TransactionSchema.index({ sector: 1, date: 1 });
+TransactionSchema.index({ channel: 1 });
+TransactionSchema.index({ transactionId: 1 });
+TransactionSchema.index({ date: 1 });
