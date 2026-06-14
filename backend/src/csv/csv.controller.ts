@@ -41,6 +41,28 @@ export class CsvController {
     };
   }
 
+  @Post('historical/:module')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 50 * 1024 * 1024 },
+    }),
+  )
+  async uploadHistoricalCsv(
+    @Param('module') module: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+    if (!file.originalname.toLowerCase().endsWith('.csv')) {
+      throw new BadRequestException(
+        'Historical forecasting ingestion accepts CSV files only',
+      );
+    }
+
+    return this.csvService.processHistoricalUpload(file, module);
+  }
+
   @Get('uploads')
   async getUploads() {
     const uploads = await this.csvService.getUploads();

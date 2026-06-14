@@ -3,7 +3,7 @@ import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Ha
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
-import { uploadCSV, getUploads, deleteUpload, getMetrics } from "../lib/api";
+import { uploadCSV, uploadHistoricalCSV, getUploads, deleteUpload, getMetrics } from "../lib/api";
 
 interface CsvUploadRecord {
   _id: string;
@@ -26,6 +26,8 @@ interface Metrics {
 }
 
 const CHANNEL_OPTIONS = [
+  { value: "Cafe Historical", label: "Cafe History", description: "Physical POS only", color: "#F53799" },
+  { value: "Services Historical", label: "Services History", description: "Physical POS only", color: "#3AE4FA" },
   { value: "POS", label: "POS", description: "Cafe, Services & Retail", color: "#F53799" },
   { value: "Shopee", label: "Shopee", description: "Retail only", color: "#EE4D2D" },
   { value: "TikTok Shop", label: "TikTok Shop", description: "Retail only", color: "#000000" },
@@ -37,14 +39,18 @@ export function DataIngestion() {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<string>("POS");
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   const refreshData = useCallback(async () => {
     try {
       const [uploadsRes, metricsRes] = await Promise.all([getUploads(), getMetrics()]);
       setUploads(uploadsRes.uploads || []);
       setMetrics(metricsRes);
-    } catch {
-      // Backend might not be running yet
+      setConnectionError(null);
+    } catch (error) {
+      setConnectionError(
+        error instanceof Error ? error.message : "Backend unavailable",
+      );
     }
   }, []);
 
@@ -52,11 +58,19 @@ export function DataIngestion() {
 
   const handleUpload = async (file: File) => {
     setUploading(true);
+    setConnectionError(null);
     try {
-      await uploadCSV(file, selectedChannel);
+      if (selectedChannel === "Cafe Historical") {
+        await uploadHistoricalCSV(file, "cafe");
+      } else if (selectedChannel === "Services Historical") {
+        await uploadHistoricalCSV(file, "services");
+      } else {
+        await uploadCSV(file, selectedChannel);
+      }
       toast.success("CSV uploaded successfully!", { description: `${file.name} processed as ${selectedChannel}.` });
       await refreshData();
     } catch (err: any) {
+      setConnectionError(err.message);
       toast.error("Upload failed", { description: err.message });
     } finally {
       setUploading(false);
@@ -102,6 +116,13 @@ export function DataIngestion() {
           Upload CSV/Excel files from POS, Shopee, or TikTok Shop to power your analytics
         </p>
       </div>
+
+      {connectionError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="font-semibold">Upload service is not connected</div>
+          <div className="mt-1">{connectionError}</div>
+        </div>
+      )}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -175,7 +196,11 @@ export function DataIngestion() {
           </p>
           <p className="text-xs text-[#223047] opacity-50 mt-1">
             Uploading as <span className="font-bold text-[#F53799]">{selectedChannel}</span>
-            {selectedChannel === "POS" ? " → rows split into Cafe, Services & Retail by category" : " → all rows go to Retail"}
+            {selectedChannel.endsWith("Historical")
+              ? " → e-commerce and out-of-module rows are excluded before EMA preprocessing"
+              : selectedChannel === "POS"
+                ? " → rows split into Cafe, Services & Retail by category"
+                : " → all rows go to Retail"}
           </p>
         </div>
       </div>

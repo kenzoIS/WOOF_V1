@@ -1,13 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock } from "lucide-react";
-import { KPICard } from "../components/KPICard";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import servicesMascot from "../../imports/no_bg_Services-1.png";
-import { getDashboard, getForecast } from "../lib/api";
+import { ForecastRun, getForecast } from "../lib/api";
 import {
   LineChart,
   Line,
@@ -31,41 +30,11 @@ import {
 } from "../components/ui/table";
 import { toast } from "sonner";
 
-// Fallback booking data will be used if API fails
-
-const serviceUtilization = [
-  { service: "Full Grooming", current: 87, capacity: 100, bookings: 14, avgDuration: 90, revenue: 12600 },
-  { service: "Boarding", current: 72, capacity: 100, bookings: 18, avgDuration: 1440, revenue: 25200 },
-  { service: "Birthday Party", current: 45, capacity: 100, bookings: 3, avgDuration: 180, revenue: 8100 },
-  { service: "Paw-dicure", current: 65, capacity: 100, bookings: 11, avgDuration: 45, revenue: 4950 },
-  { service: "Bath Only", current: 58, capacity: 100, bookings: 9, avgDuration: 30, revenue: 2700 },
-];
-
-const occupancyAlerts = [
-  { time: "3:00 PM Today", service: "Full Grooming", capacity: 92, risk: "High", queued: 8, action: "Suggest reschedule" },
-  { time: "4:00 PM Today", service: "Full Grooming", capacity: 87, risk: "High", queued: 6, action: "Add temp slot" },
-  { time: "11:00 AM Tomorrow", service: "Boarding", capacity: 78, risk: "Medium", queued: 4, action: "Monitor" },
-];
-
-const hourlyBookings = Array.from({ length: 10 }, (_, i) => ({
-  hour: `${i + 9}:00`,
-  bookings: Math.floor(Math.random() * 8 + 2),
-  capacity: 10,
-}));
-
-const weeklyTrends = Array.from({ length: 7 }, (_, i) => ({
-  day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i],
-  grooming: Math.random() * 15 + 10,
-  boarding: Math.random() * 20 + 15,
-  other: Math.random() * 8 + 3,
-}));
-
 export function Services() {
-  const [viewMode, setViewMode] = useState("today");
+  const [viewMode, setViewMode] = useState("next30days");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedService, setExpandedService] = useState<string | null>(null);
-  const [lastSyncTime, setLastSyncTime] = useState("3 hours ago");
   const [errorModal, setErrorModal] = useState<{ isOpen: boolean; type: ErrorType | null }>({
     isOpen: false,
     type: null,
@@ -75,35 +44,95 @@ export function Services() {
     type: null,
   });
 
-  // API data
-  const [dashboardData, setDashboardData] = useState<any>(null);
-  const [forecastApiData, setForecastApiData] = useState<any>(null);
+  const [forecastRun, setForecastRun] = useState<ForecastRun | null>(null);
 
   useEffect(() => {
-    getDashboard("services").then(setDashboardData).catch(() => {});
-    getForecast("services").then(setForecastApiData).catch(() => {});
+    getForecast("services").then(setForecastRun).catch(() => {});
   }, []);
 
   const bookingForecastData = useMemo(() => {
-    if (!forecastApiData?.historical?.length) {
+    if (!forecastRun?.historical?.length) {
       return [];
     }
-    const hist = forecastApiData.historical.map((d: any, index: number, arr: any[]) => ({
+    const hist = forecastRun.historical.map((d, index, arr) => ({
       day: d.date,
       actual: d.actual,
       forecast: index === arr.length - 1 ? d.actual : null,
     }));
-    const fore = (forecastApiData.forecast || []).map((d: any) => ({
+    const horizon =
+      viewMode === "next7days" ? 7 : viewMode === "next14days" ? 14 : 30;
+    const fore = forecastRun.forecast.slice(0, horizon).map((d) => ({
       day: d.date,
       actual: null,
       forecast: d.forecast,
     }));
     return [...hist.slice(-30), ...fore];
-  }, [forecastApiData]);
+  }, [forecastRun, viewMode]);
 
-  const kpis = dashboardData?.kpis || {};
-  const servicesRevenue = kpis.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
-  const activeBookings = kpis.totalOrders || 0;
+  const kpis = forecastRun?.kpis;
+  const servicesRevenue = kpis?.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
+  const activeBookings = kpis?.totalOrders || 0;
+  const serviceUtilization = useMemo(() => {
+    if (!forecastRun?.topItems.length) return [];
+    const maxQuantity = Math.max(
+      ...forecastRun.topItems.map((item) => item.quantity),
+      1,
+    );
+    const last7Days = forecastRun.historical.slice(-7);
+    return forecastRun.topItems.slice(0, 8).map((item) => {
+      const share = item.revenue / (forecastRun.kpis.totalRevenue || 1);
+      return {
+        service: item.name,
+        current: Math.round((item.quantity / maxQuantity) * 100),
+        bookings: item.orderCount,
+        avgPrice: item.avgPrice,
+        revenue: item.revenue,
+        trend: last7Days.map((day) => Math.round(day.orders * share)),
+      };
+    });
+  }, [forecastRun]);
+  const recentBookings = useMemo(
+    () =>
+      (forecastRun?.historical || []).slice(-10).map((point) => ({
+        hour: point.date,
+        bookings: point.orders,
+      })),
+    [forecastRun],
+  );
+  const weeklyTrends = useMemo(() => {
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const totals = new Map(dayNames.map((day) => [day, 0]));
+    for (const point of forecastRun?.historical || []) {
+      const day = dayNames[new Date(`${point.date}T00:00:00`).getDay()];
+      totals.set(day, (totals.get(day) || 0) + point.orders);
+    }
+    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+      day,
+      bookings: totals.get(day) || 0,
+    }));
+  }, [forecastRun]);
+  const occupancyAlerts = useMemo(() => {
+    const forecast = forecastRun?.forecast || [];
+    if (!forecast.length) return [];
+    const average =
+      forecast.reduce((sum, point) => sum + point.forecast, 0) /
+      forecast.length;
+    const max = Math.max(...forecast.map((point) => point.forecast), 1);
+    return [...forecast]
+      .sort((a, b) => b.forecast - a.forecast)
+      .slice(0, 3)
+      .map((point) => ({
+        time: point.date,
+        service: "Projected Services POS demand",
+        capacity: Math.round((point.forecast / max) * 100),
+        risk: point.forecast >= average * 1.2 ? "High" : "Medium",
+        projectedRevenue: point.forecast,
+        action: forecastRun?.isFallback
+          ? "Review fallback forecast"
+          : "Plan staffing",
+      }));
+  }, [forecastRun]);
+  const peakForecast = occupancyAlerts[0];
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -141,7 +170,7 @@ export function Services() {
     toast.info("Retrying data synchronization...");
     setTimeout(() => {
       // Update the last sync time to show data was refreshed
-      setLastSyncTime("just now");
+      void getForecast("services").then(setForecastRun);
       setSuccessModal({ isOpen: true, type: "data_sync_success" });
     }, 2000);
   };
@@ -209,8 +238,8 @@ export function Services() {
               <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Utilization Rate</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">65%</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Booking Value</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">₱{(kpis?.avgOrderValue || 0).toLocaleString()}</div>
             </div>
           </div>
 
@@ -220,8 +249,8 @@ export function Services() {
               <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Peak Capacity Alert</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">3:00 PM</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">Peak Forecast Date</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{peakForecast?.time || "—"}</div>
               <Button size="sm" className="bg-[#3AE4FA] hover:bg-[#5CE1E6] text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex">
                 View Alerts
               </Button>
@@ -238,8 +267,14 @@ export function Services() {
               Services Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              AI-selected best model: <span className="font-semibold text-[#3AE4FA]">{forecastApiData?.modelInfo?.model || "SARIMA"}</span> (MASE: {forecastApiData?.modelInfo?.mase || "0.72"}, Accuracy: {forecastApiData?.modelInfo?.accuracy || "89"}%)
+              Active model: <span className="font-semibold text-[#3AE4FA]">{forecastRun?.modelName || "Waiting for uploaded POS history"}</span>
+              {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, Accuracy: ${forecastRun.accuracy.toFixed(1)}%)`}
             </p>
+            {forecastRun?.isFallback && (
+              <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
+                SMA fallback active: selected model did not meet the MASE threshold
+              </Badge>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -303,20 +338,20 @@ export function Services() {
             <div className="grid grid-cols-2 gap-3 md:gap-4">
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#3AE4FA]">{forecastApiData?.modelInfo?.mase || "0.72"}</div>
-                <div className="text-xs text-green-600 hidden md:block">Beats baseline by 28%</div>
+                <div className="text-xl md:text-2xl font-bold text-[#3AE4FA]">{forecastRun?.mase.toFixed(2) ?? "—"}</div>
+                <div className="text-xs text-[#223047] opacity-60 hidden md:block">Fallback threshold: 1.20</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">RMSE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.rmse || "2.14"}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.accuracy.toFixed(1)}%` : "—"}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MAPE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.mape !== undefined ? `${forecastApiData.modelInfo.mape}%` : "6.8%"}</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.mape.toFixed(2)}%` : "—"}</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">R²</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.r2 !== undefined ? forecastApiData.modelInfo.r2 : "0.89"}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
               </div>
             </div>
           </div>
@@ -324,7 +359,9 @@ export function Services() {
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
             <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
             <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-              SARIMA model excels at weekly seasonality detection. Slight over-forecast bias of +0.12% on weekdays. Strong weekend pattern recognition. Model retrained {lastSyncTime} with latest booking data.
+              {forecastRun
+                ? `${forecastRun.modelName} was selected using held-out POS history and generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
+                : "Upload Services POS history to generate a validated forecast."}
             </p>
             <Button onClick={handleRetrainModel} className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs md:text-sm" size="sm">
               Retrain Model
@@ -345,7 +382,9 @@ export function Services() {
             </Badge>
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "Full Grooming approaching capacity at 3 PM. Consider dynamic pricing (+10%) or suggest alternative time slots to customers."
+            {forecastRun?.topItems?.[0]
+              ? `${forecastRun.topItems[0].name} leads Services POS revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} from ${forecastRun.topItems[0].orderCount} bookings.`
+              : "Upload Services POS history to populate service-level insights."}
           </p>
         </div>
         <img
@@ -381,10 +420,10 @@ export function Services() {
                   className="cursor-pointer hover:bg-[#FFF2FA] text-center"
                   onClick={() => handleSort("utilization")}
                 >
-                  Utilization {sortColumn === "utilization" && (sortDirection === "asc" ? "↑" : "↓")}
+                  Demand Share {sortColumn === "utilization" && (sortDirection === "asc" ? "↑" : "↓")}
                 </TableHead>
                 <TableHead className="text-center">Bookings</TableHead>
-                <TableHead className="text-center">Avg Time</TableHead>
+                <TableHead className="text-center">Avg Ticket</TableHead>
                 <TableHead className="text-center">Revenue</TableHead>
                 <TableHead className="text-center">Action</TableHead>
               </TableRow>
@@ -411,7 +450,7 @@ export function Services() {
                       </div>
                     </TableCell>
                     <TableCell className="text-center text-xs md:text-sm">{service.bookings}</TableCell>
-                    <TableCell className="text-center text-xs">{service.avgDuration} min</TableCell>
+                    <TableCell className="text-center text-xs">₱{service.avgPrice.toLocaleString()}</TableCell>
                     <TableCell className="text-center font-semibold text-xs md:text-sm">₱{service.revenue.toLocaleString()}</TableCell>
                     <TableCell className="text-center">
                       <Button size="sm" variant="outline" className="border-[#3AE4FA] text-[#3AE4FA] text-xs">
@@ -424,12 +463,10 @@ export function Services() {
                       <TableCell colSpan={6} className="bg-[#FFF7FB]">
                         <div className="p-3 md:p-4 space-y-3">
                           <ResponsiveContainer width="100%" height={120} className="md:!h-[150px]">
-                            <BarChart
-                              data={Array.from({ length: 7 }, (_, i) => ({
-                                day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i],
-                                bookings: Math.floor(Math.random() * 10 + 5),
-                              }))}
-                            >
+                            <BarChart data={service.trend.map((bookings, index) => ({
+                              day: `Day ${index + 1}`,
+                              bookings,
+                            }))}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" />
                               <XAxis dataKey="day" style={{ fontSize: "10px" }} />
                               <YAxis style={{ fontSize: "10px" }} />
@@ -452,12 +489,12 @@ export function Services() {
           {/* Hourly Bookings */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
             <div>
-              <h3 className="text-base md:text-lg font-bold text-[#223047]">Today's Hourly Bookings</h3>
-              <p className="text-xs text-[#223047] opacity-60 mt-1">Operating hours: 9 AM - 6 PM</p>
+              <h3 className="text-base md:text-lg font-bold text-[#223047]">Recent Daily Bookings</h3>
+              <p className="text-xs text-[#223047] opacity-60 mt-1">Calculated from uploaded POS transactions</p>
             </div>
 
             <ResponsiveContainer width="100%" height={180} className="md:!h-[200px]">
-              <BarChart data={hourlyBookings}>
+              <BarChart data={recentBookings}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
                 <XAxis dataKey="hour" stroke="#223047" style={{ fontSize: "10px" }} />
                 <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
@@ -469,14 +506,13 @@ export function Services() {
                   }}
                 />
                 <Bar key="bar-bookings-hourly" dataKey="bookings" fill="#3AE4FA" radius={[6, 6, 0, 0]} animationDuration={800} />
-                <Bar key="bar-capacity" dataKey="capacity" fill="#FFD9EC" radius={[6, 6, 0, 0]} animationDuration={800} />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           {/* Weekly Trends */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
-            <h3 className="text-base md:text-lg font-bold text-[#223047]">Weekly Service Mix</h3>
+            <h3 className="text-base md:text-lg font-bold text-[#223047]">Bookings by Weekday</h3>
 
             <ResponsiveContainer width="100%" height={180} className="md:!h-[200px]">
               <AreaChart data={weeklyTrends}>
@@ -491,32 +527,11 @@ export function Services() {
                   }}
                 />
                 <Area
-                  key="area-grooming"
+                  key="area-bookings"
                   type="monotone"
-                  dataKey="grooming"
-                  stackId="1"
+                  dataKey="bookings"
                   stroke="#3AE4FA"
                   fill="#3AE4FA"
-                  fillOpacity={0.6}
-                  animationDuration={800}
-                />
-                <Area
-                  key="area-boarding"
-                  type="monotone"
-                  dataKey="boarding"
-                  stackId="1"
-                  stroke="#5CE1E6"
-                  fill="#5CE1E6"
-                  fillOpacity={0.6}
-                  animationDuration={800}
-                />
-                <Area
-                  key="area-other"
-                  type="monotone"
-                  dataKey="other"
-                  stackId="1"
-                  stroke="#FFD9EC"
-                  fill="#FFD9EC"
                   fillOpacity={0.6}
                   animationDuration={800}
                 />
@@ -531,10 +546,10 @@ export function Services() {
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
           <div className="flex-1">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Capacity Alerts & Occupancy Risks
+              Forecast Demand Alerts
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Predicted bottlenecks requiring intervention
+              Highest projected Services revenue days from the active forecast
             </p>
           </div>
           <Badge className="bg-red-500 text-white hover:bg-red-500 self-start">
@@ -559,11 +574,11 @@ export function Services() {
                 <div className="flex flex-wrap items-center gap-3 md:gap-6 text-xs md:text-sm text-[#223047] opacity-70">
                   <div className="flex items-center gap-2">
                     <Users className="w-4 h-4" />
-                    <span>Capacity: {alert.capacity}%</span>
+                    <span>Relative demand: {alert.capacity}%</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4" />
-                    <span>{alert.queued} queued</span>
+                    <span>Projected revenue: ₱{alert.projectedRevenue.toLocaleString()}</span>
                   </div>
                   <div className="flex items-center gap-2 hidden md:flex">
                     <AlertTriangle className="w-4 h-4" />

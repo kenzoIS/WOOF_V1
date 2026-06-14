@@ -1,21 +1,59 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Transaction, TransactionDocument } from '../csv/schemas/transaction.schema';
 import { spawn } from 'child_process';
 import * as path from 'path';
+import { existsSync } from 'fs';
+import {
+  ForecastModule,
+  NormalizedDailyValue,
+  normalizeDailySeries,
+} from '../common/time-series';
+import {
+  ForecastRun,
+  ForecastRunDocument,
+} from './schemas/forecast-run.schema';
+
+interface ModelResult {
+  modelName: string;
+  mase: number;
+  mape: number;
+  accuracy: number;
+  forecast: {
+    date: string;
+    forecast: number;
+    confidenceLow?: number;
+    confidenceHigh?: number;
+  }[];
+  modelMetadata?: Record<string, unknown>;
+}
 
 @Injectable()
 export class AnalyticsService {
   constructor(
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
+    @InjectModel(ForecastRun.name)
+    private forecastRunModel: Model<ForecastRunDocument>,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
    * Get dashboard KPIs for a given sector
    */
   async getDashboard(sector: string): Promise<any> {
-    const sectorFilter = sector === 'all' ? {} : { sector: this.normalizeSector(sector) };
+    const normalizedSector =
+      sector === 'all' ? 'all' : this.normalizeSector(sector);
+    const sectorFilter =
+      normalizedSector === 'all'
+        ? {}
+        : {
+            sector: normalizedSector,
+            ...(normalizedSector === 'Cafe' || normalizedSector === 'Services'
+              ? { channel: 'POS' }
+              : {}),
+          };
 
     const [kpis, topItems, dailyRevenue, channelBreakdown] = await Promise.all([
       // KPIs
@@ -112,15 +150,16 @@ export class AnalyticsService {
   }
 
   /**
-   * Get demand forecast data for a sector
-   * Uses Prophet + SARIMAX running in Python sub-process
+   * Cafe uses Prophet and Services uses pure SARIMA. Both are validated
+   * against held-out POS history before the strict SMA fallback is applied.
    */
   async getForecast(sector: string): Promise<any> {
-    const sectorFilter = sector === 'all' ? {} : { sector: this.normalizeSector(sector) };
-
-    // Get daily aggregated data
+    if (this.normalizeSector(sector) === 'Retail') {
+      return this.getLegacyRetailForecast();
+    }
+    const module = this.normalizeForecastModule(sector);
     const dailyData = await this.transactionModel.aggregate([
-      { $match: sectorFilter },
+      { $match: { sector: module, channel: 'POS' } },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
@@ -133,71 +172,81 @@ export class AnalyticsService {
       { $sort: { _id: 1 } },
       { $project: { orders: 0 } },
     ]);
+    const historical = normalizeDailySeries(
+      dailyData.map((point: any) => ({
+        date: point._id,
+        actual: point.revenue,
+        orders: point.orderCount,
+      })),
+      module,
+    );
+    const dashboard = await this.getDashboard(module);
+    const forecastDays = module === 'Services' ? 30 : 14;
 
-    if (dailyData.length < 14) {
-      return {
-        historical: dailyData.map((d: any) => ({
-          date: d._id,
-          actual: Math.round(d.revenue * 100) / 100,
-          orders: d.orderCount,
-        })),
-        forecast: [],
-        modelInfo: { model: 'Insufficient data (needs 14+ days for Prophet)', accuracy: 0 },
-      };
+    let selectedModel: ModelResult | null = null;
+    let rejectionReason = '';
+    if (historical.length >= 21) {
+      try {
+        selectedModel = await this.runForecastModel(
+          module,
+          historical,
+          forecastDays,
+        );
+        if (!Number.isFinite(selectedModel.mase)) {
+          rejectionReason = 'Model returned a non-finite MASE score';
+          selectedModel = null;
+        } else if (selectedModel.mase > 1.2) {
+          rejectionReason = `${selectedModel.modelName} MASE ${selectedModel.mase} exceeded 1.2`;
+        }
+      } catch (error) {
+        rejectionReason =
+          error instanceof Error ? error.message : 'Forecast model failed';
+      }
+    } else {
+      rejectionReason = 'At least 21 daily observations are required';
     }
 
-    const inputData = dailyData.map(d => ({
-      date: d._id,
-      revenue: Math.round(d.revenue * 100) / 100,
-      orders: d.orderCount,
-    }));
-
-    return new Promise((resolve, reject) => {
-      const scriptPath = path.join(process.cwd(), 'src', 'analytics', 'python', 'forecast.py');
-      const pythonCmd = path.join(process.cwd(), 'venv', 'bin', 'python3');
-      const pythonProcess = spawn(pythonCmd, [scriptPath]);
-      
-      let dataString = '';
-      let errorString = '';
-
-      pythonProcess.stdout.on('data', (data) => {
-        dataString += data.toString();
-      });
-
-      pythonProcess.stderr.on('data', (data) => {
-        errorString += data.toString();
-      });
-
-      pythonProcess.on('close', (code) => {
-        if (code !== 0) {
-          console.error(`Python script exited with code ${code}: ${errorString}`);
-          reject(new Error(`Python forecast failed: ${errorString}`));
-          return;
-        }
-        try {
-          const result = JSON.parse(dataString);
-          if (result.error) {
-            reject(new Error(`Python forecast error: ${result.error}`));
-          } else {
-            // Normalize historical field names: Python returns 'revenue', frontend expects 'actual'
-            if (result.historical) {
-              result.historical = result.historical.map((d: any) => ({
-                date: d.date,
-                actual: d.revenue ?? d.actual,
-                orders: d.orders,
-              }));
+    const useFallback = !selectedModel || selectedModel.mase > 1.2;
+    const finalModel: ModelResult =
+      useFallback || !selectedModel
+        ? this.buildSmaFallback(historical, forecastDays, rejectionReason)
+        : selectedModel;
+    const payload = {
+      module,
+      modelName: finalModel.modelName,
+      mase: finalModel.mase,
+      mape: finalModel.mape,
+      accuracy: finalModel.accuracy,
+      isFallback: useFallback,
+      historical: historical.map(
+        ({ date, actual, normalized, orders }) => ({
+          date,
+          actual,
+          normalized,
+          orders,
+        }),
+      ),
+      forecast: finalModel.forecast,
+      kpis: dashboard.kpis,
+      topItems: dashboard.topItems,
+      modelMetadata: {
+        ...finalModel.modelMetadata,
+        emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
+        missingDaysFilled: historical.filter((point) => point.isMissingDate)
+          .length,
+        sourceChannel: 'POS',
+        ...(useFallback && selectedModel
+          ? {
+              rejectedModel: selectedModel.modelName,
+              rejectedModelMase: selectedModel.mase,
             }
-            resolve(result);
-          }
-        } catch (e) {
-          console.error('Failed to parse Python output:', dataString);
-          reject(new Error('Failed to parse Python forecast output'));
-        }
-      });
+          : {}),
+      },
+      generatedAt: new Date(),
+    };
 
-      pythonProcess.stdin.write(JSON.stringify(inputData));
-      pythonProcess.stdin.end();
-    });
+    const savedRun = await this.forecastRunModel.create(payload);
+    return savedRun.toObject();
   }
 
   /**
@@ -326,6 +375,246 @@ export class AnalyticsService {
         historical: formatSeries(onlineData),
       },
     };
+  }
+
+  private normalizeForecastModule(sector: string): ForecastModule {
+    const normalized = this.normalizeSector(sector);
+    if (normalized === 'Cafe' || normalized === 'Services') {
+      return normalized;
+    }
+    throw new BadRequestException(
+      'Forecasting is restricted to Cafe and Services',
+    );
+  }
+
+  private async runForecastModel(
+    module: ForecastModule,
+    historical: NormalizedDailyValue[],
+    forecastDays: number,
+  ): Promise<ModelResult> {
+    const scriptName =
+      module === 'Cafe' ? 'cafe_prophet.py' : 'services_sarima.py';
+    return this.runPython<ModelResult>(scriptName, {
+      data: historical,
+      forecastDays,
+    });
+  }
+
+  private runPython<T>(
+    scriptName: string,
+    input: Record<string, unknown>,
+  ): Promise<T> {
+    const scriptPath = path.join(
+      process.cwd(),
+      'src',
+      'analytics',
+      'python',
+      scriptName,
+    );
+    const localPython = path.join(
+      process.cwd(),
+      '.venv',
+      process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+    );
+    const pythonCommand =
+      this.configService.get<string>('PYTHON_PATH') ||
+      (existsSync(localPython)
+        ? localPython
+        : process.platform === 'win32'
+          ? 'python'
+          : 'python3');
+
+    return new Promise((resolve, reject) => {
+      const pythonProcess = spawn(pythonCommand, [scriptPath], {
+        cwd: process.cwd(),
+      });
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      pythonProcess.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+      pythonProcess.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      pythonProcess.on('error', (error) => {
+        if (!settled) {
+          settled = true;
+          reject(
+            new Error(
+              `Unable to start Python using "${pythonCommand}": ${error.message}`,
+            ),
+          );
+        }
+      });
+      pythonProcess.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        if (code !== 0) {
+          reject(
+            new Error(
+              `${scriptName} exited with code ${code}: ${stderr.trim()}`,
+            ),
+          );
+          return;
+        }
+        try {
+          const result = JSON.parse(stdout) as T & { error?: string };
+          if (result.error) {
+            reject(new Error(result.error));
+            return;
+          }
+          resolve(result);
+        } catch {
+          reject(
+            new Error(
+              `Invalid JSON returned by ${scriptName}: ${stdout.slice(0, 300)}`,
+            ),
+          );
+        }
+      });
+
+      pythonProcess.stdin.write(JSON.stringify(input));
+      pythonProcess.stdin.end();
+    });
+  }
+
+  private buildSmaFallback(
+    historical: NormalizedDailyValue[],
+    forecastDays: number,
+    reason: string,
+  ): ModelResult {
+    if (historical.length === 0) {
+      return {
+        modelName: 'SMA (7-day fallback)',
+        mase: 0,
+        mape: 0,
+        accuracy: 0,
+        forecast: [],
+        modelMetadata: { fallbackReason: reason, windowDays: 7 },
+      };
+    }
+
+    const actuals = historical.map((point) => point.actual);
+    const windowSize = Math.min(7, actuals.length);
+    const forecastValue = this.average(actuals.slice(-windowSize));
+    const lastDate = new Date(
+      `${historical[historical.length - 1].date}T00:00:00.000Z`,
+    );
+    const forecast = Array.from({ length: forecastDays }, (_, index) => {
+      const date = new Date(lastDate);
+      date.setUTCDate(date.getUTCDate() + index + 1);
+      return {
+        date: date.toISOString().slice(0, 10),
+        forecast: this.round(forecastValue),
+        confidenceLow: this.round(Math.max(0, forecastValue * 0.9)),
+        confidenceHigh: this.round(forecastValue * 1.1),
+      };
+    });
+
+    const validationActual: number[] = [];
+    const validationPredicted: number[] = [];
+    for (let index = 7; index < actuals.length; index += 1) {
+      validationActual.push(actuals[index]);
+      validationPredicted.push(
+        this.average(actuals.slice(index - 7, index)),
+      );
+    }
+    const metrics = this.calculateMetrics(
+      validationActual,
+      validationPredicted,
+      actuals.slice(0, Math.max(1, actuals.length - validationActual.length)),
+    );
+
+    return {
+      modelName: 'SMA (7-day fallback)',
+      ...metrics,
+      forecast,
+      modelMetadata: { fallbackReason: reason, windowDays: 7 },
+    };
+  }
+
+  private calculateMetrics(
+    actual: number[],
+    predicted: number[],
+    training: number[],
+  ): Pick<ModelResult, 'mase' | 'mape' | 'accuracy'> {
+    if (actual.length === 0) {
+      return { mase: 0, mape: 0, accuracy: 0 };
+    }
+    const absoluteErrors = actual.map((value, index) =>
+      Math.abs(value - predicted[index]),
+    );
+    const mae = this.average(absoluteErrors);
+    const naiveErrors = training
+      .slice(1)
+      .map((value, index) => Math.abs(value - training[index]));
+    const naiveMae = this.average(naiveErrors);
+    const percentageErrors = actual
+      .map((value, index) =>
+        value === 0
+          ? null
+          : Math.abs((value - predicted[index]) / value) * 100,
+      )
+      .filter((value): value is number => value !== null);
+    const mape = this.average(percentageErrors);
+    return {
+      mase: this.round(naiveMae > 0 ? mae / naiveMae : mae === 0 ? 0 : 999),
+      mape: this.round(mape),
+      accuracy: this.round(Math.max(0, 100 - mape)),
+    };
+  }
+
+  private async getLegacyRetailForecast(): Promise<any> {
+    const dailyData = await this.transactionModel.aggregate([
+      { $match: { sector: 'Retail' } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+          revenue: { $sum: '$netSales' },
+          orders: { $addToSet: '$transactionId' },
+        },
+      },
+      { $addFields: { orderCount: { $size: '$orders' } } },
+      { $sort: { _id: 1 } },
+      { $project: { orders: 0 } },
+    ]);
+    const inputData = dailyData.map((point: any) => ({
+      date: point._id,
+      revenue: this.round(point.revenue),
+      orders: point.orderCount,
+    }));
+    if (inputData.length < 14) {
+      return {
+        historical: inputData.map((point: any) => ({
+          date: point.date,
+          actual: point.revenue,
+          orders: point.orders,
+        })),
+        forecast: [],
+        modelInfo: { model: 'Insufficient data', accuracy: 0 },
+      };
+    }
+    const result = await this.runPython<any>('forecast.py', inputData as any);
+    return {
+      ...result,
+      historical: (result.historical || []).map((point: any) => ({
+        date: point.date,
+        actual: point.revenue ?? point.actual,
+        orders: point.orders,
+      })),
+    };
+  }
+
+  private average(values: number[]): number {
+    return values.length
+      ? values.reduce((sum, value) => sum + value, 0) / values.length
+      : 0;
+  }
+
+  private round(value: number): number {
+    return Math.round(value * 100) / 100;
   }
 
   private normalizeSector(sector: string): string {

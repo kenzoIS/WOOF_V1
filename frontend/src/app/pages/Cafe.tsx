@@ -1,13 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { Coffee, DollarSign, TrendingUp, PieChart, Download } from "lucide-react";
-import { KPICard } from "../components/KPICard";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
-import { getDashboard, getForecast } from "../lib/api";
+import { ForecastRun, getForecast } from "../lib/api";
 import cafeMascot from "../../imports/no_bg_Cafe-2.png";
 import {
   LineChart,
@@ -31,27 +30,7 @@ import {
 import { Slider } from "../components/ui/slider";
 import { toast } from "sonner";
 
-// Fallback data sourced from POS-HappyTails.csv actual top-selling Cafe items
-const fallbackMenuItems = [
-  { name: "Dog Bento Cake", qtySold: 98, category: "Pet Bakery", equilibrium: "balanced", trend: [450, 380, 520, 410, 490, 460, 430], revenue: 26824, grossProfit: 16028 },
-  { name: "Cat Bento Cake", qtySold: 86, category: "Pet Bakery", equilibrium: "balanced", trend: [400, 350, 480, 370, 440, 410, 380], revenue: 23954, grossProfit: 14305 },
-  { name: "Peanut Butter Choco Frappe", qtySold: 91, category: "Coffee", equilibrium: "balanced", trend: [250, 210, 280, 230, 270, 260, 240], revenue: 15383, grossProfit: 9181 },
-  { name: "Doggie Pizza Large", qtySold: 92, category: "Pet Bakery", equilibrium: "balanced", trend: [200, 180, 250, 210, 230, 220, 190], revenue: 12750, grossProfit: 7670 },
-  { name: "Choco Java Chip Frappe", qtySold: 76, category: "Coffee", equilibrium: "balanced", trend: [190, 160, 220, 180, 210, 200, 175], revenue: 12546, grossProfit: 7559 },
-  { name: "Iced Cocoa Tiramisu", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [185, 165, 210, 175, 200, 190, 170], revenue: 12256, grossProfit: 7333 },
-  { name: "Matcha Frappe", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [180, 160, 215, 170, 195, 185, 175], revenue: 12189, grossProfit: 7297 },
-  { name: "Caramel Macchiato Frappe", qtySold: 75, category: "Coffee", equilibrium: "balanced", trend: [175, 155, 205, 165, 190, 180, 160], revenue: 11730, grossProfit: 6906 },
-  { name: "Iced Matcha Latte", qtySold: 84, category: "Coffee", equilibrium: "balanced", trend: [170, 145, 195, 160, 185, 170, 155], revenue: 11192, grossProfit: 6738 },
-  { name: "Iced Coconut Latte", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [165, 140, 190, 155, 180, 165, 150], revenue: 11006, grossProfit: 6637 },
-  { name: "Iced Hazelnut Latte", qtySold: 79, category: "Coffee", equilibrium: "balanced", trend: [160, 135, 185, 150, 175, 160, 145], revenue: 10665, grossProfit: 6444 },
-  { name: "Iced Vanilla Latte", qtySold: 78, category: "Coffee", equilibrium: "balanced", trend: [155, 130, 180, 145, 170, 155, 140], revenue: 10382, grossProfit: 6242 },
-  { name: "Pet Dognut Box of 3", qtySold: 56, category: "Pet Bakery", equilibrium: "diverging", trend: [150, 130, 175, 140, 165, 150, 135], revenue: 10080, grossProfit: 6026 },
-  { name: "Doggie Pizza Small", qtySold: 79, category: "Pet Bakery", equilibrium: "balanced", trend: [140, 120, 165, 135, 155, 140, 130], revenue: 9480, grossProfit: 5588 },
-  { name: "Strawberry Frappe", qtySold: 56, category: "Coffee", equilibrium: "diverging", trend: [135, 115, 160, 130, 150, 135, 125], revenue: 9350, grossProfit: 5590 },
-];
-
 export function Cafe() {
-  const [metricType, setMetricType] = useState("revenue");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -66,33 +45,40 @@ export function Cafe() {
     type: null,
   });
   const [showModelDetails, setShowModelDetails] = useState(false);
-  const [lastModelUpdate, setLastModelUpdate] = useState("2 hours ago");
+  const [forecastRun, setForecastRun] = useState<ForecastRun | null>(null);
 
   // API data state
-  const [dashboardData, setDashboardData] = useState<any>(null);
-  const [forecastApiData, setForecastApiData] = useState<any>(null);
-
   useEffect(() => {
-    getDashboard("cafe").then(setDashboardData).catch(() => {});
-    getForecast("cafe").then(setForecastApiData).catch(() => {});
+    getForecast("cafe").then(setForecastRun).catch(() => {});
   }, []);
 
   // Build menu items from API data — maps backend topItems to table shape
   const menuItems = useMemo(() => {
-    if (!dashboardData?.topItems?.length) return fallbackMenuItems;
+    if (!forecastRun?.topItems?.length) return [];
     
     // Get last 7 days of total revenue to build per-item trend sparklines
-    const last7Days = (dashboardData.dailyRevenue || []).slice(-7);
+    const last7Days = forecastRun.historical.slice(-7);
+    const averageQuantity =
+      forecastRun.topItems.reduce((sum, item) => sum + item.quantity, 0) /
+      forecastRun.topItems.length;
 
-    return dashboardData.topItems.slice(0, 15).map((item: any) => {
+    return forecastRun.topItems.slice(0, 15).map((item) => {
       // Scale the cafe's daily revenue shape to this item's proportion
-      const itemProportion = item.revenue / (dashboardData.kpis?.totalRevenue || 1);
+      const itemProportion =
+        item.revenue / (forecastRun.kpis.totalRevenue || 1);
       const trend = last7Days.length > 0
-        ? last7Days.map((d: any) => Math.max(0, Math.round(d.revenue * itemProportion)))
+        ? last7Days.map((day) =>
+            Math.max(0, Math.round(day.actual * itemProportion)),
+          )
         : [item.revenue];
 
       // Determine status based on quantity thresholds from actual dataset
-      const equilibrium = item.quantity >= 70 ? "balanced" : (item.quantity >= 40 ? "diverging" : "critical");
+      const equilibrium =
+        item.quantity >= averageQuantity
+          ? "balanced"
+          : item.quantity >= averageQuantity * 0.5
+            ? "diverging"
+            : "critical";
 
       return {
         name: item.name,
@@ -101,31 +87,30 @@ export function Cafe() {
         equilibrium,
         trend,
         revenue: Math.round(item.revenue),
-        grossProfit: Math.round(item.revenue * 0.6), // Approximate from dataset avg margin ~60%
       };
     });
-  }, [dashboardData]);
+  }, [forecastRun]);
 
   // KPI values from API
-  const kpis = dashboardData?.kpis || {};
-  const cafeRevenue = kpis.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
-  const totalOrders = kpis.totalOrders || 0;
-  const avgCheck = kpis.avgOrderValue ? `₱${kpis.avgOrderValue.toLocaleString()}` : "₱0";
-  const activeItems = dashboardData?.topItems?.length || 0;
+  const kpis = forecastRun?.kpis;
+  const cafeRevenue = kpis?.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
+  const totalOrders = kpis?.totalOrders || 0;
+  const avgCheck = kpis?.avgOrderValue ? `₱${kpis.avgOrderValue.toLocaleString()}` : "₱0";
+  const activeItems = forecastRun?.topItems?.length || 0;
 
   // Build forecast chart data from API
   const forecastData = useMemo(() => {
-    if (!forecastApiData?.historical?.length) {
+    if (!forecastRun?.historical?.length) {
       return [];
     }
-    const hist = forecastApiData.historical.map((d: any, index: number, arr: any[]) => ({
+    const hist = forecastRun.historical.map((d, index, arr) => ({
       date: d.date,
       actual: d.actual,
       forecast: index === arr.length - 1 ? d.actual : null,
       confidenceLow: null as number | null,
       confidenceHigh: null as number | null,
     }));
-    const fc = (forecastApiData.forecast || []).map((d: any) => ({
+    const fc = forecastRun.forecast.map((d) => ({
       date: d.date,
       actual: null as number | null,
       forecast: d.forecast,
@@ -133,13 +118,13 @@ export function Cafe() {
       confidenceHigh: d.confidenceHigh,
     }));
     return [...hist.slice(-30), ...fc];
-  }, [forecastApiData, metricType]);
+  }, [forecastRun]);
 
   // Filtered menu items based on filter
   const filteredMenuItems = useMemo(() => {
     if (menuFilter === "all") return menuItems;
-    if (menuFilter === "top") return menuItems.filter((item: any) => item.revenue >= 12000);
-    if (menuFilter === "under") return menuItems.filter((item: any) => item.revenue < 10000);
+    if (menuFilter === "top") return menuItems.slice(0, 5);
+    if (menuFilter === "under") return menuItems.slice(-5);
     if (menuFilter === "diverging") return menuItems.filter((item: any) => item.equilibrium === "diverging" || item.equilibrium === "critical");
     return menuItems;
   }, [menuFilter, menuItems]);
@@ -208,7 +193,7 @@ export function Cafe() {
     toast.info("Retrying data synchronization...");
     setTimeout(() => {
       // Update last model update time to show data was refreshed
-      setLastModelUpdate("just now");
+      void getForecast("cafe").then(setForecastRun);
       setSuccessModal({ isOpen: true, type: "data_sync_success" });
     }, 2000);
   };
@@ -311,27 +296,17 @@ export function Cafe() {
               Cafe Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              AI-selected best model: <span className="font-semibold text-[#F53799]">{forecastApiData?.modelInfo?.model || "Prophet"}</span> <span className="hidden sm:inline">(MASE: {forecastApiData?.modelInfo?.mase || "0.68"}, Accuracy: {forecastApiData?.modelInfo?.accuracy || "92"}%)</span>
+              Active model: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded POS history"}</span>
+              {forecastRun && <span className="hidden sm:inline"> (MASE: {forecastRun.mase.toFixed(2)}, Accuracy: {forecastRun.accuracy.toFixed(1)}%)</span>}
             </p>
+            {forecastRun?.isFallback && (
+              <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
+                SMA fallback active: selected model did not meet the MASE threshold
+              </Badge>
+            )}
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {["Revenue", "Order Volume"].map((metric) => (
-              <Button
-                key={metric}
-                size="sm"
-                variant={metricType === metric.toLowerCase().replace(" ", "") ? "default" : "outline"}
-                onClick={() => setMetricType(metric.toLowerCase().replace(" ", ""))}
-                className={
-                  metricType === metric.toLowerCase().replace(" ", "")
-                    ? "bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm"
-                    : "border-[#FFD9EC] hover:bg-[#FFF2FA] text-xs md:text-sm"
-                }
-              >
-                {metric}
-              </Button>
-            ))}
-          </div>
+          <Badge variant="outline" className="border-[#FFD9EC]">Revenue</Badge>
         </div>
 
         {/* Forecast Chart */}
@@ -377,20 +352,20 @@ export function Cafe() {
             <div className="grid grid-cols-2 gap-3 md:gap-4">
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#F53799]">{forecastApiData?.modelInfo?.mase || "0.68"}</div>
-                <div className="text-xs text-green-600 hidden md:block">Beats baseline by 32%</div>
+                <div className="text-xl md:text-2xl font-bold text-[#F53799]">{forecastRun?.mase.toFixed(2) ?? "—"}</div>
+                <div className="text-xs text-[#223047] opacity-60 hidden md:block">Fallback threshold: 1.20</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">RMSE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.rmse || "1053"}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.accuracy.toFixed(1)}%` : "—"}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MAPE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.mape !== undefined ? `${forecastApiData.modelInfo.mape}%` : "4.2%"}</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.mape.toFixed(2)}%` : "—"}</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">R²</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastApiData?.modelInfo?.r2 !== undefined ? forecastApiData.modelInfo.r2 : "0.92"}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
               </div>
             </div>
           </div>
@@ -398,7 +373,9 @@ export function Cafe() {
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
             <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
             <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-              Prophet model selected for superior seasonal pattern detection. <span className="hidden md:inline">Slight under-forecast bias of -0.15% detected. Strong performance on weekend peaks.</span> Model last retrained {lastModelUpdate}.
+              {forecastRun
+                ? `${forecastRun.modelName} was evaluated on held-out POS history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
+                : "Upload Cafe POS history to generate a validated forecast."}
             </p>
             <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" size="sm">
               Retrain Model
@@ -419,7 +396,9 @@ export function Cafe() {
             </Badge>
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "Dog Bento Cake leads cafe revenue at ₱26,824 across 98 units. <span className="hidden sm:inline">Consider bundling with grooming services during 2-5 PM window for 18% lift potential.</span>"
+            {forecastRun?.topItems?.[0]
+              ? `${forecastRun.topItems[0].name} leads Cafe POS revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} across ${forecastRun.topItems[0].quantity} units.`
+              : "Upload Cafe POS history to populate item-level insights."}
           </p>
         </div>
         <img
@@ -512,12 +491,10 @@ export function Cafe() {
                         <TableCell colSpan={7} className="bg-[#FFF7FB]">
                           <div className="p-4 space-y-3">
                             <ResponsiveContainer width="100%" height={120} className="md:!h-[150px]">
-                              <LineChart
-                                data={Array.from({ length: 14 }, (_, i) => ({
-                                  day: `Day ${i + 1}`,
-                                  sales: Math.random() * 100 + 50,
-                                }))}
-                              >
+                              <LineChart data={item.trend.map((sales: number, index: number) => ({
+                                day: `Day ${index + 1}`,
+                                sales,
+                              }))}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" />
                                 <XAxis dataKey="day" style={{ fontSize: "10px" }} />
                                 <YAxis style={{ fontSize: "10px" }} />

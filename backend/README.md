@@ -31,6 +31,37 @@
 $ pnpm install
 ```
 
+### Environment and forecasting setup
+
+Create `backend/.env` from `.env.example` and set a private MongoDB connection string:
+
+```dotenv
+MONGODB_URI=mongodb://127.0.0.1:27017/woof
+PORT=3001
+```
+
+The backend fails fast when `MONGODB_URI` is missing. Do not commit `.env`.
+For Atlas, replace the `<db_password>` placeholder with the actual database
+user password. URL-encode reserved password characters such as `@`, `:`, `/`,
+`?`, and `#`.
+
+Install the forecasting dependencies in the project-local environment:
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Historical forecasting uploads use:
+
+```text
+POST /api/csv/historical/cafe
+POST /api/csv/historical/services
+```
+
+Both endpoints accept multipart CSV field `file` and retain physical POS rows
+for the requested module only.
+
 ## Compile and run the project
 
 ```bash

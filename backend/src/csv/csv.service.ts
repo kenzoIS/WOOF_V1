@@ -5,6 +5,10 @@ import { CsvUpload, CsvUploadDocument } from './schemas/csv-upload.schema';
 import { Transaction, TransactionDocument } from './schemas/transaction.schema';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
+import {
+  ForecastModule,
+  normalizeDailySeries,
+} from '../common/time-series';
 
 // Map POS categories to sectors
 const SECTOR_MAP: Record<string, string> = {
@@ -20,7 +24,11 @@ const SECTOR_MAP: Record<string, string> = {
 };
 
 function mapCategoryToSector(category: string): string {
-  return SECTOR_MAP[category] || 'Retail';
+  const match = Object.entries(SECTOR_MAP).find(
+    ([knownCategory]) =>
+      knownCategory.toLowerCase() === category.trim().toLowerCase(),
+  );
+  return match?.[1] || 'Retail';
 }
 
 // Detect channel from filename
@@ -46,7 +54,7 @@ export class CsvService {
     let transactions: Partial<Transaction>[];
 
     if (channel === 'POS') {
-      transactions = this.parsePOS(file.buffer);
+      transactions = this.parseFlexibleCsv(file.buffer, file.originalname, channel);
     } else if (channel === 'Shopee') {
       if (isExcel) {
         transactions = this.parseShopeeExcel(file.buffer);
@@ -54,7 +62,23 @@ export class CsvService {
         transactions = this.parseShopeeCsv(file.buffer);
       }
     } else {
-      transactions = this.parseTikTok(file.buffer);
+      try {
+        transactions = this.parseTikTok(file.buffer);
+      } catch {
+        transactions = this.parseFlexibleCsv(
+          file.buffer,
+          file.originalname,
+          channel,
+        );
+      }
+    }
+
+    if (transactions.length === 0 && !isExcel) {
+      transactions = this.parseFlexibleCsv(
+        file.buffer,
+        file.originalname,
+        channel,
+      );
     }
 
     // Shopee and TikTok Shop are always Retail — override any product-name-based inference
@@ -94,31 +118,433 @@ export class CsvService {
     return upload;
   }
 
-  private parsePOS(buffer: Buffer): Partial<Transaction>[] {
-    const content = buffer.toString('utf-8').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const records = parse(content, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-    });
+  async processHistoricalUpload(
+    file: Express.Multer.File,
+    requestedModule: string,
+  ): Promise<Record<string, unknown>> {
+    const module = this.normalizeHistoricalModule(requestedModule);
+    const parsed = this.parseHistoricalPOS(file.buffer, module);
+    if (parsed.transactions.length === 0) {
+      throw new BadRequestException(
+        `No physical POS ${module} transactions were found in the uploaded CSV`,
+      );
+    }
 
-    return records.map((row: any) => {
-      const category = row['Category'] || '';
-      return {
-        date: new Date(row['Transaction Date']),
-        transactionId: row['Transaction ID'] || '',
-        productName: row['Item Names'] || '',
-        sku: row['SKU'] || '',
-        category,
-        sector: mapCategoryToSector(category),
-        quantity: parseInt(row['Items Sold'] || '0', 10),
-        unitPrice: parseFloat(row['Gross Sales'] || '0') / Math.max(parseInt(row['Items Sold'] || '1', 10), 1),
-        totalAmount: parseFloat(row['Gross Sales'] || '0'),
-        discount: parseFloat(row['Discounts'] || '0'),
-        netSales: parseFloat(row['Net Sales'] || '0'),
-        paymentType: row['Payment Type'] || '',
+    const uniqueTransactionIds = new Set(
+      parsed.transactions.map((transaction) => transaction.transactionId),
+    );
+    const categories = [
+      ...new Set(
+        parsed.transactions
+          .map((transaction) => transaction.category)
+          .filter((category): category is string => Boolean(category)),
+      ),
+    ];
+    const totalRevenue = parsed.transactions.reduce(
+      (sum, transaction) =>
+        sum + (transaction.netSales || transaction.totalAmount || 0),
+      0,
+    );
+    const totalQuantity = parsed.transactions.reduce(
+      (sum, transaction) => sum + (transaction.quantity || 0),
+      0,
+    );
+
+    const upload = await this.csvUploadModel.create({
+      filename: file.originalname,
+      channel: 'POS',
+      purpose: 'historical-forecast',
+      module,
+      recordCount: parsed.transactions.length,
+      excludedRecordCount: parsed.excludedRecordCount,
+      repairedDateCount: parsed.repairedDateCount,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      totalQuantity,
+      totalTransactions: uniqueTransactionIds.size,
+      categories,
+      uploadedAt: new Date(),
+    } as any);
+
+    const uploadId = (upload as any)._id as Types.ObjectId;
+    await this.transactionModel.insertMany(
+      parsed.transactions.map((transaction) => ({
+        ...transaction,
+        csvUploadId: uploadId,
+        channel: 'POS',
+      })),
+      { ordered: false },
+    );
+
+    const dailyMap = new Map<
+      string,
+      { actual: number; transactionIds: Set<string> }
+    >();
+    for (const transaction of parsed.transactions) {
+      const date = transaction.date!.toISOString().slice(0, 10);
+      const current = dailyMap.get(date) || {
+        actual: 0,
+        transactionIds: new Set<string>(),
       };
-    });
+      current.actual += transaction.netSales || transaction.totalAmount || 0;
+      if (transaction.transactionId) {
+        current.transactionIds.add(transaction.transactionId);
+      }
+      dailyMap.set(date, current);
+    }
+    const normalizedSeries = normalizeDailySeries(
+      [...dailyMap.entries()].map(([date, value]) => ({
+        date,
+        actual: value.actual,
+        orders: value.transactionIds.size,
+      })),
+      module,
+    );
+
+    return {
+      success: true,
+      upload,
+      preprocessing: {
+        module,
+        channel: 'POS',
+        emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
+        acceptedRecordCount: parsed.transactions.length,
+        excludedRecordCount: parsed.excludedRecordCount,
+        repairedDateCount: parsed.repairedDateCount,
+        filledMissingDayCount: normalizedSeries.filter(
+          (point) => point.isMissingDate,
+        ).length,
+      },
+      normalizedSeries,
+    };
+  }
+
+  private parseFlexibleCsv(
+    buffer: Buffer,
+    filename: string,
+    channel: string,
+  ): Partial<Transaction>[] {
+    const records = this.parseCsvRecords(buffer);
+    const fallbackDate = new Date();
+
+    return records.map((row, index) =>
+      this.mapFlexibleRow(row, {
+        channel,
+        fallbackDate,
+        fallbackId: `${filename}-${index + 1}`,
+      }),
+    );
+  }
+
+  private parseHistoricalPOS(
+    buffer: Buffer,
+    module: ForecastModule,
+  ): {
+    transactions: Partial<Transaction>[];
+    excludedRecordCount: number;
+    repairedDateCount: number;
+  } {
+    const records = this.parseCsvRecords(buffer);
+
+    const transactions: Partial<Transaction>[] = [];
+    let excludedRecordCount = 0;
+    let repairedDateCount = 0;
+    const validDates = records
+      .map((row) => this.parseDate(this.getValue(row, ['transaction date', 'date', 'order date', 'created at', 'timestamp'])))
+      .filter((date): date is Date => Boolean(date));
+    let lastValidDate: Date | null = validDates[0] || new Date();
+
+    for (const [index, row] of records.entries()) {
+      const source = this.getValue(row, [
+        'channel',
+        'sales channel',
+        'order source',
+        'platform',
+        'source',
+      ]).toLowerCase();
+      if (
+        /shopee|tiktok|lazada|website|online|e-?commerce|marketplace/.test(
+          source,
+        )
+      ) {
+        excludedRecordCount += 1;
+        continue;
+      }
+
+      const category = this.getValue(row, [
+        'category',
+        'product category',
+        'item category',
+      ]);
+      const explicitSector = this.getValue(row, ['sector', 'module']);
+      const productName = this.getValue(row, [
+        'item names',
+        'item name',
+        'product name',
+        'product',
+        'service',
+        'name',
+        'description',
+      ]);
+      const inferredSector = this.inferFlexibleSector(
+        category,
+        explicitSector,
+        productName,
+      );
+      if ((category || explicitSector) && inferredSector !== module) {
+        excludedRecordCount += 1;
+        continue;
+      }
+
+      const rawDate = this.getValue(row, [
+        'transaction date',
+        'date',
+        'order date',
+        'created at',
+        'timestamp',
+      ]);
+      let date = this.parseDate(rawDate);
+      if (date) {
+        lastValidDate = date;
+      } else {
+        date = new Date(lastValidDate);
+        repairedDateCount += 1;
+      }
+
+      transactions.push(
+        this.mapFlexibleRow(row, {
+          channel: 'POS',
+          forcedModule: module,
+          fallbackDate: date,
+          fallbackId: `historical-${module}-${index + 1}`,
+        }),
+      );
+    }
+
+    return { transactions, excludedRecordCount, repairedDateCount };
+  }
+
+  private normalizeHistoricalModule(module: string): ForecastModule {
+    const normalized = module.toLowerCase();
+    if (normalized === 'cafe') return 'Cafe';
+    if (normalized === 'services') return 'Services';
+    throw new BadRequestException(
+      'Historical ingestion is restricted to Cafe and Services',
+    );
+  }
+
+  private toNumber(value: string | undefined, fallback: number): number {
+    const parsedValue = Number.parseFloat(
+      (value || '').replace(/[^0-9.-]/g, ''),
+    );
+    return Number.isFinite(parsedValue) ? parsedValue : fallback;
+  }
+
+  private parseCsvRecords(buffer: Buffer): Record<string, string>[] {
+    const content = buffer
+      .toString('utf-8')
+      .replace(/^\uFEFF/, '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .trim();
+    if (!content) {
+      throw new BadRequestException('The uploaded CSV is empty');
+    }
+
+    try {
+      const rows = parse(content, {
+        columns: (headers: string[]) =>
+          headers.map((header, index) => header.trim() || `column_${index + 1}`),
+        skip_empty_lines: true,
+        trim: true,
+        relax_column_count: true,
+        relax_quotes: true,
+        bom: true,
+      }) as Record<string, string>[];
+      if (rows.length > 0) return rows;
+
+      const rawRows = parse(content, {
+        skip_empty_lines: true,
+        trim: true,
+        relax_column_count: true,
+        relax_quotes: true,
+        bom: true,
+      }) as string[][];
+      return rawRows.map((values) =>
+        Object.fromEntries(
+          values.map((value, index) => [`column_${index + 1}`, value]),
+        ),
+      );
+    } catch (error) {
+      throw new BadRequestException(
+        `Unable to parse CSV: ${error instanceof Error ? error.message : 'invalid format'}`,
+      );
+    }
+  }
+
+  private mapFlexibleRow(
+    row: Record<string, string>,
+    options: {
+      channel: string;
+      fallbackDate: Date;
+      fallbackId: string;
+      forcedModule?: ForecastModule;
+    },
+  ): Partial<Transaction> {
+    const productName =
+      this.getValue(row, [
+        'item names',
+        'item name',
+        'product name',
+        'product',
+        'service',
+        'name',
+        'description',
+      ]) || this.firstMeaningfulValue(row) || `Imported row ${options.fallbackId}`;
+    const category =
+      this.getValue(row, [
+        'category',
+        'product category',
+        'item category',
+        'type',
+      ]) || options.forcedModule || 'Uncategorized';
+    const explicitSector = this.getValue(row, ['sector', 'module']);
+    const sector =
+      options.forcedModule ||
+      this.inferFlexibleSector(category, explicitSector, productName);
+    const quantity = Math.max(
+      0,
+      this.toNumber(
+        this.getValue(row, [
+          'items sold',
+          'quantity',
+          'qty',
+          'units',
+          'count',
+        ]),
+        1,
+      ),
+    );
+    const unitPrice = this.toNumber(
+      this.getValue(row, [
+        'unit price',
+        'price',
+        'rate',
+        'deal price',
+        'original price',
+      ]),
+      0,
+    );
+    const grossSales = this.toNumber(
+      this.getValue(row, [
+        'gross sales',
+        'gross amount',
+        'total amount',
+        'amount',
+        'sales',
+        'revenue',
+        'total',
+      ]),
+      unitPrice * quantity,
+    );
+    const discount = this.toNumber(
+      this.getValue(row, ['discounts', 'discount', 'total discount']),
+      0,
+    );
+    const netSales = this.toNumber(
+      this.getValue(row, [
+        'net sales',
+        'net amount',
+        'subtotal after discount',
+      ]),
+      grossSales - discount,
+    );
+
+    return {
+      date:
+        this.parseDate(
+          this.getValue(row, [
+            'transaction date',
+            'date',
+            'order date',
+            'created at',
+            'created time',
+            'timestamp',
+          ]),
+        ) || options.fallbackDate,
+      transactionId:
+        this.getValue(row, [
+          'transaction id',
+          'order id',
+          'invoice id',
+          'receipt id',
+          'id',
+        ]) || options.fallbackId,
+      productName,
+      sku: this.getValue(row, ['sku', 'sku id', 'product id', 'item code']),
+      category,
+      sector,
+      quantity,
+      unitPrice: unitPrice || grossSales / Math.max(quantity, 1),
+      totalAmount: grossSales,
+      discount,
+      netSales,
+      paymentType: this.getValue(row, [
+        'payment type',
+        'payment method',
+        'payment',
+      ]),
+    };
+  }
+
+  private inferFlexibleSector(
+    category: string,
+    explicitSector: string,
+    productName: string,
+  ): string {
+    const sector = explicitSector.trim().toLowerCase();
+    if (sector.includes('cafe') || sector.includes('coffee')) return 'Cafe';
+    if (sector.includes('service') || sector.includes('groom')) return 'Services';
+    if (sector.includes('retail')) return 'Retail';
+
+    const mapped = mapCategoryToSector(category);
+    return mapped !== 'Retail' || category.toLowerCase().includes('retail')
+      ? mapped
+      : this.inferSectorFromProduct(productName, category);
+  }
+
+  private getValue(
+    row: Record<string, string>,
+    aliases: string[],
+  ): string {
+    const normalizedAliases = aliases.map((alias) => this.normalizeHeader(alias));
+    for (const [key, value] of Object.entries(row)) {
+      if (
+        normalizedAliases.includes(this.normalizeHeader(key)) &&
+        value !== undefined &&
+        value !== null
+      ) {
+        return String(value).trim();
+      }
+    }
+    return '';
+  }
+
+  private normalizeHeader(header: string): string {
+    return header.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private firstMeaningfulValue(row: Record<string, string>): string {
+    return (
+      Object.values(row).find(
+        (value) => typeof value === 'string' && value.trim().length > 0,
+      )?.trim() || ''
+    );
+  }
+
+  private parseDate(value: string): Date | null {
+    if (!value) return null;
+    const parsedDate = new Date(value);
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
   }
 
   private parseTikTok(buffer: Buffer): Partial<Transaction>[] {
@@ -222,15 +648,7 @@ export class CsvService {
   }
 
   private parseShopeeCsv(buffer: Buffer): Partial<Transaction>[] {
-    // Fallback CSV parsing for Shopee
-    const content = buffer.toString('utf-8').replace(/\r\n/g, '\n');
-    const records = parse(content, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      relax_column_count: true,
-    });
-    return this.parseShopeeExcel(buffer); // Reuse logic
+    return this.parseFlexibleCsv(buffer, 'shopee.csv', 'Shopee');
   }
 
   private inferSectorFromProduct(productName: string, category: string): string {

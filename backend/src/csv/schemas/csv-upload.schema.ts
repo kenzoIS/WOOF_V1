@@ -11,6 +11,12 @@ export class CsvUpload {
   @Prop({ required: true })
   channel: string; // "POS" | "Shopee" | "TikTok Shop"
 
+  @Prop({ default: 'general' })
+  purpose: string;
+
+  @Prop({ enum: ['Cafe', 'Services'] })
+  module?: string;
+
   @Prop({ default: 0 })
   recordCount: number;
 
@@ -25,6 +31,12 @@ export class CsvUpload {
 
   @Prop({ type: [String], default: [] })
   categories: string[];
+
+  @Prop({ default: 0 })
+  excludedRecordCount: number;
+
+  @Prop({ default: 0 })
+  repairedDateCount: number;
 
   @Prop()
   uploadedAt: Date;
