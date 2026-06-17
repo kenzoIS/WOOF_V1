@@ -84,6 +84,16 @@ const flaggedRetailReviews = [
   },
 ];
 
+const formatChartDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+  });
+};
+
 export function Retail() {
   const [filterVelocity, setFilterVelocity] = useState("all");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -318,6 +328,107 @@ export function Retail() {
         </div>
       </div>
 
+      {/* RETAIL REVENUE BY CHANNEL */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div>
+          <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+            Retail Revenue by Channel
+          </h2>
+          <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+            Physical POS and online channel history with the active Retail forecast overlay
+          </p>
+        </div>
+
+        <ResponsiveContainer width="100%" height={280} className="md:!h-[360px]">
+          <LineChart data={forecastData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
+            <XAxis
+              dataKey="day"
+              stroke="#223047"
+              tickFormatter={formatChartDate}
+              minTickGap={28}
+              interval="preserveStartEnd"
+              style={{ fontSize: "10px" }}
+            />
+            <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
+            <Tooltip
+              labelFormatter={(label) => formatChartDate(String(label))}
+              contentStyle={{
+                backgroundColor: "white",
+                border: "1px solid #FFD9EC",
+                borderRadius: "12px",
+              }}
+            />
+            <Line
+              key="line-physical-wide"
+              type="monotone"
+              dataKey="physical"
+              stroke="#D42A7D"
+              strokeWidth={2.5}
+              dot={false}
+              animationDuration={800}
+              name="Physical (POS)"
+            />
+            <Line
+              key="line-online-wide"
+              type="monotone"
+              dataKey="online"
+              stroke="#3AE4FA"
+              strokeWidth={2.5}
+              dot={false}
+              animationDuration={800}
+              name="Online (Shopee/TikTok)"
+            />
+            <Line
+              key="line-forecast-wide"
+              type="monotone"
+              dataKey="forecast"
+              stroke="#223047"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              dot={false}
+              animationDuration={800}
+              name="Forecast"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+
+        <div className="flex flex-wrap justify-center gap-4 md:gap-6 pt-2">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-[#D42A7D] rounded-full" />
+            <span className="text-xs">Physical (POS)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
+            <span className="text-xs">Online (Shopee/TikTok)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-0.5 border-t-2 border-dashed border-[#223047]" style={{ width: "12px" }} />
+            <span className="text-xs">Forecast</span>
+          </div>
+        </div>
+      </div>
+
+      {/* QUICK STATS */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4">
+        <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">Quick Stats</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+          {[
+            { label: "Avg Daily Sales", value: "â‚±8,450", color: "#D42A7D" },
+            { label: "Top Category", value: "Pet Food", color: "#F53799" },
+            { label: "Online Share", value: "42%", color: "#5CE1E6" },
+            { label: "Inventory Value", value: "â‚±2.1M", color: "#3AE4FA" },
+          ].map((stat) => (
+            <div key={stat.label} className="flex items-center justify-between p-3 md:p-4 bg-[#FFF2FA] rounded-lg">
+              <span className="text-xs md:text-sm text-[#223047] opacity-70">{stat.label}</span>
+              <span className="text-sm md:text-base font-bold text-[#223047]" style={{ color: stat.color }}>
+                {stat.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
       <div
         className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
@@ -340,10 +451,8 @@ export function Retail() {
         />
       </div>
 
-      {/* INVENTORY HEALTH MONITOR + SALES VELOCITY */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
-        {/* Inventory Table (60% - 3 columns) */}
-        <div className="lg:col-span-3 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+      {/* INVENTORY HEALTH MONITOR */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
             <div className="flex-1 min-w-0">
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
@@ -484,80 +593,7 @@ export function Retail() {
           </div>
         </div>
 
-        {/* Sales Velocity Chart (40% - 2 columns) */}
-        <div className="lg:col-span-2 space-y-4 md:space-y-6">
-          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
-            <div>
-              <h3 className="text-base md:text-lg font-bold text-[#223047]">Retail Revenue by Channel</h3>
-              <p className="text-xs text-[#223047] opacity-60 mt-1">Physical (POS) vs Online (Shopee/TikTok)</p>
-            </div>
-
-            <ResponsiveContainer width="100%" height={200} className="md:!h-[250px]">
-              <LineChart data={forecastData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-                <XAxis dataKey="day" stroke="#223047" style={{ fontSize: "10px" }} />
-                <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "white",
-                    border: "1px solid #FFD9EC",
-                    borderRadius: "12px",
-                  }}
-                />
-                <Line
-                  key="line-physical"
-                  type="monotone"
-                  dataKey="physical"
-                  stroke="#D42A7D"
-                  strokeWidth={2.5}
-                  dot={false}
-                  animationDuration={800}
-                  name="Physical (POS)"
-                />
-                <Line
-                  key="line-online"
-                  type="monotone"
-                  dataKey="online"
-                  stroke="#3AE4FA"
-                  strokeWidth={2.5}
-                  dot={false}
-                  animationDuration={800}
-                  name="Online (Shopee/TikTok)"
-                />
-                <Line
-                  key="line-forecast"
-                  type="monotone"
-                  dataKey="forecast"
-                  stroke="#223047"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  dot={false}
-                  animationDuration={800}
-                  name="Forecast"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-
-            <div className="flex justify-center gap-4 md:gap-6 pt-2">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-[#D42A7D] rounded-full" />
-                <span className="text-xs">Physical (POS)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
-                <span className="text-xs">Online (Shopee/TikTok)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-0.5 border-t-2 border-dashed border-[#223047]" style={{ width: '12px' }} />
-                <span className="text-xs">Forecast</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
-            <h3 className="text-base md:text-lg font-bold text-[#223047]">Quick Stats</h3>
-
-            <div className="space-y-2 md:space-y-3">
+            <div className="hidden">
               {[
                 { label: "Avg Daily Sales", value: "₱8,450", color: "#D42A7D" },
                 { label: "Top Category", value: "Pet Food", color: "#F53799" },
@@ -572,10 +608,6 @@ export function Retail() {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      </div>
-
       {/* SPOILAGE RISK ENGINE */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">

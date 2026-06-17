@@ -7,9 +7,11 @@ import {
   ForecastRun,
   ForecastRunSchema,
 } from './schemas/forecast-run.schema';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
+    CommonModule,
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },
       { name: ForecastRun.name, schema: ForecastRunSchema },

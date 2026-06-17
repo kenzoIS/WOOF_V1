@@ -2,7 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Transaction, TransactionDocument } from '../csv/schemas/transaction.schema';
+import {
+  Transaction,
+  TransactionDocument,
+} from '../csv/schemas/transaction.schema';
 import { spawn } from 'child_process';
 import * as path from 'path';
 import { existsSync } from 'fs';
@@ -11,11 +14,23 @@ import {
   NormalizedDailyValue,
   normalizeDailySeries,
 } from '../common/time-series';
+import { ExogenousDataService } from '../common/exogenous-data.service';
 import {
   ForecastRun,
   ForecastRunDocument,
 } from './schemas/forecast-run.schema';
 
+/**
+ * Forecasting limitations for the current capstone implementation:
+ * 1. Python child process timeout is not implemented yet; long-running fits can
+ *    block the Node request path until Python exits. Phase 2 should add
+ *    process-level cancellation from Node.
+ * 2. Forecast results are not cached; every API call re-runs the selected
+ *    Python model. Phase 3 should cache recent ForecastRun results.
+ * 3. Services forecasting now attempts SARIMAX with weather and holiday
+ *    regressors when exogenous data is available, then degrades to pure SARIMA.
+ *    Deeper exogenous validation remains a Phase 1 improvement.
+ */
 interface ModelResult {
   modelName: string;
   mase: number;
@@ -33,10 +48,12 @@ interface ModelResult {
 @Injectable()
 export class AnalyticsService {
   constructor(
-    @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
+    @InjectModel(Transaction.name)
+    private transactionModel: Model<TransactionDocument>,
     @InjectModel(ForecastRun.name)
     private forecastRunModel: Model<ForecastRunDocument>,
     private readonly configService: ConfigService,
+    private readonly exogenousDataService: ExogenousDataService,
   ) {}
 
   /**
@@ -115,12 +132,19 @@ export class AnalyticsService {
       ]),
     ]);
 
-    const kpi = kpis[0] || { totalRevenue: 0, totalOrders: [], totalQuantity: 0, totalItems: 0 };
+    const kpi = kpis[0] || {
+      totalRevenue: 0,
+      totalOrders: [],
+      totalQuantity: 0,
+      totalItems: 0,
+    };
 
     return {
       kpis: {
         totalRevenue: Math.round(kpi.totalRevenue * 100) / 100,
-        totalOrders: Array.isArray(kpi.totalOrders) ? kpi.totalOrders.length : 0,
+        totalOrders: Array.isArray(kpi.totalOrders)
+          ? kpi.totalOrders.length
+          : 0,
         totalQuantity: kpi.totalQuantity,
         totalItems: kpi.totalItems,
         avgOrderValue: kpi.totalOrders?.length
@@ -182,15 +206,26 @@ export class AnalyticsService {
     );
     const dashboard = await this.getDashboard(module);
     const forecastDays = module === 'Services' ? 30 : 14;
+    let exogenousPayload: Record<string, unknown> = {};
+    let exogenousMetadata: Record<string, unknown> = {};
 
     let selectedModel: ModelResult | null = null;
     let rejectionReason = '';
     if (historical.length >= 21) {
       try {
+        if (module === 'Services') {
+          const servicesExogenous = await this.buildServicesExogenousPayload(
+            historical,
+            forecastDays,
+          );
+          exogenousPayload = servicesExogenous.payload;
+          exogenousMetadata = servicesExogenous.metadata;
+        }
         selectedModel = await this.runForecastModel(
           module,
           historical,
           forecastDays,
+          exogenousPayload,
         );
         if (!Number.isFinite(selectedModel.mase)) {
           rejectionReason = 'Model returned a non-finite MASE score';
@@ -218,14 +253,13 @@ export class AnalyticsService {
       mape: finalModel.mape,
       accuracy: finalModel.accuracy,
       isFallback: useFallback,
-      historical: historical.map(
-        ({ date, actual, normalized, orders }) => ({
-          date,
-          actual,
-          normalized,
-          orders,
-        }),
-      ),
+      rejectionReason: useFallback ? rejectionReason : undefined,
+      historical: historical.map(({ date, actual, normalized, orders }) => ({
+        date,
+        actual,
+        normalized,
+        orders,
+      })),
       forecast: finalModel.forecast,
       kpis: dashboard.kpis,
       topItems: dashboard.topItems,
@@ -235,6 +269,7 @@ export class AnalyticsService {
         missingDaysFilled: historical.filter((point) => point.isMissingDate)
           .length,
         sourceChannel: 'POS',
+        ...exogenousMetadata,
         ...(useFallback && selectedModel
           ? {
               rejectedModel: selectedModel.modelName,
@@ -268,20 +303,30 @@ export class AnalyticsService {
     ]);
 
     if (baskets.length < 5) {
-      return { rules: [], totalBaskets: baskets.length, message: 'Not enough multi-item transactions' };
+      return {
+        rules: [],
+        totalBaskets: baskets.length,
+        message: 'Not enough multi-item transactions',
+      };
     }
 
-    const inputData = baskets.map(b => ({
+    const inputData = baskets.map((b) => ({
       transactionId: b._id,
       items: b.items,
-      sectors: b.sectors
+      sectors: b.sectors,
     }));
 
     return new Promise((resolve, reject) => {
-      const scriptPath = path.join(process.cwd(), 'src', 'analytics', 'python', 'cross_sell.py');
+      const scriptPath = path.join(
+        process.cwd(),
+        'src',
+        'analytics',
+        'python',
+        'cross_sell.py',
+      );
       const pythonCmd = path.join(process.cwd(), 'venv', 'bin', 'python3');
       const pythonProcess = spawn(pythonCmd, [scriptPath]);
-      
+
       let dataString = '';
       let errorString = '';
 
@@ -295,7 +340,9 @@ export class AnalyticsService {
 
       pythonProcess.on('close', (code) => {
         if (code !== 0) {
-          console.error(`Python script exited with code ${code}: ${errorString}`);
+          console.error(
+            `Python script exited with code ${code}: ${errorString}`,
+          );
           reject(new Error(`Python cross-sell failed: ${errorString}`));
           return;
         }
@@ -306,11 +353,15 @@ export class AnalyticsService {
           } else {
             // Re-append cross-sector analytics logic on node side
             const totalBaskets = baskets.length;
-            const crossSectorBaskets = baskets.filter((b: any) => b.sectors.length > 1);
-            const crossSectorRate = totalBaskets > 0 ? crossSectorBaskets.length / totalBaskets : 0;
-            
+            const crossSectorBaskets = baskets.filter(
+              (b: any) => b.sectors.length > 1,
+            );
+            const crossSectorRate =
+              totalBaskets > 0 ? crossSectorBaskets.length / totalBaskets : 0;
+
             result.crossSectorBaskets = crossSectorBaskets.length;
-            result.crossSectorRate = Math.round(crossSectorRate * 10000) / 10000;
+            result.crossSectorRate =
+              Math.round(crossSectorRate * 10000) / 10000;
             resolve(result);
           }
         } catch (e) {
@@ -346,7 +397,12 @@ export class AnalyticsService {
         { $project: { orders: 0 } },
       ]),
       this.transactionModel.aggregate([
-        { $match: { ...sectorFilter, channel: { $in: ['Shopee', 'TikTok Shop'] } } },
+        {
+          $match: {
+            ...sectorFilter,
+            channel: { $in: ['Shopee', 'TikTok Shop'] },
+          },
+        },
         {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
@@ -361,7 +417,7 @@ export class AnalyticsService {
     ]);
 
     const formatSeries = (data: any[]) =>
-      data.map(d => ({
+      data.map((d) => ({
         date: d._id,
         revenue: Math.round(d.revenue * 100) / 100,
         orders: d.orderCount,
@@ -374,6 +430,37 @@ export class AnalyticsService {
       online: {
         historical: formatSeries(onlineData),
       },
+    };
+  }
+
+  async getExogenousStatus(): Promise<any> {
+    const cacheStatus = await this.exogenousDataService.getCacheStatus();
+    const lastServicesForecast = await this.forecastRunModel
+      .findOne({ module: 'Services' })
+      .sort({ generatedAt: -1 })
+      .lean();
+    const modelName = (lastServicesForecast as any)?.modelName || null;
+
+    return {
+      ...cacheStatus,
+      lastServicesForecast: lastServicesForecast
+        ? {
+            modelName,
+            modelType: String(modelName).includes('SARIMAX')
+              ? 'SARIMAX'
+              : 'SARIMA',
+            exogenousVariables:
+              (lastServicesForecast as any)?.modelMetadata
+                ?.exogenousVariables || [],
+            weatherDataSource:
+              (lastServicesForecast as any)?.modelMetadata
+                ?.weatherDataSource || 'unknown',
+            holidayDataSource:
+              (lastServicesForecast as any)?.modelMetadata
+                ?.holidayDataSource || 'unknown',
+            generatedAt: (lastServicesForecast as any)?.generatedAt,
+          }
+        : null,
     };
   }
 
@@ -391,12 +478,90 @@ export class AnalyticsService {
     module: ForecastModule,
     historical: NormalizedDailyValue[],
     forecastDays: number,
+    extraPayload: Record<string, unknown> = {},
   ): Promise<ModelResult> {
     const scriptName =
       module === 'Cafe' ? 'cafe_prophet.py' : 'services_sarima.py';
     return this.runPython<ModelResult>(scriptName, {
       data: historical,
       forecastDays,
+      ...extraPayload,
+    });
+  }
+
+  private async buildServicesExogenousPayload(
+    historical: NormalizedDailyValue[],
+    forecastDays: number,
+  ): Promise<{
+    payload: Record<string, unknown>;
+    metadata: Record<string, unknown>;
+  }> {
+    if (historical.length === 0) {
+      return { payload: {}, metadata: {} };
+    }
+
+    try {
+      const historicalDates = historical.map((point) => point.date);
+      const futureDates = this.buildFutureDates(
+        historicalDates[historicalDates.length - 1],
+        forecastDays,
+      );
+      const allDates = [...historicalDates, ...futureDates];
+      const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
+      const weatherRecords =
+        await this.exogenousDataService.fetchWeatherHistory(
+          lat,
+          lng,
+          allDates[0],
+          allDates[allDates.length - 1],
+        );
+      const years = [...new Set(allDates.map((date) => Number(date.slice(0, 4))))];
+      const holidayRecords = (
+        await Promise.all(
+          years.map((year) => this.exogenousDataService.fetchHolidayHistory(year)),
+        )
+      ).flat();
+
+      return {
+        payload: {
+          exogenous: this.exogenousDataService.buildExogenousMatrix(
+            historicalDates,
+            weatherRecords,
+            holidayRecords,
+          ),
+          exogenousForecast: this.exogenousDataService.buildExogenousMatrix(
+            futureDates,
+            weatherRecords,
+            holidayRecords,
+          ),
+        },
+        metadata: {
+          weatherDataSource: this.exogenousDataService.getLastWeatherSource(),
+          holidayDataSource: this.exogenousDataService.getLastHolidaySource(),
+        },
+      };
+    } catch (error) {
+      console.warn(
+        `Services exogenous data unavailable; falling back to pure SARIMA: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return {
+        payload: { exogenous: [], exogenousForecast: [] },
+        metadata: {
+          weatherDataSource: 'synthetic',
+          holidayDataSource: 'hardcoded',
+        },
+      };
+    }
+  }
+
+  private buildFutureDates(lastDate: string, days: number): string[] {
+    const baseDate = new Date(`${lastDate}T00:00:00.000Z`);
+    return Array.from({ length: days }, (_, index) => {
+      const date = new Date(baseDate);
+      date.setUTCDate(date.getUTCDate() + index + 1);
+      return date.toISOString().slice(0, 10);
     });
   }
 
@@ -475,8 +640,42 @@ export class AnalyticsService {
         }
       });
 
-      pythonProcess.stdin.write(JSON.stringify(input));
-      pythonProcess.stdin.end();
+      pythonProcess.stdin.on('error', (error) => {
+        if (!settled) {
+          settled = true;
+          reject(
+            new Error(
+              `Failed to send input to ${scriptName}: ${error.message}`,
+            ),
+          );
+        }
+      });
+
+      const payload = JSON.stringify(input);
+      const rowCount = Array.isArray(input.data) ? input.data.length : 0;
+      const chunkSize = rowCount > 5000 ? 16 * 1024 : 64 * 1024;
+      let offset = 0;
+
+      const writeNextChunk = () => {
+        if (settled) return;
+        if (offset >= payload.length) {
+          pythonProcess.stdin.end();
+          return;
+        }
+
+        const nextOffset = Math.min(offset + chunkSize, payload.length);
+        const canContinue = pythonProcess.stdin.write(
+          payload.slice(offset, nextOffset),
+        );
+        offset = nextOffset;
+        if (canContinue) {
+          setImmediate(writeNextChunk);
+        } else {
+          pythonProcess.stdin.once('drain', writeNextChunk);
+        }
+      };
+
+      writeNextChunk();
     });
   }
 
@@ -517,9 +716,7 @@ export class AnalyticsService {
     const validationPredicted: number[] = [];
     for (let index = 7; index < actuals.length; index += 1) {
       validationActual.push(actuals[index]);
-      validationPredicted.push(
-        this.average(actuals.slice(index - 7, index)),
-      );
+      validationPredicted.push(this.average(actuals.slice(index - 7, index)));
     }
     const metrics = this.calculateMetrics(
       validationActual,
@@ -553,9 +750,7 @@ export class AnalyticsService {
     const naiveMae = this.average(naiveErrors);
     const percentageErrors = actual
       .map((value, index) =>
-        value === 0
-          ? null
-          : Math.abs((value - predicted[index]) / value) * 100,
+        value === 0 ? null : Math.abs((value - predicted[index]) / value) * 100,
       )
       .filter((value): value is number => value !== null);
     const mape = this.average(percentageErrors);

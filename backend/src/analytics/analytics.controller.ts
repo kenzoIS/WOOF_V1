@@ -20,6 +20,11 @@ export class AnalyticsController {
     return this.analyticsService.getRetailForecastByChannel();
   }
 
+  @Get('exogenous/status')
+  async getExogenousStatus() {
+    return this.analyticsService.getExogenousStatus();
+  }
+
   @Get('cross-sell')
   async getCrossSell() {
     return this.analyticsService.getCrossSell();

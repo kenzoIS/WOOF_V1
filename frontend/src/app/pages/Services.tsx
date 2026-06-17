@@ -30,6 +30,16 @@ import {
 } from "../components/ui/table";
 import { toast } from "sonner";
 
+const formatChartDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+  });
+};
+
 export function Services() {
   const [viewMode, setViewMode] = useState("next30days");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -299,9 +309,17 @@ export function Services() {
         <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
           <LineChart data={bookingForecastData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-            <XAxis dataKey="day" stroke="#223047" style={{ fontSize: "12px" }} />
+            <XAxis
+              dataKey="day"
+              stroke="#223047"
+              tickFormatter={formatChartDate}
+              minTickGap={28}
+              interval="preserveStartEnd"
+              style={{ fontSize: "11px" }}
+            />
             <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
             <Tooltip
+              labelFormatter={(label) => formatChartDate(String(label))}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -394,10 +412,8 @@ export function Services() {
         />
       </div>
 
-      {/* SERVICE UTILIZATION + HOURLY BOOKINGS */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
-        {/* Service Utilization Table (60% - 3 columns) */}
-        <div className="lg:col-span-3 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+      {/* SERVICE UTILIZATION */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div>
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               Service Utilization Monitor
@@ -539,65 +555,34 @@ export function Services() {
             </ResponsiveContainer>
           </div>
         </div>
-      </div>
 
-      {/* CAPACITY ALERTS */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
-          <div className="flex-1">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Forecast Demand Alerts
-            </h2>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">Forecast Demand Alerts</h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Highest projected Services revenue days from the active forecast
             </p>
           </div>
-          <Badge className="bg-red-500 text-white hover:bg-red-500 self-start">
-            {occupancyAlerts.length} Active Alerts
-          </Badge>
+          <Badge className="bg-red-500 text-white hover:bg-red-500 self-start">{occupancyAlerts.length} Active Alerts</Badge>
         </div>
 
         <div className="grid gap-3 md:gap-4">
           {occupancyAlerts.map((alert, idx) => (
-            <div
-              key={idx}
-              className="flex flex-col md:flex-row md:items-center md:justify-between p-4 md:p-6 bg-[#FFF7FB] border-l-4 border-[#F53799] rounded-xl gap-3 md:gap-4"
-            >
-              <div className="flex-1">
-                <div className="flex items-center gap-2 md:gap-3 mb-2">
-                  <Badge className={`${getRiskColor(alert.risk)} font-semibold text-xs px-2 py-1`}>
-                    {alert.risk.toUpperCase()} RISK
-                  </Badge>
-                  <span className="text-xs md:text-sm font-bold text-[#223047]">{alert.time}</span>
+            <div key={idx} className="p-4 bg-[#FFF7FB] border-l-4 border-[#F53799] rounded-xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge className={`${getRiskColor(alert.risk)} font-semibold text-xs px-2 py-1`}>{alert.risk.toUpperCase()} RISK</Badge>
+                    <span className="text-xs md:text-sm font-bold text-[#223047]">{alert.time}</span>
+                  </div>
+                  <div className="text-sm md:text-base font-bold text-[#223047]">{alert.service}</div>
+                  <div className="text-xs text-[#223047] opacity-70 mt-1">Relative demand: {alert.capacity}% • Projected revenue: ₱{alert.projectedRevenue.toLocaleString()}</div>
                 </div>
-                <h3 className="text-sm md:text-base font-bold text-[#223047] mb-1">{alert.service}</h3>
-                <div className="flex flex-wrap items-center gap-3 md:gap-6 text-xs md:text-sm text-[#223047] opacity-70">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-4 h-4" />
-                    <span>Relative demand: {alert.capacity}%</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    <span>Projected revenue: ₱{alert.projectedRevenue.toLocaleString()}</span>
-                  </div>
-                  <div className="flex items-center gap-2 hidden md:flex">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>{alert.action}</span>
-                  </div>
+                <div className="flex gap-2">
+                  <Button onClick={() => handleResolveAlert(alert.time)} className="bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs md:text-sm" size="sm">Resolve</Button>
+                  <Button variant="outline" className="border-[#FFD9EC] text-xs md:text-sm" size="sm">Snooze</Button>
                 </div>
-              </div>
-
-              <div className="flex gap-2 self-start md:self-auto">
-                <Button
-                  onClick={() => handleResolveAlert(alert.time)}
-                  className="bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs md:text-sm"
-                  size="sm"
-                >
-                  Resolve
-                </Button>
-                <Button variant="outline" className="border-[#FFD9EC] text-xs md:text-sm" size="sm">
-                  Snooze
-                </Button>
               </div>
             </div>
           ))}

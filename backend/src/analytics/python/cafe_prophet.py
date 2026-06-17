@@ -20,7 +20,12 @@ def build_model(changepoint_prior_scale):
         changepoint_prior_scale=changepoint_prior_scale,
         interval_width=0.8,
     )
-    model.add_country_holidays(country_name="PH")
+    try:
+        model.add_country_holidays(country_name="PH")
+    except Exception:
+        # Holiday import support can vary by Prophet installation; forecasting can
+        # still proceed without holidays because the primary signal is POS revenue.
+        pass
     return model
 
 
@@ -43,12 +48,22 @@ def metrics(actual, predicted, training):
 
 
 def run(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Input payload must be a JSON object")
+
     data = payload.get("data", [])
     forecast_days = int(payload.get("forecastDays", 14))
+    if not isinstance(data, list):
+        raise ValueError("Input payload data must be an array")
     if len(data) < 21:
         raise ValueError("Cafe Prophet requires at least 21 daily observations")
 
     frame = pd.DataFrame(data)
+    required_columns = {"date", "actual", "normalized"}
+    missing_columns = required_columns.difference(frame.columns)
+    if missing_columns:
+        raise ValueError(f"Missing required fields: {', '.join(sorted(missing_columns))}")
+
     frame["ds"] = pd.to_datetime(frame["date"])
     frame["y"] = frame["normalized"].astype(float)
     actual = frame["actual"].astype(float).to_numpy()
@@ -60,21 +75,27 @@ def run(payload):
     best = None
 
     for candidate in candidates:
-        model = build_model(candidate)
-        model.fit(train)
-        predicted = model.predict(validation_dates)["yhat"].to_numpy()
-        mase, mape, accuracy = metrics(
-            validation_actual, predicted, actual[:-holdout]
-        )
-        score = (mase, mape)
-        if best is None or score < best["score"]:
-            best = {
-                "score": score,
-                "changepointPriorScale": candidate,
-                "mase": mase,
-                "mape": mape,
-                "accuracy": accuracy,
-            }
+        try:
+            model = build_model(candidate)
+            model.fit(train)
+            predicted = model.predict(validation_dates)["yhat"].to_numpy()
+            mase, mape, accuracy = metrics(
+                validation_actual, predicted, actual[:-holdout]
+            )
+            score = (mase, mape)
+            if best is None or score < best["score"]:
+                best = {
+                    "score": score,
+                    "changepointPriorScale": candidate,
+                    "mase": mase,
+                    "mape": mape,
+                    "accuracy": accuracy,
+                }
+        except Exception:
+            continue
+
+    if best is None:
+        raise RuntimeError("Prophet could not fit any changepoint prior candidate")
 
     final_model = build_model(best["changepointPriorScale"])
     final_model.fit(frame[["ds", "y"]])
@@ -111,6 +132,11 @@ def run(payload):
 
 if __name__ == "__main__":
     try:
-        print(json.dumps(run(json.loads(sys.stdin.read()))))
+        raw_input = sys.stdin.read()
+        payload = json.loads(raw_input)
+        sys.stdout.write(json.dumps(run(payload)))
+    except json.JSONDecodeError as error:
+        sys.stdout.write(json.dumps({"error": f"Malformed JSON input: {error.msg}"}))
     except Exception as error:
-        print(json.dumps({"error": str(error)}))
+        sys.stdout.write(json.dumps({"error": str(error)}))
+    sys.exit(0)

@@ -56,6 +56,9 @@ export class ForecastRun {
   @Prop({ required: true, default: false })
   isFallback: boolean;
 
+  @Prop()
+  rejectionReason?: string;
+
   @Prop({ type: [HistoricalPoint], default: [] })
   historical: HistoricalPoint[];
 

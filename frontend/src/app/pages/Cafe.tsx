@@ -30,6 +30,16 @@ import {
 import { Slider } from "../components/ui/slider";
 import { toast } from "sonner";
 
+const formatChartDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+  });
+};
+
 export function Cafe() {
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -313,9 +323,17 @@ export function Cafe() {
         <ResponsiveContainer width="100%" height={250} className="md:!h-[350px] lg:!h-[400px]">
           <LineChart data={forecastData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-            <XAxis dataKey="date" stroke="#223047" style={{ fontSize: "12px" }} />
+            <XAxis
+              dataKey="date"
+              stroke="#223047"
+              tickFormatter={formatChartDate}
+              minTickGap={28}
+              interval="preserveStartEnd"
+              style={{ fontSize: "11px" }}
+            />
             <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
             <Tooltip
+              labelFormatter={(label) => formatChartDate(String(label))}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -408,10 +426,8 @@ export function Cafe() {
         />
       </div>
 
-      {/* MENU PERFORMANCE + HAPPY HOUR */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
-        {/* Menu Item Performance Table (60% - 3 columns) */}
-        <div className="lg:col-span-3 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+      {/* MENU PERFORMANCE */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               Menu Item Performance
@@ -428,7 +444,7 @@ export function Cafe() {
             </select>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="max-h-[620px] overflow-auto pr-1">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -522,8 +538,9 @@ export function Cafe() {
           </div>
         </div>
 
-        {/* Happy Hour Optimizer (40% - 2 columns) */}
-        <div className="lg:col-span-2 space-y-4 md:space-y-6">
+      {/* QUIET PERIOD + HAPPY HOUR */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <div className="space-y-4 md:space-y-6">
           <div className="bg-[#223047] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
             <div className="flex items-start justify-between">
               <h3 className="text-base md:text-lg font-bold">Next Quiet Period</h3>
@@ -561,7 +578,10 @@ export function Cafe() {
             </Button>
           </div>
 
-          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
+        </div>
+
+        <div className="space-y-4 md:space-y-6">
+          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4 h-full">
             <h3 className="text-sm md:text-base font-bold text-[#223047]">Past Happy Hour Effectiveness</h3>
 
             <div className="space-y-2">
