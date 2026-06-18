@@ -335,7 +335,8 @@ export function Retail() {
             Retail Revenue by Channel
           </h2>
           <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            Physical POS and online channel history with the active Retail forecast overlay
+            Physical POS and online channel history with the active Retail forecast overlay. 
+            <span className="ml-1 font-semibold text-[#D42A7D]">(Note: Retail forecasting uses a univariate model and does not incorporate exogenous weather or holiday variables).</span>
           </p>
         </div>
 
@@ -350,9 +351,14 @@ export function Retail() {
               interval="preserveStartEnd"
               style={{ fontSize: "10px" }}
             />
-            <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
+            <YAxis 
+              stroke="#223047" 
+              style={{ fontSize: "10px" }} 
+              tickFormatter={(value) => `₱${Number(value).toLocaleString()}`}
+            />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
+              formatter={(value: any) => [`₱${Number(value).toLocaleString()}`, "Revenue"]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -414,10 +420,10 @@ export function Retail() {
         <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">Quick Stats</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {[
-            { label: "Avg Daily Sales", value: "â‚±8,450", color: "#D42A7D" },
+            { label: "Avg Daily Sales", value: "₱8,450", color: "#D42A7D" },
             { label: "Top Category", value: "Pet Food", color: "#F53799" },
             { label: "Online Share", value: "42%", color: "#5CE1E6" },
-            { label: "Inventory Value", value: "â‚±2.1M", color: "#3AE4FA" },
+            { label: "Inventory Value", value: "₱2.1M", color: "#3AE4FA" },
           ].map((stat) => (
             <div key={stat.label} className="flex items-center justify-between p-3 md:p-4 bg-[#FFF2FA] rounded-lg">
               <span className="text-xs md:text-sm text-[#223047] opacity-70">{stat.label}</span>

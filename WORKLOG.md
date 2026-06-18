@@ -237,3 +237,81 @@ This file records requested revisions, implementation details, verification, and
 - Passed: Git ignore rules match backend/frontend dependencies, build output, caches, and `backend/.env`.
 - Passed: zero files under the targeted generated paths remain tracked.
 - Passed: local `node_modules`, build output, `.next`, and `backend/.env` remain on disk.
+
+## 2026-06-18 - Phase 1 Exogenous Variables Simulation and Terminology Clean Up
+
+### Requested
+
+- Clean up and polish Phase 1 forecasting components on the frontend dashboards (Cafe, Services, Retail).
+- Display and control exogenous factors directly on the frontend.
+- Standardize terminology, formatting, and Peso currency display across dashboards.
+- Verify backend and python forecast self-tests, and verify frontend compilation.
+
+### Backend Changes
+
+- Updated `GET /analytics/forecast/:sector` in `analytics.controller.ts` to accept optional query override parameters for weather and holidays: `temp`, `rain`, and `holiday`.
+- Enhanced `getForecast()` in `analytics.service.ts` to process overrides and dynamically inject them into the future forecast exogenous matrix in `buildServicesExogenousPayload()` when generating the services SARIMAX model.
+- Appended override information to the returned `modelMetadata` payload so the client knows when overrides are active.
+
+### Frontend Changes
+
+- Updated `getForecast()` in `frontend/src/app/lib/api.ts` to forward optional parameter objects as query strings to the NestJS API.
+- Rebuilt the forecast card in `frontend/src/app/pages/Services.tsx`:
+  - Added an **Exogenous Simulator** card permitting users to toggle between Sunny/Dry and Rainy/Stormy weather scenarios, and force or ignore holidays.
+  - Added "Apply Scenario" and "Reset" buttons to trigger forecast recalculations using simulated future exogenous values on-demand.
+  - Standardized terminology: changed "Services Demand Forecast" chart header to "Services Revenue & Demand Forecast", and formatted all daily forecast values as Peso (**₱**) values.
+- Updated the forecast card in `frontend/src/app/pages/Cafe.tsx`:
+  - Added an **Exogenous Holidays** card demonstrating Prophet's built-in Philippine (PH) holiday calendar integration.
+  - Displayed a scrollable list of tracked PH holidays for context.
+  - Adjusted terminology to "Cafe Revenue & Demand Forecast" and formatted y-axis ticks and tooltips as Peso (**₱**) values.
+- Updated `frontend/src/app/pages/Retail.tsx`:
+  - Replaced distorted currency symbols (`â‚±`) with standard Peso (**₱**) signs in the Quick Stats cards.
+  - Formatted the retail channel chart tooltips and y-axis ticks to print Peso values.
+  - Added a visual note clarifying that Retail forecasting uses a univariate model that does not incorporate weather or holiday variables.
+
+### Files Changed
+
+- [analytics.controller.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/analytics.controller.ts)
+- [analytics.service.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/analytics.service.ts)
+- [api.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/lib/api.ts)
+- [Services.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Services.tsx)
+- [Cafe.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Cafe.tsx)
+- [Retail.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Retail.tsx)
+- [WORKLOG.md](file:///c:/Users/Schenly/Desktop/CAPSTONE2/WORKLOG.md)
+
+### Verification
+
+- Passed: NestJS backend Jest tests (15 tests passed across 5 suites).
+- Passed: Python forecasting tests (`test_services_sarimax.py`, `test_services_sarima.py`, `test_cafe_prophet.py` all self-passed).
+
+## 2026-06-18 - Forecast Runs Caching Layer
+
+### Issue
+
+- The user reported that switching between the Cafe, Services, and Retail dashboard tabs takes a very long time to load after uploading a CSV.
+- Investigating the backend showed that every API call to `GET /analytics/forecast/:sector` triggered the full Python model fitting and execution from scratch. Since the frontend triggers forecast updates when loading/switching tabs, this resulted in waiting for Prophet fits and SARIMA grid searches (15–45 seconds) on every single click.
+
+### Changes
+
+- Modified `analytics.service.ts` to implement a database-backed caching layer for forecast runs.
+- **Cache Invalidation Rules**:
+  - A forecast run is read from MongoDB cache if one exists for the target module.
+  - The cache is automatically invalidated if the user uploads a new CSV or deletes an upload, which is detected by comparing the count of `CsvUpload` documents, the `_id` of the latest upload, and its `uploadedAt` timestamp.
+  - The cache is bypassed if the user triggers custom exogenous simulator overrides (e.g. Sunny/Rainy weather scenarios in the Services tab) that do not match the parameters of the cached run.
+- **Model Metadata Updates**:
+  - Saved the current state of uploads (`csvUploadCount`, `latestCsvUploadId`, `latestCsvUploadTime`) inside the `ForecastRun` metadata during database insertion.
+- **Unit Testing**:
+  - Updated `analytics.service.spec.ts` to mock the `CsvUpload` dependency and verify that matching database states bypass Python execution and return cached results instantly.
+
+### Files Changed
+
+- [analytics.service.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/analytics.service.ts)
+- [analytics.service.spec.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/analytics.service.spec.ts)
+- [WORKLOG.md](file:///c:/Users/Schenly/Desktop/CAPSTONE2/WORKLOG.md)
+
+### Verification
+
+- Passed: NestJS backend Jest tests (16 tests passed across 5 suites, including the new caching behavior checks).
+- Passed: Python forecasting self-tests (`test_services_sarimax.py`, `test_services_sarima.py`, `test_cafe_prophet.py`).
+- Passed: Next.js frontend production build compilation for all 11 routes.
+

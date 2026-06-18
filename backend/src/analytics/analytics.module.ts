@@ -7,6 +7,7 @@ import {
   ForecastRun,
   ForecastRunSchema,
 } from './schemas/forecast-run.schema';
+import { CsvUpload, CsvUploadSchema } from '../csv/schemas/csv-upload.schema';
 import { CommonModule } from '../common/common.module';
 
 @Module({
@@ -15,6 +16,7 @@ import { CommonModule } from '../common/common.module';
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },
       { name: ForecastRun.name, schema: ForecastRunSchema },
+      { name: CsvUpload.name, schema: CsvUploadSchema },
     ]),
   ],
   controllers: [AnalyticsController],

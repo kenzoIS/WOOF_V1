@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
@@ -11,8 +11,13 @@ export class AnalyticsController {
   }
 
   @Get('forecast/:sector')
-  async getForecast(@Param('sector') sector: string) {
-    return this.analyticsService.getForecast(sector);
+  async getForecast(
+    @Param('sector') sector: string,
+    @Query('temp') temp?: string,
+    @Query('rain') rain?: string,
+    @Query('holiday') holiday?: string,
+  ) {
+    return this.analyticsService.getForecast(sector, { temp, rain, holiday });
   }
 
   @Get('forecast-by-channel/retail')

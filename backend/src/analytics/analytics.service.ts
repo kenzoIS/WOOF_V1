@@ -6,6 +6,10 @@ import {
   Transaction,
   TransactionDocument,
 } from '../csv/schemas/transaction.schema';
+import {
+  CsvUpload,
+  CsvUploadDocument,
+} from '../csv/schemas/csv-upload.schema';
 import { spawn } from 'child_process';
 import * as path from 'path';
 import { existsSync } from 'fs';
@@ -52,6 +56,8 @@ export class AnalyticsService {
     private transactionModel: Model<TransactionDocument>,
     @InjectModel(ForecastRun.name)
     private forecastRunModel: Model<ForecastRunDocument>,
+    @InjectModel(CsvUpload.name)
+    private csvUploadModel: Model<CsvUploadDocument>,
     private readonly configService: ConfigService,
     private readonly exogenousDataService: ExogenousDataService,
   ) {}
@@ -177,11 +183,57 @@ export class AnalyticsService {
    * Cafe uses Prophet and Services uses pure SARIMA. Both are validated
    * against held-out POS history before the strict SMA fallback is applied.
    */
-  async getForecast(sector: string): Promise<any> {
+  async getForecast(
+    sector: string,
+    overrides?: { temp?: string; rain?: string; holiday?: string },
+  ): Promise<any> {
     if (this.normalizeSector(sector) === 'Retail') {
       return this.getLegacyRetailForecast();
     }
     const module = this.normalizeForecastModule(sector);
+
+    // Caching check
+    const cachedForecast = await this.forecastRunModel
+      .findOne({ module })
+      .sort({ generatedAt: -1 })
+      .exec();
+
+    const latestUpload = await this.csvUploadModel.findOne().sort({ uploadedAt: -1 }).exec();
+    const uploadCount = await this.csvUploadModel.countDocuments().exec();
+
+    if (cachedForecast) {
+      const metadata = cachedForecast.modelMetadata || {};
+      const cacheUploadCount = metadata.csvUploadCount;
+      const cacheLatestUploadId = metadata.latestCsvUploadId;
+      const cacheLatestUploadTime = metadata.latestCsvUploadTime;
+
+      const currentLatestUploadId = latestUpload ? latestUpload._id.toString() : null;
+      const currentLatestUploadTime = latestUpload ? latestUpload.uploadedAt.getTime() : null;
+
+      const isCsvStateMatch =
+        cacheUploadCount === uploadCount &&
+        cacheLatestUploadId === currentLatestUploadId &&
+        cacheLatestUploadTime === currentLatestUploadTime;
+
+      // Check overrides match
+      const reqTemp = overrides?.temp !== undefined && overrides.temp !== '' ? Number(overrides.temp) : undefined;
+      const cacheTemp = metadata.tempOverride !== undefined ? Number(metadata.tempOverride) : undefined;
+      
+      const reqRain = overrides?.rain !== undefined && overrides.rain !== '' ? (overrides.rain === '1' ? 1 : 0) : undefined;
+      const cacheRain = metadata.rainOverride !== undefined ? Number(metadata.rainOverride) : undefined;
+
+      const reqHoliday = overrides?.holiday !== undefined && overrides.holiday !== '' ? (overrides.holiday === '1' ? 1 : 0) : undefined;
+      const cacheHoliday = metadata.holidayOverride !== undefined ? Number(metadata.holidayOverride) : undefined;
+
+      const isOverridesMatch =
+        reqTemp === cacheTemp &&
+        reqRain === cacheRain &&
+        reqHoliday === cacheHoliday;
+
+      if (isCsvStateMatch && isOverridesMatch) {
+        return cachedForecast.toObject();
+      }
+    }
     const dailyData = await this.transactionModel.aggregate([
       { $match: { sector: module, channel: 'POS' } },
       {
@@ -217,6 +269,7 @@ export class AnalyticsService {
           const servicesExogenous = await this.buildServicesExogenousPayload(
             historical,
             forecastDays,
+            overrides,
           );
           exogenousPayload = servicesExogenous.payload;
           exogenousMetadata = servicesExogenous.metadata;
@@ -276,6 +329,9 @@ export class AnalyticsService {
               rejectedModelMase: selectedModel.mase,
             }
           : {}),
+        csvUploadCount: uploadCount,
+        latestCsvUploadId: latestUpload ? latestUpload._id.toString() : null,
+        latestCsvUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
       },
       generatedAt: new Date(),
     };
@@ -492,6 +548,7 @@ export class AnalyticsService {
   private async buildServicesExogenousPayload(
     historical: NormalizedDailyValue[],
     forecastDays: number,
+    overrides?: { temp?: string; rain?: string; holiday?: string },
   ): Promise<{
     payload: Record<string, unknown>;
     metadata: Record<string, unknown>;
@@ -522,6 +579,45 @@ export class AnalyticsService {
         )
       ).flat();
 
+      const exogenousForecast = this.exogenousDataService.buildExogenousMatrix(
+        futureDates,
+        weatherRecords,
+        holidayRecords,
+      );
+
+      const metadata: Record<string, unknown> = {
+        weatherDataSource: this.exogenousDataService.getLastWeatherSource(),
+        holidayDataSource: this.exogenousDataService.getLastHolidaySource(),
+      };
+
+      if (overrides) {
+        if (overrides.temp !== undefined && overrides.temp !== '') {
+          const tempVal = Number(overrides.temp);
+          if (!Number.isNaN(tempVal)) {
+            exogenousForecast.forEach((row) => {
+              row.tempCelsius = tempVal;
+            });
+            metadata.tempOverride = tempVal;
+          }
+        }
+        if (overrides.rain !== undefined && overrides.rain !== '') {
+          const rainVal = overrides.rain === '1' ? 1 : 0;
+          exogenousForecast.forEach((row) => {
+            row.rainFlag = rainVal;
+          });
+          metadata.rainOverride = rainVal;
+        }
+        if (overrides.holiday !== undefined && overrides.holiday !== '') {
+          const holidayVal = overrides.holiday === '1' ? 1 : 0;
+          exogenousForecast.forEach((row) => {
+            row.isHoliday = holidayVal;
+            row.dayBeforeHoliday = holidayVal;
+            row.dayAfterHoliday = holidayVal;
+          });
+          metadata.holidayOverride = holidayVal;
+        }
+      }
+
       return {
         payload: {
           exogenous: this.exogenousDataService.buildExogenousMatrix(
@@ -529,16 +625,9 @@ export class AnalyticsService {
             weatherRecords,
             holidayRecords,
           ),
-          exogenousForecast: this.exogenousDataService.buildExogenousMatrix(
-            futureDates,
-            weatherRecords,
-            holidayRecords,
-          ),
+          exogenousForecast,
         },
-        metadata: {
-          weatherDataSource: this.exogenousDataService.getLastWeatherSource(),
-          holidayDataSource: this.exogenousDataService.getLastHolidaySource(),
-        },
+        metadata,
       };
     } catch (error) {
       console.warn(

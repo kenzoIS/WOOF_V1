@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
-import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock } from "lucide-react";
+import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
@@ -55,10 +55,61 @@ export function Services() {
   });
 
   const [forecastRun, setForecastRun] = useState<ForecastRun | null>(null);
+  const [weatherScenario, setWeatherScenario] = useState("default");
+  const [holidayScenario, setHolidayScenario] = useState("default");
+  const [isSimulating, setIsSimulating] = useState(false);
 
   useEffect(() => {
     getForecast("services").then(setForecastRun).catch(() => {});
   }, []);
+
+  const handleApplySimulation = async () => {
+    setIsSimulating(true);
+    toast.info("Running forecast simulation...");
+    const params: Record<string, string> = {};
+    if (weatherScenario === "sunny") {
+      params.temp = "32";
+      params.rain = "0";
+    } else if (weatherScenario === "rainy") {
+      params.temp = "24";
+      params.rain = "1";
+    }
+    
+    if (holidayScenario === "force") {
+      params.holiday = "1";
+    } else if (holidayScenario === "ignore") {
+      params.holiday = "0";
+    }
+
+    try {
+      const res = await getForecast("services", params);
+      setForecastRun(res);
+      toast.success("Simulation complete!", {
+        description: "Forecast chart and alerts updated based on your scenario.",
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Simulation failed");
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleResetSimulation = async () => {
+    setIsSimulating(true);
+    setWeatherScenario("default");
+    setHolidayScenario("default");
+    try {
+      const res = await getForecast("services");
+      setForecastRun(res);
+      toast.success("Reset successful", {
+        description: "Restored live forecast settings.",
+      });
+    } catch (error) {
+      toast.error("Failed to reset forecast");
+    } finally {
+      setIsSimulating(false);
+    }
+  };
 
   const bookingForecastData = useMemo(() => {
     if (!forecastRun?.historical?.length) {
@@ -269,12 +320,12 @@ export function Services() {
         </div>
       </div>
 
-      {/* SERVICES DEMAND FORECAST - Best Model Only */}
+      {/* SERVICES REVENUE FORECAST - Best Model Only */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
           <div className="flex-1 min-w-0">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Services Demand Forecast
+              Services Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Active model: <span className="font-semibold text-[#3AE4FA]">{forecastRun?.modelName || "Waiting for uploaded POS history"}</span>
@@ -317,9 +368,14 @@ export function Services() {
               interval="preserveStartEnd"
               style={{ fontSize: "11px" }}
             />
-            <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
+            <YAxis 
+              stroke="#223047" 
+              style={{ fontSize: "12px" }} 
+              tickFormatter={(value) => `₱${Number(value).toLocaleString()}`}
+            />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
+              formatter={(value: any) => [`₱${Number(value).toLocaleString()}`, "Projected Revenue"]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -349,8 +405,8 @@ export function Services() {
           </LineChart>
         </ResponsiveContainer>
 
-        {/* Model Info & Insights */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
+        {/* Model Info & Insights & Simulator */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
             <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
             <div className="grid grid-cols-2 gap-3 md:gap-4">
@@ -372,6 +428,21 @@ export function Services() {
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
               </div>
             </div>
+            {forecastRun?.modelMetadata && (
+              <div className="text-[10px] text-[#223047] opacity-50 mt-2 border-t pt-2 space-y-1">
+                <div>Weather Source: {String(forecastRun.modelMetadata.weatherDataSource || "N/A")}</div>
+                <div>Holiday Source: {String(forecastRun.modelMetadata.holidayDataSource || "N/A")}</div>
+                {forecastRun.modelMetadata.tempOverride !== undefined && (
+                  <div className="text-[#3AE4FA] font-medium">Temp Override: {String(forecastRun.modelMetadata.tempOverride)}°C</div>
+                )}
+                {forecastRun.modelMetadata.rainOverride !== undefined && (
+                  <div className="text-[#3AE4FA] font-medium">Rain Override: {forecastRun.modelMetadata.rainOverride === 1 ? "Yes" : "No"}</div>
+                )}
+                {forecastRun.modelMetadata.holidayOverride !== undefined && (
+                  <div className="text-[#3AE4FA] font-medium">Holiday Override: {forecastRun.modelMetadata.holidayOverride === 1 ? "Yes" : "No"}</div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
@@ -384,6 +455,68 @@ export function Services() {
             <Button onClick={handleRetrainModel} className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs md:text-sm" size="sm">
               Retrain Model
             </Button>
+          </div>
+
+          {/* EXOGENOUS FACTORS OVERRIDE & SIMULATOR */}
+          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 flex flex-col justify-between">
+            <div>
+              <h3 className="text-sm md:text-base font-bold text-[#223047] flex items-center gap-1.5">
+                <span>Sales Simulator (What-If?)</span>
+              </h3>
+              <p className="text-xs text-[#223047] opacity-60 mb-2">
+                See how different weather patterns and calendar holidays affect your upcoming sales.
+              </p>
+
+              <div className="space-y-3">
+                {/* Weather Select */}
+                <div>
+                  <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Weather Conditions</label>
+                  <select
+                    value={weatherScenario}
+                    onChange={(e) => setWeatherScenario(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#3AE4FA]"
+                  >
+                    <option value="default">Current Live Weather</option>
+                    <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
+                    <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
+                  </select>
+                </div>
+
+                {/* Holiday Select */}
+                <div>
+                  <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Holiday Schedule</label>
+                  <select
+                    value={holidayScenario}
+                    onChange={(e) => setHolidayScenario(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#3AE4FA]"
+                  >
+                    <option value="default">Live Calendar Holidays</option>
+                    <option value="force">Treat Everyday as a Holiday</option>
+                    <option value="ignore">Treat Everyday as a Workday</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-4 pt-2 border-t border-[#FFD9EC]">
+              <Button
+                disabled={isSimulating}
+                onClick={handleApplySimulation}
+                className="flex-1 bg-[#3AE4FA] hover:bg-[#5CE1E6] text-white text-xs py-1"
+                size="sm"
+              >
+                {isSimulating ? "Simulating..." : "Run Simulator"}
+              </Button>
+              <Button
+                disabled={isSimulating}
+                onClick={handleResetSimulation}
+                variant="outline"
+                className="border-[#FFD9EC] text-xs py-1 px-2"
+                size="sm"
+              >
+                Reset to Live
+              </Button>
+            </div>
           </div>
         </div>
       </div>

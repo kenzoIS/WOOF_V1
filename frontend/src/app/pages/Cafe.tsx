@@ -298,12 +298,12 @@ export function Cafe() {
         </div>
       </div>
 
-      {/* DEMAND FORECAST PANEL - Best Model Only */}
+      {/* REVENUE FORECAST PANEL - Best Model Only */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
           <div className="flex-1">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Cafe Demand Forecast
+              Cafe Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Active model: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded POS history"}</span>
@@ -316,7 +316,7 @@ export function Cafe() {
             )}
           </div>
 
-          <Badge variant="outline" className="border-[#FFD9EC]">Revenue</Badge>
+          <Badge variant="outline" className="border-[#FFD9EC]">Revenue (₱)</Badge>
         </div>
 
         {/* Forecast Chart */}
@@ -331,9 +331,14 @@ export function Cafe() {
               interval="preserveStartEnd"
               style={{ fontSize: "11px" }}
             />
-            <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
+            <YAxis 
+              stroke="#223047" 
+              style={{ fontSize: "12px" }} 
+              tickFormatter={(value) => `₱${Number(value).toLocaleString()}`}
+            />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
+              formatter={(value: any) => [`₱${Number(value).toLocaleString()}`, "Projected Revenue"]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -363,8 +368,8 @@ export function Cafe() {
           </LineChart>
         </ResponsiveContainer>
 
-        {/* Model Info & Recommendation */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
+        {/* Model Info, Recommendation, and Exogenous Info */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
             <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
             <div className="grid grid-cols-2 gap-3 md:gap-4">
@@ -398,6 +403,34 @@ export function Cafe() {
             <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" size="sm">
               Retrain Model
             </Button>
+          </div>
+
+          {/* EXOGENOUS HOLIDAY CALENDAR PANEL */}
+          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 flex flex-col justify-between">
+            <div>
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">Holiday & Calendar Impact</h3>
+              <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
+                Our prediction system automatically tracks Philippine national holidays and weekly trends (like weekends) to predict spikes in customer orders.
+              </p>
+              
+              <div className="mt-3 space-y-1">
+                <div className="text-[10px] uppercase font-bold text-[#F53799]">Philippine National Holidays List:</div>
+                <div className="max-h-[80px] overflow-y-auto pr-1 text-[10px] text-[#223047] opacity-60 space-y-1">
+                  <div>• Jan 1: New Year's Day</div>
+                  <div>• Holy Week: Maundy Thursday & Good Friday</div>
+                  <div>• May 1: Labor Day</div>
+                  <div>• Jun 12: Independence Day</div>
+                  <div>• Aug (Last Mon): National Heroes Day</div>
+                  <div>• Nov 30: Bonifacio Day</div>
+                  <div>• Dec 25: Christmas Day</div>
+                  <div>• Dec 30: Rizal Day</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="text-[10px] text-[#223047] opacity-50 border-t pt-2">
+              Holiday calendar source: Philippine Standard Calendar
+            </div>
           </div>
         </div>
       </div>

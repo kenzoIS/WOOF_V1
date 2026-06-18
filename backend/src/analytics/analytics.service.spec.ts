@@ -6,6 +6,11 @@ describe('AnalyticsService getForecast', () => {
   };
   const forecastRunModel = {
     create: jest.fn(),
+    findOne: jest.fn(),
+  };
+  const csvUploadModel = {
+    findOne: jest.fn(),
+    countDocuments: jest.fn(),
   };
   const configService = {
     get: jest.fn(),
@@ -76,9 +81,21 @@ describe('AnalyticsService getForecast', () => {
       ...payload,
       toObject: () => payload,
     }));
+    forecastRunModel.findOne.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(null),
+    });
+    csvUploadModel.findOne.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(null),
+    });
+    csvUploadModel.countDocuments.mockReturnValue({
+      exec: jest.fn().mockResolvedValue(0),
+    });
     service = new AnalyticsService(
       transactionModel as any,
       forecastRunModel as any,
+      csvUploadModel as any,
       configService as any,
       exogenousDataService as any,
     );
@@ -146,5 +163,49 @@ describe('AnalyticsService getForecast', () => {
     expect(runPythonSpy).not.toHaveBeenCalled();
     expect(result.isFallback).toBe(true);
     expect(result.rejectionReason).toContain('21 daily observations');
+  });
+  describe('caching behavior', () => {
+    it('returns cached forecast run if CSV state and overrides match', async () => {
+      const cached = {
+        module: 'Cafe',
+        modelName: 'Prophet (weekly seasonality + PH holidays)',
+        mase: 0.8,
+        mape: 15,
+        accuracy: 85,
+        isFallback: false,
+        historical: [],
+        forecast: [],
+        kpis: {},
+        topItems: [],
+        modelMetadata: {
+          csvUploadCount: 2,
+          latestCsvUploadId: 'upload-id-1',
+          latestCsvUploadTime: 123456789,
+        },
+        generatedAt: new Date(),
+        toObject: function() { return this; }
+      };
+
+      forecastRunModel.findOne.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(cached),
+      });
+
+      csvUploadModel.findOne.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue({
+          _id: 'upload-id-1',
+          uploadedAt: new Date(123456789),
+        }),
+      });
+
+      csvUploadModel.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(2),
+      });
+
+      const result = await service.getForecast('cafe');
+      expect(result.modelMetadata.csvUploadCount).toBe(2);
+      expect(transactionModel.aggregate).not.toHaveBeenCalled();
+    });
   });
 });

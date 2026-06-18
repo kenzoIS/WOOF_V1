@@ -136,8 +136,12 @@ export async function getDashboard(sector: string) {
   return fetchApi(`/analytics/dashboard/${sector}`);
 }
 
-export async function getForecast(sector: string): Promise<ForecastRun> {
-  return fetchApi(`/analytics/forecast/${sector}`);
+export async function getForecast(
+  sector: string,
+  params?: Record<string, string>,
+): Promise<ForecastRun> {
+  const query = params ? '?' + new URLSearchParams(params).toString() : '';
+  return fetchApi(`/analytics/forecast/${sector}${query}`);
 }
 
 export async function getCrossSell() {
