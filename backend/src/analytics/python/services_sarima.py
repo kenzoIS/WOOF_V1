@@ -217,6 +217,7 @@ def run(payload):
         "mape": mape,
         "accuracy": accuracy,
         "forecast": forecast,
+        "fittedValues": [round(max(0.0, float(v)), 2) for v in final_fit.fittedvalues],
         "modelMetadata": {
             "order": list(order),
             "seasonalOrder": list(seasonal_order),

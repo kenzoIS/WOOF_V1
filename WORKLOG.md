@@ -315,3 +315,114 @@ This file records requested revisions, implementation details, verification, and
 - Passed: Python forecasting self-tests (`test_services_sarimax.py`, `test_services_sarima.py`, `test_cafe_prophet.py`).
 - Passed: Next.js frontend production build compilation for all 11 routes.
 
+## 2026-06-21 - Weather API Integration and Forecasting Improvements
+
+### Requested
+
+- Verify OpenWeather API integration and key settings.
+- Implement the proposed system suggestions:
+  - Dynamically display the current temperature and weather conditions in the navbar header.
+  - Integrate weather data (temperature and rain flags) as extra regressors into the Cafe Facebook Prophet forecasting script.
+  - Create a diagnostics panel in System Settings displaying OpenWeather/Abstract Holidays connection health, cached rows, and status parameters.
+- Record all changes in the WORKLOG.md.
+
+### Backend Changes
+
+- Added `GET /analytics/weather/current` endpoint in `analytics.controller.ts` returning today's weather records (serving from database cache or live OpenWeather API fallback).
+- Modified `getForecast()` in `analytics.service.ts` to build and feed exogenous weather matrices (temperature, rain flags) to both `Services` and `Cafe` models instead of just `Services`.
+- Updated `analytics.service.ts` to implement `getCurrentWeather()` for resolving coordinates and caching current weather history.
+- Overwrote `cafe_prophet.py` using Facebook Prophet to register and process weather fields (`tempCelsius`, `rainFlag`) as extra regressors (`add_regressor`) when `exogenous` matrices are present.
+
+### Frontend Changes
+
+- Added `getCurrentWeather()` and `getExogenousStatus()` API wrapper calls in `api.ts`.
+- Updated `Header.tsx` to load current weather details on mount, rendering real-time temperature and matching weather status icons in the navbar instead of a static placeholder.
+- Updated `Cafe.tsx` forecast cards to display active model metadata fields (`Weather Source`, `Holiday Source`, and `Exogenous Variables`).
+- Rebuilt `Settings.tsx` to add a new "External API Connections & Diagnostics" section to check connection status (Connected vs Fallback) and count of cached records.
+- Modified `tsconfig.json` to exclude the `.next` folder from TS type-checking to prevent transpiled bundle artifacts from throwing phantom typecheck errors.
+
+### Files Changed
+
+- [analytics.controller.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/analytics.controller.ts)
+- [analytics.service.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/analytics.service.ts)
+- [cafe_prophet.py](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/python/cafe_prophet.py)
+- [api.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/lib/api.ts)
+- [Header.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/components/Header.tsx)
+- [Cafe.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Cafe.tsx)
+- [Settings.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Settings.tsx)
+- [tsconfig.json](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/tsconfig.json)
+- [WORKLOG.md](file:///c:/Users/Schenly/Desktop/CAPSTONE2/WORKLOG.md)
+
+### Verification
+
+- Passed: NestJS backend Jest tests (16 tests passed across 5 suites).
+- Passed: `npx tsc --noEmit` frontend type check compiles with 0 errors.
+- Verified: Both frontend Next.js dev server and NestJS backend dev server compile and run successfully in the background.
+
+## 2026-06-21 - Overlapping Predictions, Performance Metrics in Retail, and Cafe Sales Simulator
+
+### Requested
+
+- Verify that forecasting performance metrics (MASE, Accuracy, MAPE, R²) are visible in the Retail tab, matching Cafe and Services.
+- Check whether the Cafe and Retail tabs should contain a Sales Simulator.
+- Align predictions (dashed line) and actual sales (solid line) so they overlap in the historical region of the graphs for all three sectors.
+- Standardize chart tooltip hover labels to show "Revenue" (solid line) and "Predicted revenue" (broken line) consistently.
+
+### Backend Changes
+
+- Added `fitted?: number` property to `HistoricalPoint` in the forecast-run database schema.
+- Updated forecasting python scripts (`services_sarima.py`, `cafe_prophet.py`, `forecast.py`) to output historical `fittedValues`.
+- Updated `analytics.service.ts` to map and persist the fitted values in forecast runs.
+- Resolved compilation issues by ensuring fallback/empty fitted values are mapped to `undefined` instead of `null` to comply with the schema typings.
+
+### Frontend Changes
+
+- Updated Services, Cafe, and Retail dashboard charts to map past predictions as a dashed overlay line directly matching the actual sales dates.
+- Replaced the static holiday list on the Cafe tab with a fully functional **Sales Simulator** (What-If?) panel, utilizing Prophet weather and holiday exogenous inputs.
+- Implemented the **Active Model Performance** card at the bottom of the Retail forecast chart displaying live MASE, Accuracy, MAPE, and R² scores.
+- Documented that the Retail tab does not have a simulator panel due to model limitations (univariate ensemble that does not accept weather/holiday parameters).
+- Fixed the Tooltip formatter in Services, Cafe, and Retail charts to dynamically read line `name` attributes instead of hardcoding "Projected Revenue" or "Revenue", ensuring tooltips output "Revenue" (solid lines) and "Predicted revenue" (broken lines) cleanly on hover.
+
+### Files Changed
+
+- [forecast-run.schema.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/schemas/forecast-run.schema.ts)
+- [analytics.service.ts](file:///c:/Users/Schenly/Desktop/CAPSTONE2/backend/src/analytics/analytics.service.ts)
+- [Services.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Services.tsx)
+- [Cafe.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Cafe.tsx)
+- [Retail.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Retail.tsx)
+- [WORKLOG.md](file:///c:/Users/Schenly/Desktop/CAPSTONE2/WORKLOG.md)
+
+### Verification
+
+- Passed: NestJS backend Jest tests (16 tests passed across 5 suites).
+- Passed: NestJS backend dev server compilation with 0 errors.
+- Passed: Next.js frontend dev server compilation with 0 errors.
+- Verified: Login and navigation on `http://localhost:3000` via browser subagent. Confirmed chart line overlapping, simulator executions on the Cafe tab, metrics visibility on the Retail tab, and verified that hovering over lines correctly triggers the "Revenue" and "Predicted revenue" labels in the tooltips.
+
+## 2026-06-23 - Transitioning Retail Dashboard to Descriptive Analytics
+
+### Requested
+
+- Transition the Retail tab from predictive forecasting to purely descriptive sales analytics, removing models, prediction lines, and performance metrics.
+
+### Frontend Changes
+
+- Removed the `forecastApiData` state variable and disabled the unnecessary `getForecast("retail")` API call in [Retail.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Retail.tsx).
+- Simplified the `forecastData` useMemo in [Retail.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Retail.tsx) to only merge and sort actual Physical POS and e-commerce channel history, removing prediction lines, fits, and offsets.
+- Removed the predicted revenue `<Line>` and `"Predicted revenue"` indicators from the legend and tooltip.
+- Removed the "Active Model Performance" metrics card entirely.
+- Replaced the univariate model explanation card at the bottom of [Retail.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Retail.tsx) with a descriptive "WOOF Retail Analysis" summary card detailing Physical vs. Online e-commerce platform contributions.
+
+### Files Changed
+
+- [Retail.tsx](file:///c:/Users/Schenly/Desktop/CAPSTONE2/frontend/src/app/pages/Retail.tsx)
+- [WORKLOG.md](file:///c:/Users/Schenly/Desktop/CAPSTONE2/WORKLOG.md)
+
+### Verification
+
+- Passed: Next.js frontend dev server compilation with 0 errors.
+- Verified: Navigated to `/retail` via browser subagent and verified that the dashboard renders descriptive channels (Physical POS vs. Online) without prediction lines, metrics, or forecasting cards.
+
+
+
+

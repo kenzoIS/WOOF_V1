@@ -30,6 +30,11 @@ export class AnalyticsController {
     return this.analyticsService.getExogenousStatus();
   }
 
+  @Get('weather/current')
+  async getCurrentWeather() {
+    return this.analyticsService.getCurrentWeather();
+  }
+
   @Get('cross-sell')
   async getCrossSell() {
     return this.analyticsService.getCrossSell();

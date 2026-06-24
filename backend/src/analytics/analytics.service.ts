@@ -46,6 +46,7 @@ interface ModelResult {
     confidenceLow?: number;
     confidenceHigh?: number;
   }[];
+  fittedValues?: number[];
   modelMetadata?: Record<string, unknown>;
 }
 
@@ -265,7 +266,7 @@ export class AnalyticsService {
     let rejectionReason = '';
     if (historical.length >= 21) {
       try {
-        if (module === 'Services') {
+        if (module === 'Services' || module === 'Cafe') {
           const servicesExogenous = await this.buildServicesExogenousPayload(
             historical,
             forecastDays,
@@ -307,11 +308,14 @@ export class AnalyticsService {
       accuracy: finalModel.accuracy,
       isFallback: useFallback,
       rejectionReason: useFallback ? rejectionReason : undefined,
-      historical: historical.map(({ date, actual, normalized, orders }) => ({
+      historical: historical.map(({ date, actual, normalized, orders }, index) => ({
         date,
         actual,
         normalized,
         orders,
+        fitted: finalModel.fittedValues && finalModel.fittedValues[index] !== undefined 
+          ? finalModel.fittedValues[index] 
+          : undefined,
       })),
       forecast: finalModel.forecast,
       kpis: dashboard.kpis,
@@ -518,6 +522,33 @@ export class AnalyticsService {
           }
         : null,
     };
+  }
+
+  async getCurrentWeather(): Promise<any> {
+    const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    try {
+      const records = await this.exogenousDataService.fetchWeatherHistory(
+        lat,
+        lng,
+        todayStr,
+        todayStr,
+      );
+      return records[0] || {
+        date: todayStr,
+        tempCelsius: 28,
+        rainfallMm: 0,
+        isSynthetic: true,
+      };
+    } catch (error) {
+      return {
+        date: todayStr,
+        tempCelsius: 28,
+        rainfallMm: 0,
+        isSynthetic: true,
+        error: error.message,
+      };
+    }
   }
 
   private normalizeForecastModule(sector: string): ForecastModule {
@@ -813,10 +844,20 @@ export class AnalyticsService {
       actuals.slice(0, Math.max(1, actuals.length - validationActual.length)),
     );
 
+    const fittedValues: number[] = [];
+    for (let index = 0; index < actuals.length; index += 1) {
+      if (index < 7) {
+        fittedValues.push(actuals[index]);
+      } else {
+        fittedValues.push(this.round(this.average(actuals.slice(index - 7, index))));
+      }
+    }
+
     return {
       modelName: 'SMA (7-day fallback)',
       ...metrics,
       forecast,
+      fittedValues,
       modelMetadata: { fallbackReason: reason, windowDays: 7 },
     };
   }
@@ -883,10 +924,13 @@ export class AnalyticsService {
     const result = await this.runPython<any>('forecast.py', inputData as any);
     return {
       ...result,
-      historical: (result.historical || []).map((point: any) => ({
+      historical: (result.historical || []).map((point: any, index: number) => ({
         date: point.date,
         actual: point.revenue ?? point.actual,
         orders: point.orders,
+        fitted: result.fittedValues && result.fittedValues[index] !== undefined 
+          ? result.fittedValues[index] 
+          : undefined,
       })),
     };
   }

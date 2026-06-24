@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
-import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain } from "lucide-react";
+import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
@@ -45,6 +45,23 @@ export function Services() {
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedService, setExpandedService] = useState<string | null>(null);
+  const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+  const [showInfoModal, setShowInfoModal] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("globalDateRange") || "last-7-days";
+    setGlobalDateRange(saved);
+
+    const handleGlobalDateChange = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      setGlobalDateRange(customEvent.detail);
+    };
+
+    window.addEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    return () => {
+      window.removeEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    };
+  }, []);
   const [errorModal, setErrorModal] = useState<{ isOpen: boolean; type: ErrorType | null }>({
     isOpen: false,
     type: null,
@@ -115,10 +132,10 @@ export function Services() {
     if (!forecastRun?.historical?.length) {
       return [];
     }
-    const hist = forecastRun.historical.map((d, index, arr) => ({
+    const hist = forecastRun.historical.map((d) => ({
       day: d.date,
       actual: d.actual,
-      forecast: index === arr.length - 1 ? d.actual : null,
+      forecast: d.fitted !== undefined && d.fitted !== null ? d.fitted : null,
     }));
     const horizon =
       viewMode === "next7days" ? 7 : viewMode === "next14days" ? 14 : 30;
@@ -127,12 +144,51 @@ export function Services() {
       actual: null,
       forecast: d.forecast,
     }));
-    return [...hist.slice(-30), ...fore];
-  }, [forecastRun, viewMode]);
+    const sliceCount = (() => {
+      switch (globalDateRange) {
+        case "today": return 1;
+        case "yesterday": return 2;
+        case "last-7-days": return 7;
+        case "last-30-days": return 30;
+        case "last-90-days": return 90;
+        case "last-12-months": return 365;
+        default: return 30;
+      }
+    })();
+    return [...hist.slice(-sliceCount), ...fore];
+  }, [forecastRun, viewMode, globalDateRange]);
 
+  // Aggregated KPI values dynamically calculated from API history based on globalDateRange
+  const aggregatedKpis = useMemo(() => {
+    const defaultKpis = {
+      totalRevenue: forecastRun?.kpis?.totalRevenue || 0,
+      totalOrders: forecastRun?.kpis?.totalOrders || 0,
+      avgOrderValue: forecastRun?.kpis?.avgOrderValue || 0,
+    };
+    if (!forecastRun?.historical?.length) {
+      return defaultKpis;
+    }
+    const sliceCount = (() => {
+      switch (globalDateRange) {
+        case "today": return 1;
+        case "yesterday": return 2;
+        case "last-7-days": return 7;
+        case "last-30-days": return 30;
+        case "last-90-days": return 90;
+        case "last-12-months": return 365;
+        default: return forecastRun.historical.length;
+      }
+    })();
+    const sliced = forecastRun.historical.slice(-sliceCount);
+    const totalRevenue = sliced.reduce((sum, d) => sum + d.actual, 0);
+    const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || 0), 0);
+    const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : (forecastRun?.kpis?.avgOrderValue || 0);
+    return { totalRevenue, totalOrders, avgOrderValue };
+  }, [forecastRun, globalDateRange]);
+
+  const servicesRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
+  const activeBookings = aggregatedKpis.totalOrders || 0;
   const kpis = forecastRun?.kpis;
-  const servicesRevenue = kpis?.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
-  const activeBookings = kpis?.totalOrders || 0;
   const serviceUtilization = useMemo(() => {
     if (!forecastRun?.topItems.length) return [];
     const maxQuantity = Math.max(
@@ -375,7 +431,7 @@ export function Services() {
             />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
-              formatter={(value: any) => [`₱${Number(value).toLocaleString()}`, "Projected Revenue"]}
+              formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString()}`, name]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -391,6 +447,7 @@ export function Services() {
               strokeWidth={2.5}
               dot={false}
               animationDuration={800}
+              name="Revenue"
             />
             <Line
               key="line-forecast"
@@ -401,6 +458,7 @@ export function Services() {
               strokeDasharray="5 5"
               dot={false}
               animationDuration={800}
+              name="Predicted revenue"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -408,7 +466,16 @@ export function Services() {
         {/* Model Info & Insights & Simulator */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
-            <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+              <button
+                onClick={() => setShowInfoModal(true)}
+                className="p-1 hover:bg-[#FFF2FA] rounded-full transition-colors text-[#3AE4FA]"
+                title="Explain metrics"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-3 md:gap-4">
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
@@ -574,7 +641,7 @@ export function Services() {
                 <TableHead className="text-center">Bookings</TableHead>
                 <TableHead className="text-center">Avg Ticket</TableHead>
                 <TableHead className="text-center">Revenue</TableHead>
-                <TableHead className="text-center">Action</TableHead>
+                <TableHead className="text-center w-12"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -602,9 +669,13 @@ export function Services() {
                     <TableCell className="text-center text-xs">₱{service.avgPrice.toLocaleString()}</TableCell>
                     <TableCell className="text-center font-semibold text-xs md:text-sm">₱{service.revenue.toLocaleString()}</TableCell>
                     <TableCell className="text-center">
-                      <Button size="sm" variant="outline" className="border-[#3AE4FA] text-[#3AE4FA] text-xs">
-                        Manage
-                      </Button>
+                      <div className="inline-flex items-center justify-center p-1 rounded hover:bg-[#FFF2FA] text-[#3AE4FA] transition-colors">
+                        {expandedService === service.service ? (
+                          <ChevronUp className="w-5 h-5" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5" />
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                   {expandedService === service.service && (
@@ -661,7 +732,7 @@ export function Services() {
 
           {/* Weekly Trends */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
-            <h3 className="text-base md:text-lg font-bold text-[#223047]">Bookings by Weekday</h3>
+            <h3 className="text-base md:text-lg font-bold text-[#223047]">Booking Weekly Volume</h3>
 
             <ResponsiveContainer width="100%" height={180} className="md:!h-[200px]">
               <AreaChart data={weeklyTrends}>
@@ -745,6 +816,55 @@ export function Services() {
           onClose={() => setSuccessModal({ isOpen: false, type: null })}
           successType={successModal.type}
         />
+      )}
+
+      {/* Model Performance Metrics Guide modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-[#FFD9EC] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#FFD9EC]">
+              <h3 className="text-base font-bold text-[#223047]">Model Performance Metrics Guide</h3>
+              <button
+                onClick={() => setShowInfoModal(false)}
+                className="text-xs text-gray-500 hover:text-[#3AE4FA] font-bold"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-4 text-xs md:text-sm text-[#223047] opacity-80 animate-in fade-in zoom-in-95 duration-150" style={{ lineHeight: "1.6" }}>
+              <div>
+                <strong className="text-sm text-[#3AE4FA]">MASE (Mean Absolute Scaled Error)</strong>
+                <p className="mt-1">
+                  Measures how smart the AI's prediction is compared to a simple baseline guess (such as assuming today's sales are identical to yesterday's). A score **below 1.0** indicates that our AI model is performing significantly better and is highly reliable.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#3AE4FA]">Accuracy</strong>
+                <p className="mt-1">
+                  The overall correctness rate of the AI's forecasts. For example, a **90% accuracy** means the system's daily sales projections are 90% close to the actual final sales numbers.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#3AE4FA]">MAPE (Mean Absolute Percentage Error)</strong>
+                <p className="mt-1">
+                  The average margin of error in percentage terms. A **lower percentage** (such as 5%) indicates that the AI's predictions deviate only slightly from reality, ensuring higher precision.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#3AE4FA]">Missing Days Filled</strong>
+                <p className="mt-1">
+                  The count of days with missing sales data (due to closures or system downtime) that the AI automatically calculated and filled using smart estimations to keep the forecasting model accurate and complete.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => setShowInfoModal(false)}
+              className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-white rounded-lg mt-4"
+            >
+              Understood
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );

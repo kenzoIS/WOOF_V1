@@ -112,16 +112,30 @@ export function Retail() {
     type: null,
   });
   const [reorderAttempts, setReorderAttempts] = useState(0);
+  const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+
+  useEffect(() => {
+    const saved = localStorage.getItem("globalDateRange") || "last-7-days";
+    setGlobalDateRange(saved);
+
+    const handleGlobalDateChange = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      setGlobalDateRange(customEvent.detail);
+    };
+
+    window.addEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    return () => {
+      window.removeEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    };
+  }, []);
 
   // API data
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [channelForecast, setChannelForecast] = useState<any>(null);
-  const [forecastApiData, setForecastApiData] = useState<any>(null);
 
   useEffect(() => {
     getDashboard("retail").then(setDashboardData).catch(() => {});
     getRetailForecastByChannel().then(setChannelForecast).catch(() => {});
-    getForecast("retail").then(setForecastApiData).catch(() => {});
   }, []);
 
   const forecastData = useMemo(() => {
@@ -130,44 +144,63 @@ export function Retail() {
     if (phys.length === 0 && online.length === 0) return [];
 
     // Merge both series by date into a single array
-    const dateMap: Record<string, { physical: number | null; online: number | null; forecast: number | null }> = {};
+    const dateMap: Record<string, { physical: number | null; online: number | null }> = {};
     phys.forEach((d: any) => {
-      if (!dateMap[d.date]) dateMap[d.date] = { physical: null, online: null, forecast: null };
+      if (!dateMap[d.date]) dateMap[d.date] = { physical: null, online: null };
       dateMap[d.date].physical = d.revenue;
     });
     online.forEach((d: any) => {
-      if (!dateMap[d.date]) dateMap[d.date] = { physical: null, online: null, forecast: null };
+      if (!dateMap[d.date]) dateMap[d.date] = { physical: null, online: null };
       dateMap[d.date].online = d.revenue;
     });
-
-    // Add forecast data (combined retail forecast, dashed line)
-    const forecastItems = forecastApiData?.forecast || [];
-    forecastItems.forEach((d: any) => {
-      if (!dateMap[d.date]) dateMap[d.date] = { physical: null, online: null, forecast: null };
-      dateMap[d.date].forecast = d.forecast;
-    });
-
-    // Bridge: set forecast start value to the last day's total revenue
-    const historicalDates = Object.keys(dateMap).filter(date => {
-      const v = dateMap[date];
-      return v.physical !== null || v.online !== null;
-    }).sort();
-    if (historicalDates.length > 0 && forecastItems.length > 0) {
-      const lastHistDate = historicalDates[historicalDates.length - 1];
-      const lastPhys = dateMap[lastHistDate].physical || 0;
-      const lastOnline = dateMap[lastHistDate].online || 0;
-      dateMap[lastHistDate].forecast = lastPhys + lastOnline;
-    }
 
     const sorted = Object.entries(dateMap)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, vals]) => ({ day: date, ...vals }));
 
-    return sorted.slice(-45);
-  }, [channelForecast, forecastApiData]);
+    const sliceCount = (() => {
+      switch (globalDateRange) {
+        case "today": return 1;
+        case "yesterday": return 2;
+        case "last-7-days": return 7;
+        case "last-30-days": return 30;
+        case "last-90-days": return 90;
+        case "last-12-months": return 365;
+        default: return 45;
+      }
+    })();
+
+    return sorted.slice(-sliceCount);
+  }, [channelForecast, globalDateRange]);
 
   const kpis = dashboardData?.kpis || {};
-  const retailRevenue = kpis.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
+  const aggregatedKpis = useMemo(() => {
+    if (!channelForecast?.physical?.historical?.length) {
+      return {
+        totalRevenue: kpis?.totalRevenue || 0,
+      };
+    }
+    const sliceCount = (() => {
+      switch (globalDateRange) {
+        case "today": return 1;
+        case "yesterday": return 2;
+        case "last-7-days": return 7;
+        case "last-30-days": return 30;
+        case "last-90-days": return 90;
+        case "last-12-months": return 365;
+        default: return channelForecast.physical.historical.length;
+      }
+    })();
+    const physSliced = channelForecast.physical.historical.slice(-sliceCount);
+    const onlineSliced = (channelForecast.online?.historical || []).slice(-sliceCount);
+    const physRevenue = physSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
+    const onlineRevenue = onlineSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
+    return {
+      totalRevenue: physRevenue + onlineRevenue,
+    };
+  }, [channelForecast, globalDateRange, kpis]);
+
+  const retailRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
   const activeSKUs = dashboardData?.topItems?.length || 0;
 
   const handleSort = (column: string) => {
@@ -335,8 +368,7 @@ export function Retail() {
             Retail Revenue by Channel
           </h2>
           <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            Physical POS and online channel history with the active Retail forecast overlay. 
-            <span className="ml-1 font-semibold text-[#D42A7D]">(Note: Retail forecasting uses a univariate model and does not incorporate exogenous weather or holiday variables).</span>
+            Physical POS and e-commerce channel history. Shows the distribution of in-store sales versus online orders.
           </p>
         </div>
 
@@ -358,7 +390,7 @@ export function Retail() {
             />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
-              formatter={(value: any) => [`₱${Number(value).toLocaleString()}`, "Revenue"]}
+              formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString()}`, name]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -385,17 +417,6 @@ export function Retail() {
               animationDuration={800}
               name="Online (Shopee/TikTok)"
             />
-            <Line
-              key="line-forecast-wide"
-              type="monotone"
-              dataKey="forecast"
-              stroke="#223047"
-              strokeWidth={2}
-              strokeDasharray="5 5"
-              dot={false}
-              animationDuration={800}
-              name="Forecast"
-            />
           </LineChart>
         </ResponsiveContainer>
 
@@ -408,9 +429,15 @@ export function Retail() {
             <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
             <span className="text-xs">Online (Shopee/TikTok)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-0.5 border-t-2 border-dashed border-[#223047]" style={{ width: "12px" }} />
-            <span className="text-xs">Forecast</span>
+        </div>
+
+        {/* Descriptive Analysis */}
+        <div className="grid grid-cols-1 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
+          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
+            <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Retail Analysis</h3>
+            <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+              This panel tracks the daily net sales contribution of physical in-store purchases (POS) versus e-commerce platforms (Shopee and TikTok Shop). Managing cross-channel retail metrics descriptively allows Happy Tails to compare retail channels, analyze trends, and coordinate inventory levels without forecasting.
+            </p>
           </div>
         </div>
       </div>
@@ -499,7 +526,6 @@ export function Retail() {
                 </TableHead>
                 <TableHead className="text-center text-xs md:text-sm hidden md:table-cell">Velocity</TableHead>
                 <TableHead className="text-center text-xs md:text-sm">Stockout</TableHead>
-                <TableHead className="text-center text-xs md:text-sm hidden lg:table-cell">Expiry</TableHead>
                 <TableHead className="text-center text-xs md:text-sm">Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -532,15 +558,6 @@ export function Retail() {
                         {item.predictedStockout}d
                       </span>
                     </TableCell>
-                    <TableCell className="text-center hidden lg:table-cell">
-                      {item.daysToExpiry ? (
-                        <span className={`text-sm md:text-base ${item.daysToExpiry < 30 ? "text-orange-600 font-bold" : ""}`}>
-                          {item.daysToExpiry}d
-                        </span>
-                      ) : (
-                        <span className="text-[#223047] opacity-30 text-sm md:text-base">N/A</span>
-                      )}
-                    </TableCell>
                     <TableCell className="text-center">
                       {item.stock < item.reorderPoint ? (
                         <Button
@@ -559,7 +576,7 @@ export function Retail() {
                   </TableRow>
                   {expandedSKU === item.sku && (
                     <TableRow>
-                      <TableCell colSpan={6} className="bg-[#FFF7FB]">
+                      <TableCell colSpan={5} className="bg-[#FFF7FB]">
                         <div className="p-3 md:p-4 grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
                           <div>
                             <div className="text-xs text-[#223047] opacity-60 mb-2">14-Day Sales Trend</div>

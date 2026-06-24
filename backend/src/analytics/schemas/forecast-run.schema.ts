@@ -16,6 +16,9 @@ export class HistoricalPoint {
 
   @Prop({ default: 0 })
   orders: number;
+
+  @Prop({ required: false })
+  fitted?: number;
 }
 
 @Schema({ _id: false })

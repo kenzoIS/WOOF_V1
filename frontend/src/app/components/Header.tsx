@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Button } from "./ui/button";
+import { getCurrentWeather } from "../lib/api";
 
 interface Notification {
   id: string;
@@ -29,8 +30,35 @@ interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const router = useRouter();
   const [dateRange, setDateRange] = useState("last-7-days");
+
+  useEffect(() => {
+    const saved = localStorage.getItem("globalDateRange");
+    if (saved) {
+      setDateRange(saved);
+      // Dispatch immediately so page components mount with the correct value
+      window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: saved }));
+    }
+  }, []);
+
+  const handleDateRangeChange = (value: string) => {
+    setDateRange(value);
+    localStorage.setItem("globalDateRange", value);
+    window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: value }));
+  };
+
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [currentWeather, setCurrentWeather] = useState<{
+    tempCelsius: number;
+    rainfallMm: number;
+    isSynthetic: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    getCurrentWeather()
+      .then(setCurrentWeather)
+      .catch(() => {});
+  }, []);
 
   const userEmail = localStorage.getItem("userEmail") || "user@happytails.com";
   const userInitials = userEmail
@@ -74,7 +102,11 @@ export function Header({ onMenuClick }: HeaderProps) {
     cloudy: Cloud,
   };
   
-  const WeatherIcon = weatherIcons.sunny;
+  const WeatherIcon = currentWeather && currentWeather.rainfallMm > 0.5 
+    ? weatherIcons.rainy 
+    : (currentWeather && currentWeather.tempCelsius < 26 ? weatherIcons.cloudy : weatherIcons.sunny);
+  
+  const weatherTempString = currentWeather ? `${Math.round(currentWeather.tempCelsius)}°C` : "28°C";
   
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -145,7 +177,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         {/* Center: Global Date Range (hidden on small mobile) */}
         <div className="hidden md:flex items-center gap-2 flex-shrink-0 absolute left-1/2 -translate-x-1/2">
           <Calendar className="w-4 h-4 text-[#223047] opacity-50" />
-          <Select value={dateRange} onValueChange={setDateRange}>
+          <Select value={dateRange} onValueChange={handleDateRangeChange}>
             <SelectTrigger className="w-[160px] lg:w-[200px] border-[#FFD9EC] focus:ring-[#F53799]">
               <SelectValue />
             </SelectTrigger>
@@ -180,9 +212,9 @@ export function Header({ onMenuClick }: HeaderProps) {
           </div>
 
           {/* Weather Badge (hidden on small mobile) */}
-          <Badge variant="outline" className="hidden sm:flex gap-1.5 border-[#FFD9EC]">
+          <Badge variant="outline" className="hidden sm:flex gap-1.5 border-[#FFD9EC]" title={currentWeather?.isSynthetic ? "Synthetic weather fallback" : "Live weather from OpenWeather"}>
             <WeatherIcon className="w-3.5 h-3.5" />
-            <span className="text-xs">28°C</span>
+            <span className="text-xs">{weatherTempString}</span>
           </Badge>
 
           {/* Notification Bell */}

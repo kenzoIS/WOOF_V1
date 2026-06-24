@@ -87,6 +87,7 @@ def run_forecast(data):
         return {
             "historical": data,
             "forecast": forecast_output,
+            "fittedValues": [round(max(0.0, float(v)), 2) for v in y_pred],
             "modelInfo": {
                 "model": "Prophet + SARIMAX Ensemble" if sarimax_mean is not None else "Prophet",
                 "accuracy": round(float(accuracy), 1),

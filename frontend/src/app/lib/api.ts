@@ -47,6 +47,7 @@ export interface ForecastRun {
     actual: number;
     normalized: number;
     orders: number;
+    fitted?: number;
   }>;
   forecast: Array<{
     date: string;
@@ -151,3 +152,12 @@ export async function getCrossSell() {
 export async function getRetailForecastByChannel() {
   return fetchApi('/analytics/forecast-by-channel/retail');
 }
+
+export async function getCurrentWeather() {
+  return fetchApi('/analytics/weather/current');
+}
+
+export async function getExogenousStatus() {
+  return fetchApi('/analytics/exogenous/status');
+}
+

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
-import { Coffee, DollarSign, TrendingUp, PieChart, Download } from "lucide-react";
+import { Coffee, DollarSign, TrendingUp, PieChart, Download, Info, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
@@ -46,6 +46,29 @@ export function Cafe() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [menuFilter, setMenuFilter] = useState("all");
   const [discountValue, setDiscountValue] = useState([15]);
+  const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showInfoModal, setShowInfoModal] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("globalDateRange") || "last-7-days";
+    setGlobalDateRange(saved);
+
+    const handleGlobalDateChange = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      setGlobalDateRange(customEvent.detail);
+      setCurrentPage(1);
+    };
+
+    window.addEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    return () => {
+      window.removeEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [menuFilter]);
   const [errorModal, setErrorModal] = useState<{ isOpen: boolean; type: ErrorType | null }>({
     isOpen: false,
     type: null,
@@ -56,6 +79,57 @@ export function Cafe() {
   });
   const [showModelDetails, setShowModelDetails] = useState(false);
   const [forecastRun, setForecastRun] = useState<ForecastRun | null>(null);
+  const [weatherScenario, setWeatherScenario] = useState("default");
+  const [holidayScenario, setHolidayScenario] = useState("default");
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  const handleApplySimulation = async () => {
+    setIsSimulating(true);
+    toast.info("Running forecast simulation...");
+    const params: Record<string, string> = {};
+    if (weatherScenario === "sunny") {
+      params.temp = "32";
+      params.rain = "0";
+    } else if (weatherScenario === "rainy") {
+      params.temp = "24";
+      params.rain = "1";
+    }
+    
+    if (holidayScenario === "force") {
+      params.holiday = "1";
+    } else if (holidayScenario === "ignore") {
+      params.holiday = "0";
+    }
+
+    try {
+      const res = await getForecast("cafe", params);
+      setForecastRun(res);
+      toast.success("Simulation complete!", {
+        description: "Forecast chart and predictions updated based on your scenario.",
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Simulation failed");
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleResetSimulation = async () => {
+    setIsSimulating(true);
+    setWeatherScenario("default");
+    setHolidayScenario("default");
+    try {
+      const res = await getForecast("cafe");
+      setForecastRun(res);
+      toast.success("Reset successful", {
+        description: "Restored live forecast settings.",
+      });
+    } catch (error) {
+      toast.error("Failed to reset forecast");
+    } finally {
+      setIsSimulating(false);
+    }
+  };
 
   // API data state
   useEffect(() => {
@@ -101,22 +175,48 @@ export function Cafe() {
     });
   }, [forecastRun]);
 
-  // KPI values from API
-  const kpis = forecastRun?.kpis;
-  const cafeRevenue = kpis?.totalRevenue ? `₱${kpis.totalRevenue.toLocaleString()}` : "₱0";
-  const totalOrders = kpis?.totalOrders || 0;
-  const avgCheck = kpis?.avgOrderValue ? `₱${kpis.avgOrderValue.toLocaleString()}` : "₱0";
+  // Aggregated KPI values dynamically calculated from API history based on globalDateRange
+  const aggregatedKpis = useMemo(() => {
+    const defaultKpis = {
+      totalRevenue: forecastRun?.kpis?.totalRevenue || 0,
+      totalOrders: forecastRun?.kpis?.totalOrders || 0,
+      avgOrderValue: forecastRun?.kpis?.avgOrderValue || 0,
+    };
+    if (!forecastRun?.historical?.length) {
+      return defaultKpis;
+    }
+    const sliceCount = (() => {
+      switch (globalDateRange) {
+        case "today": return 1;
+        case "yesterday": return 2;
+        case "last-7-days": return 7;
+        case "last-30-days": return 30;
+        case "last-90-days": return 90;
+        case "last-12-months": return 365;
+        default: return forecastRun.historical.length;
+      }
+    })();
+    const sliced = forecastRun.historical.slice(-sliceCount);
+    const totalRevenue = sliced.reduce((sum, d) => sum + d.actual, 0);
+    const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || Math.round(d.actual / (forecastRun?.kpis?.avgOrderValue || 150))), 0);
+    const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : (forecastRun?.kpis?.avgOrderValue || 0);
+    return { totalRevenue, totalOrders, avgOrderValue };
+  }, [forecastRun, globalDateRange]);
+
+  const cafeRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
+  const totalOrders = aggregatedKpis.totalOrders || 0;
+  const avgCheck = aggregatedKpis.avgOrderValue ? `₱${aggregatedKpis.avgOrderValue.toLocaleString()}` : "₱0";
   const activeItems = forecastRun?.topItems?.length || 0;
 
-  // Build forecast chart data from API
+  // Build forecast chart data from API based on globalDateRange
   const forecastData = useMemo(() => {
     if (!forecastRun?.historical?.length) {
       return [];
     }
-    const hist = forecastRun.historical.map((d, index, arr) => ({
+    const hist = forecastRun.historical.map((d) => ({
       date: d.date,
       actual: d.actual,
-      forecast: index === arr.length - 1 ? d.actual : null,
+      forecast: d.fitted !== undefined && d.fitted !== null ? d.fitted : null,
       confidenceLow: null as number | null,
       confidenceHigh: null as number | null,
     }));
@@ -127,8 +227,19 @@ export function Cafe() {
       confidenceLow: d.confidenceLow,
       confidenceHigh: d.confidenceHigh,
     }));
-    return [...hist.slice(-30), ...fc];
-  }, [forecastRun]);
+    const sliceCount = (() => {
+      switch (globalDateRange) {
+        case "today": return 1;
+        case "yesterday": return 2;
+        case "last-7-days": return 7;
+        case "last-30-days": return 30;
+        case "last-90-days": return 90;
+        case "last-12-months": return 365;
+        default: return 30;
+      }
+    })();
+    return [...hist.slice(-sliceCount), ...fc];
+  }, [forecastRun, globalDateRange]);
 
   // Filtered menu items based on filter
   const filteredMenuItems = useMemo(() => {
@@ -138,6 +249,14 @@ export function Cafe() {
     if (menuFilter === "diverging") return menuItems.filter((item: any) => item.equilibrium === "diverging" || item.equilibrium === "critical");
     return menuItems;
   }, [menuFilter, menuItems]);
+
+  const itemsPerPage = 5;
+  const paginatedMenuItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredMenuItems.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredMenuItems, currentPage]);
+
+  const totalPages = Math.ceil(filteredMenuItems.length / itemsPerPage) || 1;
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -338,7 +457,7 @@ export function Cafe() {
             />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
-              formatter={(value: any) => [`₱${Number(value).toLocaleString()}`, "Projected Revenue"]}
+              formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString()}`, name]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -354,6 +473,7 @@ export function Cafe() {
               strokeWidth={2.5}
               dot={false}
               animationDuration={800}
+              name="Revenue"
             />
             <Line
               key="line-forecast-cafe"
@@ -364,6 +484,7 @@ export function Cafe() {
               strokeDasharray="5 5"
               dot={false}
               animationDuration={800}
+              name="Predicted revenue"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -371,7 +492,16 @@ export function Cafe() {
         {/* Model Info, Recommendation, and Exogenous Info */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
-            <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+              <button
+                onClick={() => setShowInfoModal(true)}
+                className="p-1 hover:bg-[#FFF2FA] rounded-full transition-colors text-[#F53799]"
+                title="Explain metrics"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-3 md:gap-4">
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
@@ -391,6 +521,15 @@ export function Cafe() {
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
               </div>
             </div>
+            {forecastRun?.modelMetadata && (
+              <div className="text-[10px] text-[#223047] opacity-50 mt-2 border-t pt-2 space-y-1">
+                <div>Weather Source: {String(forecastRun.modelMetadata.weatherDataSource || "N/A")}</div>
+                <div>Holiday Source: {String(forecastRun.modelMetadata.holidayDataSource || "N/A")}</div>
+                {!!forecastRun.modelMetadata.exogenousVariables && (
+                  <div>Exogenous: {Array.isArray(forecastRun.modelMetadata.exogenousVariables) ? (forecastRun.modelMetadata.exogenousVariables as any).join(", ") : String(forecastRun.modelMetadata.exogenousVariables)}</div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
@@ -405,31 +544,63 @@ export function Cafe() {
             </Button>
           </div>
 
-          {/* EXOGENOUS HOLIDAY CALENDAR PANEL */}
+          {/* EXOGENOUS FACTORS OVERRIDE & SIMULATOR */}
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 flex flex-col justify-between">
             <div>
-              <h3 className="text-sm md:text-base font-bold text-[#223047]">Holiday & Calendar Impact</h3>
-              <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
-                Our prediction system automatically tracks Philippine national holidays and weekly trends (like weekends) to predict spikes in customer orders.
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">Sales Simulator (What-If?)</h3>
+              <p className="text-xs text-[#223047] opacity-60 mb-2">
+                Simulate weather conditions and calendar holidays to forecast Cafe sales.
               </p>
-              
-              <div className="mt-3 space-y-1">
-                <div className="text-[10px] uppercase font-bold text-[#F53799]">Philippine National Holidays List:</div>
-                <div className="max-h-[80px] overflow-y-auto pr-1 text-[10px] text-[#223047] opacity-60 space-y-1">
-                  <div>• Jan 1: New Year's Day</div>
-                  <div>• Holy Week: Maundy Thursday & Good Friday</div>
-                  <div>• May 1: Labor Day</div>
-                  <div>• Jun 12: Independence Day</div>
-                  <div>• Aug (Last Mon): National Heroes Day</div>
-                  <div>• Nov 30: Bonifacio Day</div>
-                  <div>• Dec 25: Christmas Day</div>
-                  <div>• Dec 30: Rizal Day</div>
+
+              <div className="space-y-3">
+                {/* Weather Select */}
+                <div>
+                  <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Weather Conditions</label>
+                  <select
+                    value={weatherScenario}
+                    onChange={(e) => setWeatherScenario(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                  >
+                    <option value="default">Current Live Weather</option>
+                    <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
+                    <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
+                  </select>
+                </div>
+
+                {/* Holiday Select */}
+                <div>
+                  <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Holiday Schedule</label>
+                  <select
+                    value={holidayScenario}
+                    onChange={(e) => setHolidayScenario(e.target.value)}
+                    className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                  >
+                    <option value="default">Live Calendar Holidays</option>
+                    <option value="force">Treat Everyday as a Holiday</option>
+                    <option value="ignore">Treat Everyday as a Workday</option>
+                  </select>
                 </div>
               </div>
             </div>
-            
-            <div className="text-[10px] text-[#223047] opacity-50 border-t pt-2">
-              Holiday calendar source: Philippine Standard Calendar
+
+            <div className="flex gap-2 mt-4 pt-2 border-t border-[#FFD9EC]">
+              <Button
+                disabled={isSimulating}
+                onClick={handleApplySimulation}
+                className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs py-1"
+                size="sm"
+              >
+                {isSimulating ? "Simulating..." : "Run Simulator"}
+              </Button>
+              <Button
+                disabled={isSimulating}
+                onClick={handleResetSimulation}
+                variant="outline"
+                className="border-[#FFD9EC] text-xs py-1 px-2"
+                size="sm"
+              >
+                Reset to Live
+              </Button>
             </div>
           </div>
         </div>
@@ -465,16 +636,6 @@ export function Cafe() {
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               Menu Item Performance
             </h2>
-            <select
-              value={menuFilter}
-              onChange={(e) => setMenuFilter(e.target.value)}
-              className="px-3 py-1.5 border border-[#FFD9EC] rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-            >
-              <option value="all">All Items</option>
-              <option value="top">Top Performers</option>
-              <option value="under">Underperformers</option>
-              <option value="diverging">Diverging</option>
-            </select>
           </div>
 
           <div className="max-h-[620px] overflow-auto pr-1">
@@ -502,10 +663,11 @@ export function Cafe() {
                   >
                     Revenue {sortColumn === "revenue" && (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
+                  <TableHead className="text-center w-12"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredMenuItems.map((item: any, itemIndex: number) => (
+                {paginatedMenuItems.map((item: any, itemIndex: number) => (
                   <React.Fragment key={`menu-item-${item.name}-${itemIndex}`}>
                     <TableRow
                       className="cursor-pointer hover:bg-[#FFF2FA]"
@@ -534,6 +696,15 @@ export function Cafe() {
                         </div>
                       </TableCell>
                       <TableCell className="text-center font-semibold">₱{item.revenue.toLocaleString()}</TableCell>
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center justify-center p-1 rounded hover:bg-[#FFF2FA] text-[#F53799] transition-colors">
+                          {expandedRow === item.name ? (
+                            <ChevronUp className="w-5 h-5" />
+                          ) : (
+                            <ChevronDown className="w-5 h-5" />
+                          )}
+                        </div>
+                      </TableCell>
                     </TableRow>
                     {expandedRow === item.name && (
                       <TableRow>
@@ -569,6 +740,37 @@ export function Cafe() {
               </TableBody>
             </Table>
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4 border-t border-[#FFD9EC]">
+              <span className="text-xs text-[#223047] opacity-60">
+                Showing {Math.min(filteredMenuItems.length, (currentPage - 1) * itemsPerPage + 1)}-{Math.min(filteredMenuItems.length, currentPage * itemsPerPage)} of {filteredMenuItems.length} items
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  className="border-[#FFD9EC] text-xs h-8 px-3 hover:bg-[#FFF2FA]"
+                >
+                  Previous
+                </Button>
+                <span className="text-xs font-semibold text-[#223047] px-2">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  className="border-[#FFD9EC] text-xs h-8 px-3 hover:bg-[#FFF2FA]"
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
       {/* QUIET PERIOD + HAPPY HOUR */}
@@ -596,7 +798,7 @@ export function Cafe() {
                   <Slider
                     value={discountValue}
                     onValueChange={setDiscountValue}
-                    max={50}
+                    max={80}
                     min={5}
                     step={5}
                     className="flex-1"
@@ -615,7 +817,12 @@ export function Cafe() {
 
         <div className="space-y-4 md:space-y-6">
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4 h-full">
-            <h3 className="text-sm md:text-base font-bold text-[#223047]">Past Happy Hour Effectiveness</h3>
+            <div>
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">Past Happy Hour Effectiveness</h3>
+              <p className="text-xs text-[#223047] opacity-60 mt-1">
+                Percentages show <strong>Revenue Lift</strong> (the increase in sales achieved compared to typical quiet hours).
+              </p>
+            </div>
 
             <div className="space-y-2">
               {[
@@ -685,6 +892,54 @@ export function Cafe() {
         isOpen={showModelDetails}
         onClose={() => setShowModelDetails(false)}
       />
+      {/* Model Performance Metrics Guide modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-[#FFD9EC] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#FFD9EC]">
+              <h3 className="text-base font-bold text-[#223047]">Model Performance Metrics Guide</h3>
+              <button
+                onClick={() => setShowInfoModal(false)}
+                className="text-xs text-gray-500 hover:text-[#F53799] font-bold"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-4 text-xs md:text-sm text-[#223047] opacity-80 animate-in fade-in zoom-in-95 duration-150" style={{ lineHeight: "1.6" }}>
+              <div>
+                <strong className="text-sm text-[#F53799]">MASE (Mean Absolute Scaled Error)</strong>
+                <p className="mt-1">
+                  Measures how smart the AI's prediction is compared to a simple baseline guess (such as assuming today's sales are identical to yesterday's). A score **below 1.0** indicates that our AI model is performing significantly better and is highly reliable.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#F53799]">Accuracy</strong>
+                <p className="mt-1">
+                  The overall correctness rate of the AI's forecasts. For example, a **90% accuracy** means the system's daily sales projections are 90% close to the actual final sales numbers.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#F53799]">MAPE (Mean Absolute Percentage Error)</strong>
+                <p className="mt-1">
+                  The average margin of error in percentage terms. A **lower percentage** (such as 5%) indicates that the AI's predictions deviate only slightly from reality, ensuring higher precision.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#F53799]">Missing Days Filled</strong>
+                <p className="mt-1">
+                  The count of days with missing sales data (due to closures or system downtime) that the AI automatically calculated and filled using smart estimations to keep the forecasting model accurate and complete.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() => setShowInfoModal(false)}
+              className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-white rounded-lg mt-4"
+            >
+              Understood
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

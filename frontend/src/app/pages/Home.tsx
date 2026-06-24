@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -38,6 +38,7 @@ const suggestions = [
     expectedLift: "+₱4,250",
     confidence: "92%",
     reason: "Cafe-Services cross-sell pattern detected at this time window",
+    detailedExplanation: "Our analysis shows that customers who book grooming appointments between 2:00 PM and 5:00 PM are 3x more likely to purchase a cappuccino if offered a discount. Deploying this bundle is expected to increase average order value by ₱180 per customer and fill idle cafe capacity during off-peak grooming hours.",
   },
   {
     id: 2,
@@ -47,6 +48,7 @@ const suggestions = [
     expectedLift: "+₱2,890",
     confidence: "87%",
     reason: "Stock expiring in 6 days. Prophet predicts -40% demand next week",
+    detailedExplanation: "We currently have 12 units of Premium Dog Food (5kg) in stock that will expire in 6 days. Prophet forecasting model predicts a 40% decline in dog food demand next week. Implementing a 20% discount now will accelerate inventory clearance, generating ₱2,890 in revenue and preventing a total spoilage loss of ₱15,000.",
   },
   {
     id: 3,
@@ -56,11 +58,116 @@ const suggestions = [
     expectedLift: "+₱1,650",
     confidence: "84%",
     reason: "Traffic optimizer detected idle capacity window",
+    detailedExplanation: "Historical data indicates a consistent 50% drop in foot traffic at the cafe on Thursday afternoons between 3:00 PM and 4:00 PM. A Buy 1 Get 1 happy hour promotion on all beverages will attract nearby pet owners, increase overall traffic by 25%, and drive secondary sales of high-margin treats.",
   },
 ];
 
 export function Home() {
   const [timeRange, setTimeRange] = useState("today");
+  const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+  const [expandedSuggestions, setExpandedSuggestions] = useState<number[]>([]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("globalDateRange") || "last-7-days";
+    setGlobalDateRange(saved);
+
+    const handleGlobalDateChange = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      setGlobalDateRange(customEvent.detail);
+    };
+
+    window.addEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    return () => {
+      window.removeEventListener("globalDateRangeChanged", handleGlobalDateChange);
+    };
+  }, []);
+
+  // Map globalDateRange changes to local timeRange state
+  useEffect(() => {
+    if (globalDateRange === "today" || globalDateRange === "yesterday") {
+      setTimeRange("today");
+    } else if (globalDateRange === "last-7-days") {
+      setTimeRange("week");
+    } else if (globalDateRange === "last-30-days" || globalDateRange === "last-90-days" || globalDateRange === "last-12-months") {
+      setTimeRange("month");
+    } else if (globalDateRange === "custom") {
+      setTimeRange("custom");
+    }
+  }, [globalDateRange]);
+
+  const handleLocalTimeRangeChange = (localVal: string) => {
+    setTimeRange(localVal);
+    let globalVal = "last-7-days";
+    if (localVal === "today") globalVal = "today";
+    else if (localVal === "week") globalVal = "last-7-days";
+    else if (localVal === "month") globalVal = "last-30-days";
+    else if (localVal === "custom") globalVal = "custom";
+    
+    localStorage.setItem("globalDateRange", globalVal);
+    window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: globalVal }));
+  };
+
+  const toggleSuggestionExplanation = (id: number) => {
+    setExpandedSuggestions(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const scaledKPIs = useMemo(() => {
+    switch (globalDateRange) {
+      case "today":
+        return { revenue: "₱45,280", orders: "127", revenuePercent: "+12.3% ↑", ordersPercent: "+8.5% ↑" };
+      case "yesterday":
+        return { revenue: "₱42,150", orders: "118", revenuePercent: "+10.1% ↑", ordersPercent: "+7.2% ↑" };
+      case "last-7-days":
+        return { revenue: "₱316,960", orders: "889", revenuePercent: "+11.4% ↑", ordersPercent: "+8.1% ↑" };
+      case "last-30-days":
+        return { revenue: "₱1,358,400", orders: "3,810", revenuePercent: "+12.8% ↑", ordersPercent: "+8.3% ↑" };
+      case "last-90-days":
+        return { revenue: "₱4,075,200", orders: "11,430", revenuePercent: "+13.1% ↑", ordersPercent: "+8.6% ↑" };
+      case "last-12-months":
+        return { revenue: "₱16,527,200", orders: "46,355", revenuePercent: "+14.2% ↑", ordersPercent: "+9.1% ↑" };
+      default:
+        return { revenue: "₱45,280", orders: "127", revenuePercent: "+12.3% ↑", ordersPercent: "+8.5% ↑" };
+    }
+  }, [globalDateRange]);
+
+  const dynamicOmnichannelData = useMemo(() => {
+    const seedRandom = (str: string) => {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return () => {
+        const x = Math.sin(hash++) * 10000;
+        return x - Math.floor(x);
+      };
+    };
+
+    const rng = seedRandom(globalDateRange);
+    
+    if (globalDateRange === "today" || globalDateRange === "yesterday") {
+      return Array.from({ length: 13 }, (_, i) => ({
+        hour: `${i + 8}:00`,
+        cafe: rng() * 8000 + 2000,
+        services: rng() * 5000 + 1000,
+        retail: rng() * 4000 + 1000,
+        online: rng() * 3000 + 500,
+      }));
+    }
+    
+    const count = globalDateRange === "last-7-days" ? 7 : globalDateRange === "last-30-days" ? 30 : globalDateRange === "last-90-days" ? 90 : 12;
+    const label = globalDateRange === "last-12-months" ? "Month" : "Day";
+    
+    return Array.from({ length: count }, (_, i) => ({
+      hour: `${label} ${i + 1}`,
+      cafe: rng() * 50000 + 15000,
+      services: rng() * 40000 + 10000,
+      retail: rng() * 30000 + 8000,
+      online: rng() * 20000 + 5000,
+    }));
+  }, [globalDateRange]);
+
   const [heatmapFilter, setHeatmapFilter] = useState("all");
   const [visibleSeries, setVisibleSeries] = useState({
     cafe: true,
@@ -220,8 +327,8 @@ export function Home() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Total Revenue</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">₱45,280</div>
-              <div className="text-xs text-green-600 font-medium hidden md:block">+12.3% ↑</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
+              <div className="text-xs text-green-600 font-medium hidden md:block">{scaledKPIs.revenuePercent}</div>
             </div>
           </div>
 
@@ -232,8 +339,8 @@ export function Home() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Orders</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">127</div>
-              <div className="text-xs text-green-600 font-medium hidden md:block">+8.5% ↑</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
+              <div className="text-xs text-green-600 font-medium hidden md:block">{scaledKPIs.ordersPercent}</div>
             </div>
           </div>
 
@@ -309,7 +416,7 @@ export function Home() {
                 key={range}
                 size="sm"
                 variant={timeRange === range.toLowerCase() ? "default" : "outline"}
-                onClick={() => setTimeRange(range.toLowerCase())}
+                onClick={() => handleLocalTimeRangeChange(range.toLowerCase())}
                 className={
                   timeRange === range.toLowerCase()
                     ? "bg-[#F53799] hover:bg-[#D42A7D]"
@@ -323,7 +430,7 @@ export function Home() {
         </div>
 
         <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
-          <AreaChart data={omnichannelData}>
+          <AreaChart data={dynamicOmnichannelData}>
             <defs>
               <linearGradient key="cafeLuxe-gradient" id="cafeLuxe" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#F53799" stopOpacity={0.35} />
@@ -595,6 +702,24 @@ export function Home() {
               <p className="text-xs text-[#223047] opacity-50" style={{ lineHeight: "1.6" }}>
                 {suggestion.reason}
               </p>
+
+              {/* Collapsible Dropdown Explanation */}
+              <div className="pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => toggleSuggestionExplanation(suggestion.id)}
+                  className="w-full justify-between text-xs text-[#F53799] hover:bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg py-1 px-3 h-8"
+                >
+                  <span className="font-semibold">Explanation</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${expandedSuggestions.includes(suggestion.id) ? "rotate-180" : ""}`} />
+                </Button>
+                {expandedSuggestions.includes(suggestion.id) && (
+                  <div className="mt-2 p-2 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC] text-xs text-[#223047] opacity-80 animate-in fade-in slide-in-from-top-1 duration-200" style={{ lineHeight: "1.6" }}>
+                    {suggestion.detailedExplanation}
+                  </div>
+                )}
+              </div>
 
               {!approvedSuggestions.includes(suggestion.id) &&
                 !dismissedSuggestions.includes(suggestion.id) && (

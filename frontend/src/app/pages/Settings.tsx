@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert } from "lucide-react";
+import { getExogenousStatus } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
@@ -13,6 +14,14 @@ export function Settings() {
     reports: false,
     system: true,
   });
+
+  const [exogenousStatus, setExogenousStatus] = useState<any>(null);
+
+  useEffect(() => {
+    getExogenousStatus()
+      .then(setExogenousStatus)
+      .catch((err) => console.error("Failed to load exogenous status:", err));
+  }, []);
 
   const [autoRetrain, setAutoRetrain] = useState(true);
   const [confidenceThreshold, setConfidenceThreshold] = useState([80]);
@@ -152,6 +161,121 @@ export function Settings() {
             <Button onClick={handleRetrainModels} className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-sm md:text-base">
               Retrain All Models Now
             </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* EXTERNAL API CONNECTIONS & DIAGNOSTICS */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div className="flex items-center gap-2 md:gap-3">
+          <CloudSun className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
+          <div>
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              External API Connections & Diagnostics
+            </h2>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              Configure forecasting data providers and check API cache health
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-2 md:pt-4">
+          {/* OpenWeather Config */}
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-sm md:text-base text-[#223047]">OpenWeatherMap Integration</h3>
+                <p className="text-xs text-[#223047] opacity-60 mt-1">Exogenous weather feed for Cafe & Services</p>
+              </div>
+              {exogenousStatus?.weatherCache?.lastSource && exogenousStatus.weatherCache.lastSource !== "synthetic" ? (
+                <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
+                  <CheckCircle2 className="w-3 h-3" /> Connected
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1 bg-amber-50">
+                  <ShieldAlert className="w-3 h-3" /> Synthetic Fallback
+                </Badge>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div>
+                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">API Key Status</label>
+                <input
+                  type="text"
+                  readOnly
+                  value="••••••••••••••••••••••••••••••••"
+                  className="w-full px-3 py-2 bg-white/70 border border-[#FFD9EC] rounded-lg text-xs focus:outline-none text-[#223047] opacity-70"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-[#223047]">
+                <div>
+                  <span className="opacity-60 block">Target Location</span>
+                  <span className="font-semibold">Lucena City, PH</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Coordinates</span>
+                  <span className="font-semibold">13.9397, 121.6145</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Cached Records</span>
+                  <span className="font-semibold">{exogenousStatus?.weatherCache?.count ?? "—"} daily rows</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Last Active Source</span>
+                  <span className="font-semibold uppercase text-xs">{exogenousStatus?.weatherCache?.lastSource ?? "—"}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Abstract Holidays Config */}
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-sm md:text-base text-[#223047]">Abstract Holidays Calendar</h3>
+                <p className="text-xs text-[#223047] opacity-60 mt-1">Philippine national holiday catalog provider</p>
+              </div>
+              {exogenousStatus?.holidayCache?.lastSource && exogenousStatus.holidayCache.lastSource !== "hardcoded" ? (
+                <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
+                  <CheckCircle2 className="w-3 h-3" /> Connected
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1 bg-amber-50">
+                  <ShieldAlert className="w-3 h-3" /> Hardcoded Fallback
+                </Badge>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div>
+                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">API Key Status</label>
+                <input
+                  type="text"
+                  readOnly
+                  value="••••••••••••••••••••••••••••••••"
+                  className="w-full px-3 py-2 bg-white/70 border border-[#FFD9EC] rounded-lg text-xs focus:outline-none text-[#223047] opacity-70"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-[#223047]">
+                <div>
+                  <span className="opacity-60 block">Target Country</span>
+                  <span className="font-semibold">Philippines (PH)</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Cached Years</span>
+                  <span className="font-semibold">{exogenousStatus?.holidayCache?.count ?? "—"} years</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Last Active Source</span>
+                  <span className="font-semibold uppercase text-xs">{exogenousStatus?.holidayCache?.lastSource ?? "—"}</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Cache Status</span>
+                  <span className="font-semibold text-green-600">Active</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
