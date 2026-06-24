@@ -109,6 +109,7 @@ describe('AnalyticsService getForecast', () => {
       mape: 15,
       accuracy: 85,
       forecast: forecastRows(14),
+      fittedValues: Array.from({ length: 21 }, (_, index) => 95 + index),
     });
 
     const result = await service.getForecast('cafe');
@@ -128,6 +129,10 @@ describe('AnalyticsService getForecast', () => {
     );
     expect(result.historical).toHaveLength(21);
     expect(result.forecast).toHaveLength(14);
+    expect(result.historical.slice(0, -1).every((point) => point.fitted === undefined)).toBe(true);
+    expect(result.historical[20].fitted).toBe(result.historical[20].actual);
+    expect(result.modelMetadata.predictionStartsAt).toBe(result.historical[20].date);
+    expect(result.modelMetadata.predictionTrendMode).toBe('future-anchor');
     expect(result).toHaveProperty('module');
     expect(result).toHaveProperty('modelName');
     expect(result).toHaveProperty('mase');
@@ -173,7 +178,10 @@ describe('AnalyticsService getForecast', () => {
         mape: 15,
         accuracy: 85,
         isFallback: false,
-        historical: [],
+        historical: [
+          { date: '2026-01-01', actual: 100, normalized: 100, orders: 1, fitted: 98 },
+          { date: '2026-01-02', actual: 120, normalized: 120, orders: 2, fitted: 118 },
+        ],
         forecast: [],
         kpis: {},
         topItems: [],
@@ -205,6 +213,9 @@ describe('AnalyticsService getForecast', () => {
 
       const result = await service.getForecast('cafe');
       expect(result.modelMetadata.csvUploadCount).toBe(2);
+      expect(result.historical[0].fitted).toBeUndefined();
+      expect(result.historical[1].fitted).toBe(120);
+      expect(result.modelMetadata.predictionStartsAt).toBe('2026-01-02');
       expect(transactionModel.aggregate).not.toHaveBeenCalled();
     });
   });

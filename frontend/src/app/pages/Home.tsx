@@ -97,14 +97,6 @@ export function Home() {
 
   const handleLocalTimeRangeChange = (localVal: string) => {
     setTimeRange(localVal);
-    let globalVal = "last-7-days";
-    if (localVal === "today") globalVal = "today";
-    else if (localVal === "week") globalVal = "last-7-days";
-    else if (localVal === "month") globalVal = "last-30-days";
-    else if (localVal === "custom") globalVal = "custom";
-    
-    localStorage.setItem("globalDateRange", globalVal);
-    window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: globalVal }));
   };
 
   const toggleSuggestionExplanation = (id: number) => {
@@ -144,9 +136,9 @@ export function Home() {
       };
     };
 
-    const rng = seedRandom(globalDateRange);
+    const rng = seedRandom(timeRange);
     
-    if (globalDateRange === "today" || globalDateRange === "yesterday") {
+    if (timeRange === "today") {
       return Array.from({ length: 13 }, (_, i) => ({
         hour: `${i + 8}:00`,
         cafe: rng() * 8000 + 2000,
@@ -156,8 +148,8 @@ export function Home() {
       }));
     }
     
-    const count = globalDateRange === "last-7-days" ? 7 : globalDateRange === "last-30-days" ? 30 : globalDateRange === "last-90-days" ? 90 : 12;
-    const label = globalDateRange === "last-12-months" ? "Month" : "Day";
+    const count = timeRange === "week" ? 7 : timeRange === "month" ? 30 : 12;
+    const label = timeRange === "custom" ? "Period" : "Day";
     
     return Array.from({ length: count }, (_, i) => ({
       hour: `${label} ${i + 1}`,
@@ -166,7 +158,7 @@ export function Home() {
       retail: rng() * 30000 + 8000,
       online: rng() * 20000 + 5000,
     }));
-  }, [globalDateRange]);
+  }, [timeRange]);
 
   const [heatmapFilter, setHeatmapFilter] = useState("all");
   const [visibleSeries, setVisibleSeries] = useState({

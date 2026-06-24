@@ -232,7 +232,7 @@ export class AnalyticsService {
         reqHoliday === cacheHoliday;
 
       if (isCsvStateMatch && isOverridesMatch) {
-        return cachedForecast.toObject();
+        return this.withForecastStartAnchor(cachedForecast.toObject());
       }
     }
     const dailyData = await this.transactionModel.aggregate([
@@ -308,15 +308,7 @@ export class AnalyticsService {
       accuracy: finalModel.accuracy,
       isFallback: useFallback,
       rejectionReason: useFallback ? rejectionReason : undefined,
-      historical: historical.map(({ date, actual, normalized, orders }, index) => ({
-        date,
-        actual,
-        normalized,
-        orders,
-        fitted: finalModel.fittedValues && finalModel.fittedValues[index] !== undefined 
-          ? finalModel.fittedValues[index] 
-          : undefined,
-      })),
+      historical: this.buildAnchoredHistoricalPayload(historical),
       forecast: finalModel.forecast,
       kpis: dashboard.kpis,
       topItems: dashboard.topItems,
@@ -341,7 +333,7 @@ export class AnalyticsService {
     };
 
     const savedRun = await this.forecastRunModel.create(payload);
-    return savedRun.toObject();
+    return this.withForecastStartAnchor(savedRun.toObject());
   }
 
   /**
@@ -683,6 +675,49 @@ export class AnalyticsService {
       date.setUTCDate(date.getUTCDate() + index + 1);
       return date.toISOString().slice(0, 10);
     });
+  }
+
+  private buildAnchoredHistoricalPayload(
+    historical: NormalizedDailyValue[],
+  ): Array<{
+    date: string;
+    actual: number;
+    normalized: number;
+    orders: number;
+    fitted?: number;
+  }> {
+    const lastIndex = historical.length - 1;
+    return historical.map(({ date, actual, normalized, orders }, index) => ({
+      date,
+      actual,
+      normalized,
+      orders,
+      fitted: index === lastIndex ? actual : undefined,
+    }));
+  }
+
+  private withForecastStartAnchor<T extends { historical?: any[]; modelMetadata?: Record<string, unknown> }>(
+    run: T,
+  ): T {
+    const historical = Array.isArray(run.historical) ? run.historical : [];
+    const lastIndex = historical.length - 1;
+    const anchoredHistorical = historical.map((point, index) => {
+      const { fitted: _fitted, ...rest } = point;
+      return index === lastIndex ? { ...rest, fitted: point.actual } : rest;
+    });
+
+    return {
+      ...run,
+      historical: anchoredHistorical,
+      modelMetadata: {
+        ...(run.modelMetadata || {}),
+        predictionStartsAt:
+          lastIndex >= 0 ? anchoredHistorical[lastIndex].date : null,
+        predictionAnchorValue:
+          lastIndex >= 0 ? anchoredHistorical[lastIndex].actual : null,
+        predictionTrendMode: 'future-anchor',
+      },
+    };
   }
 
   private runPython<T>(

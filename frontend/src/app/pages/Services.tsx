@@ -132,10 +132,10 @@ export function Services() {
     if (!forecastRun?.historical?.length) {
       return [];
     }
-    const hist = forecastRun.historical.map((d) => ({
+    const hist = forecastRun.historical.map((d, index) => ({
       day: d.date,
       actual: d.actual,
-      forecast: d.fitted !== undefined && d.fitted !== null ? d.fitted : null,
+      forecast: index === forecastRun.historical.length - 1 ? d.actual : null,
     }));
     const horizon =
       viewMode === "next7days" ? 7 : viewMode === "next14days" ? 14 : 30;
@@ -462,6 +462,23 @@ export function Services() {
             />
           </LineChart>
         </ResponsiveContainer>
+
+        <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] md:text-xs text-[#223047] opacity-70">
+          <div className="flex items-center gap-2">
+            <span className="h-0.5 w-7 rounded-full bg-[#223047]" />
+            <span>Historical revenue</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="h-0.5 w-7 rounded-full"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to right, #3AE4FA 0 6px, transparent 6px 10px)",
+              }}
+            />
+            <span>Predicted revenue</span>
+          </div>
+        </div>
 
         {/* Model Info & Insights & Simulator */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">

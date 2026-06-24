@@ -213,10 +213,10 @@ export function Cafe() {
     if (!forecastRun?.historical?.length) {
       return [];
     }
-    const hist = forecastRun.historical.map((d) => ({
+    const hist = forecastRun.historical.map((d, index) => ({
       date: d.date,
       actual: d.actual,
-      forecast: d.fitted !== undefined && d.fitted !== null ? d.fitted : null,
+      forecast: index === forecastRun.historical.length - 1 ? d.actual : null,
       confidenceLow: null as number | null,
       confidenceHigh: null as number | null,
     }));
@@ -488,6 +488,23 @@ export function Cafe() {
             />
           </LineChart>
         </ResponsiveContainer>
+
+        <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] md:text-xs text-[#223047] opacity-70">
+          <div className="flex items-center gap-2">
+            <span className="h-0.5 w-7 rounded-full bg-[#223047]" />
+            <span>Historical revenue</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="h-0.5 w-7 rounded-full"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to right, #F53799 0 6px, transparent 6px 10px)",
+              }}
+            />
+            <span>Predicted revenue</span>
+          </div>
+        </div>
 
         {/* Model Info, Recommendation, and Exogenous Info */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
