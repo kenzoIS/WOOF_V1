@@ -23,6 +23,10 @@ import {
   ForecastRun,
   ForecastRunDocument,
 } from './schemas/forecast-run.schema';
+import {
+  CrossSellCache,
+  CrossSellCacheDocument,
+} from './schemas/cross-sell-cache.schema';
 
 /**
  * Forecasting limitations for the current capstone implementation:
@@ -50,6 +54,15 @@ interface ModelResult {
   modelMetadata?: Record<string, unknown>;
 }
 
+interface CrossSellOptions {
+  minSupport?: number | string;
+  minConfidence?: number | string;
+  minLift?: number | string;
+  maxBundleCandidates?: number | string;
+  hour?: number | string;
+  forceRefresh?: boolean | string;
+}
+
 @Injectable()
 export class AnalyticsService {
   constructor(
@@ -57,6 +70,8 @@ export class AnalyticsService {
     private transactionModel: Model<TransactionDocument>,
     @InjectModel(ForecastRun.name)
     private forecastRunModel: Model<ForecastRunDocument>,
+    @InjectModel(CrossSellCache.name)
+    private crossSellCacheModel: Model<CrossSellCacheDocument>,
     @InjectModel(CsvUpload.name)
     private csvUploadModel: Model<CsvUploadDocument>,
     private readonly configService: ConfigService,
@@ -340,24 +355,158 @@ export class AnalyticsService {
    * Cross-selling analysis using association rule mining (FP-Growth) via Python
    * Finds items frequently purchased together in the same transaction
    */
-  async getCrossSell(): Promise<any> {
+  async getCrossSell(options: CrossSellOptions = {}): Promise<any> {
+    const thresholds = this.normalizeCrossSellThresholds(options);
+    const hour = this.parseHour(options.hour);
+    const transactionMatch = this.buildHourMatch(hour);
+    const forceRefresh =
+      options.forceRefresh === true || options.forceRefresh === 'true';
+    const cacheCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const uploadState = await this.getCsvUploadState();
+
+    if (!forceRefresh) {
+      const cached = await this.crossSellCacheModel
+        .findOne({
+          computedAt: { $gte: cacheCutoff },
+          'thresholds.minSupport': thresholds.minSupport,
+          'thresholds.minConfidence': thresholds.minConfidence,
+          'thresholds.minLift': thresholds.minLift,
+          'thresholds.maxBundleCandidates': thresholds.maxBundleCandidates,
+          'thresholds.hour': thresholds.hour,
+          'uploadState.uploadCount': uploadState.uploadCount,
+          'uploadState.latestUploadId': uploadState.latestUploadId,
+          'uploadState.latestUploadTime': uploadState.latestUploadTime,
+        })
+        .sort({ computedAt: -1 })
+        .lean()
+        .exec();
+
+      if (cached) {
+        const cachedResult =
+          cached.result && Object.keys(cached.result).length > 0
+            ? (cached.result as any)
+            : cached;
+        const rules = Array.isArray(cachedResult.rules) ? cachedResult.rules : [];
+        return {
+          ...cachedResult,
+          rules,
+          thresholds,
+          cached: true,
+          cacheAgeMs: Date.now() - new Date(cached.computedAt).getTime(),
+          sectorBreakdown:
+            cachedResult.sectorBreakdown ||
+            cached.sectorBreakdown ||
+            this.groupRulesBySector(rules),
+          computedAt: cached.computedAt,
+        };
+      }
+    }
+
     // Group items by transaction to build baskets
-    const baskets = await this.transactionModel.aggregate([
-      {
-        $group: {
-          _id: '$transactionId',
-          items: { $addToSet: '$productName' },
-          sectors: { $addToSet: '$sector' },
-          totalAmount: { $sum: '$netSales' },
-        },
-      },
-      { $match: { 'items.1': { $exists: true } } }, // Only baskets with 2+ items
-    ]);
+    const [baskets, rawSummaryRows, hourlyRows, sectorRows] =
+      await Promise.all([
+        this.transactionModel.aggregate([
+          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
+          {
+            $group: {
+              _id: '$transactionId',
+              items: { $addToSet: '$productName' },
+              sectors: { $addToSet: '$sector' },
+              itemSectors: {
+                $addToSet: {
+                  item: '$productName',
+                  sector: '$sector',
+                },
+              },
+              totalAmount: { $sum: '$netSales' },
+            },
+          },
+          { $match: { 'items.1': { $exists: true } } }, // Only baskets with 2+ items
+        ]),
+        this.transactionModel.aggregate([
+          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
+          {
+            $group: {
+              _id: null,
+              totalLineItems: { $sum: 1 },
+              totalRevenue: { $sum: '$netSales' },
+              uniqueTransactions: { $addToSet: '$transactionId' },
+              uniqueItems: { $addToSet: '$productName' },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              totalLineItems: 1,
+              totalRevenue: 1,
+              totalTransactions: { $size: '$uniqueTransactions' },
+              uniqueItemCount: { $size: '$uniqueItems' },
+            },
+          },
+        ]),
+        this.transactionModel.aggregate([
+          {
+            $group: {
+              _id: {
+                transactionId: '$transactionId',
+                hour: {
+                  $hour: {
+                    date: '$date',
+                    timezone: 'Asia/Manila',
+                  },
+                },
+              },
+            },
+          },
+          {
+            $group: {
+              _id: '$_id.hour',
+              transactions: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ]),
+        this.transactionModel.aggregate([
+          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
+          {
+            $group: {
+              _id: '$sector',
+              lineItems: { $sum: 1 },
+              transactions: { $addToSet: '$transactionId' },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              sector: '$_id',
+              lineItems: 1,
+              transactionCount: { $size: '$transactions' },
+            },
+          },
+          { $sort: { transactionCount: -1 } },
+        ]),
+      ]);
+    const rawAnalysis = this.buildCrossSellRawAnalysis(
+      rawSummaryRows[0],
+      hourlyRows,
+      sectorRows,
+      baskets,
+      hour,
+    );
 
     if (baskets.length < 5) {
       return {
         rules: [],
+        bundleCandidates: [],
+        itemMetrics: [],
+        rawAnalysis,
         totalBaskets: baskets.length,
+        multiItemBaskets: baskets.length,
+        crossSectorBaskets: 0,
+        crossSectorRate: 0,
+        sectorBreakdown: this.groupRulesBySector([]),
+        thresholds,
+        uploadState,
         message: 'Not enough multi-item transactions',
       };
     }
@@ -366,65 +515,153 @@ export class AnalyticsService {
       transactionId: b._id,
       items: b.items,
       sectors: b.sectors,
+      itemSectors: b.itemSectors,
     }));
 
-    return new Promise((resolve, reject) => {
-      const scriptPath = path.join(
-        process.cwd(),
-        'src',
-        'analytics',
-        'python',
-        'cross_sell.py',
+    const startedAt = Date.now();
+    try {
+      const result = await this.runPython<any>('cross_sell.py', {
+        baskets: inputData,
+        ...thresholds,
+      });
+      const rules = Array.isArray(result.rules) ? result.rules : [];
+      const bundleCandidates = Array.isArray(result.bundleCandidates)
+        ? result.bundleCandidates
+        : [];
+      const itemMetrics = Array.isArray(result.itemMetrics)
+        ? result.itemMetrics
+        : [];
+      const totalBaskets = result.totalBaskets ?? baskets.length;
+      const crossSectorBaskets = baskets.filter(
+        (b: any) => Array.isArray(b.sectors) && b.sectors.length > 1,
+      ).length;
+      const crossSectorRate =
+        totalBaskets > 0
+          ? Math.round((crossSectorBaskets / totalBaskets) * 10000) / 10000
+          : 0;
+      const payload = {
+        ...result,
+        rules,
+        bundleCandidates,
+        itemMetrics,
+        rawAnalysis,
+        totalBaskets,
+        multiItemBaskets: result.multiItemBaskets ?? baskets.length,
+        crossSectorBaskets,
+        crossSectorRate,
+        sectorBreakdown: this.groupRulesBySector(rules),
+        thresholds,
+        uploadState,
+        computationDurationMs: Date.now() - startedAt,
+        cached: false,
+      };
+
+      await this.crossSellCacheModel.create({
+        computedAt: new Date(),
+        result: payload,
+        rules: payload.rules,
+        bundleCandidates: payload.bundleCandidates,
+        totalBaskets: payload.totalBaskets,
+        multiItemBaskets: payload.multiItemBaskets,
+        crossSectorRate: payload.crossSectorRate,
+        computationDurationMs: payload.computationDurationMs,
+        thresholds,
+        uploadState,
+        message: payload.message,
+        cleanedItems: payload.cleanedItems,
+        sectorBreakdown: payload.sectorBreakdown,
+      });
+
+      return payload;
+    } catch (error) {
+      console.error(
+        `Cross-sell computation failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
-      const pythonCmd = path.join(process.cwd(), 'venv', 'bin', 'python3');
-      const pythonProcess = spawn(pythonCmd, [scriptPath]);
+      return {
+        rules: [],
+        bundleCandidates: [],
+        itemMetrics: [],
+        rawAnalysis,
+        error: 'Cross-sell computation failed',
+        totalBaskets: baskets.length,
+        multiItemBaskets: baskets.length,
+        crossSectorBaskets: 0,
+        crossSectorRate: 0,
+        sectorBreakdown: this.groupRulesBySector([]),
+        thresholds,
+        uploadState,
+      };
+    }
+  }
 
-      let dataString = '';
-      let errorString = '';
+  async getCrossSellConfig(options: CrossSellOptions = {}): Promise<any> {
+    const thresholds = this.normalizeCrossSellThresholds(options);
+    const cached = await this.crossSellCacheModel
+      .findOne({
+        'thresholds.minSupport': thresholds.minSupport,
+        'thresholds.minConfidence': thresholds.minConfidence,
+        'thresholds.minLift': thresholds.minLift,
+        'thresholds.maxBundleCandidates': thresholds.maxBundleCandidates,
+        'thresholds.hour': thresholds.hour,
+      })
+      .sort({ computedAt: -1 })
+      .lean()
+      .exec();
 
-      pythonProcess.stdout.on('data', (data) => {
-        dataString += data.toString();
-      });
-
-      pythonProcess.stderr.on('data', (data) => {
-        errorString += data.toString();
-      });
-
-      pythonProcess.on('close', (code) => {
-        if (code !== 0) {
-          console.error(
-            `Python script exited with code ${code}: ${errorString}`,
-          );
-          reject(new Error(`Python cross-sell failed: ${errorString}`));
-          return;
-        }
-        try {
-          const result = JSON.parse(dataString);
-          if (result.error) {
-            reject(new Error(`Python cross-sell error: ${result.error}`));
-          } else {
-            // Re-append cross-sector analytics logic on node side
-            const totalBaskets = baskets.length;
-            const crossSectorBaskets = baskets.filter(
-              (b: any) => b.sectors.length > 1,
-            );
-            const crossSectorRate =
-              totalBaskets > 0 ? crossSectorBaskets.length / totalBaskets : 0;
-
-            result.crossSectorBaskets = crossSectorBaskets.length;
-            result.crossSectorRate =
-              Math.round(crossSectorRate * 10000) / 10000;
-            resolve(result);
+    return {
+      thresholds,
+      cache: cached
+        ? {
+            exists: true,
+            computedAt: cached.computedAt,
+            ageMs: Date.now() - new Date(cached.computedAt).getTime(),
+            isFresh:
+              Date.now() - new Date(cached.computedAt).getTime() <
+              24 * 60 * 60 * 1000,
           }
-        } catch (e) {
-          console.error('Failed to parse Python output:', dataString);
-          reject(new Error('Failed to parse Python cross-sell output'));
-        }
-      });
+        : {
+            exists: false,
+            computedAt: null,
+            ageMs: null,
+            isFresh: false,
+          },
+    };
+  }
 
-      pythonProcess.stdin.write(JSON.stringify(inputData));
-      pythonProcess.stdin.end();
-    });
+  async getCrossSellBySector(options: CrossSellOptions = {}): Promise<any> {
+    const result = await this.getCrossSell(options);
+    const rules = (Array.isArray(result.rules) ? result.rules : [])
+      .filter((rule: any) => rule.crossSector)
+      .sort(
+        (a: any, b: any) =>
+          (Number(b.lift) || 0) - (Number(a.lift) || 0) ||
+          (Number(b.confidence) || 0) - (Number(a.confidence) || 0),
+      );
+
+    return {
+      ...result,
+      rules,
+      sectorBreakdown: this.groupRulesBySector(rules),
+    };
+  }
+
+  async getCrossSellBundles(options: CrossSellOptions = {}): Promise<any> {
+    const result = await this.getCrossSell(options);
+    const bundleCandidates = (
+      Array.isArray(result.bundleCandidates) ? result.bundleCandidates : []
+    ).sort(
+      (a: any, b: any) =>
+        (Number(b.opportunityScore) || 0) -
+          (Number(a.opportunityScore) || 0) ||
+        (Number(b.anchorSupport) || 0) - (Number(a.anchorSupport) || 0),
+    );
+
+    return {
+      ...result,
+      bundleCandidates,
+    };
   }
 
   /**
@@ -566,6 +803,221 @@ export class AnalyticsService {
       forecastDays,
       ...extraPayload,
     });
+  }
+
+  private normalizeCrossSellThresholds(options: CrossSellOptions): {
+    minSupport: number;
+    minConfidence: number;
+    minLift: number;
+    maxBundleCandidates: number;
+    hour?: number;
+  } {
+    return {
+      minSupport: this.parseThreshold(options.minSupport, 0.05),
+      minConfidence: this.parseThreshold(options.minConfidence, 0.6),
+      minLift: this.parseThreshold(options.minLift, 1.2),
+      maxBundleCandidates: this.parseThreshold(
+        options.maxBundleCandidates,
+        20,
+      ),
+      ...(this.parseHour(options.hour) !== undefined
+        ? { hour: this.parseHour(options.hour) }
+        : {}),
+    };
+  }
+
+  private parseHour(value: number | string | undefined): number | undefined {
+    if (value === undefined || value === '') {
+      return undefined;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 23) {
+      return undefined;
+    }
+
+    return parsed;
+  }
+
+  private buildHourMatch(hour: number | undefined): Record<string, unknown> | null {
+    if (hour === undefined) {
+      return null;
+    }
+
+    return {
+      $expr: {
+        $eq: [
+          {
+            $hour: {
+              date: '$date',
+              timezone: 'Asia/Manila',
+            },
+          },
+          hour,
+        ],
+      },
+    };
+  }
+
+  private parseThreshold(value: number | string | undefined, fallback: number): number {
+    if (value === undefined || value === '') {
+      return fallback;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  private async getCsvUploadState(): Promise<{
+    uploadCount: number;
+    latestUploadId: string | null;
+    latestUploadTime: number | null;
+  }> {
+    const [latestUpload, uploadCount] = await Promise.all([
+      this.csvUploadModel.findOne().sort({ uploadedAt: -1 }).exec(),
+      this.csvUploadModel.countDocuments().exec(),
+    ]);
+
+    return {
+      uploadCount,
+      latestUploadId: latestUpload ? latestUpload._id.toString() : null,
+      latestUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
+    };
+  }
+
+  private buildCrossSellRawAnalysis(
+    summary: any,
+    hourlyRows: any[],
+    sectorRows: any[],
+    baskets: any[],
+    selectedHour?: number,
+  ): Record<string, unknown> {
+    const hourlyTransactionVolume = Array.from({ length: 24 }, (_, hour) => {
+      const row = hourlyRows.find((item) => Number(item._id) === hour);
+      return {
+        hour,
+        label: this.formatHourLabel(hour),
+        transactions: row ? Number(row.transactions) || 0 : 0,
+      };
+    });
+    const totalBaskets = baskets.length;
+    const totalBasketItems = baskets.reduce(
+      (sum, basket) => sum + (Array.isArray(basket.items) ? basket.items.length : 0),
+      0,
+    );
+    const crossSectorBaskets = baskets.filter(
+      (basket) => Array.isArray(basket.sectors) && basket.sectors.length > 1,
+    ).length;
+
+    return {
+      totalTransactions: Number(summary?.totalTransactions) || 0,
+      totalLineItems: Number(summary?.totalLineItems) || 0,
+      uniqueItemCount: Number(summary?.uniqueItemCount) || 0,
+      totalRevenue: this.round(Number(summary?.totalRevenue) || 0),
+      selectedHour: selectedHour ?? null,
+      multiItemBaskets: totalBaskets,
+      avgItemsPerBasket:
+        totalBaskets > 0 ? this.round(totalBasketItems / totalBaskets) : 0,
+      crossSectorBasketRate:
+        totalBaskets > 0
+          ? Math.round((crossSectorBaskets / totalBaskets) * 10000) / 10000
+          : 0,
+      peakHour:
+        hourlyTransactionVolume.reduce(
+          (peak, row) =>
+            row.transactions > peak.transactions ? row : peak,
+          hourlyTransactionVolume[0],
+        ) || null,
+      hourlyTransactionVolume,
+      sectorMix: sectorRows.map((row) => ({
+        sector: row.sector || 'Unknown',
+        lineItems: Number(row.lineItems) || 0,
+        transactionCount: Number(row.transactionCount) || 0,
+      })),
+    };
+  }
+
+  private formatHourLabel(hour: number): string {
+    if (hour === 0) return '12 AM';
+    if (hour === 12) return '12 PM';
+    return hour > 12 ? `${hour - 12} PM` : `${hour} AM`;
+  }
+
+  private groupRulesBySector(rules: any[]): Record<string, any[]> {
+    const grouped: Record<string, any[]> = {
+      cafeCafe: [],
+      cafeRetail: [],
+      cafeServices: [],
+      retailRetail: [],
+      retailServices: [],
+      servicesServices: [],
+      unknownUnknown: [],
+    };
+
+    for (const rule of rules) {
+      const leftSector = this.firstRuleSector(rule?.antecedentSectors);
+      const rightSector = this.firstRuleSector(rule?.consequentSectors);
+      const key = this.buildSectorPairKey(leftSector, rightSector);
+      if (!grouped[key]) {
+        grouped[key] = [];
+      }
+      grouped[key].push(rule);
+    }
+
+    for (const key of Object.keys(grouped)) {
+      grouped[key].sort(
+        (a: any, b: any) =>
+          (Number(b.lift) || 0) - (Number(a.lift) || 0) ||
+          (Number(b.confidence) || 0) - (Number(a.confidence) || 0),
+      );
+    }
+
+    return grouped;
+  }
+
+  private firstRuleSector(sectors: unknown): string {
+    if (!Array.isArray(sectors) || sectors.length === 0) {
+      return 'unknown';
+    }
+
+    return this.normalizeSectorSlug(String(sectors[0]));
+  }
+
+  private buildSectorPairKey(leftSector: string, rightSector: string): string {
+    const order = ['cafe', 'retail', 'services', 'unknown'];
+    const sectors = [leftSector, rightSector].sort(
+      (a, b) => order.indexOf(a) - order.indexOf(b),
+    );
+    return `${sectors[0]}${this.capitalize(sectors[1])}`;
+  }
+
+  private normalizeSectorSlug(sector: string): string {
+    const lower = sector.toLowerCase();
+    if (lower === 'cafe' || lower === 'coffee') return 'cafe';
+    if (lower === 'retail' || lower === 'pet supplies') return 'retail';
+    if (lower === 'services' || lower === 'grooming') return 'services';
+    return 'unknown';
+  }
+
+  private capitalize(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+
+  private resolvePythonCommand(): string {
+    const localPython = path.join(
+      process.cwd(),
+      '.venv',
+      process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+    );
+
+    return (
+      this.configService.get<string>('PYTHON_PATH') ||
+      (existsSync(localPython)
+        ? localPython
+        : process.platform === 'win32'
+          ? 'python'
+          : 'python3')
+    );
   }
 
   private async buildServicesExogenousPayload(
@@ -731,18 +1183,7 @@ export class AnalyticsService {
       'python',
       scriptName,
     );
-    const localPython = path.join(
-      process.cwd(),
-      '.venv',
-      process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
-    );
-    const pythonCommand =
-      this.configService.get<string>('PYTHON_PATH') ||
-      (existsSync(localPython)
-        ? localPython
-        : process.platform === 'win32'
-          ? 'python'
-          : 'python3');
+    const pythonCommand = this.resolvePythonCommand();
 
     return new Promise((resolve, reject) => {
       const pythonProcess = spawn(pythonCommand, [scriptPath], {

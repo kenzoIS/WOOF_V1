@@ -74,6 +74,15 @@ export interface ForecastRun {
   generatedAt: string;
 }
 
+export interface CrossSellQuery {
+  minSupport?: string;
+  minConfidence?: string;
+  minLift?: string;
+  maxBundleCandidates?: string;
+  hour?: string;
+  forceRefresh?: string;
+}
+
 async function fetchApi(path: string, options?: RequestInit) {
   const res = await request(path, {
     ...options,
@@ -85,6 +94,14 @@ async function fetchApi(path: string, options?: RequestInit) {
     throw await apiError(res, res.statusText || 'API request failed');
   }
   return res.json();
+}
+
+function toQueryString(params?: object) {
+  if (!params) return '';
+  const entries = Object.entries(params).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  );
+  return entries.length ? '?' + new URLSearchParams(entries).toString() : '';
 }
 
 // CSV Upload APIs
@@ -141,12 +158,28 @@ export async function getForecast(
   sector: string,
   params?: Record<string, string>,
 ): Promise<ForecastRun> {
-  const query = params ? '?' + new URLSearchParams(params).toString() : '';
+  const query = toQueryString(params);
   return fetchApi(`/analytics/forecast/${sector}${query}`);
 }
 
-export async function getCrossSell() {
-  return fetchApi('/analytics/cross-sell');
+export async function getCrossSell(params?: CrossSellQuery) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/cross-sell${query}`);
+}
+
+export async function getCrossSellConfig(params?: CrossSellQuery) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/cross-sell/config${query}`);
+}
+
+export async function getCrossSellBySector(params?: CrossSellQuery) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/cross-sell/by-sector${query}`);
+}
+
+export async function getCrossSellBundles(params?: CrossSellQuery) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/cross-sell/bundles${query}`);
 }
 
 export async function getRetailForecastByChannel() {

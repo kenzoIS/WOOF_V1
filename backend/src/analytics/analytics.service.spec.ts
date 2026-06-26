@@ -1,10 +1,20 @@
+import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
 import { AnalyticsService } from './analytics.service';
+
+jest.mock('child_process', () => ({
+  spawn: jest.fn(),
+}));
 
 describe('AnalyticsService getForecast', () => {
   const transactionModel = {
     aggregate: jest.fn(),
   };
   const forecastRunModel = {
+    create: jest.fn(),
+    findOne: jest.fn(),
+  };
+  const crossSellCacheModel = {
     create: jest.fn(),
     findOne: jest.fn(),
   };
@@ -85,6 +95,12 @@ describe('AnalyticsService getForecast', () => {
       sort: jest.fn().mockReturnThis(),
       exec: jest.fn().mockResolvedValue(null),
     });
+    crossSellCacheModel.findOne.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(null),
+    });
+    crossSellCacheModel.create.mockImplementation(async (payload) => payload);
     csvUploadModel.findOne.mockReturnValue({
       sort: jest.fn().mockReturnThis(),
       exec: jest.fn().mockResolvedValue(null),
@@ -95,6 +111,7 @@ describe('AnalyticsService getForecast', () => {
     service = new AnalyticsService(
       transactionModel as any,
       forecastRunModel as any,
+      crossSellCacheModel as any,
       csvUploadModel as any,
       configService as any,
       exogenousDataService as any,
@@ -217,6 +234,116 @@ describe('AnalyticsService getForecast', () => {
       expect(result.historical[1].fitted).toBe(120);
       expect(result.modelMetadata.predictionStartsAt).toBe('2026-01-02');
       expect(transactionModel.aggregate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cross-sell analysis', () => {
+    const syntheticBaskets = () =>
+      Array.from({ length: 10 }, (_, index) => ({
+        _id: `txn-${index + 1}`,
+        items:
+          index % 2 === 0
+            ? ['Latte', 'Dog Treats', 'Grooming']
+            : ['Latte', 'Dog Treats'],
+        sectors:
+          index % 2 === 0 ? ['Cafe', 'Retail', 'Services'] : ['Cafe', 'Retail'],
+        totalAmount: 200 + index,
+      }));
+
+    const mockPythonSpawn = (output: Record<string, unknown>) => {
+      const processMock = new EventEmitter() as any;
+      processMock.stdout = new EventEmitter();
+      processMock.stderr = new EventEmitter();
+
+      const stdin = new EventEmitter() as any;
+      stdin.write = jest.fn().mockReturnValue(true);
+      stdin.end = jest.fn(() => {
+        setImmediate(() => {
+          processMock.stdout.emit('data', JSON.stringify(output));
+          processMock.emit('close', 0);
+        });
+      });
+      processMock.stdin = stdin;
+
+      (spawn as jest.Mock).mockReturnValue(processMock);
+    };
+
+    it('returns cross-sell metadata and reuses the 24-hour cache', async () => {
+      let cachedCrossSell: any = null;
+      const pythonOutput = {
+        rules: [
+          {
+            itemA: 'Latte',
+            itemB: 'Dog Treats',
+            antecedents: ['Latte'],
+            consequents: ['Dog Treats'],
+            antecedentSectors: ['cafe'],
+            consequentSectors: ['retail'],
+            support: 0.8,
+            confidence: 0.9,
+            lift: 1.5,
+            isMultiItem: false,
+            crossSector: true,
+          },
+        ],
+        bundleCandidates: [
+          {
+            anchorItem: 'Latte',
+            bundleItem: 'Grooming',
+            anchorVelocity: 'fast',
+            bundleVelocity: 'slow',
+            opportunityScore: 0.42,
+            isLowAssociation: true,
+          },
+        ],
+        totalBaskets: 10,
+        multiItemBaskets: 10,
+      };
+
+      crossSellCacheModel.findOne.mockImplementation(() => ({
+        sort: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockImplementation(async () => cachedCrossSell),
+      }));
+      crossSellCacheModel.create.mockImplementation(async (payload) => {
+        cachedCrossSell = payload;
+        return payload;
+      });
+      transactionModel.aggregate
+        .mockResolvedValueOnce(syntheticBaskets())
+        .mockResolvedValueOnce([
+          {
+            totalLineItems: 25,
+            totalRevenue: 2500,
+            totalTransactions: 10,
+            uniqueItemCount: 3,
+          },
+        ])
+        .mockResolvedValueOnce([
+          { _id: 13, transactions: 10 },
+          { _id: 14, transactions: 4 },
+        ])
+        .mockResolvedValueOnce([
+          { sector: 'Cafe', lineItems: 10, transactionCount: 10 },
+          { sector: 'Retail', lineItems: 10, transactionCount: 10 },
+          { sector: 'Services', lineItems: 5, transactionCount: 5 },
+        ]);
+      mockPythonSpawn(pythonOutput);
+
+      const first = await service.getCrossSell();
+      const second = await service.getCrossSell();
+
+      expect(first.rules).toEqual(expect.any(Array));
+      expect(first.bundleCandidates).toEqual(expect.any(Array));
+      expect(first).toEqual(
+        expect.objectContaining({
+          crossSectorBaskets: expect.any(Number),
+          crossSectorRate: expect.any(Number),
+        }),
+      );
+      expect(second.cached).toBe(true);
+      expect(spawn).toHaveBeenCalledTimes(1);
+      expect(transactionModel.aggregate).toHaveBeenCalledTimes(4);
     });
   });
 });

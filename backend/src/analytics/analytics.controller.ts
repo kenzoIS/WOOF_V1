@@ -36,7 +36,76 @@ export class AnalyticsController {
   }
 
   @Get('cross-sell')
-  async getCrossSell() {
-    return this.analyticsService.getCrossSell();
+  async getCrossSell(
+    @Query('minSupport') minSupport?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('minLift') minLift?: string,
+    @Query('maxBundleCandidates') maxBundleCandidates?: string,
+    @Query('hour') hour?: string,
+    @Query('forceRefresh') forceRefresh?: string,
+  ) {
+    return this.analyticsService.getCrossSell({
+      minSupport,
+      minConfidence,
+      minLift,
+      maxBundleCandidates,
+      hour,
+      forceRefresh,
+    });
+  }
+
+  @Get('cross-sell/config')
+  async getCrossSellConfig(
+    @Query('minSupport') minSupport?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('minLift') minLift?: string,
+    @Query('maxBundleCandidates') maxBundleCandidates?: string,
+    @Query('hour') hour?: string,
+  ) {
+    return this.analyticsService.getCrossSellConfig({
+      minSupport,
+      minConfidence,
+      minLift,
+      maxBundleCandidates,
+      hour,
+    });
+  }
+
+  @Get('cross-sell/by-sector')
+  async getCrossSellBySector(
+    @Query('minSupport') minSupport?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('minLift') minLift?: string,
+    @Query('maxBundleCandidates') maxBundleCandidates?: string,
+    @Query('hour') hour?: string,
+    @Query('forceRefresh') forceRefresh?: string,
+  ) {
+    return this.analyticsService.getCrossSellBySector({
+      minSupport,
+      minConfidence,
+      minLift,
+      maxBundleCandidates,
+      hour,
+      forceRefresh,
+    });
+  }
+
+  @Get('cross-sell/bundles')
+  async getCrossSellBundles(
+    @Query('minSupport') minSupport?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('minLift') minLift?: string,
+    @Query('maxBundleCandidates') maxBundleCandidates?: string,
+    @Query('hour') hour?: string,
+    @Query('forceRefresh') forceRefresh?: string,
+  ) {
+    return this.analyticsService.getCrossSellBundles({
+      minSupport,
+      minConfidence,
+      minLift,
+      maxBundleCandidates,
+      hour,
+      forceRefresh,
+    });
   }
 }

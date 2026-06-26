@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map, Zap } from "lucide-react";
-import { KPICard } from "../components/KPICard";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
+import { getCrossSell } from "../lib/api";
 import aiMascot from "../../imports/no_bg_AI.png";
 import {
   BarChart,
@@ -24,45 +24,114 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 
-// Strategic Proximity Recommendations
-const proximityRecommendations = [
-  {
-    pairing: "Dog Shampoo + Dog Toothbrushes",
-    score: 92,
-    advice: "Position these items in the same aisle or on adjacent end-caps to maximize impulse purchases.",
-    color: "#3AE4FA",
-  },
-  {
-    pairing: "Pet Treats + Chew Toys",
-    score: 87,
-    advice: "Position these items in the same aisle or on adjacent end-caps to maximize impulse purchases.",
-    color: "#A78BFA",
-  },
-  {
-    pairing: "Dog Collar + Leash",
-    score: 94,
-    advice: "Position these items in the same aisle or on adjacent end-caps to maximize impulse purchases.",
-    color: "#3AE4FA",
-  },
-  {
-    pairing: "Food Bowls + Treat Containers",
-    score: 78,
-    advice: "Position these items in the same aisle or on adjacent end-caps to maximize impulse purchases.",
-    color: "#A78BFA",
-  },
-  {
-    pairing: "Pet Grooming Wipes + Paw Balm",
-    score: 83,
-    advice: "Position these items in the same aisle or on adjacent end-caps to maximize impulse purchases.",
-    color: "#3AE4FA",
-  },
-  {
-    pairing: "Dog Toys + Training Treats",
-    score: 89,
-    advice: "Position these items in the same aisle or on adjacent end-caps to maximize impulse purchases.",
-    color: "#A78BFA",
-  },
-];
+interface CrossSellRule {
+  itemA: string;
+  itemB: string;
+  antecedents?: string[];
+  consequents?: string[];
+  antecedentSectors?: string[];
+  consequentSectors?: string[];
+  support: number;
+  confidence: number;
+  lift: number;
+  cooccurrences?: number;
+  isMultiItem?: boolean;
+  crossSector?: boolean;
+}
+
+interface BundleCandidate {
+  anchorItem: string;
+  bundleItem: string;
+  itemA?: string;
+  itemB?: string;
+  anchorVelocity?: string;
+  bundleVelocity?: string;
+  anchorSupport?: number;
+  bundleSupport?: number;
+  pairSupport?: number;
+  confidence: number;
+  lift: number;
+  cooccurrences?: number;
+  opportunityScore?: number;
+  reason?: string;
+  antecedentSectors?: string[];
+  consequentSectors?: string[];
+  crossSector?: boolean;
+  isLowAssociation?: boolean;
+}
+
+interface ItemMetric {
+  item: string;
+  sector: string;
+  sectors?: string[];
+  support: number;
+  basketCount: number;
+  velocity: "fast" | "moderate" | "slow";
+}
+
+interface HourlyTransactionVolume {
+  hour: number;
+  label: string;
+  transactions: number;
+}
+
+interface CrossSellResponse {
+  rules?: CrossSellRule[];
+  bundleCandidates?: BundleCandidate[];
+  itemMetrics?: ItemMetric[];
+  rawAnalysis?: {
+    totalTransactions?: number;
+    totalLineItems?: number;
+    uniqueItemCount?: number;
+    totalRevenue?: number;
+    selectedHour?: number | null;
+    multiItemBaskets?: number;
+    avgItemsPerBasket?: number;
+    crossSectorBasketRate?: number;
+    peakHour?: HourlyTransactionVolume | null;
+    hourlyTransactionVolume?: HourlyTransactionVolume[];
+    sectorMix?: Array<{
+      sector: string;
+      lineItems: number;
+      transactionCount: number;
+    }>;
+  };
+  totalBaskets?: number;
+  multiItemBaskets?: number;
+  crossSectorRate?: number;
+  cached?: boolean;
+  message?: string;
+  error?: string;
+}
+
+const sectorColors: Record<string, string> = {
+  cafe: "#D2B48C",
+  retail: "#F59E0B",
+  services: "#0D9488",
+  service: "#0D9488",
+  unknown: "#A78BFA",
+};
+
+const slugify = (value: string) =>
+  value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+
+const formatPercent = (value?: number) =>
+  `${Math.round((value || 0) * 100)}%`;
+
+const formatPair = (left: string, right: string) => `${left} + ${right}`;
+
+const firstSector = (sectors?: string[]) => sectors?.[0] || "unknown";
+
+const formatSector = (sector?: string) => {
+  const value = sector || "unknown";
+  if (value === "cafe") return "Cafe";
+  if (value === "retail") return "Retail";
+  if (value === "services" || value === "service") return "Services";
+  return "Unknown";
+};
+
+const formatSectorPair = (sectors: string[]) =>
+  sectors.map(formatSector).join(" + ");
 
 export function AISimulation() {
   const [activeTab, setActiveTab] = useState("bundle-simulator");
@@ -71,9 +140,12 @@ export function AISimulation() {
   const [dataTime, setDataTime] = useState([13]); // 1 PM for Bundle Simulator
 
   // Live Behavioral Web states
-  const [supportThreshold, setSupportThreshold] = useState([35]);
-  const [confidenceLevel, setConfidenceLevel] = useState([65]);
-  const [fpGrowthTime, setFpGrowthTime] = useState([14]); // Time slider for FP-Growth
+  const [supportThreshold, setSupportThreshold] = useState([5]);
+  const [confidenceLevel, setConfidenceLevel] = useState([60]);
+  const [fpGrowthTime, setFpGrowthTime] = useState([13]); // Time slider for FP-Growth
+  const [crossSellData, setCrossSellData] = useState<CrossSellResponse | null>(null);
+  const [crossSellLoading, setCrossSellLoading] = useState(false);
+  const [crossSellError, setCrossSellError] = useState<string | null>(null);
 
   // Scenario Builder states
   const [scenarioName, setScenarioName] = useState("Weekend Promo Campaign");
@@ -97,6 +169,48 @@ export function AISimulation() {
     });
   };
 
+  const handleBundleTimeChange = (value: number[]) => {
+    setDataTime(value);
+    setFpGrowthTime(value);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setCrossSellLoading(true);
+    setCrossSellError(null);
+
+    getCrossSell({
+      minSupport: (supportThreshold[0] / 100).toFixed(2),
+      minConfidence: (confidenceLevel[0] / 100).toFixed(2),
+      minLift: "1.20",
+      maxBundleCandidates: "20",
+      hour: String(dataTime[0]),
+    })
+      .then((result: CrossSellResponse) => {
+        if (!cancelled) {
+          setCrossSellData(result);
+          if (result.error) {
+            setCrossSellError(result.error);
+          }
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setCrossSellError(error.message);
+          setCrossSellData(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCrossSellLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supportThreshold, confidenceLevel, dataTime]);
+
   const handleRunSimulation = () => {
     toast.info("Running simulation...", {
       description: "Calculating optimal pricing and demand scenarios...",
@@ -115,124 +229,233 @@ export function AISimulation() {
     return `${value}:00 AM`;
   };
 
+  const rules = crossSellData?.rules || [];
+  const bundleCandidates = crossSellData?.bundleCandidates || [];
+  const itemMetrics = crossSellData?.itemMetrics || [];
+  const rawAnalysis = crossSellData?.rawAnalysis;
+  const avgRuleLift =
+    rules.length > 0
+      ? rules.reduce((sum, rule) => sum + (rule.lift || 0), 0) / rules.length
+      : 0;
+  const avgRuleConfidence =
+    rules.length > 0
+      ? rules.reduce((sum, rule) => sum + (rule.confidence || 0), 0) / rules.length
+      : 0;
+  const peakHourLabel = rawAnalysis?.peakHour?.label || "No data";
+  const maxCoPurchaseFrequency = Math.max(
+    1,
+    ...rules.map((rule) => rule.cooccurrences || 0),
+  );
+
   // Transaction volume data based on time selection
   const transactionVolumeData = useMemo(() => {
-    const selectedHour = dataTime[0];
-    return Array.from({ length: 12 }, (_, i) => {
-      const hour = i + 7; // 7 AM to 6 PM
-      const isSelected = hour === selectedHour;
-      const baseVolume = 40 + Math.random() * 30;
-      const peakBoost = hour >= 12 && hour <= 15 ? 20 : 0;
+    const rows = rawAnalysis?.hourlyTransactionVolume || [];
+    return Array.from({ length: 13 }, (_, i) => {
+      const hour = i + 7; // 7 AM to 7 PM
+      const row = rows.find((item) => item.hour === hour);
       return {
         hour: formatHour(hour),
-        transactions: baseVolume + peakBoost + (isSelected ? 10 : 0),
-        selected: isSelected,
+        transactions: row?.transactions || 0,
+        selected: hour === dataTime[0],
       };
     });
-  }, [dataTime]);
+  }, [dataTime, rawAnalysis]);
 
   // Co-purchase patterns based on time
   const coPurchaseData = useMemo(() => {
-    const timeMultiplier = dataTime[0] >= 14 && dataTime[0] <= 16 ? 1.3 : 1;
-    return [
-      { pair: "Latte + Grooming", frequency: Math.floor(45 * timeMultiplier) },
-      { pair: "Cappuccino + Spa", frequency: Math.floor(38 * timeMultiplier) },
-      { pair: "Food + Toy", frequency: Math.floor(32 * timeMultiplier) },
-      { pair: "Treats + Shampoo", frequency: Math.floor(28 * timeMultiplier) },
-      { pair: "Collar + Leash", frequency: Math.floor(24 * timeMultiplier) },
-    ];
-  }, [dataTime]);
+    return rules
+      .slice()
+      .sort((a, b) => (b.cooccurrences || 0) - (a.cooccurrences || 0))
+      .slice(0, 5)
+      .map((rule) => ({
+        pair: formatPair(rule.itemA, rule.itemB),
+        frequency: rule.cooccurrences || 0,
+      }));
+  }, [rules]);
 
   // Bundle predictions based on time analysis
   const bundlePredictions = useMemo(() => {
-    const timeBoost = dataTime[0] >= 14 && dataTime[0] <= 16 ? 5 : 0;
-    return [
-      {
-        bundle: "Cappuccino + Grooming",
-        confidence: 87 + timeBoost,
-        lift: 4250,
-        margin: 68,
-        frequency: coPurchaseData[0].frequency,
-      },
-      {
-        bundle: "Latte + Pet Spa",
-        confidence: 82 + timeBoost,
-        lift: 3800,
-        margin: 72,
-        frequency: coPurchaseData[1].frequency,
-      },
-      {
-        bundle: "Smoothie + Bath",
-        confidence: 79 + timeBoost,
-        lift: 2100,
-        margin: 65,
-        frequency: 28,
-      },
-      {
-        bundle: "Pastry + Paw-dicure",
-        confidence: 74 + timeBoost,
-        lift: 1850,
-        margin: 55,
-        frequency: 22,
-      },
-    ];
-  }, [dataTime, coPurchaseData]);
+    const lowAssociation = bundleCandidates.map((candidate) => ({
+      bundle: formatPair(candidate.anchorItem, candidate.bundleItem),
+      confidence: Math.round((candidate.confidence || 0) * 100),
+      lift: candidate.lift || 0,
+      score: Math.round((candidate.opportunityScore || 0) * 100),
+      frequency: candidate.cooccurrences || 0,
+      type: "Fast + Slow opportunity",
+      sectors: [
+        firstSector(candidate.antecedentSectors),
+        firstSector(candidate.consequentSectors),
+      ],
+      sectorPair: formatSectorPair([
+        firstSector(candidate.antecedentSectors),
+        firstSector(candidate.consequentSectors),
+      ]),
+      reason:
+        candidate.reason ||
+        "Fast-moving item paired with a slower-moving item that is not already strongly associated.",
+    }));
+    const significantRules = rules.map((rule) => ({
+      bundle: formatPair(rule.itemA, rule.itemB),
+      confidence: Math.round((rule.confidence || 0) * 100),
+      lift: rule.lift || 0,
+      score: Math.round(Math.min(99, (rule.lift || 0) * 35)),
+      frequency: rule.cooccurrences || 0,
+      type: rule.isMultiItem ? "Multi-item FP-Growth rule" : "Significant FP-Growth rule",
+      sectors: [
+        firstSector(rule.antecedentSectors),
+        firstSector(rule.consequentSectors),
+      ],
+      sectorPair: formatSectorPair([
+        firstSector(rule.antecedentSectors),
+        firstSector(rule.consequentSectors),
+      ]),
+      reason: "Significant association rule mined from ingested transaction baskets.",
+    }));
+
+    return [...lowAssociation, ...significantRules]
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          b.confidence - a.confidence ||
+          b.lift - a.lift,
+      )
+      .slice(0, 8);
+  }, [bundleCandidates, rules]);
+
+  const proximityRecommendations = useMemo(() => {
+    return bundlePredictions.slice(0, 6).map((bundle, index) => {
+      const color =
+        sectorColors[bundle.sectors[0]] ||
+        sectorColors[bundle.sectors[1]] ||
+        sectorColors.unknown;
+      const sameSector =
+        bundle.sectors[0] !== "unknown" && bundle.sectors[0] === bundle.sectors[1];
+      const advice = sameSector
+        ? `Place these ${bundle.sectorPair.toLowerCase()} offers in the same shelf, menu, or service zone to increase discovery inside an already active category.`
+        : `Place ${bundle.bundle} near the transition between ${bundle.sectorPair} touchpoints so the stronger purchase intent can expose the slower-moving offer.`;
+
+      return {
+        pairing: bundle.bundle,
+        advice,
+        score: Math.max(1, Math.min(100, bundle.score || bundle.confidence || 0)),
+        color,
+        sectorPair: bundle.sectorPair,
+        rank: index + 1,
+      };
+    });
+  }, [bundlePredictions]);
 
   // Live Behavioral Web Network Data - Responsive to AI Controls
   const networkNodes = useMemo(() => {
-    const timeMultiplier = fpGrowthTime[0] >= 14 && fpGrowthTime[0] <= 16 ? 1.3 : 1;
-    const confidenceFilter = confidenceLevel[0] / 100;
     const supportFilter = supportThreshold[0] / 100;
+    const nodeSource: ItemMetric[] = itemMetrics.length
+      ? itemMetrics
+      : Array.from(
+          new globalThis.Map<string, ItemMetric>(
+            rules.flatMap((rule) => [
+              [
+                rule.itemA,
+                {
+                  item: rule.itemA,
+                  sector: firstSector(rule.antecedentSectors),
+                  support: rule.support || 0,
+                  basketCount: rule.cooccurrences || 0,
+                  velocity: "moderate" as const,
+                },
+              ],
+              [
+                rule.itemB,
+                {
+                  item: rule.itemB,
+                  sector: firstSector(rule.consequentSectors),
+                  support: rule.support || 0,
+                  basketCount: rule.cooccurrences || 0,
+                  velocity: "moderate" as const,
+                },
+              ],
+            ]),
+          ).values(),
+        );
 
-    const baseNodes = [
-      { id: "iced-latte", name: "Iced Latte", category: "cafe", frequency: 92 * timeMultiplier, color: "#D2B48C" },
-      { id: "grooming", name: "Full Grooming", category: "service", frequency: 87 * timeMultiplier, color: "#0D9488" },
-      { id: "treats", name: "Pet Treats", category: "retail", frequency: 68 * timeMultiplier, color: "#F59E0B" },
-      { id: "shampoo", name: "Dog Shampoo", category: "retail", frequency: 54 * timeMultiplier, color: "#F59E0B" },
-      { id: "cappuccino", name: "Cappuccino", category: "cafe", frequency: 76 * timeMultiplier, color: "#D2B48C" },
-      { id: "toys", name: "Chew Toys", category: "retail", frequency: 61 * timeMultiplier, color: "#F59E0B" },
-    ];
-
-    // Filter based on support threshold
-    return baseNodes.filter(node => (node.frequency / 100) >= supportFilter);
-  }, [fpGrowthTime, confidenceLevel, supportThreshold]);
+    return nodeSource
+      .filter((node) => (node.support || 0) >= supportFilter)
+      .slice(0, 10)
+      .map((node, index, source) => {
+        const angle = (Math.PI * 2 * index) / Math.max(source.length, 1) - Math.PI / 2;
+        const radius = source.length <= 4 ? 150 : 180;
+        const sector = (node.sector || "unknown").toLowerCase();
+        return {
+          id: slugify(node.item),
+          name: node.item,
+          category: sector,
+          frequency: Math.round((node.support || 0) * 100),
+          basketCount: node.basketCount,
+          color: sectorColors[sector] || sectorColors.unknown,
+          x: 300 + Math.cos(angle) * radius,
+          y: 240 + Math.sin(angle) * radius,
+        };
+      });
+  }, [itemMetrics, rules, supportThreshold]);
 
   const networkConnections = useMemo(() => {
     const confidenceFilter = confidenceLevel[0];
     const supportFilter = supportThreshold[0];
+    const nodeIds = new Set(networkNodes.map((node) => node.id));
 
-    const allConnections = [
-      { source: "iced-latte", target: "grooming", confidence: 92, support: 45, lift: 2.5 },
-      { source: "cappuccino", target: "grooming", confidence: 88, support: 42, lift: 2.3 },
-      { source: "treats", target: "shampoo", confidence: 76, support: 35, lift: 1.8 },
-      { source: "iced-latte", target: "treats", confidence: 71, support: 38, lift: 1.6 },
-      { source: "toys", target: "treats", confidence: 68, support: 32, lift: 1.5 },
-      { source: "cappuccino", target: "toys", confidence: 64, support: 28, lift: 1.4 },
-    ];
-
-    // Filter connections based on thresholds
-    return allConnections.filter(
-      conn => conn.confidence >= confidenceFilter && conn.support >= supportFilter
-    );
-  }, [confidenceLevel, supportThreshold]);
+    return rules
+      .map((rule) => ({
+        source: slugify(rule.itemA),
+        target: slugify(rule.itemB),
+        sourceName: rule.itemA,
+        targetName: rule.itemB,
+        confidence: Math.round((rule.confidence || 0) * 100),
+        support: Math.round((rule.support || 0) * 100),
+        lift: rule.lift || 0,
+        cooccurrences: rule.cooccurrences || 0,
+        crossSector: Boolean(rule.crossSector),
+      }))
+      .filter(
+        (conn) =>
+          nodeIds.has(conn.source) &&
+          nodeIds.has(conn.target) &&
+          conn.confidence >= confidenceFilter &&
+          conn.support >= supportFilter,
+      )
+      .sort(
+        (a, b) =>
+          b.confidence - a.confidence ||
+          b.lift - a.lift ||
+          b.cooccurrences - a.cooccurrences,
+      );
+  }, [confidenceLevel, networkNodes, rules, supportThreshold]);
 
   // Top AI Insights from network analysis
   const topInsights = useMemo(() => {
     const topConnection = networkConnections.length > 0 ? networkConnections[0] : null;
-    const topNode = networkNodes.length > 0 ? networkNodes[0] : null;
+    const topBundle = bundlePredictions[0];
+    const crossSectorConnection = networkConnections.find((conn) => conn.crossSector);
+    const crossSectorBundle = bundlePredictions.find(
+      (bundle) => bundle.sectors[0] !== bundle.sectors[1],
+    );
 
     return {
       topBundle: topConnection
-        ? `${topConnection.source.replace(/-/g, " ")} + ${topConnection.target.replace(/-/g, " ")}`
+        ? formatPair(topConnection.sourceName, topConnection.targetName)
         : "No patterns detected",
       bundleConfidence: topConnection ? topConnection.confidence : 0,
       bundleLift: topConnection ? topConnection.lift : 0,
-      emergingTrend: "Pet Treats + Shampoo",
-      trendGrowth: "+47%",
-      crossSell: "Café → Grooming",
-      crossSellRate: "72%",
+      emergingTrend: topBundle?.bundle || "No bundle candidates",
+      trendGrowth: topBundle ? `${topBundle.score}% score` : "0% score",
+      crossSell: crossSectorConnection
+        ? formatPair(crossSectorConnection.sourceName, crossSectorConnection.targetName)
+        : crossSectorBundle?.bundle || "No cross-sector pattern",
+      crossSellRate: crossSectorConnection
+        ? `${crossSectorConnection.confidence}%`
+        : crossSectorBundle
+          ? `${crossSectorBundle.confidence}%`
+          : "0%",
     };
-  }, [networkConnections, networkNodes]);
+  }, [bundlePredictions, networkConnections]);
 
   // Dynamic pricing data based on discount slider
   const pricingScenarios = useMemo(() => {
@@ -381,8 +604,8 @@ export function AISimulation() {
               <FlaskConical className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Active Simulations</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">4</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">FP-Growth Rules</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{rules.length}</div>
             </div>
           </div>
 
@@ -392,8 +615,8 @@ export function AISimulation() {
               <Target className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Deployed Bundles</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">127</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">Bundle Candidates</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{bundleCandidates.length}</div>
             </div>
           </div>
 
@@ -403,8 +626,8 @@ export function AISimulation() {
               <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Lift Prediction</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">89%</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Rule Lift</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{avgRuleLift.toFixed(2)}x</div>
             </div>
           </div>
 
@@ -414,8 +637,8 @@ export function AISimulation() {
               <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Confidence Score</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">92%</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Confidence</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{formatPercent(avgRuleConfidence)}</div>
             </div>
           </div>
         </div>
@@ -442,6 +665,22 @@ export function AISimulation() {
       {/* TAB CONTENT */}
       {activeTab === "bundle-simulator" && (
         <div className="space-y-4 md:space-y-6 lg:space-y-8">
+          {(crossSellLoading || crossSellError || crossSellData?.message) && (
+            <div className="bg-white border border-[#FFD9EC] rounded-xl md:rounded-2xl p-3 md:p-4">
+              <div className="text-sm font-semibold text-[#223047]">
+                {crossSellLoading
+                  ? "Loading live FP-Growth analysis..."
+                  : crossSellError
+                    ? "Cross-sell analysis unavailable"
+                    : crossSellData?.message}
+              </div>
+              {(crossSellError || crossSellData?.message) && (
+                <div className="text-xs text-[#223047] opacity-60 mt-1">
+                  Upload more multi-item transaction data or adjust the support and confidence thresholds.
+                </div>
+              )}
+            </div>
+          )}
           {/* Raw Transaction Data Sources */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -468,7 +707,7 @@ export function AISimulation() {
               <div className="relative">
                 <Slider
                   value={dataTime}
-                  onValueChange={setDataTime}
+                  onValueChange={handleBundleTimeChange}
                   max={19}
                   min={7}
                   step={1}
@@ -522,6 +761,11 @@ export function AISimulation() {
                   </Badge>
                 </div>
                 <div className="space-y-3">
+                  {coPurchaseData.length === 0 && (
+                    <div className="text-sm text-[#223047] opacity-60">
+                      No significant co-purchase rules detected for this hour and threshold.
+                    </div>
+                  )}
                   {coPurchaseData.map((item, idx) => (
                     <div key={idx} className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
@@ -531,7 +775,7 @@ export function AISimulation() {
                       <div className="h-2 bg-[#FFD9EC] rounded-full overflow-hidden">
                         <div
                           className="h-full bg-gradient-to-r from-[#F53799] to-[#3AE4FA] transition-all"
-                          style={{ width: `${(item.frequency / coPurchaseData[0].frequency) * 100}%` }}
+                          style={{ width: `${(item.frequency / maxCoPurchaseFrequency) * 100}%` }}
                         />
                       </div>
                     </div>
@@ -544,15 +788,19 @@ export function AISimulation() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 pt-3 md:pt-4 border-t border-[#FFD9EC]">
               <div className="p-3 md:p-4 bg-gradient-to-br from-[#F53799]/10 to-[#F53799]/5 border border-[#F53799]/20 rounded-lg md:rounded-xl text-center">
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Peak Transaction Hour</div>
-                <div className="text-base md:text-lg font-bold text-[#F53799]">2:00 PM</div>
+                <div className="text-base md:text-lg font-bold text-[#F53799]">{peakHourLabel}</div>
               </div>
               <div className="p-3 md:p-4 bg-gradient-to-br from-[#3AE4FA]/10 to-[#3AE4FA]/5 border border-[#3AE4FA]/20 rounded-lg md:rounded-xl text-center">
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Avg. Items per Cart</div>
-                <div className="text-base md:text-lg font-bold text-[#3AE4FA]">3.2</div>
+                <div className="text-base md:text-lg font-bold text-[#3AE4FA]">
+                  {(rawAnalysis?.avgItemsPerBasket || 0).toFixed(1)}
+                </div>
               </div>
               <div className="p-3 md:p-4 bg-gradient-to-br from-[#D42A7D]/10 to-[#D42A7D]/5 border border-[#D42A7D]/20 rounded-lg md:rounded-xl text-center">
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Cross-Category %</div>
-                <div className="text-base md:text-lg font-bold text-[#D42A7D]">68%</div>
+                <div className="text-base md:text-lg font-bold text-[#D42A7D]">
+                  {formatPercent(rawAnalysis?.crossSectorBasketRate)}
+                </div>
               </div>
             </div>
           </div>
@@ -615,18 +863,8 @@ export function AISimulation() {
                       const targetNode = networkNodes.find(n => n.id === conn.target);
                       if (!sourceNode || !targetNode) return null;
 
-                      // Position calculation - well-contained within viewBox
-                      const positions: Record<string, {x: number, y: number}> = {
-                        "iced-latte": { x: 120, y: 100 },
-                        "grooming": { x: 480, y: 100 },
-                        "cappuccino": { x: 120, y: 280 },
-                        "treats": { x: 300, y: 380 },
-                        "shampoo": { x: 480, y: 280 },
-                        "toys": { x: 300, y: 190 },
-                      };
-
-                      const sourcePos = positions[conn.source] || { x: 200, y: 200 };
-                      const targetPos = positions[conn.target] || { x: 400, y: 200 };
+                      const sourcePos = { x: sourceNode.x, y: sourceNode.y };
+                      const targetPos = { x: targetNode.x, y: targetNode.y };
 
                       // Line thickness based on confidence (2-12px)
                       const thickness = 2 + (conn.confidence / 100) * 10;
@@ -651,16 +889,7 @@ export function AISimulation() {
 
                     {/* Product Nodes - Varying sizes based on frequency */}
                     {networkNodes.map((node) => {
-                      const positions: Record<string, {x: number, y: number}> = {
-                        "iced-latte": { x: 120, y: 100 },
-                        "grooming": { x: 480, y: 100 },
-                        "cappuccino": { x: 120, y: 280 },
-                        "treats": { x: 300, y: 380 },
-                        "shampoo": { x: 480, y: 280 },
-                        "toys": { x: 300, y: 190 },
-                      };
-
-                      const pos = positions[node.id] || { x: 300, y: 240 };
+                      const pos = { x: node.x, y: node.y };
                       // Node size based on frequency (28-58px radius)
                       const radius = 28 + (node.frequency / 100) * 30;
 
@@ -695,7 +924,7 @@ export function AISimulation() {
                             className="text-xs font-bold pointer-events-none"
                             fill="#223047"
                           >
-                            {node.name.split(" ").map((word, i) => (
+                            {node.name.split(" ").map((word: string, i: number) => (
                               <tspan key={i} x={pos.x} dy={i === 0 ? 0 : 14}>
                                 {word}
                               </tspan>
@@ -868,12 +1097,14 @@ export function AISimulation() {
                   </div>
                   <div>
                     <span className="text-[#223047] opacity-60">Lift:</span>
-                    <span className="ml-1 font-bold text-[#F53799]">{topInsights.bundleLift}×</span>
+                    <span className="ml-1 font-bold text-[#F53799]">{topInsights.bundleLift.toFixed(2)}x</span>
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-[#F53799]/20">
                   <div className="text-xs text-green-600 font-semibold">
-                    ↑ +{Math.round(topInsights.bundleLift * 100 - 100)}% revenue potential
+                    {topInsights.bundleLift > 0
+                      ? `${Math.max(0, Math.round(topInsights.bundleLift * 100 - 100))}% association lift over baseline`
+                      : "No association lift detected"}
                   </div>
                 </div>
               </div>
@@ -889,11 +1120,11 @@ export function AISimulation() {
                   {topInsights.emergingTrend}
                 </div>
                 <div className="text-sm text-[#223047] opacity-60 mb-3">
-                  Fastest growing pattern this week
+                  Highest-ranked model opportunity
                 </div>
                 <div className="mt-3 pt-3 border-t border-[#3AE4FA]/20">
                   <div className="text-xs text-green-600 font-semibold">
-                    ↑ {topInsights.trendGrowth} week-over-week growth
+                    {topInsights.trendGrowth} model score
                   </div>
                 </div>
               </div>
@@ -909,7 +1140,7 @@ export function AISimulation() {
                   {topInsights.crossSell}
                 </div>
                 <div className="text-sm text-[#223047] opacity-60 mb-3">
-                  High conversion pathway detected
+                  Cross-sector or cross-category pathway detected
                 </div>
                 <div className="mt-3 pt-3 border-t border-[#D42A7D]/20">
                   <div className="text-xs font-semibold text-[#D42A7D]">
@@ -940,7 +1171,7 @@ export function AISimulation() {
               <div className="relative">
                 <Slider
                   value={fpGrowthTime}
-                  onValueChange={setFpGrowthTime}
+                  onValueChange={handleBundleTimeChange}
                   max={19}
                   min={7}
                   step={1}
@@ -974,6 +1205,11 @@ export function AISimulation() {
             </div>
 
             <div className="grid gap-3 md:gap-4">
+              {bundlePredictions.length === 0 && (
+                <div className="p-4 md:p-6 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl text-sm text-[#223047] opacity-70">
+                  No bundle opportunities were detected for the selected hour and thresholds. Try lowering support or confidence to inspect weaker patterns.
+                </div>
+              )}
               {bundlePredictions.map((bundle, idx) => (
                 <div
                   key={idx}
@@ -985,20 +1221,26 @@ export function AISimulation() {
                       <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs">
                         {bundle.confidence}% Confidence
                       </Badge>
+                      <Badge variant="outline" className="text-xs border-[#F53799] text-[#F53799]">
+                        {bundle.sectorPair}
+                      </Badge>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-6 text-xs md:text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-6 text-xs md:text-sm mb-2">
                       <div>
-                        <span className="text-[#223047] opacity-60">Expected Lift:</span>
-                        <span className="ml-2 font-bold text-[#F53799]">+₱{bundle.lift.toLocaleString()}</span>
+                        <span className="text-[#223047] opacity-60">Lift:</span>
+                        <span className="ml-2 font-bold text-[#F53799]">{bundle.lift.toFixed(2)}x</span>
                       </div>
                       <div>
-                        <span className="text-[#223047] opacity-60">Margin:</span>
-                        <span className="ml-2 font-semibold text-[#223047]">{bundle.margin}%</span>
+                        <span className="text-[#223047] opacity-60">Opportunity:</span>
+                        <span className="ml-2 font-semibold text-[#223047]">{bundle.score}%</span>
                       </div>
                       <div>
                         <span className="text-[#223047] opacity-60">Co-occurrence:</span>
                         <span className="ml-2 font-semibold text-[#223047]">{bundle.frequency} times</span>
                       </div>
+                    </div>
+                    <div className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
+                      {bundle.type}: {bundle.reason}
                     </div>
                   </div>
                   <Button
@@ -1034,6 +1276,11 @@ export function AISimulation() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
+              {proximityRecommendations.length === 0 && (
+                <div className="lg:col-span-2 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 text-sm text-[#223047] opacity-70">
+                  No proximity recommendations are available for the selected hour. The placement advice will appear once FP-Growth rules or bundle candidates are detected from the ingested baskets.
+                </div>
+              )}
               {proximityRecommendations.map((rec, idx) => (
                 <div
                   key={idx}
@@ -1084,7 +1331,9 @@ export function AISimulation() {
                     </Badge>
                   </div>
                   <p className="text-xs md:text-sm text-[#223047] opacity-80 italic" style={{ lineHeight: "1.6" }}>
-                    High-synergy pairings (85%+) demonstrate strong correlation in purchase patterns. Strategic proximity placement can increase basket size by 18-32% and improve customer discovery of complementary products.
+                    {proximityRecommendations.length > 0
+                      ? `${proximityRecommendations.length} placement recommendations were generated from live FP-Growth rules and low-association bundle opportunities for ${formatHour(dataTime[0])}. Same-sector and cross-sector pairs are both included when the ingested baskets support them.`
+                      : `No placement recommendation is currently available for ${formatHour(dataTime[0])}; adjust thresholds or select a busier transaction hour to inspect weaker patterns.`}
                   </p>
                 </div>
                 <img

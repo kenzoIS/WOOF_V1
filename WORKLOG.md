@@ -2,6 +2,164 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-06-26 - Upload Service Backend Recovery
+
+### Issue
+
+- The frontend showed: `Upload service is not connected`.
+- The UI reported: `Backend unavailable. Check that MongoDB is configured and the backend is running on port 3001.`
+
+### Diagnosis
+
+- Port `3001` was not listening initially.
+- `backend/.env` existed and contained the expected configuration keys; secret values were not printed.
+- Running the backend inside the sandbox failed before MongoDB startup because Nest attempted to update generated `dist` files and hit a filesystem `EPERM` unlink error.
+
+### Resolution
+
+- Started the Nest backend in watch mode outside the sandbox restriction as a hidden background process.
+- Backend logs are written to ignored local files:
+  - `backend/backend-dev.out.log`
+  - `backend/backend-dev.err.log`
+
+### Verification
+
+- Backend started successfully on `http://localhost:3001`.
+- MongoDB connected successfully through Mongoose.
+- Verified `GET http://localhost:3001/api/csv/metrics` returns live uploaded data:
+  - `5677` records
+  - `2269` transactions
+  - `8618` quantity
+  - `1605712` revenue
+  - `1` upload
+- Verified frontend proxy `GET http://localhost:3000/backend-api/csv/metrics` reaches the backend successfully.
+
+## 2026-06-26 - Live FP-Growth Bundle Simulator Integration
+
+### Requested
+
+- Fully implement the cross-selling and FP-Growth engine into the AI Simulation module's Bundle Simulator.
+- Ensure Bundle Simulator data is no longer static and reflects ingested transaction data.
+- Wire live model output into:
+  - Raw Transaction Data Analysis
+  - Live Behavioral Web / FP-Growth Pattern Detection Engine
+  - AI-Predicted Bundle Opportunities
+  - Strategic Proximity Recommendations
+- Ensure AI-predicted bundle opportunities are not limited to Product + Services, and can include Product + Product, Services + Services, and cross-sector pairings when supported by ingested baskets.
+- Log all changes in this worklog.
+
+### Backend Changes
+
+- Extended the cross-sell analytics response used by the AI Simulation module with live raw-analysis data:
+  - Selected hour filtering through `hour`.
+  - Hourly transaction volume from ingested transaction timestamps.
+  - Total transactions, line items, revenue, unique item count, multi-item basket count, average items per basket, cross-sector basket rate, peak hour, and sector mix.
+- Added upload-state-aware cross-sell cache invalidation so cached FP-Growth results are bypassed when CSV uploads change.
+- Preserved paper-compliant FP-Growth significant rules while also returning low-association `bundleCandidates` and `itemMetrics` for simulator visualizations.
+- Updated the cross-sell service spec to mock the raw-analysis aggregate pipelines and verify cache reuse still prevents a second Python execution.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx` so the Bundle Simulator now consumes `getCrossSell()` live data with selected hour, support, confidence, lift, and max bundle candidate query parameters.
+- Replaced static Bundle Simulator KPIs with live values:
+  - FP-Growth rule count
+  - Bundle candidate count
+  - Average rule lift
+  - Average confidence
+- Raw Transaction Data Analysis now renders live hourly transaction volume, live top co-purchases, peak hour, average items per cart, and cross-category rate.
+- Live Behavioral Web now positions nodes from actual `itemMetrics` / rule items instead of fixed demo product coordinates.
+- Top insight cards now use the strongest live rule, top model opportunity, and strongest live cross-sector/cross-category pattern.
+- AI-Predicted Bundle Opportunities now lists both significant FP-Growth rules and low-association bundle candidates, including same-sector and cross-sector pairings.
+- Strategic Proximity Recommendations now derive placement advice from live model-ranked bundle opportunities instead of static pairings.
+- Added loading/error/insufficient-data states for the Bundle Simulator.
+
+### Verification
+
+- Passed: `python src\analytics\python\test_cross_sell.py` (`6` tests).
+- Passed: `npm test -- --testPathPatterns=analytics.service.spec --runInBand` (`5` tests).
+- Passed: `npx tsc --noEmit --pretty false` for the frontend.
+- Passed: `npm run build` for the NestJS backend.
+
+## 2026-06-26 - FP-Growth Cross-Selling Hardening and Bundle Candidate Engine
+
+### Requested
+
+- Align the FP-Growth cross-selling implementation with the paper thresholds:
+  support >= `0.05`, confidence >= `0.60`, and lift >= `1.20`.
+- Add configurable thresholds, validation, cross-sector rule metadata, multi-item handling, and caching.
+- Add cross-sell controller endpoints for rules, config, and sector-filtered output.
+- Add tests for the Python FP-Growth script and NestJS service cache behavior.
+- Clarify whether the analytics models are implemented in actual system features or only placeholders.
+- Make the cross-selling engine support practical low-association bundles, specifically fast-moving items paired with slow-moving items.
+- Continue recording future system changes in this worklog.
+
+### Backend Changes
+
+- Updated `backend/src/analytics/python/cross_sell.py` to:
+  - Accept either the existing basket-list payload or an object payload containing `baskets`, `minSupport`, `minConfidence`, `minLift`, and `maxBundleCandidates`.
+  - Default thresholds to support `0.05`, confidence `0.60`, and lift `1.20`.
+  - Filter association rules by confidence and lift after rule generation.
+  - Return up to `50` significant rules sorted by lift, then confidence.
+  - Preserve full `antecedents` and `consequents` arrays while continuing to expose `itemA` and `itemB` for dashboard-friendly pair display.
+  - Flag multi-item rules with `isMultiItem`.
+  - Clean invalid basket items, including empty strings, `null`, and null-character values, and report `cleanedItems`.
+  - Infer product sectors from transaction item-sector pairs where available, then tag each rule with `antecedentSectors`, `consequentSectors`, and `crossSector`.
+  - Add `bundleCandidates` for low-association merchandising opportunities: fast-moving anchor items paired with slower-moving items that do not already meet the significant association thresholds.
+- Updated `backend/src/analytics/analytics.service.ts` to:
+  - Pass threshold configuration to Python.
+  - Use the shared Python command resolution path with `.venv`, platform fallback, and `PYTHON_PATH` override support.
+  - Add resilient handling for failed or invalid Python output, returning an empty rules payload instead of throwing through the request path.
+  - Add 24-hour MongoDB-backed cache support for cross-sell results, keyed by thresholds.
+  - Add sector grouping for dashboard display.
+  - Add `getCrossSellConfig()`, `getCrossSellBySector()`, and `getCrossSellBundles()`.
+- Added `backend/src/analytics/schemas/cross-sell-cache.schema.ts` with computed time, rules, bundle candidates, basket counts, cross-sector rate, computation duration, thresholds, and indexes.
+- Registered the cross-sell cache schema in `backend/src/analytics/analytics.module.ts`.
+- Updated `backend/src/analytics/analytics.controller.ts` endpoints:
+  - `GET /analytics/cross-sell`
+  - `GET /analytics/cross-sell/config`
+  - `GET /analytics/cross-sell/by-sector`
+  - `GET /analytics/cross-sell/bundles`
+- Added `mlxtend` to `backend/requirements.txt`.
+
+### Frontend/API Changes
+
+- Updated `frontend/src/app/lib/api.ts` with query-aware wrappers for:
+  - `getCrossSell()`
+  - `getCrossSellConfig()`
+  - `getCrossSellBySector()`
+  - `getCrossSellBundles()`
+- AI Simulation Bundle Simulator was later wired to the live cross-sell endpoints in the `2026-06-26 - Live FP-Growth Bundle Simulator Integration` entry below. Behavioral Bridges still contains static/demo cross-sell text unless separately wired.
+
+### Tests Added
+
+- Added `backend/src/analytics/python/test_cross_sell.py` with coverage for:
+  - Valid rule shape and required output fields.
+  - Insufficient basket handling.
+  - Threshold filtering.
+  - High support filtering.
+  - Empty/null item cleanup.
+  - Fast-moving-to-slow-moving low-association bundle candidates.
+- Updated `backend/src/analytics/analytics.service.spec.ts` to mock cross-sell basket aggregation, Python spawn output, cache writes, and cache-hit reuse.
+
+### Implementation Status
+
+- The backend cross-selling engine is implemented as a live feature, not a placeholder.
+- The live backend feature is available through the analytics module and API endpoints listed above.
+- Frontend consumption is available through API wrappers. AI Simulation Bundle Simulator now consumes the live endpoints; Behavioral Bridges still contains static/demo cross-sell text unless separately wired.
+- Forecasting models are also implemented as live backend and frontend features:
+  - Cafe forecast: `GET /analytics/forecast/cafe`, Cafe dashboard forecast and simulator.
+  - Services forecast: `GET /analytics/forecast/services`, Services dashboard forecast and simulator.
+  - Retail descriptive analytics: `GET /analytics/dashboard/retail` and `GET /analytics/forecast-by-channel/retail`; Retail forecasting/prediction UI was intentionally removed.
+  - Weather and exogenous diagnostics: `GET /analytics/weather/current`, `GET /analytics/exogenous/status`, Header weather display, and Settings diagnostics.
+
+### Verification
+
+- Passed: `python src\analytics\python\test_cross_sell.py` (`6` tests).
+- Passed: `npm test -- --testPathPatterns=analytics.service.spec --runInBand` (`5` tests).
+- Passed: `npm run build` for the NestJS backend.
+- Passed: `npx tsc --noEmit --pretty false` for the frontend API wrapper changes.
+- Note: Jest 30 uses `--testPathPatterns`; the older requested `--testPathPattern` flag is no longer accepted.
+
 ## 2026-06-14 - Next.js Missing Chunk Recovery
 
 ### Issue

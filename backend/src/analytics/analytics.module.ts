@@ -7,6 +7,10 @@ import {
   ForecastRun,
   ForecastRunSchema,
 } from './schemas/forecast-run.schema';
+import {
+  CrossSellCache,
+  CrossSellCacheSchema,
+} from './schemas/cross-sell-cache.schema';
 import { CsvUpload, CsvUploadSchema } from '../csv/schemas/csv-upload.schema';
 import { CommonModule } from '../common/common.module';
 
@@ -16,6 +20,7 @@ import { CommonModule } from '../common/common.module';
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },
       { name: ForecastRun.name, schema: ForecastRunSchema },
+      { name: CrossSellCache.name, schema: CrossSellCacheSchema },
       { name: CsvUpload.name, schema: CsvUploadSchema },
     ]),
   ],
