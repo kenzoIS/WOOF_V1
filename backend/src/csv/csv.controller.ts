@@ -12,13 +12,15 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CsvService } from './csv.service';
 
+const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
+
 @Controller('csv')
 export class CsvController {
   constructor(private readonly csvService: CsvService) {}
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', {
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+    limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
   }))
   async uploadCsv(
     @UploadedFile() file: Express.Multer.File,
@@ -44,7 +46,7 @@ export class CsvController {
   @Post('historical/:module')
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: 50 * 1024 * 1024 },
+      limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
     }),
   )
   async uploadHistoricalCsv(

@@ -49,6 +49,7 @@ export const CrossSellCacheSchema =
   SchemaFactory.createForClass(CrossSellCache);
 
 CrossSellCacheSchema.index({ computedAt: -1 });
+CrossSellCacheSchema.index({ computedAt: 1 }, { expireAfterSeconds: 86400 });
 CrossSellCacheSchema.index({
   'thresholds.minSupport': 1,
   'thresholds.minConfidence': 1,

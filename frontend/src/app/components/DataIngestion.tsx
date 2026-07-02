@@ -72,6 +72,7 @@ export function DataIngestion() {
     } catch (err: any) {
       setConnectionError(err.message);
       toast.error("Upload failed", { description: err.message });
+      await refreshData();
     } finally {
       setUploading(false);
     }
@@ -119,7 +120,7 @@ export function DataIngestion() {
 
       {connectionError && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <div className="font-semibold">Upload service is not connected</div>
+          <div className="font-semibold">Upload needs attention</div>
           <div className="mt-1">{connectionError}</div>
         </div>
       )}
@@ -193,6 +194,9 @@ export function DataIngestion() {
           <Upload className={`w-8 h-8 mx-auto mb-3 ${uploading ? "animate-bounce text-[#F53799]" : "text-[#223047] opacity-40"}`} />
           <p className="text-sm font-semibold text-[#223047]">
             {uploading ? "Processing..." : "Drop CSV/Excel file here or click to browse"}
+          </p>
+          <p className="text-xs text-[#223047] opacity-50 mt-1">
+            Maximum upload size: 100 MB
           </p>
           <p className="text-xs text-[#223047] opacity-50 mt-1">
             Uploading as <span className="font-bold text-[#F53799]">{selectedChannel}</span>

@@ -366,7 +366,8 @@ def run_cross_sell(baskets, config=None):
             }
 
         rules = rules[
-            (rules["confidence"] >= min_confidence)
+            (rules["support"] >= min_support)
+            & (rules["confidence"] >= min_confidence)
             & (rules["lift"] >= min_lift)
         ]
 

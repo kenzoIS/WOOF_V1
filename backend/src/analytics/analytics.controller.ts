@@ -5,6 +5,11 @@ import { AnalyticsService } from './analytics.service';
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
+  @Get('home')
+  async getHomeOverview(@Query('range') range?: string) {
+    return this.analyticsService.getHomeOverview(range);
+  }
+
   @Get('dashboard/:sector')
   async getDashboard(@Param('sector') sector: string) {
     return this.analyticsService.getDashboard(sector);

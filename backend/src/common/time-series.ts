@@ -2,6 +2,7 @@ export type ForecastModule = 'Cafe' | 'Services';
 
 export interface DailyValue {
   date: string;
+  /** Physical demand volume: items sold for Cafe/Retail, bookings for Services. */
   actual: number;
   orders: number;
 }

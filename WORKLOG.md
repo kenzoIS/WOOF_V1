@@ -2,6 +2,110 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-03 - Home Module Live Ingested Data Integration
+
+### Requested
+
+- Fix the Home module so KPI cards, charts, insights, and suggestions reflect actual ingested transaction data instead of hard-coded/demo values.
+
+### Backend Changes
+
+- Added `GET /api/analytics/home?range=today|week|month|custom`.
+- Implemented `AnalyticsService.getHomeOverview()` backed by the `transactions` collection.
+- The Home overview now returns:
+  - Revenue, orders, quantity, line-item count, average order value, and period-over-period changes.
+  - Busiest sector from actual sector revenue.
+  - Omnichannel revenue series split into Cafe, Services, Retail, and Online.
+  - Offline vs. online category balance.
+  - Sales-intensity heatmap values from actual transaction timestamps.
+  - Data-driven suggestions and next action from top items, sector performance, and channel balance.
+- Anchored dashboard date windows to the latest ingested transaction date so historical CSVs still produce meaningful Home KPIs.
+
+### Frontend Changes
+
+- Added `getHomeOverview()` API client.
+- Updated `frontend/src/app/pages/Home.tsx` to consume live Home analytics.
+- Replaced hard-coded KPI values, busiest sector, pending count, WOOF insight, omnichannel chart data, chart legend totals, channel balance data, random heatmap values, suggestion cards, next scheduled action, and AI partner copy.
+- Removed demo suggestion fallback content; when no transaction data exists, the Home module now shows empty/live-data waiting states instead of sample recommendations.
+- Added a Home analytics error banner under the Data Ingestion Center.
+
+### Verification
+
+- Passed: `npx tsc --noEmit --pretty false` for the frontend.
+- Passed: `npx tsc --noEmit --pretty false` for the NestJS backend.
+- Verified live response from `GET http://localhost:3001/api/analytics/home?range=week`; it returned real uploaded-data KPIs such as `totalRevenue`, `totalOrders`, `busiestSector`, omnichannel series, heatmap rows, and generated suggestions.
+
+## 2026-07-02 - Large CSV Re-upload Error Follow-up
+
+### Issue
+
+- Re-uploading `HappyTails_5years.csv` still showed `Upload service is not connected` / `Backend unavailable`.
+- Live checks showed the backend and frontend proxy were both reachable while the error appeared.
+
+### Diagnosis
+
+- During the re-upload attempts, `/api/csv/metrics` briefly showed hundreds of thousands of inserted transaction rows, proving the upload was reaching the backend and MongoDB.
+- The upload attempts later rolled back to `0` rows and `0` uploads, which means the backend cleanup worked after a persistence failure.
+- The frontend message was misleading because long-running or interrupted large-upload requests were being labeled as a backend connection failure.
+
+### Changes
+
+- Updated `frontend/src/app/lib/api.ts` so CSV uploads post directly to the Nest backend at `http://localhost:3001/api` by default, bypassing the Next.js rewrite proxy for large multipart uploads.
+- Added `NEXT_PUBLIC_UPLOAD_API_URL` support for overriding the direct upload base URL when needed.
+- Updated `frontend/src/app/components/DataIngestion.tsx` to label upload errors as `Upload needs attention` instead of `Upload service is not connected`.
+- Refreshes metrics/uploads after upload errors so partial progress or rollback state is immediately reflected in the UI.
+- Hardened `backend/src/csv/csv.service.ts` by sanitizing transaction dates, required strings, and numeric fields immediately before chunked Mongo inserts.
+- Added backend logging for the exact chunk persistence failure if Mongo rejects a large upload again.
+
+### Verification
+
+- Passed: `npm test -- --testPathPatterns=csv.service.spec --runInBand`.
+- Passed: `npx tsc --noEmit --pretty false` for the NestJS backend.
+- Passed: `npx tsc --noEmit --pretty false` for the frontend.
+- Current database state after rollback: `0` uploads and `0` transaction rows, so the next upload should start cleanly.
+
+## 2026-07-02 - CSV Upload Limit and Large File Ingestion Fix
+
+### Requested
+
+- Increase accepted CSV upload size to `100 MB`.
+- Diagnose why the frontend displayed `Upload service is not connected` even though the backend appeared to be running.
+
+### Diagnosis
+
+- The backend and frontend proxy were reachable:
+  - `GET http://localhost:3001/api/csv/metrics`
+  - `GET http://localhost:3000/backend-api/csv/metrics`
+- The upload route was also reachable; a POST without a file returned `400 Bad Request`, confirming it was not a connection failure.
+- The large `HappyTails_5years.csv` upload created upload metadata records, but transaction metrics later showed `0` persisted transaction rows.
+- Root cause: the upload flow attempted to persist all parsed transaction rows in one large `insertMany()` call. For a 553k-row CSV, that can fail after the upload metadata has already been created, leaving dangling upload history records and causing the frontend to show a misleading generic backend-unavailable message.
+
+### Backend Changes
+
+- Raised multer upload limits in `backend/src/csv/csv.controller.ts` from `50 MB` to `100 MB` for:
+  - `POST /api/csv/upload`
+  - `POST /api/csv/historical/:module`
+- Updated `backend/src/csv/csv.service.ts` to insert parsed transactions in chunks of `5000` rows instead of one massive insert.
+- Added rollback behavior: if any transaction insert chunk fails, the service deletes partial transaction rows and removes the upload metadata record.
+- Returned clearer server errors when transaction persistence fails.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/components/DataIngestion.tsx` to display `Maximum upload size: 100 MB`.
+- Updated `frontend/src/app/lib/api.ts` so API errors first use the backend's actual error message, with a specific `Upload too large. Maximum supported file size is 100 MB.` message for `413` responses.
+- This prevents backend processing errors from being shown as the generic `Backend unavailable` message when the backend is actually reachable.
+
+### Verification
+
+- Passed: `npm test -- --testPathPatterns=csv.service.spec --runInBand` (`5` tests).
+- Passed: `npx tsc --noEmit --pretty false` for the frontend.
+- Passed: `npm run build` for the NestJS backend.
+- Restarted the backend on port `3001` and verified the frontend proxy still reaches `/backend-api/csv/metrics`.
+
+### Follow-up Note
+
+- Two `HappyTails_5years.csv` upload metadata records exist from failed pre-fix attempts, but transaction metrics show `0` rows. Delete those upload records from the UI before re-uploading, or clean them directly from the database if needed.
+
 ## 2026-06-26 - Upload Service Backend Recovery
 
 ### Issue

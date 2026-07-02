@@ -5,6 +5,13 @@ import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { getDashboard, getForecast, getRetailForecastByChannel } from "../lib/api";
+import {
+  HISTORY_START_DATE,
+  INGESTED_HISTORY_END_DATE,
+  filterByDateRange,
+  parseCustomRange,
+  parseGlobalRange,
+} from "../lib/dateRanges";
 import retailMascot from "../../imports/no_bg_Retail.png";
 import {
   BarChart,
@@ -113,6 +120,9 @@ export function Retail() {
   });
   const [reorderAttempts, setReorderAttempts] = useState(0);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+  const [channelRangeMode, setChannelRangeMode] = useState("last30days");
+  const [customChannelStart, setCustomChannelStart] = useState("2026-05-01");
+  const [customChannelEnd, setCustomChannelEnd] = useState(INGESTED_HISTORY_END_DATE);
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -128,6 +138,26 @@ export function Retail() {
       window.removeEventListener("globalDateRangeChanged", handleGlobalDateChange);
     };
   }, []);
+
+  useEffect(() => {
+    const customRange = parseCustomRange(globalDateRange);
+    if (customRange) {
+      setChannelRangeMode("custom");
+      setCustomChannelStart(customRange.start);
+      setCustomChannelEnd(
+        customRange.end > INGESTED_HISTORY_END_DATE
+          ? INGESTED_HISTORY_END_DATE
+          : customRange.end,
+      );
+      return;
+    }
+
+    if (globalDateRange === "last-30-days" || globalDateRange === "last-90-days" || globalDateRange === "last-12-months") {
+      setChannelRangeMode("last30days");
+    } else if (globalDateRange === "last-7-days" || globalDateRange === "today" || globalDateRange === "yesterday") {
+      setChannelRangeMode("last7days");
+    }
+  }, [globalDateRange]);
 
   // API data
   const [dashboardData, setDashboardData] = useState<any>(null);
@@ -158,20 +188,29 @@ export function Retail() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, vals]) => ({ day: date, ...vals }));
 
-    const sliceCount = (() => {
-      switch (globalDateRange) {
-        case "today": return 1;
-        case "yesterday": return 2;
-        case "last-7-days": return 7;
-        case "last-30-days": return 30;
-        case "last-90-days": return 90;
-        case "last-12-months": return 365;
-        default: return 45;
-      }
-    })();
+    if (channelRangeMode === "custom") {
+      return filterByDateRange(
+        sorted,
+        {
+          start: customChannelStart,
+          end:
+            customChannelEnd >= customChannelStart
+              ? customChannelEnd
+              : customChannelStart,
+          isCustom: true,
+        },
+      );
+    }
+
+    const sliceCount =
+      channelRangeMode === "last7days"
+        ? 7
+        : channelRangeMode === "last14days"
+          ? 14
+          : 30;
 
     return sorted.slice(-sliceCount);
-  }, [channelForecast, globalDateRange]);
+  }, [channelForecast, channelRangeMode, customChannelStart, customChannelEnd]);
 
   const kpis = dashboardData?.kpis || {};
   const aggregatedKpis = useMemo(() => {
@@ -180,19 +219,12 @@ export function Retail() {
         totalRevenue: kpis?.totalRevenue || 0,
       };
     }
-    const sliceCount = (() => {
-      switch (globalDateRange) {
-        case "today": return 1;
-        case "yesterday": return 2;
-        case "last-7-days": return 7;
-        case "last-30-days": return 30;
-        case "last-90-days": return 90;
-        case "last-12-months": return 365;
-        default: return channelForecast.physical.historical.length;
-      }
-    })();
-    const physSliced = channelForecast.physical.historical.slice(-sliceCount);
-    const onlineSliced = (channelForecast.online?.historical || []).slice(-sliceCount);
+    const latestHistoryDate =
+      channelForecast.physical.historical[channelForecast.physical.historical.length - 1]?.date ||
+      INGESTED_HISTORY_END_DATE;
+    const range = parseGlobalRange(globalDateRange, latestHistoryDate);
+    const physSliced = filterByDateRange(channelForecast.physical.historical, range);
+    const onlineSliced = filterByDateRange(channelForecast.online?.historical || [], range);
     const physRevenue = physSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
     const onlineRevenue = onlineSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
     return {
@@ -363,14 +395,62 @@ export function Retail() {
 
       {/* RETAIL REVENUE BY CHANNEL */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div>
-          <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-            Retail Revenue by Channel
-          </h2>
-          <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            Physical POS and e-commerce channel history. Shows the distribution of in-store sales versus online orders.
-          </p>
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+          <div>
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Retail Revenue by Channel
+            </h2>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              Physical POS and e-commerce channel history. Shows the distribution of in-store sales versus online orders.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["last30days", "Last 30 Days"],
+              ["last14days", "Last 14 Days"],
+              ["last7days", "Last 7 Days"],
+              ["custom", "Custom"],
+            ].map(([value, label]) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={channelRangeMode === value ? "default" : "outline"}
+                onClick={() => setChannelRangeMode(value)}
+                className={
+                  channelRangeMode === value
+                    ? "bg-[#D42A7D] hover:bg-[#F53799] text-xs"
+                    : "border-[#FFD9EC] hover:bg-[#FFF2FA] text-xs"
+                }
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
         </div>
+
+        {channelRangeMode === "custom" && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3">
+            <input
+              type="date"
+              min={HISTORY_START_DATE}
+              max={INGESTED_HISTORY_END_DATE}
+              value={customChannelStart}
+              onChange={(event) => setCustomChannelStart(event.target.value)}
+              className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#D42A7D]"
+            />
+            <input
+              type="date"
+              min={customChannelStart}
+              max={INGESTED_HISTORY_END_DATE}
+              value={customChannelEnd}
+              onChange={(event) => setCustomChannelEnd(event.target.value)}
+              className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#D42A7D]"
+            />
+            <span className="text-xs text-[#223047] opacity-60">
+              Retail is descriptive, so custom dates are limited to Mar 2021 through May 2026.
+            </span>
+          </div>
+        )}
 
         <ResponsiveContainer width="100%" height={280} className="md:!h-[360px]">
           <LineChart data={forecastData}>

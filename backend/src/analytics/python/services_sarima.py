@@ -19,6 +19,7 @@ EXOG_COLUMNS = [
     "isHoliday",
     "dayBeforeHoliday",
     "dayAfterHoliday",
+    "average_unit_price",
 ]
 
 
@@ -133,10 +134,7 @@ def build_forecast_exog(payload, forecast_days):
     matrix = build_exog_matrix(payload.get("exogenousForecast", []), forecast_days)
     if matrix is not None:
         return matrix
-    return np.asarray(
-        [[28.0, 0.0, 0.0, 0.0, 0.0] for _ in range(forecast_days)],
-        dtype=float,
-    )
+    return np.asarray([[28.0, 0.0, 0.0, 0.0, 0.0, 0.0] for _ in range(forecast_days)], dtype=float)
 
 
 def run(payload):
@@ -180,8 +178,8 @@ def run(payload):
     final_fit = fit_model(normalized, order, seasonal_order, exog)
     prediction = final_fit.get_forecast(steps=forecast_days, exog=forecast_exog)
     intervals = prediction.conf_int(alpha=0.2)
-    # The model is fit on EMA-normalized net sales, so predicted_mean is returned
-    # as-is in revenue units; downstream code treats normalized ~= revenue.
+    # The model is fit on EMA-normalized demand volume, so predicted_mean is
+    # returned as physical units/bookings. Currency is applied in NestJS.
     means = prediction.predicted_mean
     last_date = pd.to_datetime(frame["date"].iloc[-1])
 

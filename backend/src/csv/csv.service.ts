@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CsvUpload, CsvUploadDocument } from './schemas/csv-upload.schema';
@@ -42,6 +47,8 @@ function detectChannel(filename: string): string {
 
 @Injectable()
 export class CsvService {
+  private readonly logger = new Logger(CsvService.name);
+
   constructor(
     @InjectModel(CsvUpload.name) private csvUploadModel: Model<CsvUploadDocument>,
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
@@ -111,8 +118,19 @@ export class CsvService {
       channel,
     }));
 
-    if (transactionsWithUploadId.length > 0) {
-      await this.transactionModel.insertMany(transactionsWithUploadId, { ordered: false });
+    try {
+      await this.insertTransactionsInChunks(transactionsWithUploadId);
+    } catch (error) {
+      this.logger.error(
+        `Failed to persist ${transactionsWithUploadId.length} uploaded transactions for ${file.originalname}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      await this.rollbackUpload(uploadId);
+      throw new InternalServerErrorException(
+        `Failed to persist uploaded transactions: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
 
     return upload;
@@ -166,14 +184,26 @@ export class CsvService {
     } as any);
 
     const uploadId = (upload as any)._id as Types.ObjectId;
-    await this.transactionModel.insertMany(
-      parsed.transactions.map((transaction) => ({
+    const transactionsWithUploadId = parsed.transactions.map((transaction) => ({
         ...transaction,
         csvUploadId: uploadId,
         channel: 'POS',
-      })),
-      { ordered: false },
-    );
+      }));
+
+    try {
+      await this.insertTransactionsInChunks(transactionsWithUploadId);
+    } catch (error) {
+      this.logger.error(
+        `Failed to persist ${transactionsWithUploadId.length} historical transactions for ${file.originalname}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      await this.rollbackUpload(uploadId);
+      throw new InternalServerErrorException(
+        `Failed to persist historical transactions: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
 
     const dailyMap = new Map<
       string,
@@ -185,7 +215,7 @@ export class CsvService {
         actual: 0,
         transactionIds: new Set<string>(),
       };
-      current.actual += transaction.netSales || transaction.totalAmount || 0;
+      current.actual += transaction.quantity || 0;
       if (transaction.transactionId) {
         current.transactionIds.add(transaction.transactionId);
       }
@@ -676,6 +706,68 @@ export class CsvService {
 
   async getUploads(): Promise<CsvUploadDocument[]> {
     return this.csvUploadModel.find().sort({ uploadedAt: -1 }).exec();
+  }
+
+  private async insertTransactionsInChunks(
+    transactions: Partial<Transaction>[],
+  ): Promise<void> {
+    const chunkSize = 5000;
+    for (let index = 0; index < transactions.length; index += chunkSize) {
+      const chunk = transactions
+        .slice(index, index + chunkSize)
+        .map((transaction) => this.sanitizeTransaction(transaction));
+      if (chunk.length > 0) {
+        await this.transactionModel.insertMany(chunk, { ordered: false });
+      }
+    }
+  }
+
+  private sanitizeTransaction(
+    transaction: Partial<Transaction>,
+  ): Partial<Transaction> {
+    const fallbackDate = new Date();
+    const date =
+      transaction.date instanceof Date &&
+      Number.isFinite(transaction.date.getTime())
+        ? transaction.date
+        : fallbackDate;
+
+    return {
+      ...transaction,
+      date,
+      transactionId: this.safeRequiredString(
+        transaction.transactionId,
+        `imported-${date.getTime()}`,
+      ),
+      productName: this.safeRequiredString(
+        transaction.productName,
+        'Imported item',
+      ),
+      category: this.safeRequiredString(transaction.category, 'Uncategorized'),
+      sector: this.safeRequiredString(transaction.sector, 'Retail'),
+      channel: this.safeRequiredString(transaction.channel, 'POS'),
+      quantity: this.safeNumber(transaction.quantity, 1),
+      unitPrice: this.safeNumber(transaction.unitPrice, 0),
+      totalAmount: this.safeNumber(transaction.totalAmount, 0),
+      discount: this.safeNumber(transaction.discount, 0),
+      netSales: this.safeNumber(transaction.netSales, 0),
+    };
+  }
+
+  private safeRequiredString(value: unknown, fallback: string): string {
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text.length > 0 ? text : fallback;
+  }
+
+  private safeNumber(value: unknown, fallback: number): number {
+    const numberValue =
+      typeof value === 'number' ? value : Number.parseFloat(String(value));
+    return Number.isFinite(numberValue) ? numberValue : fallback;
+  }
+
+  private async rollbackUpload(uploadId: Types.ObjectId): Promise<void> {
+    await this.transactionModel.deleteMany({ csvUploadId: uploadId }).exec();
+    await this.csvUploadModel.findByIdAndDelete(uploadId).exec();
   }
 
   async deleteUpload(id: string): Promise<{ deleted: boolean }> {

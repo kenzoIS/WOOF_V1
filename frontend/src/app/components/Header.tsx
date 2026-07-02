@@ -13,6 +13,11 @@ import {
 } from "./ui/select";
 import { Button } from "./ui/button";
 import { getCurrentWeather } from "../lib/api";
+import {
+  HISTORY_START_DATE,
+  INGESTED_HISTORY_END_DATE,
+  encodeCustomRange,
+} from "../lib/dateRanges";
 
 interface Notification {
   id: string;
@@ -30,20 +35,38 @@ interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const router = useRouter();
   const [dateRange, setDateRange] = useState("last-7-days");
+  const [customStartDate, setCustomStartDate] = useState(HISTORY_START_DATE);
+  const [customEndDate, setCustomEndDate] = useState(INGESTED_HISTORY_END_DATE);
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange");
     if (saved) {
       setDateRange(saved);
+      if (saved.startsWith("custom:")) {
+        const [, start, end] = saved.split(":");
+        setCustomStartDate(start || HISTORY_START_DATE);
+        setCustomEndDate(end || INGESTED_HISTORY_END_DATE);
+      }
       // Dispatch immediately so page components mount with the correct value
       window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: saved }));
     }
   }, []);
 
   const handleDateRangeChange = (value: string) => {
+    if (value === "custom") {
+      setDateRange("custom");
+      return;
+    }
     setDateRange(value);
     localStorage.setItem("globalDateRange", value);
     window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: value }));
+  };
+
+  const applyCustomDateRange = () => {
+    const encoded = encodeCustomRange(customStartDate, customEndDate);
+    setDateRange(encoded);
+    localStorage.setItem("globalDateRange", encoded);
+    window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: encoded }));
   };
 
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -177,7 +200,10 @@ export function Header({ onMenuClick }: HeaderProps) {
         {/* Center: Global Date Range (hidden on small mobile) */}
         <div className="hidden md:flex items-center gap-2 flex-shrink-0 absolute left-1/2 -translate-x-1/2">
           <Calendar className="w-4 h-4 text-[#223047] opacity-50" />
-          <Select value={dateRange} onValueChange={handleDateRangeChange}>
+          <Select
+            value={dateRange.startsWith("custom:") ? "custom" : dateRange}
+            onValueChange={handleDateRangeChange}
+          >
             <SelectTrigger className="w-[160px] lg:w-[200px] border-[#FFD9EC] focus:ring-[#F53799]">
               <SelectValue />
             </SelectTrigger>
@@ -192,6 +218,35 @@ export function Header({ onMenuClick }: HeaderProps) {
             </SelectContent>
           </Select>
         </div>
+
+        {(dateRange === "custom" || dateRange.startsWith("custom:")) && (
+          <div className="hidden lg:flex items-center gap-2 absolute left-1/2 translate-x-[110px]">
+            <input
+              type="date"
+              min={HISTORY_START_DATE}
+              max={INGESTED_HISTORY_END_DATE}
+              value={customStartDate}
+              onChange={(event) => setCustomStartDate(event.target.value)}
+              className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+              title="Historical data starts on March 1, 2021"
+            />
+            <input
+              type="date"
+              min={customStartDate || HISTORY_START_DATE}
+              value={customEndDate}
+              onChange={(event) => setCustomEndDate(event.target.value)}
+              className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+              title="Descriptive panels stop at May 31, 2026; forecast panels may show later dates when available"
+            />
+            <Button
+              size="sm"
+              onClick={applyCustomDateRange}
+              className="h-9 bg-[#F53799] hover:bg-[#D42A7D] text-xs"
+            >
+              Apply
+            </Button>
+          </div>
+        )}
 
         {/* Right: Status Pills, Weather, Notifications, Avatar */}
         <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">

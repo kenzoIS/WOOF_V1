@@ -8,6 +8,15 @@ import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import servicesMascot from "../../imports/no_bg_Services-1.png";
 import { ForecastRun, getForecast } from "../lib/api";
 import {
+  HISTORY_START_DATE,
+  INGESTED_HISTORY_END_DATE,
+  addDays,
+  filterByDateRange,
+  forecastRangeFromHorizon,
+  parseCustomRange,
+  parseGlobalRange,
+} from "../lib/dateRanges";
+import {
   LineChart,
   Line,
   AreaChart,
@@ -72,6 +81,8 @@ export function Services() {
   });
 
   const [forecastRun, setForecastRun] = useState<ForecastRun | null>(null);
+  const [customForecastStart, setCustomForecastStart] = useState("2026-06-01");
+  const [customForecastEnd, setCustomForecastEnd] = useState("2026-06-30");
   const [weatherScenario, setWeatherScenario] = useState("default");
   const [holidayScenario, setHolidayScenario] = useState("default");
   const [isSimulating, setIsSimulating] = useState(false);
@@ -79,6 +90,32 @@ export function Services() {
   useEffect(() => {
     getForecast("services").then(setForecastRun).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const customRange = parseCustomRange(globalDateRange);
+    if (customRange) {
+      setViewMode("custom");
+      setCustomForecastStart(customRange.start);
+      setCustomForecastEnd(customRange.end);
+      return;
+    }
+
+    if (globalDateRange === "last-30-days" || globalDateRange === "last-90-days" || globalDateRange === "last-12-months") {
+      setViewMode("next30days");
+    } else if (globalDateRange === "last-7-days" || globalDateRange === "today" || globalDateRange === "yesterday") {
+      setViewMode("next7days");
+    }
+  }, [globalDateRange]);
+
+  useEffect(() => {
+    if (viewMode === "custom") return;
+    const latestHistoryDate =
+      forecastRun?.historical?.[forecastRun.historical.length - 1]?.date ||
+      INGESTED_HISTORY_END_DATE;
+    const defaultStart = addDays(latestHistoryDate, 1);
+    setCustomForecastStart(defaultStart);
+    setCustomForecastEnd(addDays(defaultStart, 29));
+  }, [forecastRun?.generatedAt, viewMode]);
 
   const handleApplySimulation = async () => {
     setIsSimulating(true);
@@ -132,31 +169,58 @@ export function Services() {
     if (!forecastRun?.historical?.length) {
       return [];
     }
-    const hist = forecastRun.historical.map((d, index) => ({
-      day: d.date,
-      actual: d.actual,
-      forecast: index === forecastRun.historical.length - 1 ? d.actual : null,
-    }));
+    const latestHistoryDate =
+      forecastRun.historical[forecastRun.historical.length - 1]?.date ||
+      INGESTED_HISTORY_END_DATE;
     const horizon =
       viewMode === "next7days" ? 7 : viewMode === "next14days" ? 14 : 30;
-    const fore = forecastRun.forecast.slice(0, horizon).map((d) => ({
+    const selectedRange =
+      viewMode === "custom"
+        ? {
+            start: customForecastStart,
+            end:
+              customForecastEnd >= customForecastStart
+                ? customForecastEnd
+                : customForecastStart,
+            isCustom: true,
+          }
+        : forecastRangeFromHorizon(latestHistoryDate, horizon);
+    const historyRange =
+      viewMode === "custom"
+        ? selectedRange
+        : {
+            start: addDays(latestHistoryDate, -29),
+            end: latestHistoryDate,
+            isCustom: false,
+          };
+    const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
+    const forecastRows = filterByDateRange(forecastRun.forecast, selectedRange);
+    const shouldAnchorForecast =
+      forecastRows.length > 0 &&
+      (historicalRows.length === 0 ||
+        historicalRows[historicalRows.length - 1]?.date !== latestHistoryDate);
+    const anchorRow = shouldAnchorForecast
+      ? forecastRun.historical[forecastRun.historical.length - 1]
+      : null;
+    const hist = [
+      ...historicalRows,
+      ...(anchorRow ? [anchorRow] : []),
+    ].map((d, index, rows) => ({
+      day: d.date,
+      actual: d.actual,
+      forecast:
+        (viewMode !== "custom" || d.date === latestHistoryDate) &&
+        index === rows.length - 1
+          ? d.actual
+          : null,
+    }));
+    const fore = forecastRows.map((d) => ({
       day: d.date,
       actual: null,
       forecast: d.forecast,
     }));
-    const sliceCount = (() => {
-      switch (globalDateRange) {
-        case "today": return 1;
-        case "yesterday": return 2;
-        case "last-7-days": return 7;
-        case "last-30-days": return 30;
-        case "last-90-days": return 90;
-        case "last-12-months": return 365;
-        default: return 30;
-      }
-    })();
-    return [...hist.slice(-sliceCount), ...fore];
-  }, [forecastRun, viewMode, globalDateRange]);
+    return [...hist, ...fore];
+  }, [forecastRun, viewMode, customForecastStart, customForecastEnd]);
 
   // Aggregated KPI values dynamically calculated from API history based on globalDateRange
   const aggregatedKpis = useMemo(() => {
@@ -168,18 +232,11 @@ export function Services() {
     if (!forecastRun?.historical?.length) {
       return defaultKpis;
     }
-    const sliceCount = (() => {
-      switch (globalDateRange) {
-        case "today": return 1;
-        case "yesterday": return 2;
-        case "last-7-days": return 7;
-        case "last-30-days": return 30;
-        case "last-90-days": return 90;
-        case "last-12-months": return 365;
-        default: return forecastRun.historical.length;
-      }
-    })();
-    const sliced = forecastRun.historical.slice(-sliceCount);
+    const latestHistoryDate =
+      forecastRun.historical[forecastRun.historical.length - 1]?.date ||
+      INGESTED_HISTORY_END_DATE;
+    const range = parseGlobalRange(globalDateRange, latestHistoryDate);
+    const sliced = filterByDateRange(forecastRun.historical, range);
     const totalRevenue = sliced.reduce((sum, d) => sum + d.actual, 0);
     const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || 0), 0);
     const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : (forecastRun?.kpis?.avgOrderValue || 0);
@@ -395,7 +452,7 @@ export function Services() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {["Next 30 Days", "Next 7 Days", "Next 14 Days"].map((view) => (
+            {["Next 30 Days", "Next 14 Days", "Next 7 Days", "Custom"].map((view) => (
               <Button
                 key={view}
                 size="sm"
@@ -412,6 +469,30 @@ export function Services() {
             ))}
           </div>
         </div>
+
+        {viewMode === "custom" && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3">
+            <input
+              type="date"
+              min={HISTORY_START_DATE}
+              max={forecastRun?.forecast?.[forecastRun.forecast.length - 1]?.date || addDays(INGESTED_HISTORY_END_DATE, 30)}
+              value={customForecastStart}
+              onChange={(event) => setCustomForecastStart(event.target.value)}
+              className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#3AE4FA]"
+            />
+            <input
+              type="date"
+              min={customForecastStart}
+              max={forecastRun?.forecast?.[forecastRun.forecast.length - 1]?.date || addDays(INGESTED_HISTORY_END_DATE, 30)}
+              value={customForecastEnd}
+              onChange={(event) => setCustomForecastEnd(event.target.value)}
+              className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#3AE4FA]"
+            />
+            <span className="text-xs text-[#223047] opacity-60">
+              History begins Mar 2021; dates after May 2026 use forecast points when available.
+            </span>
+          </div>
+        )}
 
         <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
           <LineChart data={bookingForecastData}>

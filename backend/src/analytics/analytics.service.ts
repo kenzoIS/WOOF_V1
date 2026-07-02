@@ -49,6 +49,11 @@ interface ModelResult {
     forecast: number;
     confidenceLow?: number;
     confidenceHigh?: number;
+    forecastQuantity?: number;
+    projectedNetSales?: number;
+    projectedGrossProfit?: number;
+    unitPrice?: number;
+    unitCost?: number;
   }[];
   fittedValues?: number[];
   modelMetadata?: Record<string, unknown>;
@@ -62,6 +67,8 @@ interface CrossSellOptions {
   hour?: number | string;
   forceRefresh?: boolean | string;
 }
+
+type HomeRange = 'today' | 'week' | 'month' | 'custom';
 
 @Injectable()
 export class AnalyticsService {
@@ -81,6 +88,178 @@ export class AnalyticsService {
   /**
    * Get dashboard KPIs for a given sector
    */
+  async getHomeOverview(range = 'week'): Promise<any> {
+    const normalizedRange = this.normalizeHomeRange(range);
+    const latestRows = await this.transactionModel.aggregate([
+      { $group: { _id: null, latestDate: { $max: '$date' } } },
+    ]);
+    const latestDate = latestRows[0]?.latestDate
+      ? new Date(latestRows[0].latestDate)
+      : null;
+
+    if (!latestDate || Number.isNaN(latestDate.getTime())) {
+      return this.emptyHomeOverview(normalizedRange);
+    }
+
+    const { start, end, previousStart, previousEnd } =
+      this.getHomeDateWindow(normalizedRange, latestDate);
+    const dateFilter = { date: { $gte: start, $lte: end } };
+    const previousDateFilter = {
+      date: { $gte: previousStart, $lte: previousEnd },
+    };
+
+    const [
+      currentTotals,
+      previousTotals,
+      sectorTotals,
+      channelTotals,
+      series,
+      channelBalance,
+      heatmap,
+      topItems,
+    ] = await Promise.all([
+      this.aggregateHomeTotals(dateFilter),
+      this.aggregateHomeTotals(previousDateFilter),
+      this.transactionModel.aggregate([
+        { $match: dateFilter },
+        {
+          $group: {
+            _id: '$sector',
+            revenue: { $sum: '$netSales' },
+            orders: { $addToSet: '$transactionId' },
+          },
+        },
+        { $addFields: { orderCount: { $size: '$orders' } } },
+      ]),
+      this.transactionModel.aggregate([
+        { $match: dateFilter },
+        {
+          $group: {
+            _id: '$channel',
+            revenue: { $sum: '$netSales' },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      this.aggregateHomeSeries(dateFilter, normalizedRange),
+      this.transactionModel.aggregate([
+        { $match: dateFilter },
+        {
+          $group: {
+            _id: '$category',
+            physical: {
+              $sum: {
+                $cond: [{ $eq: ['$channel', 'POS'] }, '$netSales', 0],
+              },
+            },
+            online: {
+              $sum: {
+                $cond: [{ $ne: ['$channel', 'POS'] }, '$netSales', 0],
+              },
+            },
+          },
+        },
+        { $sort: { physical: -1, online: -1 } },
+        { $limit: 8 },
+      ]),
+      this.transactionModel.aggregate([
+        { $match: { date: { $gte: this.addDays(end, -6), $lte: end } } },
+        {
+          $project: {
+            sector: 1,
+            netSales: 1,
+            dayOfWeek: { $dayOfWeek: '$date' },
+            hour: { $hour: '$date' },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              dayOfWeek: '$dayOfWeek',
+              hourBucket: {
+                $subtract: ['$hour', { $mod: ['$hour', 2] }],
+              },
+              sector: '$sector',
+            },
+            revenue: { $sum: '$netSales' },
+          },
+        },
+      ]),
+      this.transactionModel.aggregate([
+        { $match: dateFilter },
+        {
+          $group: {
+            _id: {
+              productName: '$productName',
+              sector: '$sector',
+              category: '$category',
+            },
+            revenue: { $sum: '$netSales' },
+            quantity: { $sum: '$quantity' },
+            orders: { $addToSet: '$transactionId' },
+          },
+        },
+        { $addFields: { orderCount: { $size: '$orders' } } },
+        { $sort: { revenue: -1 } },
+        { $limit: 6 },
+      ]),
+    ]);
+
+    const sectorSummary = this.formatHomeSectorSummary(sectorTotals);
+    const channelSummary = this.formatHomeChannelSummary(channelTotals);
+    const totalRevenue = currentTotals.totalRevenue;
+    const totalOrders = currentTotals.totalOrders;
+    const busiestSector =
+      [...sectorSummary].sort((a, b) => b.revenue - a.revenue)[0]?.sector ||
+      'None';
+    const suggestions = this.buildHomeSuggestions({
+      sectorSummary,
+      channelSummary,
+      topItems,
+      totalRevenue,
+    });
+
+    return {
+      range: normalizedRange,
+      anchorDate: latestDate.toISOString(),
+      window: {
+        start: start.toISOString(),
+        end: end.toISOString(),
+      },
+      kpis: {
+        totalRevenue: this.round(totalRevenue),
+        totalOrders,
+        totalQuantity: currentTotals.totalQuantity,
+        totalItems: currentTotals.totalItems,
+        avgOrderValue: totalOrders
+          ? this.round(totalRevenue / totalOrders)
+          : 0,
+        revenueChangePercent: this.percentChange(
+          currentTotals.totalRevenue,
+          previousTotals.totalRevenue,
+        ),
+        ordersChangePercent: this.percentChange(
+          currentTotals.totalOrders,
+          previousTotals.totalOrders,
+        ),
+        busiestSector,
+        pendingSuggestions: suggestions.length,
+      },
+      insight: this.buildHomeInsight(sectorSummary, channelSummary, suggestions),
+      omnichannelSeries: this.formatHomeSeries(series, normalizedRange),
+      sectorSummary,
+      channelSummary,
+      channelBalance: channelBalance.map((row: any) => ({
+        category: row._id || 'Uncategorized',
+        physical: this.round(row.physical || 0),
+        online: this.round(row.online || 0),
+      })),
+      heatmap: this.formatHomeHeatmap(heatmap),
+      suggestions,
+      nextAction: suggestions[0] || null,
+    };
+  }
+
   async getDashboard(sector: string): Promise<any> {
     const normalizedSector =
       sector === 'all' ? 'all' : this.normalizeSector(sector);
@@ -267,7 +446,7 @@ export class AnalyticsService {
     const historical = normalizeDailySeries(
       dailyData.map((point: any) => ({
         date: point._id,
-        actual: point.revenue,
+        actual: point.quantity,
         orders: point.orderCount,
       })),
       module,
@@ -286,6 +465,8 @@ export class AnalyticsService {
             historical,
             forecastDays,
             overrides,
+            module,
+            dailyData,
           );
           exogenousPayload = servicesExogenous.payload;
           exogenousMetadata = servicesExogenous.metadata;
@@ -315,6 +496,11 @@ export class AnalyticsService {
       useFallback || !selectedModel
         ? this.buildSmaFallback(historical, forecastDays, rejectionReason)
         : selectedModel;
+    const priceCostMatrix = await this.getActivePriceCostMatrix(module);
+    const calibratedForecast = this.applyPriceCalibration(
+      finalModel.forecast,
+      priceCostMatrix,
+    );
     const payload = {
       module,
       modelName: finalModel.modelName,
@@ -324,7 +510,7 @@ export class AnalyticsService {
       isFallback: useFallback,
       rejectionReason: useFallback ? rejectionReason : undefined,
       historical: this.buildAnchoredHistoricalPayload(historical),
-      forecast: finalModel.forecast,
+      forecast: calibratedForecast,
       kpis: dashboard.kpis,
       topItems: dashboard.topItems,
       modelMetadata: {
@@ -333,6 +519,15 @@ export class AnalyticsService {
         missingDaysFilled: historical.filter((point) => point.isMissingDate)
           .length,
         sourceChannel: 'POS',
+        targetVariable: 'quantity_volume',
+        forecastUnit: module === 'Services' ? 'service_bookings' : 'items_sold',
+        priceCalibration: priceCostMatrix,
+        annualDemandQuantity: this.round(
+          calibratedForecast.reduce(
+            (sum, point) => sum + (point.forecastQuantity ?? point.forecast),
+            0,
+          ) * (365 / Math.max(calibratedForecast.length, 1)),
+        ),
         ...exogenousMetadata,
         ...(useFallback && selectedModel
           ? {
@@ -813,9 +1008,12 @@ export class AnalyticsService {
     hour?: number;
   } {
     return {
-      minSupport: this.parseThreshold(options.minSupport, 0.05),
-      minConfidence: this.parseThreshold(options.minConfidence, 0.6),
-      minLift: this.parseThreshold(options.minLift, 1.2),
+      minSupport: Math.max(this.parseThreshold(options.minSupport, 0.05), 0.05),
+      minConfidence: Math.max(
+        this.parseThreshold(options.minConfidence, 0.6),
+        0.6,
+      ),
+      minLift: Math.max(this.parseThreshold(options.minLift, 1.2), 1.2),
       maxBundleCandidates: this.parseThreshold(
         options.maxBundleCandidates,
         20,
@@ -1024,6 +1222,8 @@ export class AnalyticsService {
     historical: NormalizedDailyValue[],
     forecastDays: number,
     overrides?: { temp?: string; rain?: string; holiday?: string },
+    module?: ForecastModule,
+    dailyData: any[] = [],
   ): Promise<{
     payload: Record<string, unknown>;
     metadata: Record<string, unknown>;
@@ -1059,6 +1259,23 @@ export class AnalyticsService {
         weatherRecords,
         holidayRecords,
       );
+      const historicalPriceByDate = this.buildHistoricalUnitPriceMap(dailyData);
+      const defaultUnitPrice = await this.getCurrentUnitPriceFromTransactions(
+        historical[historical.length - 1]?.date,
+        module || 'Services',
+      );
+      const historicalExogenous = this.exogenousDataService
+        .buildExogenousMatrix(historicalDates, weatherRecords, holidayRecords)
+        .map((row) => ({
+          ...row,
+          average_unit_price:
+            historicalPriceByDate.get(row.date) ?? defaultUnitPrice,
+        }));
+      (
+        exogenousForecast as unknown as Array<Record<string, number | string>>
+      ).forEach((row) => {
+        row.average_unit_price = defaultUnitPrice;
+      });
 
       const metadata: Record<string, unknown> = {
         weatherDataSource: this.exogenousDataService.getLastWeatherSource(),
@@ -1095,11 +1312,7 @@ export class AnalyticsService {
 
       return {
         payload: {
-          exogenous: this.exogenousDataService.buildExogenousMatrix(
-            historicalDates,
-            weatherRecords,
-            holidayRecords,
-          ),
+          exogenous: historicalExogenous,
           exogenousForecast,
         },
         metadata,
@@ -1146,6 +1359,120 @@ export class AnalyticsService {
       orders,
       fitted: index === lastIndex ? actual : undefined,
     }));
+  }
+
+  private applyPriceCalibration(
+    forecast: ModelResult['forecast'],
+    matrix: {
+      unitPrice: number;
+      unitCost: number;
+      source: string;
+    },
+  ): ModelResult['forecast'] {
+    return forecast.map((point) => {
+      const forecastQuantity = this.round(Math.max(0, Number(point.forecast) || 0));
+      const confidenceLow =
+        point.confidenceLow === undefined
+          ? undefined
+          : this.round(Math.max(0, Number(point.confidenceLow) || 0));
+      const confidenceHigh =
+        point.confidenceHigh === undefined
+          ? undefined
+          : this.round(Math.max(0, Number(point.confidenceHigh) || 0));
+
+      return {
+        ...point,
+        forecast: forecastQuantity,
+        forecastQuantity,
+        confidenceLow,
+        confidenceHigh,
+        projectedNetSales: this.round(forecastQuantity * matrix.unitPrice),
+        projectedGrossProfit: this.round(
+          forecastQuantity * (matrix.unitPrice - matrix.unitCost),
+        ),
+        unitPrice: matrix.unitPrice,
+        unitCost: matrix.unitCost,
+      };
+    });
+  }
+
+  private async getActivePriceCostMatrix(module: ForecastModule): Promise<{
+    unitPrice: number;
+    unitCost: number;
+    source: string;
+  }> {
+    const rows = await this.transactionModel.aggregate([
+      {
+        $match: {
+          sector: module,
+          channel: 'POS',
+          date: { $gte: new Date('2026-01-01T00:00:00.000Z') },
+          unitPrice: { $gt: 0 },
+          quantity: { $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          weightedRevenue: { $sum: { $multiply: ['$unitPrice', '$quantity'] } },
+          quantity: { $sum: '$quantity' },
+        },
+      },
+    ]);
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    const unitPrice =
+      row?.quantity > 0 ? this.round(row.weightedRevenue / row.quantity) : 0;
+    const configuredCost = this.configService.get<string>(
+      `CURRENT_UNIT_COST_${module.toUpperCase()}`,
+    );
+    const parsedCost =
+      configuredCost === undefined ? NaN : Number(configuredCost);
+
+    return {
+      unitPrice,
+      unitCost: Number.isFinite(parsedCost) ? this.round(parsedCost) : 0,
+      source: unitPrice > 0 ? '2026_pos_weighted_average' : 'unavailable',
+    };
+  }
+
+  private buildHistoricalUnitPriceMap(dailyData: any[]): Map<string, number> {
+    const byDate = new Map<string, number>();
+    for (const point of dailyData) {
+      const quantity = Number(point.quantity) || 0;
+      const revenue = Number(point.revenue) || 0;
+      if (point._id && quantity > 0) {
+        byDate.set(point._id, this.round(revenue / quantity));
+      }
+    }
+    return byDate;
+  }
+
+  private async getCurrentUnitPriceFromTransactions(
+    anchorDate?: string,
+    module?: ForecastModule,
+  ): Promise<number> {
+    const minDate = anchorDate
+      ? new Date(`${anchorDate.slice(0, 4)}-01-01T00:00:00.000Z`)
+      : new Date('2026-01-01T00:00:00.000Z');
+    const rows = await this.transactionModel.aggregate([
+      {
+        $match: {
+          ...(module ? { sector: module, channel: 'POS' } : {}),
+          date: { $gte: minDate },
+          unitPrice: { $gt: 0 },
+          quantity: { $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          weightedRevenue: { $sum: { $multiply: ['$unitPrice', '$quantity'] } },
+          quantity: { $sum: '$quantity' },
+        },
+      },
+    ]);
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    return row?.quantity > 0 ? this.round(row.weightedRevenue / row.quantity) : 0;
   }
 
   private withForecastStartAnchor<T extends { historical?: any[]; modelMetadata?: Record<string, unknown> }>(
@@ -1336,6 +1663,286 @@ export class AnalyticsService {
       fittedValues,
       modelMetadata: { fallbackReason: reason, windowDays: 7 },
     };
+  }
+
+  private normalizeHomeRange(range: string): HomeRange {
+    const lower = range.toLowerCase();
+    if (lower === 'today') return 'today';
+    if (lower === 'month') return 'month';
+    if (lower === 'custom') return 'custom';
+    return 'week';
+  }
+
+  private getHomeDateWindow(range: HomeRange, latestDate: Date): {
+    start: Date;
+    end: Date;
+    previousStart: Date;
+    previousEnd: Date;
+  } {
+    const end = new Date(latestDate);
+    const start = new Date(latestDate);
+    start.setHours(0, 0, 0, 0);
+
+    const dayCount =
+      range === 'today' ? 1 : range === 'month' ? 30 : range === 'custom' ? 90 : 7;
+    if (dayCount > 1) {
+      start.setDate(start.getDate() - dayCount + 1);
+    }
+
+    const previousEnd = new Date(start);
+    previousEnd.setMilliseconds(previousEnd.getMilliseconds() - 1);
+    const previousStart = new Date(previousEnd);
+    previousStart.setDate(previousStart.getDate() - dayCount + 1);
+    previousStart.setHours(0, 0, 0, 0);
+
+    return { start, end, previousStart, previousEnd };
+  }
+
+  private async aggregateHomeTotals(match: Record<string, unknown>): Promise<{
+    totalRevenue: number;
+    totalOrders: number;
+    totalQuantity: number;
+    totalItems: number;
+  }> {
+    const rows = await this.transactionModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$netSales' },
+          totalOrders: { $addToSet: '$transactionId' },
+          totalQuantity: { $sum: '$quantity' },
+          totalItems: { $sum: 1 },
+        },
+      },
+    ]);
+    const row = rows[0];
+    return {
+      totalRevenue: Number(row?.totalRevenue) || 0,
+      totalOrders: Array.isArray(row?.totalOrders) ? row.totalOrders.length : 0,
+      totalQuantity: Number(row?.totalQuantity) || 0,
+      totalItems: Number(row?.totalItems) || 0,
+    };
+  }
+
+  private aggregateHomeSeries(
+    match: Record<string, unknown>,
+    range: HomeRange,
+  ): Promise<any[]> {
+    const groupId =
+      range === 'today'
+        ? {
+            hour: { $hour: '$date' },
+            sector: '$sector',
+            channel: '$channel',
+          }
+        : {
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+            sector: '$sector',
+            channel: '$channel',
+          };
+
+    return this.transactionModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: groupId,
+          revenue: { $sum: '$netSales' },
+        },
+      },
+      { $sort: range === 'today' ? { '_id.hour': 1 } : { '_id.date': 1 } },
+    ]);
+  }
+
+  private formatHomeSeries(rows: any[], range: HomeRange): any[] {
+    const points = new Map<string, any>();
+    for (const row of rows) {
+      const id = row._id || {};
+      const label =
+        range === 'today'
+          ? this.formatHourLabel(Number(id.hour) || 0)
+          : String(id.date || '');
+      if (!points.has(label)) {
+        points.set(label, { hour: label, cafe: 0, services: 0, retail: 0, online: 0 });
+      }
+      const point = points.get(label);
+      const revenue = this.round(Number(row.revenue) || 0);
+      if (id.channel && id.channel !== 'POS') {
+        point.online += revenue;
+      } else if (id.sector === 'Cafe') {
+        point.cafe += revenue;
+      } else if (id.sector === 'Services') {
+        point.services += revenue;
+      } else {
+        point.retail += revenue;
+      }
+    }
+
+    return Array.from(points.values()).map((point) => ({
+      ...point,
+      cafe: this.round(point.cafe),
+      services: this.round(point.services),
+      retail: this.round(point.retail),
+      online: this.round(point.online),
+    }));
+  }
+
+  private formatHomeSectorSummary(rows: any[]): any[] {
+    const sectors = ['Cafe', 'Services', 'Retail'];
+    return sectors.map((sector) => {
+      const row = rows.find((entry) => entry._id === sector);
+      return {
+        sector,
+        revenue: this.round(Number(row?.revenue) || 0),
+        orders: Number(row?.orderCount) || 0,
+      };
+    });
+  }
+
+  private formatHomeChannelSummary(rows: any[]): any[] {
+    return rows.map((row) => ({
+      channel: row._id || 'Unknown',
+      revenue: this.round(Number(row.revenue) || 0),
+      count: Number(row.count) || 0,
+    }));
+  }
+
+  private formatHomeHeatmap(rows: any[]): any[] {
+    const maxRevenue = Math.max(
+      1,
+      ...rows.map((row) => Number(row.revenue) || 0),
+    );
+    return rows.map((row) => ({
+      dayOfWeek: Number(row._id?.dayOfWeek) || 1,
+      hourBucket: Number(row._id?.hourBucket) || 0,
+      sector: row._id?.sector || 'Unknown',
+      revenue: this.round(Number(row.revenue) || 0),
+      intensity: this.round(((Number(row.revenue) || 0) / maxRevenue) * 100),
+    }));
+  }
+
+  private buildHomeSuggestions(input: {
+    sectorSummary: any[];
+    channelSummary: any[];
+    topItems: any[];
+    totalRevenue: number;
+  }): any[] {
+    const topSector = [...input.sectorSummary].sort(
+      (a, b) => b.revenue - a.revenue,
+    )[0];
+    const topItem = input.topItems[0];
+    const onlineRevenue = input.channelSummary
+      .filter((row) => row.channel !== 'POS')
+      .reduce((sum, row) => sum + row.revenue, 0);
+    const posRevenue = input.channelSummary
+      .filter((row) => row.channel === 'POS')
+      .reduce((sum, row) => sum + row.revenue, 0);
+
+    const suggestions: any[] = [];
+    if (topItem) {
+      const confidence = Math.min(
+        95,
+        Math.max(60, Math.round((topItem.revenue / Math.max(input.totalRevenue, 1)) * 100 + 60)),
+      );
+      suggestions.push({
+        id: 1,
+        title: `Promote ${topItem._id.productName}`,
+        trigger: 'Next high-traffic sales window',
+        discount: 'Targeted bundle or featured placement',
+        expectedLift: `+${this.formatPeso(topItem.revenue * 0.08)}`,
+        confidence: `${confidence}%`,
+        reason: `${topItem._id.productName} is currently the top revenue driver in ${topItem._id.sector}.`,
+        detailedExplanation: `This recommendation is based on uploaded transaction data. ${topItem._id.productName} generated ${this.formatPeso(topItem.revenue)} across ${topItem.orderCount} orders in the selected period, making it the strongest candidate for promotion or bundling.`,
+      });
+    }
+
+    if (topSector?.revenue > 0) {
+      suggestions.push({
+        id: 2,
+        title: `Prioritize ${topSector.sector} inventory and staffing`,
+        trigger: 'Current selected period',
+        discount: 'Operational action',
+        expectedLift: `+${this.formatPeso(topSector.revenue * 0.05)}`,
+        confidence: '82%',
+        reason: `${topSector.sector} is the busiest sector by revenue.`,
+        detailedExplanation: `${topSector.sector} produced ${this.formatPeso(topSector.revenue)} from ${topSector.orders} orders. Keep high-demand items visible and staff this area first during peak periods.`,
+      });
+    }
+
+    if (onlineRevenue > 0 || posRevenue > 0) {
+      const weaker = onlineRevenue < posRevenue ? 'online' : 'physical POS';
+      suggestions.push({
+        id: 3,
+        title: `Rebalance ${weaker} channel performance`,
+        trigger: 'Channel balance monitor',
+        discount: 'Channel-specific offer',
+        expectedLift: `+${this.formatPeso(Math.abs(posRevenue - onlineRevenue) * 0.04)}`,
+        confidence: '76%',
+        reason: `Uploaded sales show a visible gap between physical and online channels.`,
+        detailedExplanation: `Physical POS revenue is ${this.formatPeso(posRevenue)} while online revenue is ${this.formatPeso(onlineRevenue)}. Use this gap to decide whether to push marketplace promos or in-store conversion tactics.`,
+      });
+    }
+
+    return suggestions;
+  }
+
+  private buildHomeInsight(
+    sectorSummary: any[],
+    channelSummary: any[],
+    suggestions: any[],
+  ): string {
+    const topSector = [...sectorSummary].sort((a, b) => b.revenue - a.revenue)[0];
+    const topChannel = [...channelSummary].sort((a, b) => b.revenue - a.revenue)[0];
+    if (!topSector || topSector.revenue === 0) {
+      return 'Upload transaction data to activate live Home insights.';
+    }
+    return `${topSector.sector} is leading revenue at ${this.formatPeso(topSector.revenue)}. ${topChannel?.channel || 'POS'} is the strongest channel, and ${suggestions.length} data-driven actions are ready for review.`;
+  }
+
+  private emptyHomeOverview(range: HomeRange): any {
+    return {
+      range,
+      anchorDate: null,
+      window: null,
+      kpis: {
+        totalRevenue: 0,
+        totalOrders: 0,
+        totalQuantity: 0,
+        totalItems: 0,
+        avgOrderValue: 0,
+        revenueChangePercent: 0,
+        ordersChangePercent: 0,
+        busiestSector: 'None',
+        pendingSuggestions: 0,
+      },
+      insight: 'Upload transaction data to activate live Home insights.',
+      omnichannelSeries: [],
+      sectorSummary: [
+        { sector: 'Cafe', revenue: 0, orders: 0 },
+        { sector: 'Services', revenue: 0, orders: 0 },
+        { sector: 'Retail', revenue: 0, orders: 0 },
+      ],
+      channelSummary: [],
+      channelBalance: [],
+      heatmap: [],
+      suggestions: [],
+      nextAction: null,
+    };
+  }
+
+  private percentChange(current: number, previous: number): number {
+    if (!previous) return current > 0 ? 100 : 0;
+    return this.round(((current - previous) / previous) * 100);
+  }
+
+  private addDays(date: Date, days: number): Date {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+  }
+
+  private formatPeso(value: number): string {
+    return `PHP ${this.round(value).toLocaleString('en-US')}`;
   }
 
   private calculateMetrics(

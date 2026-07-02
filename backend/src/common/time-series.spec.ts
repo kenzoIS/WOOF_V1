@@ -1,7 +1,7 @@
 import { normalizeDailySeries } from './time-series';
 
 describe('normalizeDailySeries', () => {
-  it('fills missing dates and applies the Cafe EMA alpha', () => {
+  it('fills missing dates and applies the Cafe EMA alpha to unit volume', () => {
     const result = normalizeDailySeries(
       [
         { date: '2026-01-01', actual: 100, orders: 1 },

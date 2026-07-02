@@ -39,6 +39,7 @@ def build_exogenous(days):
                 "isHoliday": 1 if index in (4, 18) else 0,
                 "dayBeforeHoliday": 1 if index in (3, 17) else 0,
                 "dayAfterHoliday": 1 if index in (5, 19) else 0,
+                "average_unit_price": 650 + (index % 4) * 25,
             }
         )
     return rows
@@ -69,7 +70,7 @@ def main():
                 "exogenousForecast": exogenous_forecast,
             }
         )
-        assert_forecast(sarimax, "SARIMAX", 5)
+        assert_forecast(sarimax, "SARIMAX", 6)
 
         sarima = run({"data": data, "forecastDays": 30, "exogenous": []})
         assert_forecast(sarima, "SARIMA", 0)

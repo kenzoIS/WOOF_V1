@@ -3,9 +3,13 @@ import { CsvService } from './csv.service';
 describe('CsvService flexible uploads', () => {
   const create = jest.fn(async (value) => ({ _id: 'upload-id', ...value }));
   const insertMany = jest.fn(async (values) => values);
+  const deleteMany = jest.fn(() => ({ exec: jest.fn(async () => undefined) }));
+  const findByIdAndDelete = jest.fn(() => ({
+    exec: jest.fn(async () => undefined),
+  }));
   const service = new CsvService(
-    { create } as any,
-    { insertMany } as any,
+    { create, findByIdAndDelete } as any,
+    { insertMany, deleteMany } as any,
   );
 
   beforeEach(() => {
@@ -77,5 +81,54 @@ describe('CsvService flexible uploads', () => {
         repairedDateCount: 2,
       }),
     );
+    expect((result.normalizedSeries as any[])[0]).toEqual(
+      expect.objectContaining({
+        actual: 2,
+        normalized: 2,
+      }),
+    );
+  });
+
+  it('inserts large uploads in chunks', async () => {
+    const rows = Array.from(
+      { length: 5001 },
+      (_, index) => `2026-06-01,Latte ${index},150,1`,
+    ).join('\n');
+
+    const result = await service.processUpload(
+      {
+        originalname: 'large.csv',
+        buffer: Buffer.from(`Date,Product,Amount,Qty\n${rows}\n`),
+      } as Express.Multer.File,
+      'POS',
+    );
+
+    expect(result.recordCount).toBe(5001);
+    expect(insertMany).toHaveBeenCalledTimes(2);
+    expect(insertMany.mock.calls[0][0]).toHaveLength(5000);
+    expect(insertMany.mock.calls[1][0]).toHaveLength(1);
+  });
+
+  it('rolls back upload metadata if a chunk insert fails', async () => {
+    const rows = Array.from(
+      { length: 5001 },
+      (_, index) => `2026-06-01,Latte ${index},150,1`,
+    ).join('\n');
+    insertMany
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('database insert failed'));
+
+    await expect(
+      service.processUpload(
+        {
+          originalname: 'large.csv',
+          buffer: Buffer.from(`Date,Product,Amount,Qty\n${rows}\n`),
+        } as Express.Multer.File,
+        'POS',
+      ),
+    ).rejects.toThrow('Failed to persist uploaded transactions');
+
+    expect(deleteMany).toHaveBeenCalledWith({ csvUploadId: 'upload-id' });
+    expect(findByIdAndDelete).toHaveBeenCalledWith('upload-id');
   });
 });

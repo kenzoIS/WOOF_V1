@@ -42,9 +42,9 @@ describe('AnalyticsService getForecast', () => {
       const date = new Date(Date.UTC(2026, 0, index + 1));
       return {
         _id: date.toISOString().slice(0, 10),
-        revenue: 100 + index,
+        revenue: (10 + index) * 120,
         orderCount: 2 + index,
-        quantity: 3 + index,
+        quantity: 10 + index,
       };
     });
 
@@ -82,7 +82,13 @@ describe('AnalyticsService getForecast', () => {
         },
       ])
       .mockResolvedValueOnce(rows)
-      .mockResolvedValueOnce([{ _id: 'POS', revenue: 2500, count: 25 }]);
+      .mockResolvedValueOnce([{ _id: 'POS', revenue: 2500, count: 25 }])
+      .mockResolvedValueOnce([
+        {
+          weightedRevenue: 12000,
+          quantity: 100,
+        },
+      ]);
   };
 
   beforeEach(() => {
@@ -101,6 +107,13 @@ describe('AnalyticsService getForecast', () => {
       exec: jest.fn().mockResolvedValue(null),
     });
     crossSellCacheModel.create.mockImplementation(async (payload) => payload);
+    configService.get.mockImplementation((key: string) =>
+      key === 'CURRENT_UNIT_COST_CAFE'
+        ? '45'
+        : key === 'CURRENT_UNIT_COST_SERVICES'
+          ? '120'
+          : undefined,
+    );
     csvUploadModel.findOne.mockReturnValue({
       sort: jest.fn().mockReturnThis(),
       exec: jest.fn().mockResolvedValue(null),
@@ -146,6 +159,20 @@ describe('AnalyticsService getForecast', () => {
     );
     expect(result.historical).toHaveLength(21);
     expect(result.forecast).toHaveLength(14);
+    expect(result.historical[0].actual).toBe(10);
+    expect(result.historical[0].normalized).toBe(10);
+    expect(result.forecast[0]).toEqual(
+      expect.objectContaining({
+        forecast: 150,
+        forecastQuantity: 150,
+        projectedNetSales: 18000,
+        projectedGrossProfit: 11250,
+        unitPrice: 120,
+        unitCost: 45,
+      }),
+    );
+    expect(result.modelMetadata.targetVariable).toBe('quantity_volume');
+    expect(result.modelMetadata.annualDemandQuantity).toBeGreaterThan(0);
     expect(result.historical.slice(0, -1).every((point) => point.fitted === undefined)).toBe(true);
     expect(result.historical[20].fitted).toBe(result.historical[20].actual);
     expect(result.modelMetadata.predictionStartsAt).toBe(result.historical[20].date);

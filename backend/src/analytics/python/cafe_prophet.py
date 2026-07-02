@@ -27,7 +27,7 @@ def build_model(changepoint_prior_scale, use_exog=False):
         model.add_country_holidays(country_name="PH")
     except Exception:
         # Holiday import support can vary by Prophet installation; forecasting can
-        # still proceed without holidays because the primary signal is POS revenue.
+        # still proceed without holidays because the primary signal is POS volume.
         pass
     return model
 

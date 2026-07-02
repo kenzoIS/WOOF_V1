@@ -7,65 +7,51 @@ import { toast } from "sonner";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { DataIngestion } from "../components/DataIngestion";
+import { getHomeOverview } from "../lib/api";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
-
-const omnichannelData = Array.from({ length: 13 }, (_, i) => ({
-  hour: `${i + 8}:00`,
-  cafe: Math.random() * 8000 + 2000,
-  services: Math.random() * 5000 + 1000,
-  retail: Math.random() * 4000 + 1000,
-  online: Math.random() * 3000 + 500,
-}));
-
-const equilibriumData = [
-  { category: "Pet Food", physical: 12500, online: 8200 },
-  { category: "Grooming", physical: 9800, online: 3400 },
-  { category: "Cafe Items", physical: 15200, online: 5600 },
-  { category: "Accessories", physical: 6300, online: 11800 },
-  { category: "Services", physical: 8900, online: 2100 },
-];
 
 const heatmapDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const heatmapHours = ["8AM", "10AM", "12PM", "2PM", "4PM", "6PM", "8PM"];
 
-const suggestions = [
-  {
-    id: 1,
-    title: "Cappuccino + Full Grooming Bundle",
-    trigger: "Tomorrow 2:00 PM - 5:00 PM",
-    discount: "15% off combo",
-    expectedLift: "+₱4,250",
-    confidence: "92%",
-    reason: "Cafe-Services cross-sell pattern detected at this time window",
-    detailedExplanation: "Our analysis shows that customers who book grooming appointments between 2:00 PM and 5:00 PM are 3x more likely to purchase a cappuccino if offered a discount. Deploying this bundle is expected to increase average order value by ₱180 per customer and fill idle cafe capacity during off-peak grooming hours.",
-  },
-  {
-    id: 2,
-    title: "Flash Sale: Premium Dog Food",
-    trigger: "Today 6:00 PM",
-    discount: "20% off",
-    expectedLift: "+₱2,890",
-    confidence: "87%",
-    reason: "Stock expiring in 6 days. Prophet predicts -40% demand next week",
-    detailedExplanation: "We currently have 12 units of Premium Dog Food (5kg) in stock that will expire in 6 days. Prophet forecasting model predicts a 40% decline in dog food demand next week. Implementing a 20% discount now will accelerate inventory clearance, generating ₱2,890 in revenue and preventing a total spoilage loss of ₱15,000.",
-  },
-  {
-    id: 3,
-    title: "Happy Hour: All Beverages",
-    trigger: "Tomorrow 3:00 PM - 4:00 PM",
-    discount: "Buy 1 Get 1",
-    expectedLift: "+₱1,650",
-    confidence: "84%",
-    reason: "Traffic optimizer detected idle capacity window",
-    detailedExplanation: "Historical data indicates a consistent 50% drop in foot traffic at the cafe on Thursday afternoons between 3:00 PM and 4:00 PM. A Buy 1 Get 1 happy hour promotion on all beverages will attract nearby pet owners, increase overall traffic by 25%, and drive secondary sales of high-margin treats.",
-  },
-];
+interface HomeSuggestion {
+  id: number;
+  title: string;
+  trigger: string;
+  discount: string;
+  expectedLift: string;
+  confidence: string;
+  reason: string;
+  detailedExplanation: string;
+}
+
+interface HomeOverview {
+  anchorDate: string | null;
+  kpis: {
+    totalRevenue: number;
+    totalOrders: number;
+    revenueChangePercent: number;
+    ordersChangePercent: number;
+    busiestSector: string;
+    pendingSuggestions: number;
+  };
+  insight: string;
+  omnichannelSeries: Array<{ hour: string; cafe: number; services: number; retail: number; online: number }>;
+  sectorSummary: Array<{ sector: string; revenue: number; orders: number }>;
+  channelSummary: Array<{ channel: string; revenue: number; count: number }>;
+  channelBalance: Array<{ category: string; physical: number; online: number }>;
+  heatmap: Array<{ dayOfWeek: number; hourBucket: number; sector: string; revenue: number; intensity: number }>;
+  suggestions: HomeSuggestion[];
+  nextAction: HomeSuggestion | null;
+}
 
 export function Home() {
   const [timeRange, setTimeRange] = useState("today");
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [expandedSuggestions, setExpandedSuggestions] = useState<number[]>([]);
+  const [homeOverview, setHomeOverview] = useState<HomeOverview | null>(null);
+  const [homeLoading, setHomeLoading] = useState(false);
+  const [homeError, setHomeError] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -105,62 +91,78 @@ export function Home() {
     );
   };
 
-  const scaledKPIs = useMemo(() => {
-    switch (globalDateRange) {
-      case "today":
-        return { revenue: "₱45,280", orders: "127", revenuePercent: "+12.3% ↑", ordersPercent: "+8.5% ↑" };
-      case "yesterday":
-        return { revenue: "₱42,150", orders: "118", revenuePercent: "+10.1% ↑", ordersPercent: "+7.2% ↑" };
-      case "last-7-days":
-        return { revenue: "₱316,960", orders: "889", revenuePercent: "+11.4% ↑", ordersPercent: "+8.1% ↑" };
-      case "last-30-days":
-        return { revenue: "₱1,358,400", orders: "3,810", revenuePercent: "+12.8% ↑", ordersPercent: "+8.3% ↑" };
-      case "last-90-days":
-        return { revenue: "₱4,075,200", orders: "11,430", revenuePercent: "+13.1% ↑", ordersPercent: "+8.6% ↑" };
-      case "last-12-months":
-        return { revenue: "₱16,527,200", orders: "46,355", revenuePercent: "+14.2% ↑", ordersPercent: "+9.1% ↑" };
-      default:
-        return { revenue: "₱45,280", orders: "127", revenuePercent: "+12.3% ↑", ordersPercent: "+8.5% ↑" };
-    }
-  }, [globalDateRange]);
+  useEffect(() => {
+    let active = true;
+    setHomeLoading(true);
+    getHomeOverview(timeRange)
+      .then((data) => {
+        if (!active) return;
+        setHomeOverview(data);
+        setHomeError(null);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setHomeError(error instanceof Error ? error.message : "Unable to load Home analytics");
+      })
+      .finally(() => {
+        if (active) setHomeLoading(false);
+      });
 
-  const dynamicOmnichannelData = useMemo(() => {
-    const seedRandom = (str: string) => {
-      let hash = 0;
-      for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
-      }
-      return () => {
-        const x = Math.sin(hash++) * 10000;
-        return x - Math.floor(x);
-      };
+    return () => {
+      active = false;
     };
-
-    const rng = seedRandom(timeRange);
-    
-    if (timeRange === "today") {
-      return Array.from({ length: 13 }, (_, i) => ({
-        hour: `${i + 8}:00`,
-        cafe: rng() * 8000 + 2000,
-        services: rng() * 5000 + 1000,
-        retail: rng() * 4000 + 1000,
-        online: rng() * 3000 + 500,
-      }));
-    }
-    
-    const count = timeRange === "week" ? 7 : timeRange === "month" ? 30 : 12;
-    const label = timeRange === "custom" ? "Period" : "Day";
-    
-    return Array.from({ length: count }, (_, i) => ({
-      hour: `${label} ${i + 1}`,
-      cafe: rng() * 50000 + 15000,
-      services: rng() * 40000 + 10000,
-      retail: rng() * 30000 + 8000,
-      online: rng() * 20000 + 5000,
-    }));
   }, [timeRange]);
 
-  const [heatmapFilter, setHeatmapFilter] = useState("all");
+  const formatCurrency = (value: number) =>
+    `PHP ${Math.round(value || 0).toLocaleString()}`;
+
+  const formatPercent = (value: number) =>
+    `${value >= 0 ? "+" : ""}${Number(value || 0).toFixed(1)}%`;
+
+  const scaledKPIs = useMemo(() => {
+    const kpis = homeOverview?.kpis;
+    return {
+      revenue: formatCurrency(kpis?.totalRevenue || 0),
+      orders: (kpis?.totalOrders || 0).toLocaleString(),
+      revenuePercent: `${formatPercent(kpis?.revenueChangePercent || 0)} vs previous period`,
+      ordersPercent: `${formatPercent(kpis?.ordersChangePercent || 0)} vs previous period`,
+      busiestSector: kpis?.busiestSector || "None",
+      pending: kpis?.pendingSuggestions || 0,
+    };
+  }, [homeOverview]);
+
+  const dynamicOmnichannelData = homeOverview?.omnichannelSeries || [];
+  const equilibriumData = homeOverview?.channelBalance || [];
+  const suggestions = homeOverview?.suggestions || [];
+  const heroDate = homeOverview?.anchorDate
+    ? new Date(homeOverview.anchorDate).toLocaleDateString("en-PH", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : "Waiting for uploaded transactions";
+  const legendData = useMemo(() => {
+    const sectorTotal = (sector: string) =>
+      homeOverview?.sectorSummary.find((item) => item.sector === sector)?.revenue || 0;
+    const onlineTotal =
+      homeOverview?.channelSummary
+        .filter((item) => item.channel !== "POS")
+        .reduce((sum, item) => sum + item.revenue, 0) || 0;
+    const total = sectorTotal("Cafe") + sectorTotal("Services") + sectorTotal("Retail") + onlineTotal;
+    return [
+      { key: "cafe", label: "Cafe", color: "#F53799", value: sectorTotal("Cafe") },
+      { key: "services", label: "Services", color: "#0EA5E9", value: sectorTotal("Services") },
+      { key: "retail", label: "Retail", color: "#F59E0B", value: sectorTotal("Retail") },
+      { key: "online", label: "Online", color: "#7C3AED", value: onlineTotal },
+    ].map((item) => ({
+      ...item,
+      total: formatCurrency(item.value),
+      percent: total > 0 ? `${((item.value / total) * 100).toFixed(1)}%` : "0.0%",
+    }));
+  }, [homeOverview]);
+
+  const [heatmapFilter, setHeatmapFilter] = useState("allsectors");
   const [visibleSeries, setVisibleSeries] = useState({
     cafe: true,
     services: true,
@@ -189,21 +191,9 @@ export function Home() {
   };
 
   const handleApprove = (id: number) => {
-    // Simulate concurrent modification error for suggestion 2
-    if (id === 2) {
-      setErrorModal({ isOpen: true, type: "concurrent_modification" });
-      return;
-    }
-
-    // Simulate invalid action for suggestion 3
-    if (id === 3) {
-      setErrorModal({ isOpen: true, type: "invalid_action" });
-      return;
-    }
-
     setApprovedSuggestions((prev) => [...prev, id]);
     toast.success("Promotion approved and scheduled!", {
-      description: "The bundle has been added to your active promotions.",
+      description: "The live recommendation has been added to your review queue.",
     });
   };
 
@@ -219,7 +209,14 @@ export function Home() {
   };
 
   const handleExecuteNow = () => {
-    setErrorModal({ isOpen: true, type: "permission_denied" });
+    const nextAction = homeOverview?.nextAction;
+    if (!nextAction) {
+      toast.info("No live action is currently queued.", {
+        description: "Upload transaction data to generate Home recommendations.",
+      });
+      return;
+    }
+    handleApprove(nextAction.id);
   };
 
   const handleRefreshData = () => {
@@ -251,6 +248,21 @@ export function Home() {
     return "#FFF7FB";
   };
 
+  const getHeatmapValue = (day: string, hourLabel: string) => {
+    const dayIndex = heatmapDays.indexOf(day);
+    const mongoDay = dayIndex === 6 ? 1 : dayIndex + 2;
+    const hour = Number(hourLabel.replace(/\D/g, ""));
+    const hourBucket = hourLabel.includes("PM") && hour !== 12 ? hour + 12 : hour;
+    const rows = (homeOverview?.heatmap || []).filter((row) => {
+      const sectorMatches =
+        heatmapFilter === "allsectors" ||
+        row.sector.toLowerCase() === heatmapFilter;
+      return row.dayOfWeek === mongoDay && row.hourBucket === hourBucket && sectorMatches;
+    });
+    if (!rows.length) return 0;
+    return rows.reduce((max, row) => Math.max(max, row.intensity), 0);
+  };
+
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
       {/* SECTION 1 — HERO BANNER */}
@@ -278,12 +290,11 @@ export function Home() {
                 Today's Revenue Intelligence
               </h1>
               <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm text-white/70">
-                <span>Wednesday, April 15, 2026</span>
+                <span>{heroDate}</span>
                 <span className="hidden sm:inline">•</span>
                 <span className="hidden sm:inline">Lucena City, Philippines</span>
                 <Badge variant="outline" className="gap-1.5 border-white/30 text-white">
-                  <span>☀️</span>
-                  <span>28°C Sunny</span>
+                  <span>{homeOverview?.anchorDate ? "Live uploaded data" : "No uploaded data"}</span>
                 </Badge>
               </div>
             </div>
@@ -308,6 +319,11 @@ export function Home() {
 
       {/* SECTION 1.5 — DATA INGESTION CENTER */}
       <DataIngestion />
+      {homeError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {homeError}
+        </div>
+      )}
 
       {/* SECTION 2 — PRIMARY KPI ROW */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
@@ -343,7 +359,7 @@ export function Home() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Busiest Sector</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">Cafe</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.busiestSector}</div>
               <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs mt-1 hidden md:inline-flex">
                 Active Now
               </Badge>
@@ -357,7 +373,7 @@ export function Home() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Pending</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">3</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.pending}</div>
               <Button
                 onClick={scrollToSuggestions}
                 size="sm"
@@ -380,7 +396,7 @@ export function Home() {
             WOOF AI Insight
           </Badge>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "Cafe sector showing 12% growth. Services utilization at 78%. Strong cross-sell opportunity detected between grooming and cafe."
+            "{homeLoading ? "Loading live Home analytics..." : homeOverview?.insight || "Upload transaction data to activate live Home insights."}"
           </p>
         </div>
         <img
@@ -501,12 +517,7 @@ export function Home() {
 
         {/* Legend Row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 pt-4 border-t border-[#FFD9EC]">
-          {[
-            { key: "cafe", label: "Cafe", color: "#F53799", total: "₱18,450", percent: "40.8%" },
-            { key: "services", label: "Services", color: "#0EA5E9", total: "₱14,230", percent: "31.4%" },
-            { key: "retail", label: "Retail", color: "#F59E0B", total: "₱9,180", percent: "20.3%" },
-            { key: "online", label: "Online", color: "#7C3AED", total: "₱3,420", percent: "7.5%" },
-          ].map((sector) => (
+          {legendData.map((sector) => (
             <button
               key={sector.key}
               onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
@@ -617,13 +628,13 @@ export function Home() {
                 <div className="text-xs text-[#223047] opacity-60">{hour}</div>
                 <div className="grid grid-cols-7 gap-1.5 md:gap-2">
                   {heatmapDays.map((day) => {
-                    const value = Math.random() * 100;
+                    const value = getHeatmapValue(day, hour);
                     return (
                       <div
                         key={`${hour}-${day}`}
                         className="h-8 md:h-10 lg:h-12 rounded cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
                         style={{ backgroundColor: getHeatmapColor(value) }}
-                        title={`${day} ${hour}: ${value.toFixed(0)}% capacity`}
+                        title={`${day} ${hour}: ${value.toFixed(0)}% sales intensity`}
                       />
                     );
                   })}
@@ -656,6 +667,11 @@ export function Home() {
         </div>
 
         <div className="flex gap-4 md:gap-6 overflow-x-auto pb-2">
+          {suggestions.length === 0 && (
+            <div className="w-full rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
+              Upload transaction data to generate live WOOF recommendations.
+            </div>
+          )}
           {suggestions.map((suggestion) => (
             <div
               key={suggestion.id}
@@ -757,20 +773,20 @@ export function Home() {
           </div>
 
           <div className="text-3xl md:text-4xl lg:text-[48px] font-mono font-bold tracking-tight">
-            04:23:15
+            {homeOverview?.nextAction ? "Ready" : "--:--"}
           </div>
 
           <div>
             <div className="text-lg font-semibold mb-1">
-              Cappuccino + Grooming Bundle Launch
+              {homeOverview?.nextAction?.title || "No live action queued"}
             </div>
             <p className="text-sm opacity-70" style={{ lineHeight: "1.6" }}>
-              Automated bundle promotion targeting afternoon cross-sell opportunity
+              {homeOverview?.nextAction?.reason || "Upload transaction data to generate recommended actions."}
             </p>
           </div>
 
           <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA]">
-            Queued
+            {homeOverview?.nextAction ? "Queued from live data" : "Waiting for data"}
           </Badge>
 
           <Button onClick={handleExecuteNow} className="w-full bg-[#F53799] hover:bg-[#D42A7D]">
@@ -807,7 +823,7 @@ export function Home() {
           <div className="px-4 md:px-6 lg:px-8 pb-4 md:pb-6 lg:pb-8 space-y-4">
             <div className="bg-white/60 border border-[#FFD9EC] rounded-xl p-4">
               <p className="text-sm text-[#223047] italic" style={{ lineHeight: "1.6" }}>
-                "Your cafe sector is outperforming forecast by 12% today. I recommend extending happy hour to capture the afternoon momentum."
+                "{homeOverview?.insight || "Upload transaction data and I can summarize what is happening across sectors."}"
               </p>
             </div>
 

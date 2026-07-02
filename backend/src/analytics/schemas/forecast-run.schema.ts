@@ -26,6 +26,9 @@ export class ForecastPoint {
   @Prop({ required: true })
   date: string;
 
+  @Prop()
+  forecastQuantity?: number;
+
   @Prop({ required: true })
   forecast: number;
 
@@ -34,6 +37,18 @@ export class ForecastPoint {
 
   @Prop()
   confidenceHigh?: number;
+
+  @Prop()
+  projectedNetSales?: number;
+
+  @Prop()
+  projectedGrossProfit?: number;
+
+  @Prop()
+  unitPrice?: number;
+
+  @Prop()
+  unitCost?: number;
 }
 
 @Schema({ timestamps: true })

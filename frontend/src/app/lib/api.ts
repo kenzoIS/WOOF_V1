@@ -1,4 +1,8 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/backend-api';
+const DIRECT_UPLOAD_API_BASE =
+  process.env.NEXT_PUBLIC_UPLOAD_API_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:3001/api';
 
 async function request(
   path: string,
@@ -22,15 +26,21 @@ async function apiError(
   response: Response,
   fallback: string,
 ): Promise<Error> {
+  const body = await response.json().catch(() => null);
+  const message = Array.isArray(body?.message)
+    ? body.message.join(', ')
+    : body?.message;
+  if (message) {
+    return new Error(message);
+  }
+  if (response.status === 413) {
+    return new Error('Upload too large. Maximum supported file size is 100 MB.');
+  }
   if (response.status >= 500) {
     return new Error(
       'Backend unavailable. Check that MongoDB is configured and the backend is running on port 3001.',
     );
   }
-  const body = await response.json().catch(() => null);
-  const message = Array.isArray(body?.message)
-    ? body.message.join(', ')
-    : body?.message;
   return new Error(message || fallback);
 }
 
@@ -111,10 +121,16 @@ export async function uploadCSV(file: File, channel?: string) {
   if (channel) {
     formData.append('channel', channel);
   }
-  const res = await request('/csv/upload', {
+  const res = await fetch(`${DIRECT_UPLOAD_API_BASE}/csv/upload`, {
     method: 'POST',
     body: formData,
-  }, 'Upload could not reach the backend. Make sure the backend is running on port 3001.');
+  }).catch((error) => {
+    throw new Error(
+      error instanceof Error
+        ? `Upload request was interrupted: ${error.message}`
+        : 'Upload request was interrupted before the backend responded.',
+    );
+  });
   if (!res.ok) {
     throw await apiError(res, res.statusText || 'Upload failed');
   }
@@ -127,10 +143,16 @@ export async function uploadHistoricalCSV(
 ) {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await request(`/csv/historical/${module}`, {
+  const res = await fetch(`${DIRECT_UPLOAD_API_BASE}/csv/historical/${module}`, {
     method: 'POST',
     body: formData,
-  }, 'Historical upload could not reach the backend. Make sure the backend is running on port 3001.');
+  }).catch((error) => {
+    throw new Error(
+      error instanceof Error
+        ? `Historical upload request was interrupted: ${error.message}`
+        : 'Historical upload request was interrupted before the backend responded.',
+    );
+  });
   if (!res.ok) {
     throw await apiError(res, res.statusText || 'Historical upload failed');
   }
@@ -152,6 +174,11 @@ export async function getMetrics() {
 // Analytics APIs
 export async function getDashboard(sector: string) {
   return fetchApi(`/analytics/dashboard/${sector}`);
+}
+
+export async function getHomeOverview(range?: string) {
+  const query = range ? `?range=${encodeURIComponent(range)}` : '';
+  return fetchApi(`/analytics/home${query}`);
 }
 
 export async function getForecast(
