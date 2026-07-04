@@ -114,7 +114,7 @@ export function DataIngestion() {
           Data Ingestion Center
         </h2>
         <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-          Upload CSV/Excel files from POS, Shopee, or TikTok Shop to power your analytics
+          Upload CSV/Excel files from POS, Shopee, or TikTok Shop to power your analytics. Totals below cover all uploaded data.
         </p>
       </div>
 
@@ -128,10 +128,10 @@ export function DataIngestion() {
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          { label: "Records", value: metrics?.totalRecords?.toLocaleString() || "0", icon: Database, color: "#F53799" },
-          { label: "Transactions", value: metrics?.totalTransactions?.toLocaleString() || "0", icon: Hash, color: "#3AE4FA" },
-          { label: "Quantity Sold", value: metrics?.totalQuantity?.toLocaleString() || "0", icon: ShoppingCart, color: "#0EA5E9" },
-          { label: "Revenue", value: `₱${(metrics?.totalRevenue || 0).toLocaleString()}`, icon: DollarSign, color: "#F53799" },
+          { label: "All Records", value: metrics?.totalRecords?.toLocaleString() || "0", icon: Database, color: "#F53799" },
+          { label: "All Transactions", value: metrics?.totalTransactions?.toLocaleString() || "0", icon: Hash, color: "#3AE4FA" },
+          { label: "All Quantity Sold", value: metrics?.totalQuantity?.toLocaleString() || "0", icon: ShoppingCart, color: "#0EA5E9" },
+          { label: "All Revenue", value: `₱${(metrics?.totalRevenue || 0).toLocaleString()}`, icon: DollarSign, color: "#F53799" },
           { label: "Channels", value: Object.keys(metrics?.channels || {}).length.toString(), icon: Radio, color: "#7C3AED" },
         ].map((card) => (
           <div key={card.label} className="flex items-center gap-2 bg-[#FFF2FA] border border-[#FFD9EC] rounded-xl px-3 py-2.5">

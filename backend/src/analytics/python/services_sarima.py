@@ -12,7 +12,9 @@ warnings.filterwarnings("ignore")
 
 DEFAULT_ORDER = (1, 1, 1)
 DEFAULT_SEASONAL_ORDER = (1, 1, 0, 7)
-GRID_SEARCH_TIMEOUT_SECONDS = 90
+DEFAULT_FORECAST_DAYS = 30
+MAX_FORECAST_DAYS = 90
+GRID_SEARCH_TIMEOUT_SECONDS = 60
 EXOG_COLUMNS = [
     "tempCelsius",
     "rainFlag",
@@ -20,6 +22,15 @@ EXOG_COLUMNS = [
     "dayBeforeHoliday",
     "dayAfterHoliday",
     "average_unit_price",
+]
+WEEKLY_SEASONAL_ORDERS = [
+    DEFAULT_SEASONAL_ORDER,
+    (0, 1, 1, 7),
+    (1, 1, 1, 7),
+    (1, 0, 0, 7),
+    (0, 0, 1, 7),
+    (1, 0, 1, 7),
+    (0, 0, 0, 7),
 ]
 
 
@@ -41,7 +52,30 @@ def metrics(actual, predicted, training):
     return round(mase, 2), round(mape, 2), round(max(0.0, 100.0 - mape), 2)
 
 
-def fit_model(series, order, seasonal_order, exog=None):
+def normalize_forecast_days(value):
+    try:
+        days = int(value)
+    except Exception:
+        days = DEFAULT_FORECAST_DAYS
+    return max(1, min(days, MAX_FORECAST_DAYS))
+
+
+def chronological_split_index(length):
+    split_index = int(np.floor(length * 0.8))
+    return min(max(1, split_index), length - 1)
+
+
+def ordered_unique(values):
+    seen = set()
+    result = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def fit_model(series, order, seasonal_order, exog=None, maxiter=75):
     return SARIMAX(
         series,
         exog=exog,
@@ -50,7 +84,7 @@ def fit_model(series, order, seasonal_order, exog=None):
         trend="c" if order[1] == 0 and seasonal_order[1] == 0 else None,
         enforce_stationarity=False,
         enforce_invertibility=False,
-    ).fit(disp=False, maxiter=75)
+    ).fit(disp=False, maxiter=maxiter)
 
 
 def fit_default(series, reason, exog=None):
@@ -65,11 +99,21 @@ def fit_default(series, reason, exog=None):
 def fit_best(series, exog=None, timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS):
     best = None
     best_aic = float("inf")
-    orders = product(range(3), range(2), range(3))
-    seasonal_orders = (
-        [(0, 1, 1, 7), (1, 1, 0, 7), (1, 1, 1, 7)]
-        if exog is not None
-        else [(*seasonal, 7) for seasonal in product(range(2), range(2), range(2))]
+    if len(series) < 90:
+        order_candidates = [
+            DEFAULT_ORDER,
+            (0, 1, 1),
+            (1, 1, 0),
+            (0, 0, 1),
+            (1, 0, 0),
+        ]
+        seasonal_orders = WEEKLY_SEASONAL_ORDERS[:4]
+    else:
+        order_candidates = [DEFAULT_ORDER, *product(range(3), range(2), range(3))]
+        seasonal_orders = WEEKLY_SEASONAL_ORDERS
+    orders = ordered_unique(order_candidates)
+    seasonal_orders = ordered_unique(
+        seasonal_orders[:4] if exog is not None else seasonal_orders
     )
     started_at = time.monotonic()
     timed_out = False
@@ -81,7 +125,7 @@ def fit_best(series, exog=None, timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS):
                 break
 
             try:
-                fitted = fit_model(series, order, seasonal_order, exog)
+                fitted = fit_model(series, order, seasonal_order, exog, maxiter=50)
                 if np.isfinite(fitted.aic) and fitted.aic < best_aic:
                     best = (order, seasonal_order, fitted)
                     best_aic = float(fitted.aic)
@@ -91,17 +135,14 @@ def fit_best(series, exog=None, timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS):
             break
 
     if timed_out:
-        try:
-            return fit_default(series, "timeout", exog)
-        except Exception:
-            if best is not None:
-                order, seasonal_order, fitted = best
-                return order, seasonal_order, fitted, {
-                    "gridSearchTimedOut": True,
-                    "usedDefaultOrder": False,
-                    "defaultReason": "timeout_default_failed",
-                }
-            raise
+        if best is not None:
+            order, seasonal_order, fitted = best
+            return order, seasonal_order, fitted, {
+                "gridSearchTimedOut": True,
+                "usedDefaultOrder": False,
+                "defaultReason": "best_before_timeout",
+            }
+        return fit_default(series, "timeout", exog)
 
     if best is None:
         try:
@@ -142,7 +183,9 @@ def run(payload):
         raise ValueError("Input payload must be a JSON object")
 
     data = payload.get("data", [])
-    forecast_days = int(payload.get("forecastDays", 30))
+    forecast_days = normalize_forecast_days(
+        payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
+    )
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
     if len(data) < 21:
@@ -159,11 +202,12 @@ def run(payload):
     exog = build_exog_matrix(payload.get("exogenous", []), len(frame))
     use_exog = exog is not None
     forecast_exog = build_forecast_exog(payload, forecast_days) if use_exog else None
-    holdout = min(14, max(7, len(frame) // 5))
-    train_normalized = normalized[:-holdout]
-    train_exog = exog[:-holdout] if use_exog else None
-    validation_exog = exog[-holdout:] if use_exog else None
-    validation_actual = actual[-holdout:]
+    split_index = chronological_split_index(len(frame))
+    holdout = len(frame) - split_index
+    train_normalized = normalized[:split_index]
+    train_exog = exog[:split_index] if use_exog else None
+    validation_exog = exog[split_index:] if use_exog else None
+    validation_actual = actual[split_index:]
 
     order, seasonal_order, validation_fit, search_metadata = fit_best(
         train_normalized, train_exog
@@ -172,7 +216,7 @@ def run(payload):
         steps=holdout, exog=validation_exog
     ).predicted_mean
     mase, mape, accuracy = metrics(
-        validation_actual, validation_forecast, actual[:-holdout]
+        validation_actual, validation_forecast, actual[:split_index]
     )
 
     final_fit = fit_model(normalized, order, seasonal_order, exog)
@@ -221,6 +265,8 @@ def run(payload):
             "seasonalOrder": list(seasonal_order),
             "aic": round(float(final_fit.aic), 2),
             "validationDays": holdout,
+            "trainingDays": split_index,
+            "splitRatio": "80/20 chronological",
             "univariate": not use_exog,
             "exogenousVariables": EXOG_COLUMNS if use_exog else [],
             **search_metadata,

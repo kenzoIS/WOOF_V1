@@ -51,6 +51,8 @@ interface ModelResult {
     confidenceHigh?: number;
     forecastQuantity?: number;
     projectedNetSales?: number;
+    projectedConfidenceLow?: number;
+    projectedConfidenceHigh?: number;
     projectedGrossProfit?: number;
     unitPrice?: number;
     unitCost?: number;
@@ -69,6 +71,9 @@ interface CrossSellOptions {
 }
 
 type HomeRange = 'today' | 'week' | 'month' | 'custom';
+const FORECAST_REVENUE_PAYLOAD_VERSION = 3;
+const DEFAULT_FORECAST_DAYS = 30;
+const MAX_FORECAST_DAYS = 90;
 
 @Injectable()
 export class AnalyticsService {
@@ -143,38 +148,52 @@ export class AnalyticsService {
       ]),
       this.aggregateHomeSeries(dateFilter, normalizedRange),
       this.transactionModel.aggregate([
-        { $match: dateFilter },
         {
-          $group: {
-            _id: '$category',
-            physical: {
-              $sum: {
-                $cond: [{ $eq: ['$channel', 'POS'] }, '$netSales', 0],
-              },
-            },
-            online: {
-              $sum: {
-                $cond: [{ $ne: ['$channel', 'POS'] }, '$netSales', 0],
-              },
-            },
+          $match: {
+            ...dateFilter,
+            channel: { $in: ['POS', 'Shopee', 'TikTok Shop'] },
           },
         },
-        { $sort: { physical: -1, online: -1 } },
-        { $limit: 8 },
+        {
+          $group: {
+            _id: '$channel',
+            revenue: { $sum: '$netSales' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
       ]),
       this.transactionModel.aggregate([
-        { $match: { date: { $gte: this.addDays(end, -6), $lte: end } } },
+        { $match: { date: { $gte: this.getHeatmapStartDate(end), $lte: end } } },
         {
           $project: {
             sector: 1,
             netSales: 1,
-            dayOfWeek: { $dayOfWeek: '$date' },
-            hour: { $hour: '$date' },
+            dateKey: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+            dayOfWeek: {
+              $dayOfWeek: {
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+            hour: {
+              $hour: {
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
           },
         },
         {
           $group: {
             _id: {
+              date: '$dateKey',
               dayOfWeek: '$dayOfWeek',
               hourBucket: {
                 $subtract: ['$hour', { $mod: ['$hour', 2] }],
@@ -209,6 +228,8 @@ export class AnalyticsService {
     const channelSummary = this.formatHomeChannelSummary(channelTotals);
     const totalRevenue = currentTotals.totalRevenue;
     const totalOrders = currentTotals.totalOrders;
+    const retailRevenue =
+      sectorSummary.find((item) => item.sector === 'Retail')?.revenue || 0;
     const busiestSector =
       [...sectorSummary].sort((a, b) => b.revenue - a.revenue)[0]?.sector ||
       'None';
@@ -231,6 +252,7 @@ export class AnalyticsService {
         totalOrders,
         totalQuantity: currentTotals.totalQuantity,
         totalItems: currentTotals.totalItems,
+        retailRevenue: this.round(retailRevenue),
         avgOrderValue: totalOrders
           ? this.round(totalRevenue / totalOrders)
           : 0,
@@ -249,11 +271,8 @@ export class AnalyticsService {
       omnichannelSeries: this.formatHomeSeries(series, normalizedRange),
       sectorSummary,
       channelSummary,
-      channelBalance: channelBalance.map((row: any) => ({
-        category: row._id || 'Uncategorized',
-        physical: this.round(row.physical || 0),
-        online: this.round(row.online || 0),
-      })),
+      channelBalance: this.formatHomeChannelBalance(channelBalance),
+      heatmapDays: this.buildHomeHeatmapDays(end),
       heatmap: this.formatHomeHeatmap(heatmap),
       suggestions,
       nextAction: suggestions[0] || null,
@@ -424,8 +443,11 @@ export class AnalyticsService {
         reqTemp === cacheTemp &&
         reqRain === cacheRain &&
         reqHoliday === cacheHoliday;
+      const hasRevenuePayload =
+        metadata.forecastRevenuePayloadVersion ===
+        FORECAST_REVENUE_PAYLOAD_VERSION;
 
-      if (isCsvStateMatch && isOverridesMatch) {
+      if (isCsvStateMatch && isOverridesMatch && hasRevenuePayload) {
         return this.withForecastStartAnchor(cachedForecast.toObject());
       }
     }
@@ -451,13 +473,20 @@ export class AnalyticsService {
       })),
       module,
     );
+    const revenueByDate = new Map(
+      dailyData.map((point: any) => [
+        point._id,
+        this.round(Number(point.revenue) || 0),
+      ]),
+    );
     const dashboard = await this.getDashboard(module);
-    const forecastDays = module === 'Services' ? 30 : 14;
+    const forecastDays = this.normalizeForecastDays(DEFAULT_FORECAST_DAYS);
     let exogenousPayload: Record<string, unknown> = {};
     let exogenousMetadata: Record<string, unknown> = {};
 
     let selectedModel: ModelResult | null = null;
     let rejectionReason = '';
+    let modelQualityWarning = '';
     if (historical.length >= 21) {
       try {
         if (module === 'Services' || module === 'Cafe') {
@@ -481,7 +510,7 @@ export class AnalyticsService {
           rejectionReason = 'Model returned a non-finite MASE score';
           selectedModel = null;
         } else if (selectedModel.mase > 1.2) {
-          rejectionReason = `${selectedModel.modelName} MASE ${selectedModel.mase} exceeded 1.2`;
+          modelQualityWarning = `${selectedModel.modelName} MASE ${selectedModel.mase} exceeded 1.2; using the selected model output instead of flattening to an SMA fallback.`;
         }
       } catch (error) {
         rejectionReason =
@@ -491,7 +520,7 @@ export class AnalyticsService {
       rejectionReason = 'At least 21 daily observations are required';
     }
 
-    const useFallback = !selectedModel || selectedModel.mase > 1.2;
+    const useFallback = !selectedModel;
     const finalModel: ModelResult =
       useFallback || !selectedModel
         ? this.buildSmaFallback(historical, forecastDays, rejectionReason)
@@ -509,7 +538,7 @@ export class AnalyticsService {
       accuracy: finalModel.accuracy,
       isFallback: useFallback,
       rejectionReason: useFallback ? rejectionReason : undefined,
-      historical: this.buildAnchoredHistoricalPayload(historical),
+      historical: this.buildAnchoredHistoricalPayload(historical, revenueByDate),
       forecast: calibratedForecast,
       kpis: dashboard.kpis,
       topItems: dashboard.topItems,
@@ -520,6 +549,7 @@ export class AnalyticsService {
           .length,
         sourceChannel: 'POS',
         targetVariable: 'quantity_volume',
+        forecastRevenuePayloadVersion: FORECAST_REVENUE_PAYLOAD_VERSION,
         forecastUnit: module === 'Services' ? 'service_bookings' : 'items_sold',
         priceCalibration: priceCostMatrix,
         annualDemandQuantity: this.round(
@@ -528,13 +558,8 @@ export class AnalyticsService {
             0,
           ) * (365 / Math.max(calibratedForecast.length, 1)),
         ),
+        ...(modelQualityWarning ? { modelQualityWarning } : {}),
         ...exogenousMetadata,
-        ...(useFallback && selectedModel
-          ? {
-              rejectedModel: selectedModel.modelName,
-              rejectedModelMase: selectedModel.mase,
-            }
-          : {}),
         csvUploadCount: uploadCount,
         latestCsvUploadId: latestUpload ? latestUpload._id.toString() : null,
         latestCsvUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
@@ -1066,6 +1091,14 @@ export class AnalyticsService {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   }
 
+  private normalizeForecastDays(value: number | string | undefined): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_FORECAST_DAYS;
+    }
+    return Math.min(Math.max(Math.trunc(parsed), 1), MAX_FORECAST_DAYS);
+  }
+
   private async getCsvUploadState(): Promise<{
     uploadCount: number;
     latestUploadId: string | null;
@@ -1344,11 +1377,13 @@ export class AnalyticsService {
 
   private buildAnchoredHistoricalPayload(
     historical: NormalizedDailyValue[],
+    revenueByDate = new Map<string, number>(),
   ): Array<{
     date: string;
     actual: number;
     normalized: number;
     orders: number;
+    revenue: number;
     fitted?: number;
   }> {
     const lastIndex = historical.length - 1;
@@ -1357,6 +1392,7 @@ export class AnalyticsService {
       actual,
       normalized,
       orders,
+      revenue: revenueByDate.get(date) || 0,
       fitted: index === lastIndex ? actual : undefined,
     }));
   }
@@ -1387,6 +1423,14 @@ export class AnalyticsService {
         confidenceLow,
         confidenceHigh,
         projectedNetSales: this.round(forecastQuantity * matrix.unitPrice),
+        projectedConfidenceLow:
+          confidenceLow === undefined
+            ? undefined
+            : this.round(confidenceLow * matrix.unitPrice),
+        projectedConfidenceHigh:
+          confidenceHigh === undefined
+            ? undefined
+            : this.round(confidenceHigh * matrix.unitPrice),
         projectedGrossProfit: this.round(
           forecastQuantity * (matrix.unitPrice - matrix.unitCost),
         ),
@@ -1807,18 +1851,101 @@ export class AnalyticsService {
     }));
   }
 
+  private formatHomeChannelBalance(rows: any[]): any[] {
+    const labels: Record<string, string> = {
+      POS: 'Offline Channel (POS)',
+      Shopee: 'Online Channel (Shopee)',
+      'TikTok Shop': 'Online Channel (TikTok Shop)',
+    };
+    const order = ['POS', 'Shopee', 'TikTok Shop'];
+    const byChannel = new Map(rows.map((row) => [row._id, row]));
+
+    return order
+      .map((channel) => {
+        const row = byChannel.get(channel);
+        const revenue = this.round(Number(row?.revenue) || 0);
+        if (revenue <= 0) return null;
+        return {
+          category: labels[channel],
+          channel,
+          physical: channel === 'POS' ? revenue : 0,
+          online: channel === 'POS' ? 0 : revenue,
+          count: Number(row?.count) || 0,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  private getHeatmapStartDate(end: Date): Date {
+    const start = new Date(end);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 6);
+    return start;
+  }
+
+  private buildHomeHeatmapDays(end: Date): any[] {
+    const anchorDate = this.formatDateInTimeZone(end, 'Asia/Manila');
+    const anchor = new Date(`${anchorDate}T12:00:00.000Z`);
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const value = new Date(anchor);
+      value.setUTCDate(anchor.getUTCDate() - 6 + index);
+      const date = value.toISOString().slice(0, 10);
+      return {
+        date,
+        dayLabel: this.formatHeatmapWeekday(date),
+        label: this.formatHeatmapDisplayLabel(date),
+      };
+    });
+  }
+
   private formatHomeHeatmap(rows: any[]): any[] {
     const maxRevenue = Math.max(
       1,
       ...rows.map((row) => Number(row.revenue) || 0),
     );
     return rows.map((row) => ({
+      date: String(row._id?.date || ''),
       dayOfWeek: Number(row._id?.dayOfWeek) || 1,
+      dayLabel: row._id?.date
+        ? this.formatHeatmapWeekday(String(row._id.date))
+        : '',
       hourBucket: Number(row._id?.hourBucket) || 0,
       sector: row._id?.sector || 'Unknown',
       revenue: this.round(Number(row.revenue) || 0),
       intensity: this.round(((Number(row.revenue) || 0) / maxRevenue) * 100),
     }));
+  }
+
+  private formatDateInTimeZone(date: Date, timeZone: string): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    return `${year}-${month}-${day}`;
+  }
+
+  private formatHeatmapWeekday(date: string): string {
+    return new Intl.DateTimeFormat('en-PH', {
+      weekday: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(`${date}T12:00:00.000Z`));
+  }
+
+  private formatHeatmapDisplayLabel(date: string): string {
+    const value = new Date(`${date}T12:00:00.000Z`);
+    const weekday = this.formatHeatmapWeekday(date);
+    const monthDay = new Intl.DateTimeFormat('en-PH', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(value);
+    return `${weekday} ${monthDay}`;
   }
 
   private buildHomeSuggestions(input: {
@@ -1909,6 +2036,7 @@ export class AnalyticsService {
         totalOrders: 0,
         totalQuantity: 0,
         totalItems: 0,
+        retailRevenue: 0,
         avgOrderValue: 0,
         revenueChangePercent: 0,
         ordersChangePercent: 0,
@@ -1924,6 +2052,7 @@ export class AnalyticsService {
       ],
       channelSummary: [],
       channelBalance: [],
+      heatmapDays: [],
       heatmap: [],
       suggestions: [],
       nextAction: null,
@@ -2004,7 +2133,11 @@ export class AnalyticsService {
         modelInfo: { model: 'Insufficient data', accuracy: 0 },
       };
     }
-    const result = await this.runPython<any>('forecast.py', inputData as any);
+    const forecastDays = this.normalizeForecastDays(DEFAULT_FORECAST_DAYS);
+    const result = await this.runPython<any>('forecast.py', {
+      data: inputData,
+      forecastDays,
+    });
     return {
       ...result,
       historical: (result.historical || []).map((point: any, index: number) => ({

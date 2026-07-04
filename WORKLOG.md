@@ -2,6 +2,92 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-04 - Cafe Forecast Revenue Display Correction
+
+### Requested
+
+- Investigate why the Cafe Revenue & Demand Forecast chart showed small daily values such as `50` on `05/11/26` even though the chart is labeled as revenue.
+
+### Diagnosis
+
+- The Cafe forecasting model intentionally uses daily demand quantity as its target variable (`actual`) for model training.
+- The Cafe frontend chart was using that demand quantity field while formatting the axis and tooltip as pesos, so a day with 50 units sold appeared as `₱50`.
+- The whole-day revenue was present in backend daily aggregation but was not included in the forecast historical payload.
+
+### Backend Changes
+
+- Added daily `revenue` to each historical forecast point while preserving `actual` as the model's quantity target.
+- Added the `revenue`, `projectedConfidenceLow`, and `projectedConfidenceHigh` fields to the persisted forecast-run Mongoose schema so saved runs keep the revenue series instead of dropping it.
+- Added projected revenue confidence fields for forecast points:
+  - `projectedConfidenceLow`
+  - `projectedConfidenceHigh`
+- Bumped `forecastRevenuePayloadVersion` to `2` so old cached forecasts without persisted daily revenue are recomputed instead of reused.
+
+### Frontend Changes
+
+- Updated the Cafe Revenue & Demand Forecast chart to plot historical `revenue` and future `projectedNetSales`.
+- Added a legacy-safe frontend revenue resolver that converts model demand quantity to revenue using calibrated unit price if an older response is missing revenue fields.
+- Updated Cafe selected-period revenue KPIs to sum daily `revenue` instead of demand quantity.
+- Updated menu item trend sparklines to use revenue-shaped history instead of quantity-shaped history.
+
+### Files Changed
+
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/analytics/analytics.service.spec.ts`
+- `backend/src/analytics/schemas/forecast-run.schema.ts`
+- `frontend/src/app/lib/api.ts`
+- `frontend/src/app/pages/Cafe.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm test -- --runInBand` in `backend` (20 tests passed).
+- Passed: `npx tsc --noEmit` in `backend`.
+- Passed: `npx tsc --noEmit` in `frontend`.
+
+## 2026-07-04 - Home KPI Scope, Channel Balance, and Heatmap Date Fixes
+
+### Requested
+
+- Make the Home KPI cards reflect ingested data and rename `Pending` to `WOOF Suggestions`.
+- Ensure Offline vs. Online Channel Balance compares POS, Shopee, and TikTok Shop revenue streams.
+- Fix the Sales Intensity Map so displayed days match the ingested transaction dates.
+- Clarify why Data Ingestion Center totals differ from the Home KPI totals.
+
+### Backend Changes
+
+- Updated `GET /api/analytics/home` so Home KPIs include `retailRevenue` from actual Retail transactions in the selected Home date window.
+- Changed channel balance aggregation from category-level physical/online totals to channel-level streams:
+  - `Offline Channel (POS)`
+  - `Online Channel (Shopee)`
+  - `Online Channel (TikTok Shop)`
+- Omit zero-revenue online channels so POS-only data currently displays as POS-only.
+- Added date-aware heatmap output using Asia/Manila calendar dates, including `heatmapDays` and per-row `date` / `dayLabel` values.
+
+### Frontend Changes
+
+- Updated the Home KPI row to show `Total Revenue`, `Orders`, `Retail`, and `WOOF Suggestions` from API data.
+- Added selected-period labeling to the Home KPI row to distinguish it from lifetime ingestion totals.
+- Updated Data Ingestion Center labels to clarify that its KPIs are all-upload totals across the full uploaded dataset.
+- Updated Offline vs. Online Channel Balance labels, tooltip, and legend to reflect POS versus Shopee/TikTok Shop.
+- Updated Sales Intensity Map to render a full seven-day calendar window ending on the latest ingested date, including zero-sales days.
+- Added visible borders to zero-intensity heatmap tiles so no-sales days remain visible instead of blending into the white card background.
+
+### Files Changed
+
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/analytics/analytics.service.spec.ts`
+- `frontend/src/app/components/DataIngestion.tsx`
+- `frontend/src/app/pages/Home.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm test -- --runInBand` in `backend` (20 tests passed).
+- Passed: `npx tsc --noEmit` in `frontend`.
+- Passed: `npx tsc --noEmit` in `frontend` after the heatmap zero-tile visibility follow-up.
+- Attempted: `npm run build` in `backend`; blocked by an existing Windows file lock in `backend/dist/app.controller.d.ts`, so the non-test build could not clean `dist`.
+
 ## 2026-07-03 - Home Module Live Ingested Data Integration
 
 ### Requested

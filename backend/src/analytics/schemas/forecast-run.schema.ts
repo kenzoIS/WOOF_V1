@@ -17,6 +17,9 @@ export class HistoricalPoint {
   @Prop({ default: 0 })
   orders: number;
 
+  @Prop({ default: 0 })
+  revenue: number;
+
   @Prop({ required: false })
   fitted?: number;
 }
@@ -40,6 +43,12 @@ export class ForecastPoint {
 
   @Prop()
   projectedNetSales?: number;
+
+  @Prop()
+  projectedConfidenceLow?: number;
+
+  @Prop()
+  projectedConfidenceHigh?: number;
 
   @Prop()
   projectedGrossProfit?: number;

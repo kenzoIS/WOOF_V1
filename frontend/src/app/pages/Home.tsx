@@ -11,8 +11,54 @@ import { getHomeOverview } from "../lib/api";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
 
-const heatmapDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const fallbackHeatmapDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+  date: "",
+  dayLabel: day,
+  label: day,
+}));
 const heatmapHours = ["8AM", "10AM", "12PM", "2PM", "4PM", "6PM", "8PM"];
+
+const formatDateKeyInTimeZone = (date: Date, timeZone: string) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+};
+
+const buildHeatmapDaysFromAnchor = (anchorDate?: string | null) => {
+  if (!anchorDate) return fallbackHeatmapDays;
+  const anchor = new Date(anchorDate);
+  if (Number.isNaN(anchor.getTime())) return fallbackHeatmapDays;
+
+  const anchorKey = formatDateKeyInTimeZone(anchor, "Asia/Manila");
+  const anchorNoon = new Date(`${anchorKey}T12:00:00.000Z`);
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const value = new Date(anchorNoon);
+    value.setUTCDate(anchorNoon.getUTCDate() - 6 + index);
+    const date = value.toISOString().slice(0, 10);
+    const weekday = new Intl.DateTimeFormat("en-PH", {
+      weekday: "short",
+      timeZone: "UTC",
+    }).format(value);
+    const monthDay = new Intl.DateTimeFormat("en-PH", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(value);
+    return {
+      date,
+      dayLabel: weekday,
+      label: `${weekday} ${monthDay}`,
+    };
+  });
+};
 
 interface HomeSuggestion {
   id: number;
@@ -30,6 +76,7 @@ interface HomeOverview {
   kpis: {
     totalRevenue: number;
     totalOrders: number;
+    retailRevenue: number;
     revenueChangePercent: number;
     ordersChangePercent: number;
     busiestSector: string;
@@ -39,8 +86,9 @@ interface HomeOverview {
   omnichannelSeries: Array<{ hour: string; cafe: number; services: number; retail: number; online: number }>;
   sectorSummary: Array<{ sector: string; revenue: number; orders: number }>;
   channelSummary: Array<{ channel: string; revenue: number; count: number }>;
-  channelBalance: Array<{ category: string; physical: number; online: number }>;
-  heatmap: Array<{ dayOfWeek: number; hourBucket: number; sector: string; revenue: number; intensity: number }>;
+  channelBalance: Array<{ category: string; channel: string; physical: number; online: number; count: number }>;
+  heatmapDays: Array<{ date: string; dayLabel: string; label: string }>;
+  heatmap: Array<{ date?: string; dayOfWeek: number; dayLabel?: string; hourBucket: number; sector: string; revenue: number; intensity: number }>;
   suggestions: HomeSuggestion[];
   nextAction: HomeSuggestion | null;
 }
@@ -121,9 +169,17 @@ export function Home() {
 
   const scaledKPIs = useMemo(() => {
     const kpis = homeOverview?.kpis;
+    const totalRevenue = kpis?.totalRevenue || 0;
+    const retailRevenue =
+      kpis?.retailRevenue ??
+      homeOverview?.sectorSummary.find((item) => item.sector === "Retail")?.revenue ??
+      0;
     return {
-      revenue: formatCurrency(kpis?.totalRevenue || 0),
+      revenue: formatCurrency(totalRevenue),
       orders: (kpis?.totalOrders || 0).toLocaleString(),
+      retail: formatCurrency(retailRevenue),
+      retailPercent:
+        totalRevenue > 0 ? `${((retailRevenue / totalRevenue) * 100).toFixed(1)}% of revenue` : "0.0% of revenue",
       revenuePercent: `${formatPercent(kpis?.revenueChangePercent || 0)} vs previous period`,
       ordersPercent: `${formatPercent(kpis?.ordersChangePercent || 0)} vs previous period`,
       busiestSector: kpis?.busiestSector || "None",
@@ -133,6 +189,11 @@ export function Home() {
 
   const dynamicOmnichannelData = homeOverview?.omnichannelSeries || [];
   const equilibriumData = homeOverview?.channelBalance || [];
+  const clientHeatmapDays = useMemo(
+    () => buildHeatmapDaysFromAnchor(homeOverview?.anchorDate),
+    [homeOverview?.anchorDate],
+  );
+  const displayHeatmapDays = clientHeatmapDays;
   const suggestions = homeOverview?.suggestions || [];
   const heroDate = homeOverview?.anchorDate
     ? new Date(homeOverview.anchorDate).toLocaleDateString("en-PH", {
@@ -242,14 +303,15 @@ export function Home() {
   };
 
   const getHeatmapColor = (value: number) => {
+    if (value <= 0) return "#FFFFFF";
     if (value > 80) return "#F53799";
     if (value > 60) return "#FFD9EC";
     if (value > 40) return "#FFF2FA";
     return "#FFF7FB";
   };
 
-  const getHeatmapValue = (day: string, hourLabel: string) => {
-    const dayIndex = heatmapDays.indexOf(day);
+  const getHeatmapValue = (day: { date: string; dayLabel: string }, hourLabel: string) => {
+    const dayIndex = fallbackHeatmapDays.findIndex((item) => item.dayLabel === day.dayLabel);
     const mongoDay = dayIndex === 6 ? 1 : dayIndex + 2;
     const hour = Number(hourLabel.replace(/\D/g, ""));
     const hourBucket = hourLabel.includes("PM") && hour !== 12 ? hour + 12 : hour;
@@ -257,7 +319,12 @@ export function Home() {
       const sectorMatches =
         heatmapFilter === "allsectors" ||
         row.sector.toLowerCase() === heatmapFilter;
-      return row.dayOfWeek === mongoDay && row.hourBucket === hourBucket && sectorMatches;
+      const dayMatches = day.date
+        ? row.date
+          ? row.date === day.date
+          : row.dayLabel === day.dayLabel || row.dayOfWeek === mongoDay
+        : row.dayLabel === day.dayLabel || row.dayOfWeek === mongoDay;
+      return dayMatches && row.hourBucket === hourBucket && sectorMatches;
     });
     if (!rows.length) return 0;
     return rows.reduce((max, row) => Math.max(max, row.intensity), 0);
@@ -327,6 +394,9 @@ export function Home() {
 
       {/* SECTION 2 — PRIMARY KPI ROW */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+        <div className="mb-3 text-xs md:text-sm text-[#223047] opacity-60">
+          Selected-period KPIs from uploaded transaction data
+        </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Total Revenue Today */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
@@ -352,27 +422,27 @@ export function Home() {
             </div>
           </div>
 
-          {/* Busiest Sector */}
+          {/* Retail Revenue */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <PawPrint className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Busiest Sector</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.busiestSector}</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">Retail</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.retail}</div>
               <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs mt-1 hidden md:inline-flex">
-                Active Now
+                {scaledKPIs.retailPercent}
               </Badge>
             </div>
           </div>
 
-          {/* Pending WOOF Actions */}
+          {/* WOOF Suggestions */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
               <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Pending</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate">WOOF Suggestions</div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.pending}</div>
               <Button
                 onClick={scrollToSuggestions}
@@ -550,15 +620,20 @@ export function Home() {
               Offline vs. Online Channel Balance
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Diverging channels highlighted
+              POS compared against Shopee and TikTok Shop revenue streams
             </p>
           </div>
 
+          {equilibriumData.length === 0 && (
+            <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
+              Upload POS, Shopee, or TikTok Shop transactions to compare channel revenue.
+            </div>
+          )}
           <ResponsiveContainer width="100%" height={250} className="md:!h-[300px]">
             <BarChart
               data={equilibriumData}
               layout="vertical"
-              margin={{ top: 8, right: 40, bottom: 8, left: 24 }}
+              margin={{ top: 8, right: 40, bottom: 8, left: 32 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
               <XAxis type="number" stroke="#223047" style={{ fontSize: "12px" }} />
@@ -566,14 +641,24 @@ export function Home() {
                 type="category"
                 dataKey="category"
                 stroke="#223047"
+                width={160}
                 style={{ fontSize: "12px" }}
               />
               <Tooltip
+                formatter={(value: number, name: string) => [
+                  formatCurrency(Number(value) || 0),
+                  name === "physical" ? "Offline Channel (POS)" : "Online Channel (Shopee + TikTok Shop)",
+                ]}
                 contentStyle={{
                   backgroundColor: "white",
                   border: "1px solid #FFD9EC",
                   borderRadius: "12px",
                 }}
+              />
+              <Legend
+                formatter={(value) =>
+                  value === "physical" ? "Offline Channel (POS)" : "Online Channel (Shopee + TikTok Shop)"
+                }
               />
               <Bar
                 dataKey="physical"
@@ -599,7 +684,7 @@ export function Home() {
                 Sales Intensity Map
               </h2>
               <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Past 7 Days
+                Past 7 uploaded-data dates
               </p>
             </div>
 
@@ -627,14 +712,14 @@ export function Home() {
               <div key={hour} className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3">
                 <div className="text-xs text-[#223047] opacity-60">{hour}</div>
                 <div className="grid grid-cols-7 gap-1.5 md:gap-2">
-                  {heatmapDays.map((day) => {
+                  {displayHeatmapDays.map((day) => {
                     const value = getHeatmapValue(day, hour);
                     return (
                       <div
-                        key={`${hour}-${day}`}
-                        className="h-8 md:h-10 lg:h-12 rounded cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
+                        key={`${hour}-${day.date || day.dayLabel}`}
+                        className="h-8 md:h-10 lg:h-12 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
                         style={{ backgroundColor: getHeatmapColor(value) }}
-                        title={`${day} ${hour}: ${value.toFixed(0)}% sales intensity`}
+                        title={`${day.label} ${hour}: ${value.toFixed(0)}% sales intensity`}
                       />
                     );
                   })}
@@ -644,9 +729,9 @@ export function Home() {
             <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 pt-1">
               <div aria-hidden="true" />
               <div className="grid grid-cols-7 gap-1.5 md:gap-2">
-                {heatmapDays.map((day) => (
-                  <div key={day} className="text-center text-xs text-[#223047] opacity-60">
-                    {day}
+                {displayHeatmapDays.map((day) => (
+                  <div key={day.date || day.dayLabel} className="text-center text-[10px] md:text-xs text-[#223047] opacity-60">
+                    {day.label}
                   </div>
                 ))}
               </div>

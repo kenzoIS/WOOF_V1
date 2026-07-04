@@ -49,6 +49,30 @@ const formatChartDate = (value: string) => {
   });
 };
 
+const getCafeForecastUnitPrice = (forecastRun: ForecastRun | null) => {
+  const matrix = forecastRun?.modelMetadata?.priceCalibration as { unitPrice?: number } | undefined;
+  const forecastUnitPrice = forecastRun?.forecast?.find((point) => Number(point.unitPrice) > 0)?.unitPrice;
+  const modelUnitPrice = Number(matrix?.unitPrice || forecastUnitPrice || 0);
+  return Number.isFinite(modelUnitPrice) && modelUnitPrice > 0 ? modelUnitPrice : 0;
+};
+
+const getHistoricalRevenue = (
+  point: ForecastRun["historical"][number],
+  unitPrice: number,
+) => {
+  if (Number(point.revenue) > 0) return Number(point.revenue);
+  return unitPrice > 0 ? Math.round((Number(point.actual) || 0) * unitPrice) : 0;
+};
+
+const getProjectedRevenue = (
+  point: ForecastRun["forecast"][number],
+  unitPrice: number,
+) => {
+  if (Number(point.projectedNetSales) > 0) return Number(point.projectedNetSales);
+  const quantity = Number(point.forecastQuantity ?? point.forecast) || 0;
+  return unitPrice > 0 ? Math.round(quantity * unitPrice) : quantity;
+};
+
 export function Cafe() {
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -180,6 +204,7 @@ export function Cafe() {
     
     // Get last 7 days of total revenue to build per-item trend sparklines
     const last7Days = forecastRun.historical.slice(-7);
+    const unitPrice = getCafeForecastUnitPrice(forecastRun);
     const averageQuantity =
       forecastRun.topItems.reduce((sum, item) => sum + item.quantity, 0) /
       forecastRun.topItems.length;
@@ -190,7 +215,7 @@ export function Cafe() {
         item.revenue / (forecastRun.kpis.totalRevenue || 1);
       const trend = last7Days.length > 0
         ? last7Days.map((day) =>
-            Math.max(0, Math.round(day.actual * itemProportion)),
+            Math.max(0, Math.round(getHistoricalRevenue(day, unitPrice) * itemProportion)),
           )
         : [item.revenue];
 
@@ -228,8 +253,9 @@ export function Cafe() {
       INGESTED_HISTORY_END_DATE;
     const range = parseGlobalRange(globalDateRange, latestHistoryDate);
     const sliced = filterByDateRange(forecastRun.historical, range);
-    const totalRevenue = sliced.reduce((sum, d) => sum + d.actual, 0);
-    const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || Math.round(d.actual / (forecastRun?.kpis?.avgOrderValue || 150))), 0);
+    const unitPrice = getCafeForecastUnitPrice(forecastRun);
+    const totalRevenue = sliced.reduce((sum, d) => sum + getHistoricalRevenue(d, unitPrice), 0);
+    const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || Math.round(getHistoricalRevenue(d, unitPrice) / (forecastRun?.kpis?.avgOrderValue || 150))), 0);
     const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : (forecastRun?.kpis?.avgOrderValue || 0);
     return { totalRevenue, totalOrders, avgOrderValue };
   }, [forecastRun, globalDateRange]);
@@ -274,6 +300,7 @@ export function Cafe() {
           };
     const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
     const forecastRows = filterByDateRange(forecastRun.forecast, selectedRange);
+    const unitPrice = getCafeForecastUnitPrice(forecastRun);
     const shouldAnchorForecast =
       forecastRows.length > 0 &&
       (historicalRows.length === 0 ||
@@ -286,11 +313,11 @@ export function Cafe() {
       ...(anchorRow ? [anchorRow] : []),
     ].map((d, index, rows) => ({
       date: d.date,
-      actual: d.actual,
+      actual: getHistoricalRevenue(d, unitPrice),
       forecast:
         (forecastRangeMode !== "custom" || d.date === latestHistoryDate) &&
         index === rows.length - 1
-          ? d.actual
+          ? getHistoricalRevenue(d, unitPrice)
           : null,
       confidenceLow: null as number | null,
       confidenceHigh: null as number | null,
@@ -298,9 +325,17 @@ export function Cafe() {
     const fc = forecastRows.map((d) => ({
       date: d.date,
       actual: null as number | null,
-      forecast: d.forecast,
-      confidenceLow: d.confidenceLow,
-      confidenceHigh: d.confidenceHigh,
+      forecast: getProjectedRevenue(d, unitPrice),
+      confidenceLow:
+        d.projectedConfidenceLow ??
+        (d.confidenceLow !== undefined && unitPrice > 0
+          ? Math.round(d.confidenceLow * unitPrice)
+          : d.confidenceLow),
+      confidenceHigh:
+        d.projectedConfidenceHigh ??
+        (d.confidenceHigh !== undefined && unitPrice > 0
+          ? Math.round(d.confidenceHigh * unitPrice)
+          : d.confidenceHigh),
     }));
     return [...hist, ...fc];
   }, [forecastRun, forecastRangeMode, customForecastStart, customForecastEnd]);
@@ -494,7 +529,12 @@ export function Cafe() {
             </p>
             {forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
-                SMA fallback active: selected model did not meet the MASE threshold
+                SMA fallback active: selected model could not run
+              </Badge>
+            )}
+            {!forecastRun?.isFallback && forecastRun?.modelMetadata?.modelQualityWarning && (
+              <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
+                Selected model active with quality warning
               </Badge>
             )}
           </div>
@@ -632,7 +672,7 @@ export function Cafe() {
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
                 <div className="text-xl md:text-2xl font-bold text-[#F53799]">{forecastRun?.mase.toFixed(2) ?? "—"}</div>
-                <div className="text-xs text-[#223047] opacity-60 hidden md:block">Fallback threshold: 1.20</div>
+                <div className="text-xs text-[#223047] opacity-60 hidden md:block">Quality threshold: 1.20</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
@@ -653,6 +693,11 @@ export function Cafe() {
                 <div>Holiday Source: {String(forecastRun.modelMetadata.holidayDataSource || "N/A")}</div>
                 {!!forecastRun.modelMetadata.exogenousVariables && (
                   <div>Exogenous: {Array.isArray(forecastRun.modelMetadata.exogenousVariables) ? (forecastRun.modelMetadata.exogenousVariables as any).join(", ") : String(forecastRun.modelMetadata.exogenousVariables)}</div>
+                )}
+                {!!forecastRun.modelMetadata.modelQualityWarning && (
+                  <div className="text-amber-700 opacity-100">
+                    {String(forecastRun.modelMetadata.modelQualityWarning)}
+                  </div>
                 )}
               </div>
             )}

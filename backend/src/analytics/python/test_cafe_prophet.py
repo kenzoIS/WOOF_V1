@@ -22,7 +22,7 @@ def build_payload():
                 "isMissingDate": False,
             }
         )
-    return {"data": data, "forecastDays": 14}
+    return {"data": data, "forecastDays": 30}
 
 
 def main():
@@ -30,7 +30,7 @@ def main():
         result = run(build_payload())
         for key in ["modelName", "mase", "mape", "accuracy", "forecast"]:
             assert key in result, f"missing result key: {key}"
-        assert len(result["forecast"]) == 14, "forecast should contain 14 items"
+        assert len(result["forecast"]) == 30, "forecast should contain 30 items"
         assert isinstance(result["mase"], float), "mase should be a float"
         assert math.isfinite(result["mase"]), "mase should be finite"
         assert 0 <= result["mase"] <= 10, "mase should be between 0 and 10"

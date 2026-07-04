@@ -57,6 +57,7 @@ export interface ForecastRun {
     actual: number;
     normalized: number;
     orders: number;
+    revenue?: number;
     fitted?: number;
   }>;
   forecast: Array<{
@@ -64,6 +65,11 @@ export interface ForecastRun {
     forecast: number;
     confidenceLow?: number;
     confidenceHigh?: number;
+    forecastQuantity?: number;
+    projectedNetSales?: number;
+    projectedConfidenceLow?: number;
+    projectedConfidenceHigh?: number;
+    unitPrice?: number;
   }>;
   kpis: {
     totalRevenue: number;

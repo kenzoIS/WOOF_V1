@@ -11,8 +11,29 @@ warnings.filterwarnings('ignore')
 logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
 logging.getLogger("prophet").setLevel(logging.ERROR)
 
-def run_forecast(data):
+DEFAULT_FORECAST_DAYS = 30
+MAX_FORECAST_DAYS = 90
+
+
+def normalize_forecast_days(value):
     try:
+        days = int(value)
+    except Exception:
+        days = DEFAULT_FORECAST_DAYS
+    return max(1, min(days, MAX_FORECAST_DAYS))
+
+
+def run_forecast(payload):
+    try:
+        if isinstance(payload, dict):
+            data = payload.get("data", [])
+            forecast_days = normalize_forecast_days(
+                payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
+            )
+        else:
+            data = payload
+            forecast_days = DEFAULT_FORECAST_DAYS
+
         # data is expected to be a list of dicts: [{'date': 'YYYY-MM-DD', 'revenue': 100}, ...]
         if not data or len(data) < 14:
             return {
@@ -29,14 +50,14 @@ def run_forecast(data):
         m = Prophet(daily_seasonality=True, yearly_seasonality=False, weekly_seasonality=True)
         m.fit(df[['ds', 'y']])
         
-        future = m.make_future_dataframe(periods=14)
+        future = m.make_future_dataframe(periods=forecast_days)
         forecast_prophet = m.predict(future)
         
         # SARIMAX Model (basic auto-fit approximation)
         try:
             model_sarimax = sm.tsa.statespace.SARIMAX(df['y'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 7))
             results_sarimax = model_sarimax.fit(disp=False)
-            forecast_sarimax = results_sarimax.get_forecast(steps=14)
+            forecast_sarimax = results_sarimax.get_forecast(steps=forecast_days)
             sarimax_mean = forecast_sarimax.predicted_mean.values
         except Exception as e:
             sarimax_mean = None
@@ -44,7 +65,7 @@ def run_forecast(data):
         # Combine or select best
         forecast_output = []
         
-        for i in range(14):
+        for i in range(forecast_days):
             idx = len(df) + i
             pred_date = forecast_prophet.iloc[idx]['ds'].strftime('%Y-%m-%d')
             yhat = forecast_prophet.iloc[idx]['yhat']

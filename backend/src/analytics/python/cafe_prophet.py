@@ -11,12 +11,15 @@ warnings.filterwarnings("ignore")
 logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
 logging.getLogger("prophet").setLevel(logging.ERROR)
 
+DEFAULT_FORECAST_DAYS = 30
+MAX_FORECAST_DAYS = 90
+
 
 def build_model(changepoint_prior_scale, use_exog=False):
     model = Prophet(
         weekly_seasonality=True,
         daily_seasonality=False,
-        yearly_seasonality=False,
+        yearly_seasonality=True,
         changepoint_prior_scale=changepoint_prior_scale,
         interval_width=0.8,
     )
@@ -30,6 +33,19 @@ def build_model(changepoint_prior_scale, use_exog=False):
         # still proceed without holidays because the primary signal is POS volume.
         pass
     return model
+
+
+def normalize_forecast_days(value):
+    try:
+        days = int(value)
+    except Exception:
+        days = DEFAULT_FORECAST_DAYS
+    return max(1, min(days, MAX_FORECAST_DAYS))
+
+
+def chronological_split_index(length):
+    split_index = int(np.floor(length * 0.8))
+    return min(max(1, split_index), length - 1)
 
 
 def metrics(actual, predicted, training):
@@ -55,7 +71,9 @@ def run(payload):
         raise ValueError("Input payload must be a JSON object")
 
     data = payload.get("data", [])
-    forecast_days = int(payload.get("forecastDays", 14))
+    forecast_days = normalize_forecast_days(
+        payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
+    )
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
     if len(data) < 21:
@@ -88,16 +106,17 @@ def run(payload):
         frame["rainFlag"] = frame["rainFlag"].fillna(0.0).astype(float)
 
     actual = frame["actual"].astype(float).to_numpy()
-    holdout = min(14, max(7, len(frame) // 5))
+    split_index = chronological_split_index(len(frame))
+    holdout = len(frame) - split_index
 
     if use_exog:
-        train = frame.iloc[:-holdout][["ds", "y", "tempCelsius", "rainFlag"]]
-        validation_dates = frame.iloc[-holdout:][["ds", "tempCelsius", "rainFlag"]]
+        train = frame.iloc[:split_index][["ds", "y", "tempCelsius", "rainFlag"]]
+        validation_dates = frame.iloc[split_index:][["ds", "tempCelsius", "rainFlag"]]
     else:
-        train = frame.iloc[:-holdout][["ds", "y"]]
-        validation_dates = frame.iloc[-holdout:][["ds"]]
+        train = frame.iloc[:split_index][["ds", "y"]]
+        validation_dates = frame.iloc[split_index:][["ds"]]
 
-    validation_actual = actual[-holdout:]
+    validation_actual = actual[split_index:]
     candidates = [0.01, 0.05, 0.1, 0.5]
     best = None
 
@@ -107,7 +126,7 @@ def run(payload):
             model.fit(train)
             predicted = model.predict(validation_dates)["yhat"].to_numpy()
             mase, mape, accuracy = metrics(
-                validation_actual, predicted, actual[:-holdout]
+                validation_actual, predicted, actual[:split_index]
             )
             score = (mase, mape)
             if best is None or score < best["score"]:
@@ -157,7 +176,7 @@ def run(payload):
 
     return {
         "modelName": (
-            f"Prophet (weekly seasonality + PH holidays"
+            f"Prophet (weekly + yearly seasonality + PH holidays"
             f"{' + exog' if use_exog else ''})"
         ),
         "mase": best["mase"],
@@ -169,7 +188,10 @@ def run(payload):
             "changepointPriorScale": best["changepointPriorScale"],
             "testedChangepointPriorScales": candidates,
             "validationDays": holdout,
+            "trainingDays": split_index,
+            "splitRatio": "80/20 chronological",
             "weeklySeasonality": True,
+            "yearlySeasonality": True,
             "holidayCountry": "PH",
             "exogenousVariables": ["tempCelsius", "rainFlag"] if use_exog else [],
         },

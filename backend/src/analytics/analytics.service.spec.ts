@@ -134,11 +134,11 @@ describe('AnalyticsService getForecast', () => {
   it('returns a successful Cafe Prophet forecast payload', async () => {
     mockForecastAggregates(21);
     jest.spyOn(service as any, 'runPython').mockResolvedValue({
-      modelName: 'Prophet (weekly seasonality + PH holidays)',
+      modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
       mase: 0.8,
       mape: 15,
       accuracy: 85,
-      forecast: forecastRows(14),
+      forecast: forecastRows(30),
       fittedValues: Array.from({ length: 21 }, (_, index) => 95 + index),
     });
 
@@ -147,7 +147,7 @@ describe('AnalyticsService getForecast', () => {
     expect(result).toEqual(
       expect.objectContaining({
         module: 'Cafe',
-        modelName: 'Prophet (weekly seasonality + PH holidays)',
+        modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
         mase: 0.8,
         mape: 15,
         accuracy: 85,
@@ -158,20 +158,24 @@ describe('AnalyticsService getForecast', () => {
       }),
     );
     expect(result.historical).toHaveLength(21);
-    expect(result.forecast).toHaveLength(14);
+    expect(result.forecast).toHaveLength(30);
     expect(result.historical[0].actual).toBe(10);
+    expect(result.historical[0].revenue).toBe(1200);
     expect(result.historical[0].normalized).toBe(10);
     expect(result.forecast[0]).toEqual(
       expect.objectContaining({
         forecast: 150,
         forecastQuantity: 150,
         projectedNetSales: 18000,
+        projectedConfidenceLow: 16800,
+        projectedConfidenceHigh: 19200,
         projectedGrossProfit: 11250,
         unitPrice: 120,
         unitCost: 45,
       }),
     );
     expect(result.modelMetadata.targetVariable).toBe('quantity_volume');
+    expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(3);
     expect(result.modelMetadata.annualDemandQuantity).toBeGreaterThan(0);
     expect(result.historical.slice(0, -1).every((point) => point.fitted === undefined)).toBe(true);
     expect(result.historical[20].fitted).toBe(result.historical[20].actual);
@@ -184,23 +188,32 @@ describe('AnalyticsService getForecast', () => {
     expect(result).toHaveProperty('accuracy');
     expect(result).toHaveProperty('historical');
     expect(result).toHaveProperty('forecast');
+    expect((service as any).runPython).toHaveBeenCalledWith(
+      'cafe_prophet.py',
+      expect.objectContaining({ forecastDays: 30 }),
+    );
   });
 
-  it('falls back to SMA when the selected model MASE exceeds 1.2', async () => {
+  it('keeps the selected Cafe model when MASE exceeds 1.2 and reports a quality warning', async () => {
     mockForecastAggregates(21);
     jest.spyOn(service as any, 'runPython').mockResolvedValue({
-      modelName: 'Prophet (weekly seasonality + PH holidays)',
+      modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
       mase: 1.5,
       mape: 25,
       accuracy: 75,
-      forecast: forecastRows(14),
+      forecast: forecastRows(30),
     });
 
     const result = await service.getForecast('cafe');
 
-    expect(result.isFallback).toBe(true);
-    expect(result.modelName).toContain('SMA');
-    expect(result.rejectionReason).toContain('exceeded 1.2');
+    expect(result.isFallback).toBe(false);
+    expect(result.modelName).toBe('Prophet (weekly + yearly seasonality + PH holidays)');
+    expect(result.rejectionReason).toBeUndefined();
+    expect(result.modelMetadata.modelQualityWarning).toContain('exceeded 1.2');
+    expect(result.forecast.map((point) => point.projectedNetSales).slice(0, 14)).toEqual([
+      18000, 18120, 18240, 18360, 18480, 18600, 18720, 18840, 18960, 19080,
+      19200, 19320, 19440, 19560,
+    ]);
   });
 
   it('falls back to SMA when fewer than 21 daily observations exist', async () => {
@@ -213,18 +226,147 @@ describe('AnalyticsService getForecast', () => {
     expect(result.isFallback).toBe(true);
     expect(result.rejectionReason).toContain('21 daily observations');
   });
+
+  describe('home overview', () => {
+    it('returns uploaded-data KPIs, POS-vs-marketplace channel balance, and dated heatmap rows', async () => {
+      transactionModel.aggregate
+        .mockResolvedValueOnce([
+          { latestDate: new Date('2026-07-04T10:30:00.000Z') },
+        ])
+        .mockResolvedValueOnce([
+          {
+            totalRevenue: 5000,
+            totalOrders: ['txn-1', 'txn-2', 'txn-3'],
+            totalQuantity: 9,
+            totalItems: 6,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            totalRevenue: 2500,
+            totalOrders: ['old-1', 'old-2'],
+            totalQuantity: 4,
+            totalItems: 3,
+          },
+        ])
+        .mockResolvedValueOnce([
+          { _id: 'Cafe', revenue: 1500, orderCount: 1 },
+          { _id: 'Services', revenue: 1500, orderCount: 1 },
+          { _id: 'Retail', revenue: 2000, orderCount: 1 },
+        ])
+        .mockResolvedValueOnce([
+          { _id: 'POS', revenue: 4200, count: 5 },
+          { _id: 'Shopee', revenue: 800, count: 1 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            _id: { date: '2026-07-04', sector: 'Retail', channel: 'POS' },
+            revenue: 2000,
+          },
+          {
+            _id: { date: '2026-07-04', sector: 'Retail', channel: 'Shopee' },
+            revenue: 800,
+          },
+        ])
+        .mockResolvedValueOnce([
+          { _id: 'POS', revenue: 4200, count: 5 },
+          { _id: 'Shopee', revenue: 800, count: 1 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            _id: {
+              date: '2026-07-04',
+              dayOfWeek: 7,
+              hourBucket: 10,
+              sector: 'Retail',
+            },
+            revenue: 2000,
+          },
+          {
+            _id: {
+              date: '2026-07-03',
+              dayOfWeek: 6,
+              hourBucket: 10,
+              sector: 'Cafe',
+            },
+            revenue: 1000,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            _id: {
+              productName: 'Premium Treats',
+              sector: 'Retail',
+              category: 'Pet Supplies',
+            },
+            revenue: 2000,
+            quantity: 3,
+            orderCount: 1,
+          },
+        ]);
+
+      const result = await service.getHomeOverview('week');
+
+      expect(result.kpis).toEqual(
+        expect.objectContaining({
+          totalRevenue: 5000,
+          totalOrders: 3,
+          retailRevenue: 2000,
+          pendingSuggestions: 3,
+        }),
+      );
+      expect(result.channelBalance).toEqual([
+        {
+          category: 'Offline Channel (POS)',
+          channel: 'POS',
+          physical: 4200,
+          online: 0,
+          count: 5,
+        },
+        {
+          category: 'Online Channel (Shopee)',
+          channel: 'Shopee',
+          physical: 0,
+          online: 800,
+          count: 1,
+        },
+      ]);
+      expect(result.heatmapDays).toHaveLength(7);
+      expect(result.heatmapDays[result.heatmapDays.length - 1]).toEqual(
+        expect.objectContaining({ date: '2026-07-04' }),
+      );
+      expect(result.heatmap).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            date: '2026-07-04',
+            dayLabel: 'Sat',
+            hourBucket: 10,
+            sector: 'Retail',
+            intensity: 100,
+          }),
+          expect.objectContaining({
+            date: '2026-07-03',
+            dayLabel: 'Fri',
+            hourBucket: 10,
+            sector: 'Cafe',
+            intensity: 50,
+          }),
+        ]),
+      );
+    });
+  });
   describe('caching behavior', () => {
     it('returns cached forecast run if CSV state and overrides match', async () => {
       const cached = {
         module: 'Cafe',
-        modelName: 'Prophet (weekly seasonality + PH holidays)',
+        modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
         mase: 0.8,
         mape: 15,
         accuracy: 85,
         isFallback: false,
         historical: [
-          { date: '2026-01-01', actual: 100, normalized: 100, orders: 1, fitted: 98 },
-          { date: '2026-01-02', actual: 120, normalized: 120, orders: 2, fitted: 118 },
+          { date: '2026-01-01', actual: 100, normalized: 100, orders: 1, revenue: 10000, fitted: 98 },
+          { date: '2026-01-02', actual: 120, normalized: 120, orders: 2, revenue: 12000, fitted: 118 },
         ],
         forecast: [],
         kpis: {},
@@ -233,6 +375,7 @@ describe('AnalyticsService getForecast', () => {
           csvUploadCount: 2,
           latestCsvUploadId: 'upload-id-1',
           latestCsvUploadTime: 123456789,
+          forecastRevenuePayloadVersion: 3,
         },
         generatedAt: new Date(),
         toObject: function() { return this; }
