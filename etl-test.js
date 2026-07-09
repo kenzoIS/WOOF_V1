@@ -143,7 +143,6 @@ function validateOrder(order) {
     for (const item of order.items || []) {
         if (!item.product_id) errors.push("Missing product_id");
         if (!item.product_name) errors.push("Missing product_name");
-        if (!item.category) errors.push("Missing category");
 
         if (item.quantity == null || Number(item.quantity) < 0) {
             errors.push("Invalid quantity");
@@ -238,9 +237,9 @@ async function upsertCustomerDim(customer) {
 async function upsertProductDim(item) {
     const row = {
         product_id: item.product_id,
-        sku: item.sku || null,
-        product_name: item.product_name,
-        category: item.category,
+        sku: item.sku ? item.sku.toUpperCase().trim() : null,
+        product_name: item.product_name ? item.product_name.trim() : "Unnamed Product",
+        category: item.category || "Uncategorized",
         brand: item.brand || null,
         unit_cost: Number(item.unit_cost || 0),
         selling_price: Number(item.unit_price || 0),
@@ -253,6 +252,24 @@ async function upsertProductDim(item) {
     if (error) throw new Error(`product_dim upsert failed: ${error.message}`);
 
     return row.product_id;
+}
+
+async function upsertServiceDim(item) {
+    const row = {
+        service_id: item.product_id,
+        service_name: item.product_name ? item.product_name.trim() : "Unnamed Service",
+        service_type: item.category || "Uncategorized",
+        duration: item.duration || 0,
+        base_price: Number(item.unit_price || 0),
+    };
+
+    const { error } = await supabase
+        .from("service_dim")
+        .upsert(row, { onConflict: "service_id" });
+
+    if (error) throw new Error(`service_dim upsert failed: ${error.message}`);
+
+    return row.service_id;
 }
 
 async function upsertCampaignDim(campaign, channelId) {
@@ -305,10 +322,10 @@ async function upsertFactTransaction(rawOrder, ids, item, itemIndex) {
         source_order_id: rawOrder.source_order_id || null,
         transaction_timestamp: new Date(rawOrder.order_date).toISOString(),
         date_id: ids.dateId,
-        product_id: item.product_id,
+        product_id: ids.productId || null,
         customer_id: ids.customerId || null,
         channel_id: ids.channelId,
-        service_id: null,
+        service_id: ids.serviceId || null,
         campaign_id: ids.campaignId || null,
         segment_id: ids.segmentId,
         quantity_sold: quantity,
@@ -393,7 +410,14 @@ async function runEtlTest() {
         for (let i = 0; i < rawOrder.items.length; i++) {
             const item = rawOrder.items[i];
 
-            const productId = await upsertProductDim(item);
+            let productId = null;
+            let serviceId = null;
+
+            if (segment.segment_type === "Service") {
+                serviceId = await upsertServiceDim(item);
+            } else {
+                productId = await upsertProductDim(item);
+            }
 
             await upsertFactTransaction(
                 rawOrder,
@@ -403,6 +427,7 @@ async function runEtlTest() {
                     segmentId,
                     customerId,
                     productId,
+                    serviceId,
                     campaignId,
                 },
                 item,

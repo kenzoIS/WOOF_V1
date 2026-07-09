@@ -2090,15 +2090,16 @@ export class AnalyticsService {
       .slice(1)
       .map((value, index) => Math.abs(value - training[index]));
     const naiveMae = this.average(naiveErrors);
-    const mase = naiveMae > 0 ? mae / naiveMae : mae === 0 ? 0 : 999;
-    const sumActual = actual.reduce((sum, val) => sum + val, 0);
-    const sumAbsoluteErrors = absoluteErrors.reduce((sum, val) => sum + val, 0);
-    const wmape = sumActual > 0 ? (sumAbsoluteErrors / sumActual) * 100 : 0;
-    
+    const percentageErrors = actual
+      .map((value, index) =>
+        value === 0 ? null : Math.abs((value - predicted[index]) / value) * 100,
+      )
+      .filter((value): value is number => value !== null);
+    const mape = this.average(percentageErrors);
     return {
-      mase: this.round(mase),
-      mape: this.round(wmape),
-      accuracy: this.round(Math.max(0, 100 - wmape)),
+      mase: this.round(naiveMae > 0 ? mae / naiveMae : mae === 0 ? 0 : 999),
+      mape: this.round(mape),
+      accuracy: this.round(Math.max(0, 100 - mape)),
     };
   }
 
