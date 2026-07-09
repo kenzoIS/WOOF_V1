@@ -11,6 +11,8 @@ import {
   filterByDateRange,
   parseCustomRange,
   parseGlobalRange,
+  addDays,
+  countDays,
 } from "../lib/dateRanges";
 import retailMascot from "../../imports/no_bg_Retail.png";
 import {
@@ -99,6 +101,33 @@ const formatChartDate = (value: string) => {
     day: "2-digit",
     year: "2-digit",
   });
+};
+
+const formatGrowth = (current: number, previous: number) => {
+  if (previous === 0) {
+    return {
+      text: current > 0 ? "+100.0% ↑" : "0.0%",
+      className: current > 0 ? "text-xs text-green-600 font-medium hidden md:block" : "text-xs text-gray-500 font-medium hidden md:block",
+    };
+  }
+  const change = ((current - previous) / previous) * 100;
+  const absChange = Math.abs(change).toFixed(1);
+  if (change > 0) {
+    return {
+      text: `+${absChange}% ↑`,
+      className: "text-xs text-green-600 font-medium hidden md:block",
+    };
+  }
+  if (change < 0) {
+    return {
+      text: `-${absChange}% ↓`,
+      className: "text-xs text-rose-600 font-medium hidden md:block",
+    };
+  }
+  return {
+    text: "0.0%",
+    className: "text-xs text-gray-500 font-medium hidden md:block",
+  };
 };
 
 export function Retail() {
@@ -217,6 +246,7 @@ export function Retail() {
     if (!channelForecast?.physical?.historical?.length) {
       return {
         totalRevenue: kpis?.totalRevenue || 0,
+        revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
       };
     }
     const latestHistoryDate =
@@ -227,8 +257,21 @@ export function Retail() {
     const onlineSliced = filterByDateRange(channelForecast.online?.historical || [], range);
     const physRevenue = physSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
     const onlineRevenue = onlineSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
+    const totalRevenue = physRevenue + onlineRevenue;
+
+    const dayCount = countDays(range.start, range.end);
+    const previousEnd = addDays(range.start, -1);
+    const previousStart = addDays(previousEnd, -(dayCount - 1));
+    const prevRange = { start: previousStart, end: previousEnd, isCustom: range.isCustom };
+    const physPrevSliced = filterByDateRange(channelForecast.physical.historical, prevRange);
+    const onlinePrevSliced = filterByDateRange(channelForecast.online?.historical || [], prevRange);
+    const physPrevRevenue = physPrevSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
+    const onlinePrevRevenue = onlinePrevSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
+    const previousRevenue = physPrevRevenue + onlinePrevRevenue;
+
     return {
-      totalRevenue: physRevenue + onlineRevenue,
+      totalRevenue,
+      revenueGrowth: formatGrowth(totalRevenue, previousRevenue),
     };
   }, [channelForecast, globalDateRange, kpis]);
 
@@ -348,7 +391,7 @@ export function Retail() {
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Historical Retail Revenue</div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{retailRevenue}</div>
-              <div className="text-xs text-green-600 font-medium hidden md:block">+5.2% ↑</div>
+              <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
             </div>
           </div>
 

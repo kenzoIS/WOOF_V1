@@ -106,7 +106,8 @@ def run(payload):
         frame["rainFlag"] = frame["rainFlag"].fillna(0.0).astype(float)
 
     actual = frame["actual"].astype(float).to_numpy()
-    split_index = chronological_split_index(len(frame))
+    holdout = forecast_days
+    split_index = max(1, min(len(frame) - 1, len(frame) - holdout))
     holdout = len(frame) - split_index
 
     if use_exog:
@@ -189,7 +190,7 @@ def run(payload):
             "testedChangepointPriorScales": candidates,
             "validationDays": holdout,
             "trainingDays": split_index,
-            "splitRatio": "80/20 chronological",
+            "splitRatio": f"chronological (last {holdout} days holdout)",
             "weeklySeasonality": True,
             "yearlySeasonality": True,
             "holidayCountry": "PH",

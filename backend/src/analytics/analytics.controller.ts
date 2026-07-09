@@ -21,8 +21,9 @@ export class AnalyticsController {
     @Query('temp') temp?: string,
     @Query('rain') rain?: string,
     @Query('holiday') holiday?: string,
+    @Query('forceRefresh') forceRefresh?: string,
   ) {
-    return this.analyticsService.getForecast(sector, { temp, rain, holiday });
+    return this.analyticsService.getForecast(sector, { temp, rain, holiday, forceRefresh });
   }
 
   @Get('forecast-by-channel/retail')

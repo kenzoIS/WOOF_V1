@@ -107,7 +107,7 @@ export class AnalyticsService {
     }
 
     const { start, end, previousStart, previousEnd } =
-      this.getHomeDateWindow(normalizedRange, latestDate);
+      this.getHomeDateWindow(range, latestDate);
     const dateFilter = { date: { $gte: start, $lte: end } };
     const previousDateFilter = {
       date: { $gte: previousStart, $lte: previousEnd },
@@ -399,7 +399,7 @@ export class AnalyticsService {
    */
   async getForecast(
     sector: string,
-    overrides?: { temp?: string; rain?: string; holiday?: string },
+    overrides?: { temp?: string; rain?: string; holiday?: string; forceRefresh?: string },
   ): Promise<any> {
     if (this.normalizeSector(sector) === 'Retail') {
       return this.getLegacyRetailForecast();
@@ -447,7 +447,9 @@ export class AnalyticsService {
         metadata.forecastRevenuePayloadVersion ===
         FORECAST_REVENUE_PAYLOAD_VERSION;
 
-      if (isCsvStateMatch && isOverridesMatch && hasRevenuePayload) {
+      const isForceRefresh = overrides?.forceRefresh === 'true';
+
+      if (isCsvStateMatch && isOverridesMatch && hasRevenuePayload && !isForceRefresh) {
         return this.withForecastStartAnchor(cachedForecast.toObject());
       }
     }
@@ -983,11 +985,18 @@ export class AnalyticsService {
         todayStr,
         todayStr,
       );
-      return records[0] || {
+      if (records[0]) {
+        return {
+          ...records[0],
+          source: records[0].isSynthetic ? 'Synthetic fallback' : 'Open-Meteo',
+        };
+      }
+      return {
         date: todayStr,
         tempCelsius: 28,
         rainfallMm: 0,
         isSynthetic: true,
+        source: 'Synthetic fallback',
       };
     } catch (error) {
       return {
@@ -995,6 +1004,7 @@ export class AnalyticsService {
         tempCelsius: 28,
         rainfallMm: 0,
         isSynthetic: true,
+        source: 'Synthetic fallback',
         error: error.message,
       };
     }
@@ -1717,18 +1727,52 @@ export class AnalyticsService {
     return 'week';
   }
 
-  private getHomeDateWindow(range: HomeRange, latestDate: Date): {
+  private getHomeDateWindow(range: string, latestDate: Date): {
     start: Date;
     end: Date;
     previousStart: Date;
     previousEnd: Date;
   } {
+    const lower = range.toLowerCase();
+    
+    if (lower.startsWith('custom:')) {
+      const parts = range.split(':');
+      const start = new Date(parts[1]);
+      const end = new Date(parts[2]);
+      if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
+        start.setHours(0, 0, 0, 0);
+        end.setHours(23, 59, 59, 999);
+        
+        const dayCount = Math.max(1, Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1);
+        const previousEnd = new Date(start);
+        previousEnd.setMilliseconds(previousEnd.getMilliseconds() - 1);
+        const previousStart = new Date(previousEnd);
+        previousStart.setDate(previousStart.getDate() - dayCount + 1);
+        previousStart.setHours(0, 0, 0, 0);
+        
+        return { start, end, previousStart, previousEnd };
+      }
+    }
+
     const end = new Date(latestDate);
     const start = new Date(latestDate);
     start.setHours(0, 0, 0, 0);
 
-    const dayCount =
-      range === 'today' ? 1 : range === 'month' ? 30 : range === 'custom' ? 90 : 7;
+    let dayCount = 7;
+    if (lower === 'today' || lower === 'yesterday') {
+      dayCount = 1;
+      if (lower === 'yesterday') {
+        end.setDate(end.getDate() - 1);
+        start.setDate(start.getDate() - 1);
+      }
+    } else if (lower === 'month' || lower === 'last-30-days') {
+      dayCount = 30;
+    } else if (lower === 'last-90-days' || lower === 'custom') {
+      dayCount = 90;
+    } else if (lower === 'last-12-months') {
+      dayCount = 365;
+    }
+
     if (dayCount > 1) {
       start.setDate(start.getDate() - dayCount + 1);
     }

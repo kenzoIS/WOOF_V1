@@ -75,6 +75,7 @@ export function Header({ onMenuClick }: HeaderProps) {
     tempCelsius: number;
     rainfallMm: number;
     isSynthetic: boolean;
+    source?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -267,7 +268,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           </div>
 
           {/* Weather Badge (hidden on small mobile) */}
-          <Badge variant="outline" className="hidden sm:flex gap-1.5 border-[#FFD9EC]" title={currentWeather?.isSynthetic ? "Synthetic weather fallback" : "Live weather from OpenWeather"}>
+          <Badge variant="outline" className="hidden sm:flex gap-1.5 border-[#FFD9EC]" title={currentWeather?.isSynthetic ? "Synthetic weather fallback" : `Live weather from ${currentWeather?.source || "Open-Meteo"}`}>
             <WeatherIcon className="w-3.5 h-3.5" />
             <span className="text-xs">{weatherTempString}</span>
           </Badge>

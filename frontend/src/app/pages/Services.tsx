@@ -15,6 +15,7 @@ import {
   forecastRangeFromHorizon,
   parseCustomRange,
   parseGlobalRange,
+  countDays,
 } from "../lib/dateRanges";
 import {
   LineChart,
@@ -47,6 +48,33 @@ const formatChartDate = (value: string) => {
     day: "2-digit",
     year: "2-digit",
   });
+};
+
+const formatGrowth = (current: number, previous: number) => {
+  if (previous === 0) {
+    return {
+      text: current > 0 ? "+100.0% ↑" : "0.0%",
+      className: current > 0 ? "text-xs text-green-600 font-medium hidden md:block" : "text-xs text-gray-500 font-medium hidden md:block",
+    };
+  }
+  const change = ((current - previous) / previous) * 100;
+  const absChange = Math.abs(change).toFixed(1);
+  if (change > 0) {
+    return {
+      text: `+${absChange}% ↑`,
+      className: "text-xs text-green-600 font-medium hidden md:block",
+    };
+  }
+  if (change < 0) {
+    return {
+      text: `-${absChange}% ↓`,
+      className: "text-xs text-rose-600 font-medium hidden md:block",
+    };
+  }
+  return {
+    text: "0.0%",
+    className: "text-xs text-gray-500 font-medium hidden md:block",
+  };
 };
 
 export function Services() {
@@ -228,6 +256,7 @@ export function Services() {
       totalRevenue: forecastRun?.kpis?.totalRevenue || 0,
       totalOrders: forecastRun?.kpis?.totalOrders || 0,
       avgOrderValue: forecastRun?.kpis?.avgOrderValue || 0,
+      revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
     };
     if (!forecastRun?.historical?.length) {
       return defaultKpis;
@@ -240,7 +269,20 @@ export function Services() {
     const totalRevenue = sliced.reduce((sum, d) => sum + d.actual, 0);
     const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || 0), 0);
     const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : (forecastRun?.kpis?.avgOrderValue || 0);
-    return { totalRevenue, totalOrders, avgOrderValue };
+
+    const dayCount = countDays(range.start, range.end);
+    const previousEnd = addDays(range.start, -1);
+    const previousStart = addDays(previousEnd, -(dayCount - 1));
+    const prevRange = { start: previousStart, end: previousEnd, isCustom: range.isCustom };
+    const prevSliced = filterByDateRange(forecastRun.historical, prevRange);
+    const prevRevenue = prevSliced.reduce((sum, d) => sum + d.actual, 0);
+
+    return {
+      totalRevenue,
+      totalOrders,
+      avgOrderValue,
+      revenueGrowth: formatGrowth(totalRevenue, prevRevenue),
+    };
   }, [forecastRun, globalDateRange]);
 
   const servicesRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
@@ -333,10 +375,18 @@ export function Services() {
   };
 
   const handleRetrainModel = () => {
-    toast.info("Starting model retraining...");
-    setTimeout(() => {
-      setErrorModal({ isOpen: true, type: "data_sync_failed" });
-    }, 2000);
+    const toastId = toast.loading("Retraining model with latest data... This may take a few seconds.");
+    getForecast("services", { forceRefresh: "true" })
+      .then((res) => {
+        setForecastRun(res);
+        toast.dismiss(toastId);
+        setSuccessModal({ isOpen: true, type: "model_retrain_success" });
+      })
+      .catch((err) => {
+        toast.dismiss(toastId);
+        toast.error("Model retraining failed: " + (err instanceof Error ? err.message : String(err)));
+        setErrorModal({ isOpen: true, type: "data_sync_failed" });
+      });
   };
 
   const handleRetryDataSync = () => {
@@ -391,7 +441,7 @@ export function Services() {
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Historical Services Revenue</div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{servicesRevenue}</div>
-              <div className="text-xs text-green-600 font-medium hidden md:block">+8.5% ↑</div>
+              <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
             </div>
           </div>
 

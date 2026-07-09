@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert } from "lucide-react";
-import { getExogenousStatus } from "../lib/api";
+import { getExogenousStatus, getForecast } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
@@ -43,12 +43,21 @@ export function Settings() {
   };
 
   const handleRetrainModels = () => {
-    toast.info("Retraining all models...");
-    setTimeout(() => {
-      toast.success("Models retrained successfully!", {
-        description: "All prediction models updated with latest data.",
+    const toastId = toast.loading("Retraining all models with the latest data... This may take up to a minute.");
+    Promise.all([
+      getForecast("cafe", { forceRefresh: "true" }),
+      getForecast("services", { forceRefresh: "true" })
+    ])
+      .then(() => {
+        toast.dismiss(toastId);
+        toast.success("Models retrained successfully!", {
+          description: "All prediction models updated with latest data.",
+        });
+      })
+      .catch((err) => {
+        toast.dismiss(toastId);
+        toast.error("Model retraining failed: " + (err instanceof Error ? err.message : String(err)));
       });
-    }, 3000);
   };
 
   return (

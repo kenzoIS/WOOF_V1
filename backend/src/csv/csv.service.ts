@@ -783,6 +783,16 @@ export class CsvService {
         ? transaction.date
         : fallbackDate;
 
+    const quantity = this.safeNumber(transaction.quantity, 1);
+    const unitPrice = this.safeNumber(transaction.unitPrice, 0);
+    const totalAmount = this.safeNumber(transaction.totalAmount, 0);
+    const discount = this.safeNumber(transaction.discount, 0);
+    let netSales = this.safeNumber(transaction.netSales, 0);
+
+    if (netSales <= 0 && totalAmount - discount > 0) {
+      netSales = totalAmount - discount;
+    }
+
     return {
       ...transaction,
       date,
@@ -797,11 +807,11 @@ export class CsvService {
       category: this.safeRequiredString(transaction.category, 'Uncategorized'),
       sector: this.safeRequiredString(transaction.sector, 'Retail'),
       channel: this.safeRequiredString(transaction.channel, 'POS'),
-      quantity: this.safeNumber(transaction.quantity, 1),
-      unitPrice: this.safeNumber(transaction.unitPrice, 0),
-      totalAmount: this.safeNumber(transaction.totalAmount, 0),
-      discount: this.safeNumber(transaction.discount, 0),
-      netSales: this.safeNumber(transaction.netSales, 0),
+      quantity,
+      unitPrice,
+      totalAmount,
+      discount,
+      netSales,
     };
   }
 

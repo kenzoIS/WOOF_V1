@@ -202,7 +202,8 @@ def run(payload):
     exog = build_exog_matrix(payload.get("exogenous", []), len(frame))
     use_exog = exog is not None
     forecast_exog = build_forecast_exog(payload, forecast_days) if use_exog else None
-    split_index = chronological_split_index(len(frame))
+    holdout = forecast_days
+    split_index = max(1, min(len(frame) - 1, len(frame) - holdout))
     holdout = len(frame) - split_index
     train_normalized = normalized[:split_index]
     train_exog = exog[:split_index] if use_exog else None
@@ -266,7 +267,7 @@ def run(payload):
             "aic": round(float(final_fit.aic), 2),
             "validationDays": holdout,
             "trainingDays": split_index,
-            "splitRatio": "80/20 chronological",
+            "splitRatio": f"chronological (last {holdout} days holdout)",
             "univariate": not use_exog,
             "exogenousVariables": EXOG_COLUMNS if use_exog else [],
             **search_metadata,

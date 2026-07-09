@@ -142,7 +142,7 @@ export function Home() {
   useEffect(() => {
     let active = true;
     setHomeLoading(true);
-    getHomeOverview(timeRange)
+    getHomeOverview(globalDateRange)
       .then((data) => {
         if (!active) return;
         setHomeOverview(data);
@@ -159,7 +159,7 @@ export function Home() {
     return () => {
       active = false;
     };
-  }, [timeRange]);
+  }, [globalDateRange]);
 
   const formatCurrency = (value: number) =>
     `PHP ${Math.round(value || 0).toLocaleString()}`;
@@ -174,14 +174,18 @@ export function Home() {
       kpis?.retailRevenue ??
       homeOverview?.sectorSummary.find((item) => item.sector === "Retail")?.revenue ??
       0;
+    const revChange = kpis?.revenueChangePercent || 0;
+    const ordChange = kpis?.ordersChangePercent || 0;
     return {
       revenue: formatCurrency(totalRevenue),
       orders: (kpis?.totalOrders || 0).toLocaleString(),
       retail: formatCurrency(retailRevenue),
       retailPercent:
         totalRevenue > 0 ? `${((retailRevenue / totalRevenue) * 100).toFixed(1)}% of revenue` : "0.0% of revenue",
-      revenuePercent: `${formatPercent(kpis?.revenueChangePercent || 0)} vs previous period`,
-      ordersPercent: `${formatPercent(kpis?.ordersChangePercent || 0)} vs previous period`,
+      revenuePercent: `${formatPercent(revChange)} vs previous period`,
+      ordersPercent: `${formatPercent(ordChange)} vs previous period`,
+      revenueColorClass: revChange >= 0 ? "text-green-600" : "text-rose-600",
+      ordersColorClass: ordChange >= 0 ? "text-green-600" : "text-rose-600",
       busiestSector: kpis?.busiestSector || "None",
       pending: kpis?.pendingSuggestions || 0,
     };
@@ -406,7 +410,7 @@ export function Home() {
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Total Revenue</div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
-              <div className="text-xs text-green-600 font-medium hidden md:block">{scaledKPIs.revenuePercent}</div>
+              <div className={`text-xs ${scaledKPIs.revenueColorClass} font-medium hidden md:block`}>{scaledKPIs.revenuePercent}</div>
             </div>
           </div>
 
@@ -418,7 +422,7 @@ export function Home() {
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Orders</div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
-              <div className="text-xs text-green-600 font-medium hidden md:block">{scaledKPIs.ordersPercent}</div>
+              <div className={`text-xs ${scaledKPIs.ordersColorClass} font-medium hidden md:block`}>{scaledKPIs.ordersPercent}</div>
             </div>
           </div>
 
