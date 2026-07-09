@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, ChevronDown } from "lucide-react";
+import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, ChevronDown, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
@@ -14,6 +14,13 @@ interface CsvUploadRecord {
   totalQuantity: number;
   totalTransactions: number;
   uploadedAt: string;
+  etlReport?: {
+    stage1_droppedCount?: number;
+    stage1_duplicateCount?: number;
+    stage1_dropReasons?: string[];
+    stage2_droppedCount?: number;
+    stage2_dropReasons?: string[];
+  };
 }
 
 interface Metrics {
@@ -41,6 +48,8 @@ export function DataIngestion() {
   const [selectedChannel, setSelectedChannel] = useState<string>("POS");
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
+  const [lastReport, setLastReport] = useState<any>(null);
+
   const refreshData = useCallback(async () => {
     try {
       const [uploadsRes, metricsRes] = await Promise.all([getUploads(), getMetrics()]);
@@ -59,15 +68,20 @@ export function DataIngestion() {
   const handleUpload = async (file: File) => {
     setUploading(true);
     setConnectionError(null);
+    setLastReport(null);
     try {
+      let res;
       if (selectedChannel === "Cafe Historical") {
-        await uploadHistoricalCSV(file, "cafe");
+        res = await uploadHistoricalCSV(file, "cafe");
       } else if (selectedChannel === "Services Historical") {
-        await uploadHistoricalCSV(file, "services");
+        res = await uploadHistoricalCSV(file, "services");
       } else {
-        await uploadCSV(file, selectedChannel);
+        res = await uploadCSV(file, selectedChannel);
       }
       toast.success("CSV uploaded successfully!", { description: `${file.name} processed as ${selectedChannel}.` });
+      if (res?.report) {
+        setLastReport({ filename: file.name, ...res.report });
+      }
       await refreshData();
     } catch (err: any) {
       setConnectionError(err.message);
@@ -209,6 +223,42 @@ export function DataIngestion() {
         </div>
       </div>
 
+      {/* Latest Upload Report */}
+      {lastReport && (
+        <div className={`p-4 rounded-xl border ${lastReport.stage1_droppedCount > 0 || lastReport.stage1_duplicateCount > 0 ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+          <div className="flex items-start gap-3">
+            {lastReport.stage1_droppedCount > 0 || lastReport.stage1_duplicateCount > 0 ? (
+              <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
+            )}
+            <div>
+              <h4 className={`text-sm font-bold ${lastReport.stage1_droppedCount > 0 || lastReport.stage1_duplicateCount > 0 ? 'text-orange-800' : 'text-green-800'}`}>
+                {lastReport.filename} processed
+              </h4>
+              <p className={`text-xs mt-1 ${lastReport.stage1_droppedCount > 0 || lastReport.stage1_duplicateCount > 0 ? 'text-orange-700' : 'text-green-700'}`}>
+                {lastReport.stage1_droppedCount > 0 || lastReport.stage1_duplicateCount > 0
+                  ? `Dropped: ${lastReport.stage1_droppedCount} invalid rows, ${lastReport.stage1_duplicateCount} duplicates.`
+                  : "All rows passed validation!"}
+              </p>
+              {lastReport.stage1_dropReasons && lastReport.stage1_dropReasons.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs font-semibold text-orange-800">Sample Errors:</p>
+                  <ul className="text-[10px] text-orange-700 list-disc pl-4 space-y-0.5">
+                    {lastReport.stage1_dropReasons.slice(0, 5).map((reason: string, i: number) => (
+                      <li key={i}>{reason}</li>
+                    ))}
+                    {lastReport.stage1_dropReasons.length > 5 && (
+                      <li className="italic">...and {lastReport.stage1_dropReasons.length - 5} more</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Upload History */}
       {uploads.length > 0 && (
         <div className="space-y-2">
@@ -224,6 +274,14 @@ export function DataIngestion() {
                       {upload.recordCount} records • ₱{upload.totalRevenue.toLocaleString()} • {upload.channel}
                       {" • "}{new Date(upload.uploadedAt).toLocaleDateString()}
                     </div>
+                    {upload.etlReport && (
+                      <div className={`text-[10px] mt-1 ${(upload.etlReport.stage1_droppedCount || 0) > 0 || (upload.etlReport.stage1_duplicateCount || 0) > 0 ? "text-orange-500" : "text-green-500"}`}>
+                        {(upload.etlReport.stage1_droppedCount || 0) > 0 || (upload.etlReport.stage1_duplicateCount || 0) > 0 
+                          ? `Stage 1: ${upload.etlReport.stage1_droppedCount || 0} dropped, ${upload.etlReport.stage1_duplicateCount || 0} dupes`
+                          : "Stage 1: 100% Valid"}
+                        {upload.etlReport.stage2_droppedCount ? ` | Stage 2 DB Errors: ${upload.etlReport.stage2_droppedCount}` : ""}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <Button

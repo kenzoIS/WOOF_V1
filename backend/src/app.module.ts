@@ -4,8 +4,12 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { CsvModule } from './csv/csv.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 
+import { ScheduleModule } from '@nestjs/schedule';
+import { ContextModule } from './context/context.module';
+
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       validate: (config: Record<string, unknown>) => {
@@ -20,6 +24,14 @@ import { AnalyticsModule } from './analytics/analytics.module';
             'MONGODB_URI still contains a placeholder. Replace <db_password> in backend/.env with the MongoDB Atlas database user password.',
           );
         }
+        
+        if (!config.SUPABASE_URL || typeof config.SUPABASE_URL !== 'string') {
+          throw new Error('SUPABASE_URL must be configured in backend/.env');
+        }
+        if (!config.SUPABASE_SERVICE_ROLE_KEY || typeof config.SUPABASE_SERVICE_ROLE_KEY !== 'string') {
+          throw new Error('SUPABASE_SERVICE_ROLE_KEY must be configured in backend/.env');
+        }
+
         return config;
       },
     }),
@@ -34,6 +46,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     }),
     CsvModule,
     AnalyticsModule,
+    ContextModule,
   ],
 })
 export class AppModule {}

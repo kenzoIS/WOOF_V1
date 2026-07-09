@@ -106,7 +106,7 @@ export class ExogenousDataService {
       results.set(date, record);
     }
 
-    const apiKey = this.configService.get<string>('OPENWEATHER_API_KEY');
+    const apiKey = this.configService.get<string>('OPENWEATHER_API_KEY'); // Kept for backwards compatibility if needed, but not used by Open-Meteo
     let apiFetchCount = 0;
     let syntheticCount = 0;
 
@@ -114,9 +114,8 @@ export class ExogenousDataService {
       if (results.has(date)) continue;
 
       let record: WeatherRecord | null = null;
-      if (apiKey) {
-        record = await this.fetchOpenWeatherDay(apiKey, lat, lng, date);
-      }
+      // Use Open-Meteo for historical data (no API key required)
+      record = await this.fetchOpenMeteoDay(lat, lng, date);
 
       if (record) {
         apiFetchCount += 1;
@@ -150,14 +149,14 @@ export class ExogenousDataService {
 
   async fetchHolidayHistory(year: number): Promise<HolidayRecord[]> {
     const cached = await this.holidayCacheModel
-      .findOne({ year, country: 'PH' })
+      .find({ date: { $regex: `^${year}` }, location: 'PH' })
       .lean();
-    if (cached?.holidays?.length) {
+    if (cached && cached.length > 0) {
       this.lastHolidaySource = 'cache';
-      return cached.holidays.map((holiday: any) => ({
+      return cached.map((holiday: any) => ({
         date: holiday.date,
         name: holiday.name,
-        isNational: Boolean(holiday.isNational),
+        isNational: String(holiday.type || '').toLowerCase().includes('national') || true,
       }));
     }
 
@@ -244,35 +243,60 @@ export class ExogenousDataService {
     };
   }
 
-  private async fetchOpenWeatherDay(
-    apiKey: string,
+  private async fetchOpenMeteoDay(
     lat: number,
     lng: number,
     date: string,
   ): Promise<WeatherRecord | null> {
     try {
-      const unixNoon = Math.floor(
-        new Date(`${date}T12:00:00.000Z`).getTime() / 1000,
-      );
-      const response = await fetch(
-        `https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=${lat}&lon=${lng}&dt=${unixNoon}&appid=${encodeURIComponent(
-          apiKey,
-        )}&units=metric`,
-      );
-      if (!response.ok) return null;
-      const body = (await response.json()) as any;
-      const observation = Array.isArray(body.data) ? body.data[0] : body;
-      if (!observation) return null;
+      // Use Archive API for historical data. It supports fetching exactly 1 day.
+      const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum&timezone=Asia%2FManila`;
+      
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'WOOF-App/1.0' },
+      });
+      
+      let body: any = null;
+      if (response.ok) {
+        body = await response.json();
+        this.logger.log(`Open-Meteo Archive response for ${date}: ${JSON.stringify(body).substring(0, 200)}`);
+      } else {
+        this.logger.warn(`Open-Meteo Archive API returned ${response.status} ${response.statusText} for ${date}`);
+      }
+      
+      if (!body || !body.daily || !body.daily.time || body.daily.time.length === 0) {
+          this.logger.log(`Falling back to forecast API for ${date}`);
+          // If Archive API returns nothing (e.g. for today or future dates) or an error, fallback to Forecast API
+          const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum&timezone=Asia%2FManila`;
+          const forecastResponse = await fetch(forecastUrl, { headers: { 'User-Agent': 'WOOF-App/1.0' } });
+          
+          if (!forecastResponse.ok) {
+              this.logger.error(`Open-Meteo Forecast API also failed for ${date}: ${forecastResponse.status}`);
+              return null;
+          }
+          
+          const forecastBody = (await forecastResponse.json()) as any;
+          this.logger.log(`Open-Meteo Forecast response for ${date}: ${JSON.stringify(forecastBody).substring(0, 200)}`);
+          
+          if (!forecastBody.daily || !forecastBody.daily.time || forecastBody.daily.time.length === 0) return null;
+          
+          return {
+            date,
+            tempCelsius: round(Number(forecastBody.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS)),
+            rainfallMm: round(Number(forecastBody.daily.precipitation_sum[0] ?? 0)),
+            isSynthetic: false,
+          };
+      }
 
       return {
         date,
-        tempCelsius: round(Number(observation.temp ?? DEFAULT_TEMP_CELSIUS)),
-        rainfallMm: round(Number(observation.rain?.['1h'] ?? 0)),
+        tempCelsius: round(Number(body.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS)),
+        rainfallMm: round(Number(body.daily.precipitation_sum[0] ?? 0)),
         isSynthetic: false,
       };
     } catch (error) {
       this.logger.warn(
-        `OpenWeather fetch failed for ${date}: ${
+        `Open-Meteo fetch failed for ${date}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -312,18 +336,18 @@ export class ExogenousDataService {
     year: number,
     holidays: HolidayRecord[],
   ): Promise<void> {
-    await this.holidayCacheModel.updateOne(
-      { year, country: 'PH' },
-      {
-        $set: {
-          year,
-          country: 'PH',
-          holidays,
-          fetchedAt: new Date(),
+    for (const holiday of holidays) {
+      await this.holidayCacheModel.updateOne(
+        { date: holiday.date, location: 'PH' },
+        {
+          $set: {
+            name: holiday.name,
+            type: holiday.isNational ? 'National' : 'Local',
+          },
         },
-      },
-      { upsert: true },
-    );
+        { upsert: true },
+      );
+    }
   }
 }
 

@@ -8,8 +8,10 @@ describe('CsvService flexible uploads', () => {
     exec: jest.fn(async () => undefined),
   }));
   const service = new CsvService(
-    { create, findByIdAndDelete } as any,
+    { create, findByIdAndDelete, updateOne: jest.fn() } as any,
     { insertMany, deleteMany } as any,
+    { processTransactions: jest.fn() } as any,
+    { validateAndClean: jest.fn(async (rows) => ({ validRows: rows, etlReport: {} })) } as any,
   );
 
   beforeEach(() => {

@@ -10,7 +10,11 @@ async function request(
   unavailableMessage = 'Backend unavailable. Start the backend server on port 3001 and try again.',
 ) {
   try {
-    return await fetch(`${API_BASE}${path}`, options);
+    const fetchOptions = {
+      ...options,
+      cache: 'no-store' as RequestCache,
+    };
+    return await fetch(`${API_BASE}${path}`, fetchOptions);
   } catch (error) {
     throw new Error(
       error instanceof TypeError

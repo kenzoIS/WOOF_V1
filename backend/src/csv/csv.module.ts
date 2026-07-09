@@ -4,6 +4,9 @@ import { CsvController } from './csv.controller';
 import { CsvService } from './csv.service';
 import { CsvUpload, CsvUploadSchema } from './schemas/csv-upload.schema';
 import { Transaction, TransactionSchema } from './schemas/transaction.schema';
+import { EtlService } from './etl.service';
+import { DataValidationService } from './data-validation.service';
+import { ContextModule } from '../context/context.module';
 
 @Module({
   imports: [
@@ -11,9 +14,10 @@ import { Transaction, TransactionSchema } from './schemas/transaction.schema';
       { name: CsvUpload.name, schema: CsvUploadSchema },
       { name: Transaction.name, schema: TransactionSchema },
     ]),
+    ContextModule,
   ],
   controllers: [CsvController],
-  providers: [CsvService],
-  exports: [CsvService, MongooseModule],
+  providers: [CsvService, EtlService, DataValidationService],
+  exports: [CsvService, EtlService, MongooseModule, DataValidationService],
 })
 export class CsvModule {}

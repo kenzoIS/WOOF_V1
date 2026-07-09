@@ -8,6 +8,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CsvUpload, CsvUploadDocument } from './schemas/csv-upload.schema';
 import { Transaction, TransactionDocument } from './schemas/transaction.schema';
+import { EtlService } from './etl.service';
+import { DataValidationService } from './data-validation.service';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import {
@@ -52,6 +54,8 @@ export class CsvService {
   constructor(
     @InjectModel(CsvUpload.name) private csvUploadModel: Model<CsvUploadDocument>,
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
+    private etlService: EtlService,
+    private dataValidationService: DataValidationService,
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<CsvUploadDocument> {
@@ -118,14 +122,35 @@ export class CsvService {
       channel,
     }));
 
+    let reportPayload: any = null;
     try {
-      await this.insertTransactionsInChunks(transactionsWithUploadId);
+      const { cleanedTransactions, report } = this.dataValidationService.validateBatch(transactionsWithUploadId, channel);
+      reportPayload = report;
+
+      await this.csvUploadModel.findByIdAndUpdate(uploadId, {
+        recordCount: cleanedTransactions.length,
+        $set: { etlReport: {
+          stage1_droppedCount: report.stage1_droppedCount,
+          stage1_duplicateCount: report.stage1_duplicateCount,
+          stage1_dropReasons: report.stage1_dropReasons,
+        }}
+      });
+
+      await this.insertTransactionsInChunks(cleanedTransactions);
+      
+      // Run ETL to Supabase in the background
+      this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
+        this.logger.error('Background ETL process failed for upload ' + uploadId, err.stack);
+      });
     } catch (error) {
+      await this.rollbackUpload(uploadId);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       this.logger.error(
         `Failed to persist ${transactionsWithUploadId.length} uploaded transactions for ${file.originalname}`,
         error instanceof Error ? error.stack : String(error),
       );
-      await this.rollbackUpload(uploadId);
       throw new InternalServerErrorException(
         `Failed to persist uploaded transactions: ${
           error instanceof Error ? error.message : String(error)
@@ -133,7 +158,11 @@ export class CsvService {
       );
     }
 
-    return upload;
+    return {
+      success: true,
+      upload,
+      report: reportPayload
+    } as any;
   }
 
   async processHistoricalUpload(
@@ -190,14 +219,35 @@ export class CsvService {
         channel: 'POS',
       }));
 
+    let reportPayload: any = null;
     try {
-      await this.insertTransactionsInChunks(transactionsWithUploadId);
+      const { cleanedTransactions, report } = this.dataValidationService.validateBatch(transactionsWithUploadId, 'POS');
+      reportPayload = report;
+
+      await this.csvUploadModel.findByIdAndUpdate(uploadId, {
+        recordCount: cleanedTransactions.length,
+        $set: { etlReport: {
+          stage1_droppedCount: report.stage1_droppedCount,
+          stage1_duplicateCount: report.stage1_duplicateCount,
+          stage1_dropReasons: report.stage1_dropReasons,
+        }}
+      });
+
+      await this.insertTransactionsInChunks(cleanedTransactions);
+      
+      // Run ETL to Supabase in the background
+      this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
+        this.logger.error('Background ETL process failed for historical upload ' + uploadId, err.stack);
+      });
     } catch (error) {
+      await this.rollbackUpload(uploadId);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       this.logger.error(
         `Failed to persist ${transactionsWithUploadId.length} historical transactions for ${file.originalname}`,
         error instanceof Error ? error.stack : String(error),
       );
-      await this.rollbackUpload(uploadId);
       throw new InternalServerErrorException(
         `Failed to persist historical transactions: ${
           error instanceof Error ? error.message : String(error)
@@ -233,6 +283,7 @@ export class CsvService {
     return {
       success: true,
       upload,
+      report: reportPayload,
       preprocessing: {
         module,
         channel: 'POS',

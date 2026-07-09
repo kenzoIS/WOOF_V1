@@ -43,13 +43,13 @@ def metrics(actual, predicted, training):
         float(np.mean(np.abs(np.diff(training)))) if len(training) > 1 else 0.0
     )
     mase = mae / naive_mae if naive_mae > 0 else (0.0 if mae == 0 else 999.0)
-    non_zero = actual != 0
-    mape = (
-        float(np.mean(np.abs((actual[non_zero] - predicted[non_zero]) / actual[non_zero])) * 100)
-        if np.any(non_zero)
+    sum_actual = np.sum(actual)
+    wmape = (
+        float(np.sum(np.abs(actual - predicted)) / sum_actual) * 100
+        if sum_actual > 0
         else 0.0
     )
-    return round(mase, 2), round(mape, 2), round(max(0.0, 100.0 - mape), 2)
+    return round(mase, 2), round(wmape, 2), round(max(0.0, 100.0 - wmape), 2)
 
 
 def normalize_forecast_days(value):

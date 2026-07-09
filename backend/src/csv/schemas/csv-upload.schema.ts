@@ -38,6 +38,15 @@ export class CsvUpload {
   @Prop({ default: 0 })
   repairedDateCount: number;
 
+  @Prop({ type: Object, default: {} })
+  etlReport: {
+    stage1_droppedCount?: number;
+    stage1_duplicateCount?: number;
+    stage1_dropReasons?: string[];
+    stage2_droppedCount?: number;
+    stage2_dropReasons?: string[];
+  };
+
   @Prop()
   uploadedAt: Date;
 }
