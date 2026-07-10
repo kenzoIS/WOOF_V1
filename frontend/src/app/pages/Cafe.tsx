@@ -74,6 +74,67 @@ const getProjectedRevenue = (
   return unitPrice > 0 ? Math.round(quantity * unitPrice) : quantity;
 };
 
+const getMetadataDate = (
+  forecastRun: ForecastRun | null,
+  key: string,
+  fallback: string,
+) => {
+  const value = forecastRun?.modelMetadata?.[key];
+  return typeof value === "string" && value ? value : fallback;
+};
+
+const getItemHistoryBounds = (forecastRun: ForecastRun | null) => ({
+  min: getMetadataDate(forecastRun, "historyStartDate", HISTORY_START_DATE),
+  max: getMetadataDate(forecastRun, "historyEndDate", INGESTED_HISTORY_END_DATE),
+});
+
+const minDateString = (...dates: string[]) =>
+  dates.filter(Boolean).sort()[0] || "";
+
+const aggregateItemHistory = (
+  rows: NonNullable<ForecastRun["itemHistory"]>,
+) => {
+  const grouped = new Map<string, {
+    name: string;
+    revenue: number;
+    quantity: number;
+    orderCount: number;
+    avgPrice: number;
+    category: string;
+    byDate: Map<string, number>;
+  }>();
+
+  for (const row of rows) {
+    const existing = grouped.get(row.name) || {
+      name: row.name,
+      revenue: 0,
+      quantity: 0,
+      orderCount: 0,
+      avgPrice: 0,
+      category: row.category || "Cafe",
+      byDate: new Map<string, number>(),
+    };
+    existing.revenue += Number(row.revenue) || 0;
+    existing.quantity += Number(row.quantity) || 0;
+    existing.orderCount += Number(row.orderCount) || 0;
+    existing.byDate.set(row.date, (existing.byDate.get(row.date) || 0) + (Number(row.revenue) || 0));
+    existing.avgPrice = existing.quantity > 0 ? existing.revenue / existing.quantity : Number(row.avgPrice) || 0;
+    grouped.set(row.name, existing);
+  }
+
+  return [...grouped.values()]
+    .map((item) => ({
+      ...item,
+      revenue: Math.round(item.revenue),
+      quantity: Math.round(item.quantity),
+      avgPrice: Math.round(item.avgPrice),
+      trend: [...item.byDate.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, value]) => Math.round(value)),
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+};
+
 const formatGrowth = (current: number, previous: number) => {
   if (previous === 0) {
     return {
@@ -106,6 +167,7 @@ export function Cafe() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [menuFilter, setMenuFilter] = useState("all");
+  const [menuPerformanceMode, setMenuPerformanceMode] = useState<"overall" | "header">("overall");
   const [discountValue, setDiscountValue] = useState([15]);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [currentPage, setCurrentPage] = useState(1);
@@ -228,24 +290,46 @@ export function Cafe() {
 
   // Build menu items from API data — maps backend topItems to table shape
   const menuItems = useMemo(() => {
-    if (!forecastRun?.topItems?.length) return [];
-    
+    if (!forecastRun?.topItems?.length && !forecastRun?.itemHistory?.length) return [];
+
+    const bounds = getItemHistoryBounds(forecastRun);
+    const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
+    const scopedRows =
+      menuPerformanceMode === "header"
+        ? filterByDateRange(
+            forecastRun.itemHistory || [],
+            parseGlobalRange(globalDateRange, latestHistoryDate, bounds),
+          )
+        : forecastRun.itemHistory || [];
+    const sourceItems = scopedRows.length
+      ? aggregateItemHistory(scopedRows)
+      : (forecastRun.topItems || []).map((item) => ({
+          name: item.name,
+          revenue: Math.round(item.revenue),
+          quantity: item.quantity,
+          orderCount: item.orderCount,
+          avgPrice: item.avgPrice,
+          category: item.category || "Cafe",
+          trend: [] as number[],
+        }));
+
     // Get last 7 days of total revenue to build per-item trend sparklines
     const last7Days = forecastRun.historical.slice(-7);
     const unitPrice = getCafeForecastUnitPrice(forecastRun);
     const averageQuantity =
-      forecastRun.topItems.reduce((sum, item) => sum + item.quantity, 0) /
-      forecastRun.topItems.length;
+      sourceItems.reduce((sum, item) => sum + item.quantity, 0) /
+      Math.max(sourceItems.length, 1);
 
-    return forecastRun.topItems.slice(0, 15).map((item) => {
+    return sourceItems.slice(0, 15).map((item) => {
       // Scale the cafe's daily revenue shape to this item's proportion
       const itemProportion =
         item.revenue / (forecastRun.kpis.totalRevenue || 1);
-      const trend = last7Days.length > 0
+      const fallbackTrend = last7Days.length > 0
         ? last7Days.map((day) =>
             Math.max(0, Math.round(getHistoricalRevenue(day, unitPrice) * itemProportion)),
           )
         : [item.revenue];
+      const trend = item.trend.length ? item.trend : fallbackTrend;
 
       // Determine status based on quantity thresholds from actual dataset
       const equilibrium =
@@ -264,7 +348,7 @@ export function Cafe() {
         revenue: Math.round(item.revenue),
       };
     });
-  }, [forecastRun]);
+  }, [forecastRun, globalDateRange, menuPerformanceMode]);
 
   // Aggregated KPI values dynamically calculated from API history based on globalDateRange
   const aggregatedKpis = useMemo(() => {
@@ -282,7 +366,8 @@ export function Cafe() {
     const latestHistoryDate =
       forecastRun.historical[forecastRun.historical.length - 1]?.date ||
       INGESTED_HISTORY_END_DATE;
-    const range = parseGlobalRange(globalDateRange, latestHistoryDate);
+    const bounds = getItemHistoryBounds(forecastRun);
+    const range = parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const sliced = filterByDateRange(forecastRun.historical, range);
     const unitPrice = getCafeForecastUnitPrice(forecastRun);
     const totalRevenue = sliced.reduce((sum, d) => sum + getHistoricalRevenue(d, unitPrice), 0);
@@ -294,8 +379,8 @@ export function Cafe() {
     const previousStart = addDays(previousEnd, -(dayCount - 1));
     const prevRange = { start: previousStart, end: previousEnd, isCustom: range.isCustom };
     const prevSliced = filterByDateRange(forecastRun.historical, prevRange);
-    const prevRevenue = prevSliced.reduce((sum, d) => sum + d.actual, 0);
-    const prevOrders = prevSliced.reduce((sum, d) => sum + (d.orders || Math.round(d.actual / (forecastRun?.kpis?.avgOrderValue || 150))), 0);
+    const prevRevenue = prevSliced.reduce((sum, d) => sum + getHistoricalRevenue(d, unitPrice), 0);
+    const prevOrders = prevSliced.reduce((sum, d) => sum + (d.orders || Math.round(getHistoricalRevenue(d, unitPrice) / (forecastRun?.kpis?.avgOrderValue || 150))), 0);
     const prevAvgOrderValue = prevOrders > 0 ? Math.round(prevRevenue / prevOrders) : 0;
 
     return {
@@ -311,7 +396,7 @@ export function Cafe() {
   const cafeRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
   const totalOrders = aggregatedKpis.totalOrders || 0;
   const avgCheck = aggregatedKpis.avgOrderValue ? `₱${aggregatedKpis.avgOrderValue.toLocaleString()}` : "₱0";
-  const activeItems = forecastRun?.topItems?.length || 0;
+  const activeItems = menuItems.length || forecastRun?.topItems?.length || 0;
 
   // Build forecast chart data from API based on globalDateRange
   const forecastData = useMemo(() => {
@@ -321,6 +406,7 @@ export function Cafe() {
     const latestHistoryDate =
       forecastRun.historical[forecastRun.historical.length - 1]?.date ||
       INGESTED_HISTORY_END_DATE;
+    const bounds = getItemHistoryBounds(forecastRun);
     const horizon =
       forecastRangeMode === "next7days"
         ? 7
@@ -341,11 +427,7 @@ export function Cafe() {
     const historyRange =
       forecastRangeMode === "custom"
         ? selectedRange
-        : {
-            start: addDays(latestHistoryDate, -29),
-            end: latestHistoryDate,
-            isCustom: false,
-          };
+        : parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
     const forecastRows = filterByDateRange(forecastRun.forecast, selectedRange);
     const unitPrice = getCafeForecastUnitPrice(forecastRun);
@@ -386,16 +468,35 @@ export function Cafe() {
           : d.confidenceHigh),
     }));
     return [...hist, ...fc];
-  }, [forecastRun, forecastRangeMode, customForecastStart, customForecastEnd]);
+  }, [forecastRun, forecastRangeMode, customForecastStart, customForecastEnd, globalDateRange]);
 
   // Filtered menu items based on filter
   const filteredMenuItems = useMemo(() => {
-    if (menuFilter === "all") return menuItems;
-    if (menuFilter === "top") return menuItems.slice(0, 5);
-    if (menuFilter === "under") return menuItems.slice(-5);
-    if (menuFilter === "diverging") return menuItems.filter((item: any) => item.equilibrium === "diverging" || item.equilibrium === "critical");
-    return menuItems;
-  }, [menuFilter, menuItems]);
+    const filtered =
+      menuFilter === "top"
+        ? menuItems.slice(0, 5)
+        : menuFilter === "under"
+          ? menuItems.slice(-5)
+          : menuFilter === "diverging"
+            ? menuItems.filter((item: any) => item.equilibrium === "diverging" || item.equilibrium === "critical")
+            : menuItems;
+    if (!sortColumn) return filtered;
+    return [...filtered].sort((a: any, b: any) => {
+      const left =
+        sortColumn === "qty" ? a.qtySold :
+        sortColumn === "revenue" ? a.revenue :
+        String(a.name || "");
+      const right =
+        sortColumn === "qty" ? b.qtySold :
+        sortColumn === "revenue" ? b.revenue :
+        String(b.name || "");
+      const result =
+        typeof left === "number" && typeof right === "number"
+          ? left - right
+          : String(left).localeCompare(String(right));
+      return sortDirection === "asc" ? result : -result;
+    });
+  }, [menuFilter, menuItems, sortColumn, sortDirection]);
 
   const itemsPerPage = 5;
   const paginatedMenuItems = useMemo(() => {
@@ -404,6 +505,39 @@ export function Cafe() {
   }, [filteredMenuItems, currentPage]);
 
   const totalPages = Math.ceil(filteredMenuItems.length / itemsPerPage) || 1;
+  const latestCafeHistoryDate = getMetadataDate(
+    forecastRun,
+    "historyEndDate",
+    forecastRun?.historical?.[forecastRun.historical.length - 1]?.date || INGESTED_HISTORY_END_DATE,
+  );
+  const cafeForecastStartMin = addDays(latestCafeHistoryDate, 1);
+  const cafeForecastMaxDate = minDateString(
+    getMetadataDate(forecastRun, "forecastEndDate", addDays(latestCafeHistoryDate, 30)),
+    addDays(latestCafeHistoryDate, 30),
+  );
+  const cafeForecastEndMax = minDateString(
+    cafeForecastMaxDate,
+    addDays(customForecastStart || cafeForecastStartMin, 29),
+  );
+
+  useEffect(() => {
+    if (forecastRangeMode !== "custom") return;
+    if (customForecastStart < cafeForecastStartMin || customForecastStart > cafeForecastMaxDate) {
+      setCustomForecastStart(cafeForecastStartMin);
+      setCustomForecastEnd(minDateString(cafeForecastMaxDate, addDays(cafeForecastStartMin, 13)));
+      return;
+    }
+    if (customForecastEnd < customForecastStart || customForecastEnd > cafeForecastEndMax) {
+      setCustomForecastEnd(cafeForecastEndMax);
+    }
+  }, [
+    cafeForecastEndMax,
+    cafeForecastMaxDate,
+    cafeForecastStartMin,
+    customForecastEnd,
+    customForecastStart,
+    forecastRangeMode,
+  ]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -595,7 +729,7 @@ export function Cafe() {
                 SMA fallback active: selected model could not run
               </Badge>
             )}
-            {!forecastRun?.isFallback && forecastRun?.modelMetadata?.modelQualityWarning && (
+            {!forecastRun?.isFallback && Boolean(forecastRun?.modelMetadata?.modelQualityWarning) && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
                 Selected model active with quality warning
               </Badge>
@@ -630,23 +764,28 @@ export function Cafe() {
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3">
             <input
               type="date"
-              min={HISTORY_START_DATE}
-              max={forecastRun?.forecast?.[forecastRun.forecast.length - 1]?.date || addDays(INGESTED_HISTORY_END_DATE, 14)}
+              min={cafeForecastStartMin}
+              max={cafeForecastMaxDate}
               value={customForecastStart}
-              onChange={(event) => setCustomForecastStart(event.target.value)}
+              onChange={(event) => {
+                const nextStart = event.target.value;
+                setCustomForecastStart(nextStart);
+                setCustomForecastEnd((current) =>
+                  current < nextStart || current > minDateString(cafeForecastMaxDate, addDays(nextStart, 29))
+                    ? minDateString(cafeForecastMaxDate, addDays(nextStart, 29))
+                    : current,
+                );
+              }}
               className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
             />
             <input
               type="date"
               min={customForecastStart}
-              max={forecastRun?.forecast?.[forecastRun.forecast.length - 1]?.date || addDays(INGESTED_HISTORY_END_DATE, 14)}
+              max={cafeForecastEndMax}
               value={customForecastEnd}
-              onChange={(event) => setCustomForecastEnd(event.target.value)}
+              onChange={(event) => setCustomForecastEnd(event.target.value > cafeForecastEndMax ? cafeForecastEndMax : event.target.value)}
               className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
             />
-            <span className="text-xs text-[#223047] opacity-60">
-              History begins Mar 2021; dates after May 2026 use forecast points when available.
-            </span>
           </div>
         )}
 
@@ -870,6 +1009,29 @@ export function Cafe() {
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               Menu Item Performance
             </h2>
+            <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
+              {[
+                ["overall", "Overall"],
+                ["header", "Header Filter"],
+              ].map(([value, label]) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  variant={menuPerformanceMode === value ? "default" : "ghost"}
+                  onClick={() => {
+                    setMenuPerformanceMode(value as "overall" | "header");
+                    setCurrentPage(1);
+                  }}
+                  className={
+                    menuPerformanceMode === value
+                      ? "h-8 bg-[#F53799] hover:bg-[#D42A7D] text-xs"
+                      : "h-8 text-xs hover:bg-[#FFF2FA]"
+                  }
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
           </div>
 
           <div className="max-h-[620px] overflow-auto pr-1">

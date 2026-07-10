@@ -98,6 +98,9 @@ export class ForecastRun {
   @Prop({ type: [Object], default: [] })
   topItems: Record<string, unknown>[];
 
+  @Prop({ type: [Object], default: [] })
+  itemHistory: Record<string, unknown>[];
+
   @Prop({ type: Object, default: {} })
   modelMetadata: Record<string, unknown>;
 

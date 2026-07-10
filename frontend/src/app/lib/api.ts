@@ -90,8 +90,29 @@ export interface ForecastRun {
     avgPrice: number;
     category: string;
   }>;
+  itemHistory?: Array<{
+    date: string;
+    name: string;
+    revenue: number;
+    quantity: number;
+    orderCount: number;
+    avgPrice: number;
+    category: string;
+  }>;
   modelMetadata: Record<string, unknown>;
   generatedAt: string;
+}
+
+export interface DataRange {
+  serverNow: string;
+  timezone: string;
+  historyStartDate: string | null;
+  historyEndDate: string | null;
+  sectors: Record<string, {
+    minDate: string | null;
+    maxDate: string | null;
+    rows: number;
+  }>;
 }
 
 export interface CrossSellQuery {
@@ -197,6 +218,10 @@ export async function getForecast(
 ): Promise<ForecastRun> {
   const query = toQueryString(params);
   return fetchApi(`/analytics/forecast/${sector}${query}`);
+}
+
+export async function getDataRange(): Promise<DataRange> {
+  return fetchApi('/analytics/data-range');
 }
 
 export async function getCrossSell(params?: CrossSellQuery) {

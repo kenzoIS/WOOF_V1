@@ -7,6 +7,11 @@ export type DateRange = {
   isCustom: boolean;
 };
 
+export type DateBounds = {
+  min?: string | null;
+  max?: string | null;
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function addDays(date: string, days: number): string {
@@ -15,32 +20,38 @@ export function addDays(date: string, days: number): string {
   return value.toISOString().slice(0, 10);
 }
 
-export function clampHistoryDate(date: string): string {
-  if (!date || date < HISTORY_START_DATE) return HISTORY_START_DATE;
-  if (date > INGESTED_HISTORY_END_DATE) return INGESTED_HISTORY_END_DATE;
+export function clampHistoryDate(date: string, bounds: DateBounds = {}): string {
+  const min = bounds.min || HISTORY_START_DATE;
+  const max = bounds.max || INGESTED_HISTORY_END_DATE;
+  if (!date || date < min) return min;
+  if (date > max) return max;
   return date;
 }
 
-export function encodeCustomRange(start: string, end: string): string {
-  const safeStart = clampHistoryDate(start);
+export function encodeCustomRange(start: string, end: string, bounds: DateBounds = {}): string {
+  const safeStart = clampHistoryDate(start, bounds);
   const safeEnd = end && end >= safeStart ? end : safeStart;
   return `custom:${safeStart}:${safeEnd}`;
 }
 
-export function parseCustomRange(value: string): DateRange | null {
+export function parseCustomRange(value: string, bounds: DateBounds = {}): DateRange | null {
   if (!value?.startsWith("custom:")) return null;
   const [, rawStart, rawEnd] = value.split(":");
-  const start = clampHistoryDate(rawStart);
-  const end = rawEnd && rawEnd >= start ? rawEnd : start;
+  const start = clampHistoryDate(rawStart, bounds);
+  const end = rawEnd && rawEnd >= start ? clampHistoryDate(rawEnd, bounds) : start;
   return { start, end, isCustom: true };
 }
 
-export function parseGlobalRange(value: string, latestHistoryDate = INGESTED_HISTORY_END_DATE): DateRange {
-  const latest = clampHistoryDate(latestHistoryDate);
+export function parseGlobalRange(
+  value: string,
+  latestHistoryDate = INGESTED_HISTORY_END_DATE,
+  bounds: DateBounds = {},
+): DateRange {
+  const latest = clampHistoryDate(latestHistoryDate, bounds);
   if (value?.startsWith("custom:")) {
-    const customRange = parseCustomRange(value);
-    const start = customRange?.start || HISTORY_START_DATE;
-    const end = clampHistoryDate(customRange?.end || start);
+    const customRange = parseCustomRange(value, bounds);
+    const start = customRange?.start || bounds.min || HISTORY_START_DATE;
+    const end = clampHistoryDate(customRange?.end || start, bounds);
     return { start, end: end >= start ? end : start, isCustom: true };
   }
 
@@ -57,8 +68,8 @@ export function parseGlobalRange(value: string, latestHistoryDate = INGESTED_HIS
             : 7;
   const rawEnd = value === "yesterday" ? addDays(end, -1) : end;
   return {
-    start: clampHistoryDate(addDays(rawEnd, -(days - 1))),
-    end: clampHistoryDate(rawEnd),
+    start: clampHistoryDate(addDays(rawEnd, -(days - 1)), bounds),
+    end: clampHistoryDate(rawEnd, bounds),
     isCustom: false,
   };
 }

@@ -2,6 +2,59 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-10 - Cafe and Services Date-Aware Forecasts and Performance Tables
+
+### Requested
+
+- Make Cafe Menu Item Performance and Services Service Utilization respond to the Header Date Filter, with an option to view Overall performance.
+- Cap Cafe and Services custom forecast date selection to 30 days beyond the latest ingested history and make the range adapt to future ingested data.
+- Make Cafe and Services forecast charts adapt their historical window to Header Date Filter options such as Last 90 Days and Last 12 Months.
+- Fix Services forecast hover values so historical and predicted lines show daily revenue and demand correctly.
+- Correct Services Demand Share, table sorting, weekly booking volume, and KPI calculations.
+- Confirm whether the system is aware of the current date/time and add that capability if missing.
+
+### Backend Changes
+
+- Added `/analytics/data-range` to return server time, timezone, global ingested date bounds, and per-sector ingested ranges.
+- Added persisted `itemHistory` to forecast runs and built daily item/service POS aggregates from uploaded transactions.
+- Added forecast metadata for `historyStartDate`, `historyEndDate`, `forecastStartDate`, `forecastEndDate`, `serverGeneratedAt`, and `timezone`.
+- Bumped `forecastRevenuePayloadVersion` to `4` so cached forecasts refresh with item-level history and adaptive date metadata.
+- Follow-up fix: allowed existing revenue-capable cached forecasts to load without forcing a fresh Python retrain, then hydrates adaptive item/date metadata on the cached response.
+- Updated analytics tests for the new payload version and cached payload shape.
+
+### Frontend Changes
+
+- Updated Header custom range bounds to use backend ingested history dates when available and added a live Asia/Manila date/time badge.
+- Extended shared date range helpers to accept dynamic min/max bounds.
+- Updated Cafe forecast chart history to follow the Header Date Filter and capped custom forecast selection to 30 days after the latest ingested day.
+- Added Overall/Header Filter toggle to Cafe Menu Item Performance and recalculated quantity, revenue, status, trend, pagination, and sorting from `itemHistory` when scoped.
+- Updated Services forecast chart to plot historical `revenue` and future `projectedNetSales`, fixing peso tooltip values.
+- Updated Services KPIs to sum real net sales over the selected date range and display range-aware average booking value.
+- Added Overall/Header Filter toggle to Service Utilization, recalculated demand share as booking share of total service demand, and enabled sorting for bookings, average ticket, and revenue.
+- Changed Booking Weekly Volume to count only the current ingested week through the latest ingested day.
+
+### Files Changed
+
+- [analytics.controller.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.controller.ts)
+- [analytics.service.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.ts)
+- [analytics.service.spec.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.spec.ts)
+- [forecast-run.schema.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/schemas/forecast-run.schema.ts)
+- [api.ts](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/lib/api.ts)
+- [dateRanges.ts](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/lib/dateRanges.ts)
+- [Header.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/components/Header.tsx)
+- [Cafe.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Cafe.tsx)
+- [Services.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Services.tsx)
+- [WORKLOG.md](file:///D:/Capstone_v3/WOOF_V1/WORKLOG.md)
+
+### Verification
+
+- Passed: `npx tsc --noEmit` in `frontend`.
+- Passed: `npm run build` in `frontend` after rerunning outside the sandbox because the sandboxed build hit `spawn EPERM`.
+- Passed: `npm run build` in `backend`.
+- Passed: `npm test -- analytics.service.spec.ts --runInBand` in `backend`.
+- Passed after follow-up: `npm test -- analytics.service.spec.ts --runInBand` in `backend`.
+- Note: Full backend `npm test -- --runInBand` still fails in existing CSV/exogenous mock tests (`validateBatch` and holiday cache mocks), separate from the Cafe/Services analytics changes.
+
 ## 2026-07-04 - Cafe Forecast Revenue Display Correction
 
 ### Requested

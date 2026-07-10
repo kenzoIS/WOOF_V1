@@ -175,7 +175,7 @@ describe('AnalyticsService getForecast', () => {
       }),
     );
     expect(result.modelMetadata.targetVariable).toBe('quantity_volume');
-    expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(3);
+    expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(4);
     expect(result.modelMetadata.annualDemandQuantity).toBeGreaterThan(0);
     expect(result.historical.slice(0, -1).every((point) => point.fitted === undefined)).toBe(true);
     expect(result.historical[20].fitted).toBe(result.historical[20].actual);
@@ -371,11 +371,12 @@ describe('AnalyticsService getForecast', () => {
         forecast: [],
         kpis: {},
         topItems: [],
+        itemHistory: [],
         modelMetadata: {
           csvUploadCount: 2,
           latestCsvUploadId: 'upload-id-1',
           latestCsvUploadTime: 123456789,
-          forecastRevenuePayloadVersion: 3,
+          forecastRevenuePayloadVersion: 4,
         },
         generatedAt: new Date(),
         toObject: function() { return this; }
@@ -403,7 +404,60 @@ describe('AnalyticsService getForecast', () => {
       expect(result.historical[0].fitted).toBeUndefined();
       expect(result.historical[1].fitted).toBe(120);
       expect(result.modelMetadata.predictionStartsAt).toBe('2026-01-02');
-      expect(transactionModel.aggregate).not.toHaveBeenCalled();
+      expect(transactionModel.aggregate).toHaveBeenCalledTimes(1);
+      expect(transactionModel.aggregate.mock.calls[0][0]).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ $sort: expect.any(Object) })]),
+      );
+      expect(result.itemHistory).toEqual([]);
+    });
+
+    it('reuses legacy cached revenue forecasts without forcing a Python retrain', async () => {
+      const cached = {
+        module: 'Cafe',
+        modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
+        mase: 0.8,
+        mape: 15,
+        accuracy: 85,
+        isFallback: false,
+        historical: [
+          { date: '2026-01-01', actual: 100, normalized: 100, orders: 1, revenue: 10000 },
+          { date: '2026-01-02', actual: 120, normalized: 120, orders: 2, revenue: 12000 },
+        ],
+        forecast: [{ date: '2026-01-03', forecast: 130, projectedNetSales: 13000 }],
+        kpis: {},
+        topItems: [],
+        modelMetadata: {
+          csvUploadCount: 2,
+          latestCsvUploadId: 'upload-id-1',
+          latestCsvUploadTime: 123456789,
+          forecastRevenuePayloadVersion: 2,
+        },
+        generatedAt: new Date(),
+        toObject: function() { return this; }
+      };
+
+      forecastRunModel.findOne.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(cached),
+      });
+      csvUploadModel.findOne.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue({
+          _id: 'upload-id-1',
+          uploadedAt: new Date(123456789),
+        }),
+      });
+      csvUploadModel.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(2),
+      });
+      const runPythonSpy = jest.spyOn(service as any, 'runPython');
+
+      const result = await service.getForecast('cafe');
+
+      expect(runPythonSpy).not.toHaveBeenCalled();
+      expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(4);
+      expect(result.modelMetadata.historyEndDate).toBe('2026-01-02');
+      expect(result.modelMetadata.forecastEndDate).toBe('2026-01-03');
     });
   });
 

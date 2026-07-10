@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
-import { Bell, Calendar, Cloud, CloudRain, Sun, X, LogOut, User, Mail, Menu } from "lucide-react";
+import { Bell, Calendar, Clock, Cloud, CloudRain, Sun, X, LogOut, User, Mail, Menu } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { toast } from "sonner";
@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Button } from "./ui/button";
-import { getCurrentWeather } from "../lib/api";
+import { DataRange, getCurrentWeather, getDataRange } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -37,6 +37,10 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [dateRange, setDateRange] = useState("last-7-days");
   const [customStartDate, setCustomStartDate] = useState(HISTORY_START_DATE);
   const [customEndDate, setCustomEndDate] = useState(INGESTED_HISTORY_END_DATE);
+  const [dataRange, setDataRange] = useState<DataRange | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  const historyStartDate = dataRange?.historyStartDate || HISTORY_START_DATE;
+  const historyEndDate = dataRange?.historyEndDate || INGESTED_HISTORY_END_DATE;
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange");
@@ -44,12 +48,29 @@ export function Header({ onMenuClick }: HeaderProps) {
       setDateRange(saved);
       if (saved.startsWith("custom:")) {
         const [, start, end] = saved.split(":");
-        setCustomStartDate(start || HISTORY_START_DATE);
-        setCustomEndDate(end || INGESTED_HISTORY_END_DATE);
+        setCustomStartDate(start || historyStartDate);
+        setCustomEndDate(end || historyEndDate);
       }
       // Dispatch immediately so page components mount with the correct value
       window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: saved }));
     }
+  }, [historyEndDate, historyStartDate]);
+
+  useEffect(() => {
+    getDataRange()
+      .then((range) => {
+        setDataRange(range);
+        if (!localStorage.getItem("globalDateRange")) {
+          setCustomStartDate(range.historyStartDate || HISTORY_START_DATE);
+          setCustomEndDate(range.historyEndDate || INGESTED_HISTORY_END_DATE);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 30_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const handleDateRangeChange = (value: string) => {
@@ -63,7 +84,10 @@ export function Header({ onMenuClick }: HeaderProps) {
   };
 
   const applyCustomDateRange = () => {
-    const encoded = encodeCustomRange(customStartDate, customEndDate);
+    const encoded = encodeCustomRange(customStartDate, customEndDate, {
+      min: historyStartDate,
+      max: historyEndDate,
+    });
     setDateRange(encoded);
     localStorage.setItem("globalDateRange", encoded);
     window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: encoded }));
@@ -132,6 +156,13 @@ export function Header({ onMenuClick }: HeaderProps) {
   
   const weatherTempString = currentWeather ? `${Math.round(currentWeather.tempCelsius)}°C` : "28°C";
   
+  const currentTimeLabel = currentTime.toLocaleString("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const markAsRead = (id: string) => {
@@ -224,20 +255,21 @@ export function Header({ onMenuClick }: HeaderProps) {
           <div className="hidden lg:flex items-center gap-2 absolute left-1/2 translate-x-[110px]">
             <input
               type="date"
-              min={HISTORY_START_DATE}
-              max={INGESTED_HISTORY_END_DATE}
+              min={historyStartDate}
+              max={historyEndDate}
               value={customStartDate}
               onChange={(event) => setCustomStartDate(event.target.value)}
               className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-              title="Historical data starts on March 1, 2021"
+              title={`Historical data starts on ${historyStartDate}`}
             />
             <input
               type="date"
-              min={customStartDate || HISTORY_START_DATE}
+              min={customStartDate || historyStartDate}
+              max={historyEndDate}
               value={customEndDate}
               onChange={(event) => setCustomEndDate(event.target.value)}
               className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-              title="Descriptive panels stop at May 31, 2026; forecast panels may show later dates when available"
+              title={`Historical data is available through ${historyEndDate}`}
             />
             <Button
               size="sm"
@@ -271,6 +303,11 @@ export function Header({ onMenuClick }: HeaderProps) {
           <Badge variant="outline" className="hidden sm:flex gap-1.5 border-[#FFD9EC]" title={currentWeather?.isSynthetic ? "Synthetic weather fallback" : `Live weather from ${currentWeather?.source || "Open-Meteo"}`}>
             <WeatherIcon className="w-3.5 h-3.5" />
             <span className="text-xs">{weatherTempString}</span>
+          </Badge>
+
+          <Badge variant="outline" className="hidden lg:flex gap-1.5 border-[#FFD9EC]" title="Current system date and time in Asia/Manila">
+            <Clock className="w-3.5 h-3.5" />
+            <span className="text-xs">{currentTimeLabel}</span>
           </Badge>
 
           {/* Notification Bell */}

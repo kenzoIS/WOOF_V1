@@ -15,6 +15,11 @@ export class AnalyticsController {
     return this.analyticsService.getDashboard(sector);
   }
 
+  @Get('data-range')
+  async getDataRange() {
+    return this.analyticsService.getDataRange();
+  }
+
   @Get('forecast/:sector')
   async getForecast(
     @Param('sector') sector: string,

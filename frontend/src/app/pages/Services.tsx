@@ -50,6 +50,74 @@ const formatChartDate = (value: string) => {
   });
 };
 
+const getMetadataDate = (
+  forecastRun: ForecastRun | null,
+  key: string,
+  fallback: string,
+) => {
+  const value = forecastRun?.modelMetadata?.[key];
+  return typeof value === "string" && value ? value : fallback;
+};
+
+const getItemHistoryBounds = (forecastRun: ForecastRun | null) => ({
+  min: getMetadataDate(forecastRun, "historyStartDate", HISTORY_START_DATE),
+  max: getMetadataDate(forecastRun, "historyEndDate", INGESTED_HISTORY_END_DATE),
+});
+
+const minDateString = (...dates: string[]) =>
+  dates.filter(Boolean).sort()[0] || "";
+
+const getHistoricalRevenue = (point: ForecastRun["historical"][number]) =>
+  Number(point.revenue) > 0 ? Number(point.revenue) : Number(point.actual) || 0;
+
+const getProjectedRevenue = (point: ForecastRun["forecast"][number]) =>
+  Number(point.projectedNetSales) > 0
+    ? Number(point.projectedNetSales)
+    : Number(point.forecast) || 0;
+
+const aggregateServiceHistory = (
+  rows: NonNullable<ForecastRun["itemHistory"]>,
+) => {
+  const grouped = new Map<string, {
+    service: string;
+    current: number;
+    bookings: number;
+    avgPrice: number;
+    revenue: number;
+    category: string;
+    byDate: Map<string, number>;
+  }>();
+
+  for (const row of rows) {
+    const existing = grouped.get(row.name) || {
+      service: row.name,
+      current: 0,
+      bookings: 0,
+      avgPrice: 0,
+      revenue: 0,
+      category: row.category || "Services",
+      byDate: new Map<string, number>(),
+    };
+    existing.bookings += Number(row.orderCount) || 0;
+    existing.revenue += Number(row.revenue) || 0;
+    existing.byDate.set(row.date, (existing.byDate.get(row.date) || 0) + (Number(row.orderCount) || 0));
+    existing.avgPrice = existing.bookings > 0 ? existing.revenue / existing.bookings : Number(row.avgPrice) || 0;
+    grouped.set(row.name, existing);
+  }
+
+  return [...grouped.values()]
+    .map((item) => ({
+      ...item,
+      bookings: Math.round(item.bookings),
+      avgPrice: Math.round(item.avgPrice),
+      revenue: Math.round(item.revenue),
+      trend: [...item.byDate.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, value]) => Math.round(value)),
+    }))
+    .sort((a, b) => b.bookings - a.bookings);
+};
+
 const formatGrowth = (current: number, previous: number) => {
   if (previous === 0) {
     return {
@@ -82,6 +150,7 @@ export function Services() {
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedService, setExpandedService] = useState<string | null>(null);
+  const [serviceUtilizationMode, setServiceUtilizationMode] = useState<"overall" | "header">("overall");
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [showInfoModal, setShowInfoModal] = useState(false);
 
@@ -200,6 +269,7 @@ export function Services() {
     const latestHistoryDate =
       forecastRun.historical[forecastRun.historical.length - 1]?.date ||
       INGESTED_HISTORY_END_DATE;
+    const bounds = getItemHistoryBounds(forecastRun);
     const horizon =
       viewMode === "next7days" ? 7 : viewMode === "next14days" ? 14 : 30;
     const selectedRange =
@@ -216,11 +286,7 @@ export function Services() {
     const historyRange =
       viewMode === "custom"
         ? selectedRange
-        : {
-            start: addDays(latestHistoryDate, -29),
-            end: latestHistoryDate,
-            isCustom: false,
-          };
+        : parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
     const forecastRows = filterByDateRange(forecastRun.forecast, selectedRange);
     const shouldAnchorForecast =
@@ -235,20 +301,20 @@ export function Services() {
       ...(anchorRow ? [anchorRow] : []),
     ].map((d, index, rows) => ({
       day: d.date,
-      actual: d.actual,
+      actual: getHistoricalRevenue(d),
       forecast:
         (viewMode !== "custom" || d.date === latestHistoryDate) &&
         index === rows.length - 1
-          ? d.actual
+          ? getHistoricalRevenue(d)
           : null,
     }));
     const fore = forecastRows.map((d) => ({
       day: d.date,
       actual: null,
-      forecast: d.forecast,
+      forecast: getProjectedRevenue(d),
     }));
     return [...hist, ...fore];
-  }, [forecastRun, viewMode, customForecastStart, customForecastEnd]);
+  }, [forecastRun, viewMode, customForecastStart, customForecastEnd, globalDateRange]);
 
   // Aggregated KPI values dynamically calculated from API history based on globalDateRange
   const aggregatedKpis = useMemo(() => {
@@ -264,9 +330,10 @@ export function Services() {
     const latestHistoryDate =
       forecastRun.historical[forecastRun.historical.length - 1]?.date ||
       INGESTED_HISTORY_END_DATE;
-    const range = parseGlobalRange(globalDateRange, latestHistoryDate);
+    const bounds = getItemHistoryBounds(forecastRun);
+    const range = parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const sliced = filterByDateRange(forecastRun.historical, range);
-    const totalRevenue = sliced.reduce((sum, d) => sum + d.actual, 0);
+    const totalRevenue = sliced.reduce((sum, d) => sum + getHistoricalRevenue(d), 0);
     const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || 0), 0);
     const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : (forecastRun?.kpis?.avgOrderValue || 0);
 
@@ -275,7 +342,7 @@ export function Services() {
     const previousStart = addDays(previousEnd, -(dayCount - 1));
     const prevRange = { start: previousStart, end: previousEnd, isCustom: range.isCustom };
     const prevSliced = filterByDateRange(forecastRun.historical, prevRange);
-    const prevRevenue = prevSliced.reduce((sum, d) => sum + d.actual, 0);
+    const prevRevenue = prevSliced.reduce((sum, d) => sum + getHistoricalRevenue(d), 0);
 
     return {
       totalRevenue,
@@ -287,26 +354,65 @@ export function Services() {
 
   const servicesRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
   const activeBookings = aggregatedKpis.totalOrders || 0;
-  const kpis = forecastRun?.kpis;
   const serviceUtilization = useMemo(() => {
-    if (!forecastRun?.topItems.length) return [];
-    const maxQuantity = Math.max(
-      ...forecastRun.topItems.map((item) => item.quantity),
-      1,
-    );
+    if (!forecastRun?.topItems?.length && !forecastRun?.itemHistory?.length) return [];
+    const bounds = getItemHistoryBounds(forecastRun);
+    const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
+    const scopedRows =
+      serviceUtilizationMode === "header"
+        ? filterByDateRange(
+            forecastRun.itemHistory || [],
+            parseGlobalRange(globalDateRange, latestHistoryDate, bounds),
+          )
+        : forecastRun.itemHistory || [];
+    const sourceItems = scopedRows.length
+      ? aggregateServiceHistory(scopedRows)
+      : (forecastRun.topItems || []).map((item) => ({
+          service: item.name,
+          bookings: item.orderCount,
+          avgPrice: item.avgPrice,
+          revenue: item.revenue,
+          category: item.category || "Services",
+          trend: [] as number[],
+        }));
+    const totalBookings = sourceItems.reduce((sum, item) => sum + item.bookings, 0) || 1;
     const last7Days = forecastRun.historical.slice(-7);
-    return forecastRun.topItems.slice(0, 8).map((item) => {
-      const share = item.revenue / (forecastRun.kpis.totalRevenue || 1);
+    return sourceItems.slice(0, 8).map((item) => {
+      const share = item.bookings / totalBookings;
       return {
-        service: item.name,
-        current: Math.round((item.quantity / maxQuantity) * 100),
-        bookings: item.orderCount,
+        service: item.service,
+        current: Math.round(share * 100),
+        bookings: item.bookings,
         avgPrice: item.avgPrice,
         revenue: item.revenue,
-        trend: last7Days.map((day) => Math.round(day.orders * share)),
+        trend: item.trend.length
+          ? item.trend
+          : last7Days.map((day) => Math.round(day.orders * share)),
       };
     });
-  }, [forecastRun]);
+  }, [forecastRun, globalDateRange, serviceUtilizationMode]);
+  const sortedServiceUtilization = useMemo(() => {
+    if (!sortColumn) return serviceUtilization;
+    return [...serviceUtilization].sort((a: any, b: any) => {
+      const left =
+        sortColumn === "utilization" ? a.current :
+        sortColumn === "bookings" ? a.bookings :
+        sortColumn === "avgPrice" ? a.avgPrice :
+        sortColumn === "revenue" ? a.revenue :
+        String(a.service || "");
+      const right =
+        sortColumn === "utilization" ? b.current :
+        sortColumn === "bookings" ? b.bookings :
+        sortColumn === "avgPrice" ? b.avgPrice :
+        sortColumn === "revenue" ? b.revenue :
+        String(b.service || "");
+      const result =
+        typeof left === "number" && typeof right === "number"
+          ? left - right
+          : String(left).localeCompare(String(right));
+      return sortDirection === "asc" ? result : -result;
+    });
+  }, [serviceUtilization, sortColumn, sortDirection]);
   const recentBookings = useMemo(
     () =>
       (forecastRun?.historical || []).slice(-10).map((point) => ({
@@ -317,12 +423,24 @@ export function Services() {
   );
   const weeklyTrends = useMemo(() => {
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const totals = new Map(dayNames.map((day) => [day, 0]));
-    for (const point of forecastRun?.historical || []) {
+    const displayDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const totals = new Map(displayDays.map((day) => [day, 0]));
+    const historical = forecastRun?.historical || [];
+    const latestDate = historical[historical.length - 1]?.date;
+    if (!latestDate) {
+      return displayDays.map((day) => ({ day, bookings: 0 }));
+    }
+    const latest = new Date(`${latestDate}T00:00:00`);
+    const monday = new Date(latest);
+    const dayOffset = (latest.getDay() + 6) % 7;
+    monday.setDate(latest.getDate() - dayOffset);
+    const weekStart = monday.toISOString().slice(0, 10);
+    for (const point of historical) {
+      if (point.date < weekStart || point.date > latestDate) continue;
       const day = dayNames[new Date(`${point.date}T00:00:00`).getDay()];
       totals.set(day, (totals.get(day) || 0) + point.orders);
     }
-    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+    return displayDays.map((day) => ({
       day,
       bookings: totals.get(day) || 0,
     }));
@@ -349,6 +467,39 @@ export function Services() {
       }));
   }, [forecastRun]);
   const peakForecast = occupancyAlerts[0];
+  const latestServicesHistoryDate = getMetadataDate(
+    forecastRun,
+    "historyEndDate",
+    forecastRun?.historical?.[forecastRun.historical.length - 1]?.date || INGESTED_HISTORY_END_DATE,
+  );
+  const servicesForecastStartMin = addDays(latestServicesHistoryDate, 1);
+  const servicesForecastMaxDate = minDateString(
+    getMetadataDate(forecastRun, "forecastEndDate", addDays(latestServicesHistoryDate, 30)),
+    addDays(latestServicesHistoryDate, 30),
+  );
+  const servicesForecastEndMax = minDateString(
+    servicesForecastMaxDate,
+    addDays(customForecastStart || servicesForecastStartMin, 29),
+  );
+
+  useEffect(() => {
+    if (viewMode !== "custom") return;
+    if (customForecastStart < servicesForecastStartMin || customForecastStart > servicesForecastMaxDate) {
+      setCustomForecastStart(servicesForecastStartMin);
+      setCustomForecastEnd(minDateString(servicesForecastMaxDate, addDays(servicesForecastStartMin, 29)));
+      return;
+    }
+    if (customForecastEnd < customForecastStart || customForecastEnd > servicesForecastEndMax) {
+      setCustomForecastEnd(servicesForecastEndMax);
+    }
+  }, [
+    customForecastEnd,
+    customForecastStart,
+    servicesForecastEndMax,
+    servicesForecastMaxDate,
+    servicesForecastStartMin,
+    viewMode,
+  ]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -463,7 +614,7 @@ export function Services() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Avg Booking Value</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">₱{(kpis?.avgOrderValue || 0).toLocaleString()}</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">₱{aggregatedKpis.avgOrderValue.toLocaleString()}</div>
             </div>
           </div>
 
@@ -524,23 +675,28 @@ export function Services() {
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3">
             <input
               type="date"
-              min={HISTORY_START_DATE}
-              max={forecastRun?.forecast?.[forecastRun.forecast.length - 1]?.date || addDays(INGESTED_HISTORY_END_DATE, 30)}
+              min={servicesForecastStartMin}
+              max={servicesForecastMaxDate}
               value={customForecastStart}
-              onChange={(event) => setCustomForecastStart(event.target.value)}
+              onChange={(event) => {
+                const nextStart = event.target.value;
+                setCustomForecastStart(nextStart);
+                setCustomForecastEnd((current) =>
+                  current < nextStart || current > minDateString(servicesForecastMaxDate, addDays(nextStart, 29))
+                    ? minDateString(servicesForecastMaxDate, addDays(nextStart, 29))
+                    : current,
+                );
+              }}
               className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#3AE4FA]"
             />
             <input
               type="date"
               min={customForecastStart}
-              max={forecastRun?.forecast?.[forecastRun.forecast.length - 1]?.date || addDays(INGESTED_HISTORY_END_DATE, 30)}
+              max={servicesForecastEndMax}
               value={customForecastEnd}
-              onChange={(event) => setCustomForecastEnd(event.target.value)}
+              onChange={(event) => setCustomForecastEnd(event.target.value > servicesForecastEndMax ? servicesForecastEndMax : event.target.value)}
               className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#3AE4FA]"
             />
-            <span className="text-xs text-[#223047] opacity-60">
-              History begins Mar 2021; dates after May 2026 use forecast points when available.
-            </span>
           </div>
         )}
 
@@ -762,13 +918,35 @@ export function Services() {
 
       {/* SERVICE UTILIZATION */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-          <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Service Utilization Monitor
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Real-time capacity and booking status
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div>
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Service Utilization Monitor
+              </h2>
+              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+                Real-time capacity and booking status
+              </p>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
+              {[
+                ["overall", "Overall"],
+                ["header", "Header Filter"],
+              ].map(([value, label]) => (
+                <Button
+                  key={value}
+                  size="sm"
+                  variant={serviceUtilizationMode === value ? "default" : "ghost"}
+                  onClick={() => setServiceUtilizationMode(value as "overall" | "header")}
+                  className={
+                    serviceUtilizationMode === value
+                      ? "h-8 bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs"
+                      : "h-8 text-xs hover:bg-[#FFF2FA]"
+                  }
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
           </div>
 
           <Table>
@@ -786,14 +964,29 @@ export function Services() {
                 >
                   Demand Share {sortColumn === "utilization" && (sortDirection === "asc" ? "↑" : "↓")}
                 </TableHead>
-                <TableHead className="text-center">Bookings</TableHead>
-                <TableHead className="text-center">Avg Ticket</TableHead>
-                <TableHead className="text-center">Revenue</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-[#FFF2FA] text-center"
+                  onClick={() => handleSort("bookings")}
+                >
+                  Bookings {sortColumn === "bookings" && (sortDirection === "asc" ? "↑" : "↓")}
+                </TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-[#FFF2FA] text-center"
+                  onClick={() => handleSort("avgPrice")}
+                >
+                  Avg Ticket {sortColumn === "avgPrice" && (sortDirection === "asc" ? "↑" : "↓")}
+                </TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-[#FFF2FA] text-center"
+                  onClick={() => handleSort("revenue")}
+                >
+                  Revenue {sortColumn === "revenue" && (sortDirection === "asc" ? "↑" : "↓")}
+                </TableHead>
                 <TableHead className="text-center w-12"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {serviceUtilization.map((service, serviceIndex) => (
+              {sortedServiceUtilization.map((service, serviceIndex) => (
                 <React.Fragment key={`service-${service.service}-${serviceIndex}`}>
                   <TableRow
                     className="cursor-pointer hover:bg-[#FFF2FA]"

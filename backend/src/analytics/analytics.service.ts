@@ -71,7 +71,7 @@ interface CrossSellOptions {
 }
 
 type HomeRange = 'today' | 'week' | 'month' | 'custom';
-const FORECAST_REVENUE_PAYLOAD_VERSION = 3;
+const FORECAST_REVENUE_PAYLOAD_VERSION = 4;
 const DEFAULT_FORECAST_DAYS = 30;
 const MAX_FORECAST_DAYS = 90;
 
@@ -393,6 +393,45 @@ export class AnalyticsService {
     };
   }
 
+  async getDataRange(): Promise<any> {
+    const rows = await this.transactionModel.aggregate([
+      {
+        $group: {
+          _id: '$sector',
+          minDate: { $min: '$date' },
+          maxDate: { $max: '$date' },
+          rows: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const sectors = rows.reduce((acc: Record<string, any>, row: any) => {
+      const sector = this.normalizeSector(String(row._id || 'Unknown'));
+      acc[sector] = {
+        minDate: row.minDate ? this.formatDateInTimeZone(row.minDate, 'Asia/Manila') : null,
+        maxDate: row.maxDate ? this.formatDateInTimeZone(row.maxDate, 'Asia/Manila') : null,
+        rows: Number(row.rows) || 0,
+      };
+      return acc;
+    }, {});
+    const minDates = Object.values(sectors)
+      .map((entry: any) => entry.minDate)
+      .filter(Boolean)
+      .sort();
+    const maxDates = Object.values(sectors)
+      .map((entry: any) => entry.maxDate)
+      .filter(Boolean)
+      .sort();
+
+    return {
+      serverNow: new Date().toISOString(),
+      timezone: 'Asia/Manila',
+      historyStartDate: minDates[0] || null,
+      historyEndDate: maxDates[maxDates.length - 1] || null,
+      sectors,
+    };
+  }
+
   /**
    * Cafe uses Prophet and Services uses pure SARIMA. Both are validated
    * against held-out POS history before the strict SMA fallback is applied.
@@ -443,14 +482,20 @@ export class AnalyticsService {
         reqTemp === cacheTemp &&
         reqRain === cacheRain &&
         reqHoliday === cacheHoliday;
+      const payloadVersion = Number(metadata.forecastRevenuePayloadVersion) || 0;
       const hasRevenuePayload =
-        metadata.forecastRevenuePayloadVersion ===
-        FORECAST_REVENUE_PAYLOAD_VERSION;
+        payloadVersion >= 2 &&
+        Array.isArray(cachedForecast.historical) &&
+        cachedForecast.historical.some((point: any) => Number(point?.revenue) > 0);
 
       const isForceRefresh = overrides?.forceRefresh === 'true';
 
       if (isCsvStateMatch && isOverridesMatch && hasRevenuePayload && !isForceRefresh) {
-        return this.withForecastStartAnchor(cachedForecast.toObject());
+        const cachedPayload = await this.withAdaptiveForecastMetadata(
+          cachedForecast.toObject(),
+          module,
+        );
+        return this.withForecastStartAnchor(cachedPayload);
       }
     }
     const dailyData = await this.transactionModel.aggregate([
@@ -528,6 +573,7 @@ export class AnalyticsService {
         ? this.buildSmaFallback(historical, forecastDays, rejectionReason)
         : selectedModel;
     const priceCostMatrix = await this.getActivePriceCostMatrix(module);
+    const itemHistory = await this.getItemHistory(module);
     const calibratedForecast = this.applyPriceCalibration(
       finalModel.forecast,
       priceCostMatrix,
@@ -544,6 +590,7 @@ export class AnalyticsService {
       forecast: calibratedForecast,
       kpis: dashboard.kpis,
       topItems: dashboard.topItems,
+      itemHistory,
       modelMetadata: {
         ...finalModel.modelMetadata,
         emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
@@ -554,6 +601,12 @@ export class AnalyticsService {
         forecastRevenuePayloadVersion: FORECAST_REVENUE_PAYLOAD_VERSION,
         forecastUnit: module === 'Services' ? 'service_bookings' : 'items_sold',
         priceCalibration: priceCostMatrix,
+        historyStartDate: historical[0]?.date || null,
+        historyEndDate: historical[historical.length - 1]?.date || null,
+        forecastStartDate: calibratedForecast[0]?.date || null,
+        forecastEndDate: calibratedForecast[calibratedForecast.length - 1]?.date || null,
+        serverGeneratedAt: new Date().toISOString(),
+        timezone: 'Asia/Manila',
         annualDemandQuantity: this.round(
           calibratedForecast.reduce(
             (sum, point) => sum + (point.forecastQuantity ?? point.forecast),
@@ -1405,6 +1458,99 @@ export class AnalyticsService {
       revenue: revenueByDate.get(date) || 0,
       fitted: index === lastIndex ? actual : undefined,
     }));
+  }
+
+  private async getItemHistory(module: ForecastModule): Promise<any[]> {
+    const rows = await this.transactionModel.aggregate([
+      {
+        $match: {
+          sector: module,
+          channel: 'POS',
+        },
+      },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+            productName: '$productName',
+            category: '$category',
+          },
+          revenue: { $sum: '$netSales' },
+          quantity: { $sum: '$quantity' },
+          orders: { $addToSet: '$transactionId' },
+          avgPrice: { $avg: '$unitPrice' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          date: '$_id.date',
+          name: '$_id.productName',
+          category: { $ifNull: ['$_id.category', 'Uncategorized'] },
+          revenue: 1,
+          quantity: 1,
+          orderCount: { $size: '$orders' },
+          avgPrice: 1,
+        },
+      },
+    ]);
+
+    return (Array.isArray(rows) ? rows : [])
+      .map((row: any) => ({
+        date: row.date,
+        name: row.name,
+        category: row.category || 'Uncategorized',
+        revenue: this.round(Number(row.revenue) || 0),
+        quantity: this.round(Number(row.quantity) || 0),
+        orderCount: Number(row.orderCount) || 0,
+        avgPrice: this.round(Number(row.avgPrice) || 0),
+      }))
+      .sort(
+        (a, b) =>
+          a.date.localeCompare(b.date) ||
+          b.revenue - a.revenue ||
+          a.name.localeCompare(b.name),
+      );
+  }
+
+  private async withAdaptiveForecastMetadata<T extends {
+    historical?: any[];
+    forecast?: any[];
+    itemHistory?: any[];
+    modelMetadata?: Record<string, unknown>;
+  }>(run: T, module: ForecastModule): Promise<T> {
+    const historical = Array.isArray(run.historical) ? run.historical : [];
+    const forecast = Array.isArray(run.forecast) ? run.forecast : [];
+    const itemHistory = Array.isArray(run.itemHistory) && run.itemHistory.length > 0
+      ? run.itemHistory
+      : await this.getItemHistory(module);
+
+    return {
+      ...run,
+      itemHistory,
+      modelMetadata: {
+        ...(run.modelMetadata || {}),
+        forecastRevenuePayloadVersion: FORECAST_REVENUE_PAYLOAD_VERSION,
+        historyStartDate:
+          String(run.modelMetadata?.historyStartDate || historical[0]?.date || '') || null,
+        historyEndDate:
+          String(
+            run.modelMetadata?.historyEndDate ||
+              historical[historical.length - 1]?.date ||
+              '',
+          ) || null,
+        forecastStartDate:
+          String(run.modelMetadata?.forecastStartDate || forecast[0]?.date || '') || null,
+        forecastEndDate:
+          String(
+            run.modelMetadata?.forecastEndDate ||
+              forecast[forecast.length - 1]?.date ||
+              '',
+          ) || null,
+        serverGeneratedAt: new Date().toISOString(),
+        timezone: 'Asia/Manila',
+      },
+    };
   }
 
   private applyPriceCalibration(
