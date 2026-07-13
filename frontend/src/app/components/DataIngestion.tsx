@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, ChevronDown, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
-import { uploadCSV, uploadHistoricalCSV, getUploads, deleteUpload, getMetrics } from "../lib/api";
+import { uploadCSV, getUploads, deleteUpload, getMetrics } from "../lib/api";
 
 interface CsvUploadRecord {
   _id: string;
@@ -33,11 +33,10 @@ interface Metrics {
 }
 
 const CHANNEL_OPTIONS = [
-  { value: "Cafe Historical", label: "Cafe History", description: "Physical POS only", color: "#F53799" },
-  { value: "Services Historical", label: "Services History", description: "Physical POS only", color: "#3AE4FA" },
   { value: "POS", label: "POS", description: "Cafe, Services & Retail", color: "#F53799" },
   { value: "Shopee", label: "Shopee", description: "Retail only", color: "#EE4D2D" },
-  { value: "TikTok Shop", label: "TikTok Shop", description: "Retail only", color: "#000000" },
+  { value: "TikTok", label: "TikTok", description: "Retail only", color: "#000000" },
+  { value: "PetHub", label: "PetHub", description: "Cafe, Services & Retail", color: "#3AE4FA" },
 ];
 
 export function DataIngestion() {
@@ -70,14 +69,7 @@ export function DataIngestion() {
     setConnectionError(null);
     setLastReport(null);
     try {
-      let res;
-      if (selectedChannel === "Cafe Historical") {
-        res = await uploadHistoricalCSV(file, "cafe");
-      } else if (selectedChannel === "Services Historical") {
-        res = await uploadHistoricalCSV(file, "services");
-      } else {
-        res = await uploadCSV(file, selectedChannel);
-      }
+      const res = await uploadCSV(file, selectedChannel);
       toast.success("CSV uploaded successfully!", { description: `${file.name} processed as ${selectedChannel}.` });
       if (res?.report) {
         setLastReport({ filename: file.name, ...res.report });
@@ -118,7 +110,9 @@ export function DataIngestion() {
   const channelColor: Record<string, string> = {
     POS: "#F53799",
     Shopee: "#EE4D2D",
+    TikTok: "#000000",
     "TikTok Shop": "#000000",
+    PetHub: "#3AE4FA",
   };
 
   return (
@@ -128,7 +122,7 @@ export function DataIngestion() {
           Data Ingestion Center
         </h2>
         <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-          Upload CSV/Excel files from POS, Shopee, or TikTok Shop to power your analytics. Totals below cover all uploaded data.
+          Upload CSV/Excel files from POS, Shopee, TikTok, or PetHub to power your analytics. Totals below cover all uploaded data.
         </p>
       </div>
 
@@ -214,11 +208,9 @@ export function DataIngestion() {
           </p>
           <p className="text-xs text-[#223047] opacity-50 mt-1">
             Uploading as <span className="font-bold text-[#F53799]">{selectedChannel}</span>
-            {selectedChannel.endsWith("Historical")
-              ? " → e-commerce and out-of-module rows are excluded before EMA preprocessing"
-              : selectedChannel === "POS"
-                ? " → rows split into Cafe, Services & Retail by category"
-                : " → all rows go to Retail"}
+            {selectedChannel === "POS" || selectedChannel === "PetHub"
+              ? " -> rows split into Cafe, Services & Retail by category"
+              : " -> all rows go to Retail"}
           </p>
         </div>
       </div>

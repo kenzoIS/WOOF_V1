@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
-import { getDashboard, getForecast, getRetailForecastByChannel } from "../lib/api";
+import { getDashboard, getRetailForecastByChannel } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -54,13 +54,6 @@ const spoilageRiskItems = [
   { name: "Cat Treats Salmon", daysLeft: 22, currentStock: 15, dailyVelocity: 2.1, spoilageRisk: 45, recommendedDiscount: 10 },
 ];
 
-const channelPerformance = [
-  { category: "Pet Food", physical: 45200, shopee: 28400, tiktok: 18900 },
-  { category: "Accessories", physical: 32100, shopee: 41200, tiktok: 29800 },
-  { category: "Toys", physical: 18400, shopee: 32600, tiktok: 24100 },
-  { category: "Grooming", physical: 28900, shopee: 15300, tiktok: 11800 },
-];
-
 // Fallback data for velocity / forecast
 
 const retailSentimentData = [
@@ -85,7 +78,7 @@ const flaggedRetailReviews = [
     keywords: ["incorrect", "conflicting"],
   },
   {
-    platform: "Tiktok",
+    platform: "TikTok",
     text: "Packaging felt cheap and the purchase experience was slower than expected.",
     date: "Apr 12, 2026",
     product: "Pet Collar Deluxe",
@@ -277,6 +270,24 @@ export function Retail() {
 
   const retailRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
   const activeSKUs = dashboardData?.topItems?.length || 0;
+  const retailChannelPerformance = useMemo(() => {
+    const revenueFor = (channel: string) => {
+      const row = dashboardData?.channelBreakdown?.find(
+        (item: any) => item.channel === channel,
+      );
+      return Number(row?.revenue) || 0;
+    };
+
+    return [
+      {
+        sector: "Retail",
+        pos: revenueFor("POS"),
+        shopee: revenueFor("Shopee"),
+        tiktok: revenueFor("TikTok Shop"),
+        pethub: revenueFor("PetHub"),
+      },
+    ];
+  }, [dashboardData]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -444,7 +455,7 @@ export function Retail() {
               Retail Revenue by Channel
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Physical POS and e-commerce channel history. Shows the distribution of in-store sales versus online orders.
+              Physical POS and digital channel history. Shows the distribution of in-store sales versus Shopee, TikTok, and PetHub orders.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -538,7 +549,7 @@ export function Retail() {
               strokeWidth={2.5}
               dot={false}
               animationDuration={800}
-              name="Online (Shopee/TikTok)"
+              name="Digital (Shopee/TikTok/PetHub)"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -550,7 +561,7 @@ export function Retail() {
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
-            <span className="text-xs">Online (Shopee/TikTok)</span>
+            <span className="text-xs">Digital (Shopee/TikTok/PetHub)</span>
           </div>
         </div>
 
@@ -559,32 +570,11 @@ export function Retail() {
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
             <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Retail Analysis</h3>
             <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-              This panel tracks the daily net sales contribution of physical in-store purchases (POS) versus e-commerce platforms (Shopee and TikTok Shop). Managing cross-channel retail metrics descriptively allows Happy Tails to compare retail channels, analyze trends, and coordinate inventory levels without forecasting.
+              This panel tracks the daily net sales contribution of physical in-store purchases (POS) versus digital channels (Shopee, TikTok, and PetHub). Managing cross-channel retail metrics descriptively allows Happy Tails to compare retail channels, analyze trends, and coordinate inventory levels without forecasting.
             </p>
           </div>
         </div>
       </div>
-
-      {/* QUICK STATS */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4">
-        <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">Quick Stats</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          {[
-            { label: "Avg Daily Sales", value: "₱8,450", color: "#D42A7D" },
-            { label: "Top Category", value: "Pet Food", color: "#F53799" },
-            { label: "Online Share", value: "42%", color: "#5CE1E6" },
-            { label: "Inventory Value", value: "₱2.1M", color: "#3AE4FA" },
-          ].map((stat) => (
-            <div key={stat.label} className="flex items-center justify-between p-3 md:p-4 bg-[#FFF2FA] rounded-lg">
-              <span className="text-xs md:text-sm text-[#223047] opacity-70">{stat.label}</span>
-              <span className="text-sm md:text-base font-bold text-[#223047]" style={{ color: stat.color }}>
-                {stat.value}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
       <div
         className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
@@ -738,22 +728,6 @@ export function Retail() {
           </Table>
           </div>
         </div>
-
-            <div className="hidden">
-              {[
-                { label: "Avg Daily Sales", value: "₱8,450", color: "#D42A7D" },
-                { label: "Top Category", value: "Pet Food", color: "#F53799" },
-                { label: "Online Share", value: "42%", color: "#5CE1E6" },
-                { label: "Inventory Value", value: "₱2.1M", color: "#3AE4FA" },
-              ].map((stat) => (
-                <div key={stat.label} className="flex items-center justify-between p-2 md:p-3 bg-[#FFF2FA] rounded-lg">
-                  <span className="text-xs md:text-sm text-[#223047] opacity-70">{stat.label}</span>
-                  <span className="text-sm md:text-base font-bold text-[#223047]" style={{ color: stat.color }}>
-                    {stat.value}
-                  </span>
-                </div>
-              ))}
-            </div>
       {/* SPOILAGE RISK ENGINE */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
@@ -841,38 +815,45 @@ export function Retail() {
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-4">
           <div className="flex-1 min-w-0">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Omnichannel Performance by Category
+              Omnichannel Performance by Sectors
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Revenue distribution across physical and online channels
+              Retail sector revenue distribution across POS, Shopee, TikTok, and PetHub
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
-            {["All", "Physical", "Shopee", "Tiktok"].map((channel) => (
+            {[
+              { label: "All", value: "all" },
+              { label: "POS", value: "pos" },
+              { label: "Shopee", value: "shopee" },
+              { label: "TikTok", value: "tiktok" },
+              { label: "PetHub", value: "pethub" },
+            ].map((channel) => (
               <Button
-                key={channel}
+                key={channel.value}
                 size="sm"
-                variant={selectedChannel === channel.toLowerCase() ? "default" : "outline"}
-                onClick={() => setSelectedChannel(channel.toLowerCase())}
+                variant={selectedChannel === channel.value ? "default" : "outline"}
+                onClick={() => setSelectedChannel(channel.value)}
                 className={`text-xs ${
-                  selectedChannel === channel.toLowerCase()
+                  selectedChannel === channel.value
                     ? "bg-[#D42A7D] hover:bg-[#F53799]"
                     : "border-[#FFD9EC] hover:bg-[#FFF2FA]"
                 }`}
               >
-                {channel}
+                {channel.label}
               </Button>
             ))}
           </div>
         </div>
 
         <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
-          <BarChart key={`chart-${selectedChannel}`} data={channelPerformance}>
+          <BarChart key={`chart-${selectedChannel}`} data={retailChannelPerformance}>
             <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-            <XAxis dataKey="category" stroke="#223047" style={{ fontSize: "10px" }} />
+            <XAxis dataKey="sector" stroke="#223047" style={{ fontSize: "10px" }} />
             <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
             <Tooltip
+              formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString()}`, name]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -880,23 +861,27 @@ export function Retail() {
                 padding: "12px",
               }}
             />
-            {(selectedChannel === "all" || selectedChannel === "physical") && (
-              <Bar key="physical-bar" dataKey="physical" fill="#F53799" radius={[6, 6, 0, 0]} animationDuration={800} />
+            {(selectedChannel === "all" || selectedChannel === "pos") && (
+              <Bar key="pos-bar" dataKey="pos" name="POS" fill="#F53799" radius={[6, 6, 0, 0]} animationDuration={800} />
             )}
             {(selectedChannel === "all" || selectedChannel === "shopee") && (
-              <Bar key="shopee-bar" dataKey="shopee" fill="#FBBF24" radius={[6, 6, 0, 0]} animationDuration={800} />
+              <Bar key="shopee-bar" dataKey="shopee" name="Shopee" fill="#FBBF24" radius={[6, 6, 0, 0]} animationDuration={800} />
             )}
             {(selectedChannel === "all" || selectedChannel === "tiktok") && (
-              <Bar key="tiktok-bar" dataKey="tiktok" fill="#8B5CF6" radius={[6, 6, 0, 0]} animationDuration={800} />
+              <Bar key="tiktok-bar" dataKey="tiktok" name="TikTok" fill="#8B5CF6" radius={[6, 6, 0, 0]} animationDuration={800} />
+            )}
+            {(selectedChannel === "all" || selectedChannel === "pethub") && (
+              <Bar key="pethub-bar" dataKey="pethub" name="PetHub" fill="#3AE4FA" radius={[6, 6, 0, 0]} animationDuration={800} />
             )}
           </BarChart>
         </ResponsiveContainer>
 
         <div className="flex flex-wrap justify-center gap-4 md:gap-8 pt-2 md:pt-4">
           {[
-            { label: "Physical Store", color: "#F53799" },
+            { label: "POS", color: "#F53799" },
             { label: "Shopee", color: "#FBBF24" },
-            { label: "Tiktok", color: "#8B5CF6" },
+            { label: "TikTok", color: "#8B5CF6" },
+            { label: "PetHub", color: "#3AE4FA" },
           ].map((channel) => (
             <div key={channel.label} className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: channel.color }} />

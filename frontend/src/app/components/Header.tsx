@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Button } from "./ui/button";
-import { DataRange, getCurrentWeather, getDataRange } from "../lib/api";
+import { ChannelStatus, DataRange, getChannelStatus, getCurrentWeather, getDataRange } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -38,6 +38,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [customStartDate, setCustomStartDate] = useState(HISTORY_START_DATE);
   const [customEndDate, setCustomEndDate] = useState(INGESTED_HISTORY_END_DATE);
   const [dataRange, setDataRange] = useState<DataRange | null>(null);
+  const [channelStatus, setChannelStatus] = useState<ChannelStatus | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const historyStartDate = dataRange?.historyStartDate || HISTORY_START_DATE;
   const historyEndDate = dataRange?.historyEndDate || INGESTED_HISTORY_END_DATE;
@@ -65,6 +66,12 @@ export function Header({ onMenuClick }: HeaderProps) {
           setCustomEndDate(range.historyEndDate || INGESTED_HISTORY_END_DATE);
         }
       })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    getChannelStatus()
+      .then(setChannelStatus)
       .catch(() => {});
   }, []);
 
@@ -164,6 +171,15 @@ export function Header({ onMenuClick }: HeaderProps) {
     minute: "2-digit",
   });
   const unreadCount = notifications.filter(n => !n.read).length;
+  const getChannelIndicator = (channel: string) => {
+    const status = channelStatus?.channels.find((item) => item.channel === channel);
+    return {
+      active: Boolean(status?.connected),
+      title: status?.connected
+        ? `${status.label} has uploaded data. Latest sync placeholder: ${status.latestUploadAt || status.latestTransactionAt || "available"}`
+        : `${channel === "TikTok Shop" ? "TikTok" : channel} connector pending. This indicator will read live API/webhook status once implemented.`,
+    };
+  };
 
   const markAsRead = (id: string) => {
     setNotifications(prev =>
@@ -285,18 +301,20 @@ export function Header({ onMenuClick }: HeaderProps) {
         <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
           {/* Channel Status Pills (hidden on mobile) */}
           <div className="hidden xl:flex items-center gap-2">
-            <Badge variant="outline" className="gap-1.5 border-[#FFD9EC]">
-              <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-              <span className="text-xs">POS</span>
-            </Badge>
-            <Badge variant="outline" className="gap-1.5 border-[#FFD9EC]">
-              <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-              <span className="text-xs">Shopee</span>
-            </Badge>
-            <Badge variant="outline" className="gap-1.5 border-[#FFD9EC]">
-              <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-              <span className="text-xs">Tiktok</span>
-            </Badge>
+            {[
+              { channel: "POS", label: "POS" },
+              { channel: "Shopee", label: "Shopee" },
+              { channel: "TikTok Shop", label: "TikTok" },
+              { channel: "PetHub", label: "PetHub" },
+            ].map((item) => {
+              const indicator = getChannelIndicator(item.channel);
+              return (
+                <Badge key={item.channel} variant="outline" className="gap-1.5 border-[#FFD9EC]" title={indicator.title}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${indicator.active ? "bg-green-500" : "bg-amber-400"}`} />
+                  <span className="text-xs">{item.label}</span>
+                </Badge>
+              );
+            })}
           </div>
 
           {/* Weather Badge (hidden on small mobile) */}

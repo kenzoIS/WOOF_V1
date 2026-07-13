@@ -2,6 +2,138 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-14 - PetHub Sample ETL Normalization
+
+### Requested
+
+- Use the provided PetHub sample to make PetHub ingestion follow the same manual-routing ETL approach as POS, TikTok, and Shopee.
+- Make all manual upload categories more ready for future files with different row counts and column layouts, while keeping existing frontend/backend behavior intact.
+
+### Backend Changes
+
+- Added a dedicated PetHub upload path that accepts CSV or Excel files, keeps PetHub as its own channel, and maps rows into Cafe, Services, or Retail using `sector`, `category`, product/service names, and `source_type`.
+- Added PetHub status filtering so canceled, refunded, voided, failed, rejected, or unpaid rows are not imported; the PetHub parser no longer falls back to the generic importer when every row is rejected.
+- Expanded flexible upload aliases for PetHub/POS-style files, including snake_case sample headers such as `product_or_service_name`, `transaction_date`, `total_amount`, `net_sales`, `payment_type`, and `transaction_id`.
+- Updated flexible value parsing to handle CSV text and Excel numeric cells consistently, clean tab-padded values, and prefer aliases in the intended priority order when multiple ID columns exist.
+- Added PetHub sector mappings for sample categories such as `Pet Menu`, `Pet Shop`, `Boarding`, and explicit `Cafe`, `Services`, and `Retail` values.
+
+### Sample Data Notes
+
+- PetHub sample reviewed: columns include `source_system`, `source_type`, `source_id`, `transaction_id`, `transaction_date`, `customer_name`, `product_or_service_name`, `sku`, `category`, `sector`, `quantity`, `unit_price`, `total_amount`, `discount`, `net_sales`, `channel`, `payment_type`, `order_status`, and `payment_status`.
+- The sample contains Cafe, Services, and Retail rows, so PetHub is treated as an omnichannel source that distributes into the three business sectors instead of becoming a separate reporting sector.
+
+### Files Changed
+
+- [csv.service.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/csv/csv.service.ts)
+- [csv.service.spec.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/csv/csv.service.spec.ts)
+- [WORKLOG.md](file:///D:/Capstone_v3/WOOF_V1/WORKLOG.md)
+
+### Verification
+
+- Passed: `npm test -- --runInBand csv.service.spec.ts` in `backend` (9 CSV ingestion tests).
+- Passed: `npm run build` in `backend`.
+- Passed: Full backend `npm test -- --runInBand` (25 tests across 5 suites).
+- Note: The CSV rollback test intentionally logs a mocked `database insert failed` error while verifying rollback behavior; the suite still passes.
+
+## 2026-07-13 - Sector-Based PetHub and Marketplace Data Flow
+
+### Requested
+
+- Make Home, Cafe, Services, and Retail read uploaded PetHub data, and read TikTok/Shopee data where those uploads belong.
+- Remove the dedicated Online stream from Home's Omnichannel Revenue Accumulation chart because online rows should be distributed into Cafe, Services, or Retail sectors.
+- Remove the Retail Quick Stats section.
+- Change Retail Omnichannel Performance by Category into Omnichannel Performance by Sectors, comparing Retail performance across POS, TikTok, Shopee, and PetHub.
+- Add a PetHub active indicator beside TikTok in the Header, as a placeholder that can later become a real webhook/API connection indicator.
+
+### Backend Changes
+
+- Updated `getDashboard()` so Cafe and Services no longer force `channel: POS`; sector dashboards now read any uploaded row in that sector, including future PetHub Cafe/Services rows.
+- Updated Cafe/Services forecasting source queries, item history, and price calibration to use uploaded sector history instead of POS-only history.
+- Updated Home Omnichannel Revenue Accumulation aggregation to distribute all uploaded rows by their `sector` instead of placing non-POS rows into a separate `online` stream.
+- Added `GET /analytics/channel-status`, returning POS, Shopee, TikTok, and PetHub placeholder connection states based on uploaded transaction/upload presence.
+
+### Frontend Changes
+
+- Removed the Online stream/legend item/area from Home's Omnichannel Revenue Accumulation chart, leaving Cafe, Services, and Retail only.
+- Updated Cafe and Services copy to refer to uploaded sector history from POS/PetHub instead of POS-only history.
+- Removed the visible Retail Quick Stats block and the old hidden stats stub.
+- Rebuilt Retail Omnichannel Performance as an uploaded-data chart for the Retail sector with POS, Shopee, TikTok, and PetHub bars.
+- Added a PetHub header status pill after TikTok and wired all four channel pills to `/analytics/channel-status`; channels show green when uploaded data exists and amber while connector/webhook support is pending.
+
+### Files Changed
+
+- [analytics.controller.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.controller.ts)
+- [analytics.service.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.ts)
+- [api.ts](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/lib/api.ts)
+- [Header.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/components/Header.tsx)
+- [Home.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Home.tsx)
+- [Cafe.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Cafe.tsx)
+- [Services.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Services.tsx)
+- [Retail.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Retail.tsx)
+- [WORKLOG.md](file:///D:/Capstone_v3/WOOF_V1/WORKLOG.md)
+
+### Verification
+
+- Passed: Full backend `npm test -- --runInBand` (23 tests across 5 suites).
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after approval to rerun outside the sandbox because the sandboxed Next.js build hit `spawn EPERM`.
+
+## 2026-07-13 - Manual CSV Routing for POS, Shopee, TikTok, and PetHub
+
+### Requested
+
+- Keep manual CSV routing instead of fully automated stream detection.
+- Replace the Data Ingestion Center CSV Category filters with POS, Shopee, TikTok, and PetHub only.
+- Remove Cafe History and Services History from the upload selector because those streams should be covered by POS and PetHub uploads.
+- Review the provided TikTok one-year CSV and Shopee one-month XLSX columns so ingestion captures fields needed by the system's revenue, quantity, item, channel, and date analytics.
+- Prepare for a future PetHub sample while preserving existing frontend and backend features.
+
+### Backend Changes
+
+- Added channel normalization in `CsvService` so the frontend's manual `TikTok` selection routes through the existing canonical `TikTok Shop` parser and analytics compatibility path.
+- Added `PetHub` as a supported manual upload channel using flexible parsing, preserving Cafe, Services, and Retail sector inference instead of forcing all rows to Retail.
+- Updated marketplace parsing for the provided TikTok and Shopee sample shapes:
+  - Cleans tab-padded IDs/timestamps from marketplace exports.
+  - Preserves TikTok/Shopee variation names in product display names when available.
+  - Uses safe numeric parsing to avoid empty discount/payment fields becoming invalid `NaN` values.
+  - Keeps Shopee/TikTok marketplace uploads as Retail while retaining line-level quantity, price, discount, net sales, SKU, category, status, and order date fields.
+- Included PetHub in Home channel-balance analytics and Retail digital-channel rollups.
+- Updated CSV upload schema comments to include PetHub.
+- Refreshed stale CSV and exogenous-data Jest mocks to match the current `validateBatch` and per-date holiday cache APIs.
+
+### Frontend Changes
+
+- Updated `DataIngestion.tsx` CSV Category options to exactly POS, Shopee, TikTok, and PetHub.
+- Removed the Cafe History / Services History UI path and the unused historical upload call from the Data Ingestion Center.
+- Updated ingestion helper text and channel badge colors for the four manual upload routes.
+- Updated Home and Retail channel copy to include PetHub as a digital channel alongside Shopee and TikTok.
+
+### Sample Data Notes
+
+- TikTok sample reviewed: 6,290 rows from 2025-05-02 to 2026-05-02 with statuses `Completed`, `Shipped`, `To ship`, and `Canceled`; parser keeps sellable statuses and excludes canceled rows.
+- Shopee sample reviewed: 2,096 rows from 2025-04-01 to 2025-05-01 with `Completed` and `Cancelled` statuses; parser keeps completed rows.
+- Both samples provide the core fields needed for current WOOF analytics: order ID, order status, product/SKU, variation, category, quantity, date/time, unit price, discounts, net/line buyer payment, and channel.
+
+### Files Changed
+
+- [csv.service.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/csv/csv.service.ts)
+- [csv.service.spec.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/csv/csv.service.spec.ts)
+- [analytics.service.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.ts)
+- [exogenous-data.service.spec.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/common/exogenous-data.service.spec.ts)
+- [transaction.schema.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/csv/schemas/transaction.schema.ts)
+- [csv-upload.schema.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/csv/schemas/csv-upload.schema.ts)
+- [DataIngestion.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/components/DataIngestion.tsx)
+- [Home.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Home.tsx)
+- [Retail.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Retail.tsx)
+- [WORKLOG.md](file:///D:/Capstone_v3/WOOF_V1/WORKLOG.md)
+
+### Verification
+
+- Passed: `npm test -- --runInBand csv.service.spec.ts` in `backend` (7 CSV ingestion tests).
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after approval to rerun outside the sandbox because the sandboxed Next.js build hit `spawn EPERM`.
+- Passed: Full backend `npm test -- --runInBand` (23 tests across 5 suites).
+
 ## 2026-07-10 - Cafe and Services Date-Aware Forecasts and Performance Tables
 
 ### Requested

@@ -42,7 +42,7 @@ export class Transaction {
   netSales: number;
 
   @Prop({ required: true })
-  channel: string; // "POS" | "Shopee" | "TikTok Shop"
+  channel: string; // "POS" | "Shopee" | "TikTok Shop" | "PetHub"
 
   @Prop()
   paymentType: string;

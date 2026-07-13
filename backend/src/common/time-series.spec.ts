@@ -1,4 +1,7 @@
-import { normalizeDailySeries } from './time-series';
+import {
+  buildDailyValuesFromTransactionLines,
+  normalizeDailySeries,
+} from './time-series';
 
 describe('normalizeDailySeries', () => {
   it('fills missing dates and applies the Cafe EMA alpha to unit volume', () => {
@@ -11,27 +14,29 @@ describe('normalizeDailySeries', () => {
     );
 
     expect(result).toEqual([
-      {
+      expect.objectContaining({
         date: '2026-01-01',
         actual: 100,
         orders: 1,
         normalized: 100,
         isMissingDate: false,
-      },
-      {
+        isTrueZeroDay: false,
+      }),
+      expect.objectContaining({
         date: '2026-01-02',
         actual: 0,
         orders: 0,
-        normalized: 70,
+        normalized: 100,
         isMissingDate: true,
-      },
-      {
+        isTrueZeroDay: false,
+      }),
+      expect.objectContaining({
         date: '2026-01-03',
         actual: 200,
         orders: 2,
-        normalized: 109,
+        normalized: 130,
         isMissingDate: false,
-      },
+      }),
     ]);
   });
 
@@ -92,13 +97,108 @@ describe('normalizeDailySeries', () => {
     );
 
     expect(result).toEqual([
-      {
+      expect.objectContaining({
         date: '2026-01-01',
         actual: 123.45,
         orders: 2,
         normalized: 123.45,
         isMissingDate: false,
-      },
+      }),
     ]);
+  });
+
+  it('builds a transaction/day layer from raw line items', () => {
+    const result = buildDailyValuesFromTransactionLines(
+      [
+        {
+          date: '2026-01-01T09:00:00+08:00',
+          transactionId: 'A',
+          productName: 'Latte',
+          quantity: 2,
+          netSales: 200,
+        },
+        {
+          date: '2026-01-01T09:00:00+08:00',
+          transactionId: 'A',
+          productName: 'Cookie',
+          quantity: 1,
+          netSales: 80,
+          discount: 10,
+        },
+        {
+          date: '2026-01-01T10:00:00+08:00',
+          transactionId: 'B',
+          productName: 'Grooming',
+          quantity: 1,
+          netSales: 500,
+        },
+      ],
+      'Cafe',
+    );
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        date: '2026-01-01',
+        actual: 4,
+        orders: 2,
+        revenue: 780,
+        lineItems: 3,
+        basketItems: 3,
+        avgBasketSize: 1.5,
+        avgOrderValue: 390,
+        promoTransactions: 1,
+      }),
+    ]);
+  });
+
+  it('uses Services transaction counts as bookings instead of line-item quantity', () => {
+    const result = buildDailyValuesFromTransactionLines(
+      [
+        {
+          date: '2026-01-01',
+          transactionId: 'booking-1',
+          productName: 'Full Grooming',
+          quantity: 3,
+          netSales: 900,
+        },
+        {
+          date: '2026-01-01',
+          transactionId: 'booking-1',
+          productName: 'Nail Trim',
+          quantity: 1,
+          netSales: 150,
+        },
+      ],
+      'Services',
+    );
+
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        actual: 1,
+        orders: 1,
+      }),
+    );
+  });
+
+  it('caps extreme spikes for the normalized signal while preserving raw actuals', () => {
+    const result = normalizeDailySeries(
+      [
+        { date: '2026-01-01', actual: 10, orders: 1 },
+        { date: '2026-01-02', actual: 11, orders: 1 },
+        { date: '2026-01-03', actual: 12, orders: 1 },
+        { date: '2026-01-04', actual: 13, orders: 1 },
+        { date: '2026-01-05', actual: 14, orders: 1 },
+        { date: '2026-01-06', actual: 15, orders: 1 },
+        { date: '2026-01-07', actual: 1000, orders: 1 },
+      ],
+      'Cafe',
+    );
+
+    const spike = result[result.length - 1];
+    expect(spike.actual).toBe(1000);
+    expect(spike.rawActual).toBe(1000);
+    expect(spike.isOutlier).toBe(true);
+    expect(spike.cappedActual).toBeLessThan(1000);
+    expect(spike.normalized).toBeLessThan(320);
   });
 });

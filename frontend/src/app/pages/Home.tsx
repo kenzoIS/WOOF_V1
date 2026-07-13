@@ -83,7 +83,7 @@ interface HomeOverview {
     pendingSuggestions: number;
   };
   insight: string;
-  omnichannelSeries: Array<{ hour: string; cafe: number; services: number; retail: number; online: number }>;
+  omnichannelSeries: Array<{ hour: string; cafe: number; services: number; retail: number }>;
   sectorSummary: Array<{ sector: string; revenue: number; orders: number }>;
   channelSummary: Array<{ channel: string; revenue: number; count: number }>;
   channelBalance: Array<{ category: string; channel: string; physical: number; online: number; count: number }>;
@@ -210,16 +210,11 @@ export function Home() {
   const legendData = useMemo(() => {
     const sectorTotal = (sector: string) =>
       homeOverview?.sectorSummary.find((item) => item.sector === sector)?.revenue || 0;
-    const onlineTotal =
-      homeOverview?.channelSummary
-        .filter((item) => item.channel !== "POS")
-        .reduce((sum, item) => sum + item.revenue, 0) || 0;
-    const total = sectorTotal("Cafe") + sectorTotal("Services") + sectorTotal("Retail") + onlineTotal;
+    const total = sectorTotal("Cafe") + sectorTotal("Services") + sectorTotal("Retail");
     return [
       { key: "cafe", label: "Cafe", color: "#F53799", value: sectorTotal("Cafe") },
       { key: "services", label: "Services", color: "#0EA5E9", value: sectorTotal("Services") },
       { key: "retail", label: "Retail", color: "#F59E0B", value: sectorTotal("Retail") },
-      { key: "online", label: "Online", color: "#7C3AED", value: onlineTotal },
     ].map((item) => ({
       ...item,
       total: formatCurrency(item.value),
@@ -232,7 +227,6 @@ export function Home() {
     cafe: true,
     services: true,
     retail: true,
-    online: true,
   });
   const [approvedSuggestions, setApprovedSuggestions] = useState<number[]>([]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<number[]>([]);
@@ -526,10 +520,6 @@ export function Home() {
                 <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.35} />
                 <stop offset="100%" stopColor="#F59E0B" stopOpacity={0} />
               </linearGradient>
-              <linearGradient key="onlineGrad-gradient" id="onlineGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#7C3AED" stopOpacity={0.35} />
-                <stop offset="100%" stopColor="#7C3AED" stopOpacity={0} />
-              </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
             <XAxis dataKey="hour" stroke="#223047" style={{ fontSize: "12px" }} />
@@ -575,22 +565,11 @@ export function Home() {
                 animationDuration={800}
               />
             )}
-            {visibleSeries.online && (
-              <Area
-                key="online-area"
-                type="monotone"
-                dataKey="online"
-                stroke="#7C3AED"
-                strokeWidth={2.5}
-                fill="url(#onlineGrad)"
-                animationDuration={800}
-              />
-            )}
           </AreaChart>
         </ResponsiveContainer>
 
         {/* Legend Row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 pt-4 border-t border-[#FFD9EC]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-4 pt-4 border-t border-[#FFD9EC]">
           {legendData.map((sector) => (
             <button
               key={sector.key}
@@ -624,13 +603,13 @@ export function Home() {
               Offline vs. Online Channel Balance
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              POS compared against Shopee and TikTok Shop revenue streams
+              POS compared against Shopee, TikTok, and PetHub revenue streams
             </p>
           </div>
 
           {equilibriumData.length === 0 && (
             <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
-              Upload POS, Shopee, or TikTok Shop transactions to compare channel revenue.
+              Upload POS, Shopee, TikTok, or PetHub transactions to compare channel revenue.
             </div>
           )}
           <ResponsiveContainer width="100%" height={250} className="md:!h-[300px]">
@@ -651,7 +630,7 @@ export function Home() {
               <Tooltip
                 formatter={(value: number, name: string) => [
                   formatCurrency(Number(value) || 0),
-                  name === "physical" ? "Offline Channel (POS)" : "Online Channel (Shopee + TikTok Shop)",
+                  name === "physical" ? "Offline Channel (POS)" : "Digital Channels (Shopee + TikTok + PetHub)",
                 ]}
                 contentStyle={{
                   backgroundColor: "white",
@@ -661,7 +640,7 @@ export function Home() {
               />
               <Legend
                 formatter={(value) =>
-                  value === "physical" ? "Offline Channel (POS)" : "Online Channel (Shopee + TikTok Shop)"
+                  value === "physical" ? "Offline Channel (POS)" : "Digital Channels (Shopee + TikTok + PetHub)"
                 }
               />
               <Bar

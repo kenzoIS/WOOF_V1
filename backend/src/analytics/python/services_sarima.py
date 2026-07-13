@@ -22,6 +22,12 @@ EXOG_COLUMNS = [
     "dayBeforeHoliday",
     "dayAfterHoliday",
     "average_unit_price",
+    "isWeekend",
+    "dayOfWeekSin",
+    "dayOfWeekCos",
+    "promoFlag",
+    "outlierFlag",
+    "isMissingDate",
 ]
 WEEKLY_SEASONAL_ORDERS = [
     DEFAULT_SEASONAL_ORDER,
@@ -175,7 +181,12 @@ def build_forecast_exog(payload, forecast_days):
     matrix = build_exog_matrix(payload.get("exogenousForecast", []), forecast_days)
     if matrix is not None:
         return matrix
-    return np.asarray([[28.0, 0.0, 0.0, 0.0, 0.0, 0.0] for _ in range(forecast_days)], dtype=float)
+    fallback_row = [0.0 for _ in EXOG_COLUMNS]
+    fallback_row[EXOG_COLUMNS.index("tempCelsius")] = 28.0
+    return np.asarray(
+        [fallback_row for _ in range(forecast_days)],
+        dtype=float,
+    )
 
 
 def run(payload):
@@ -202,8 +213,7 @@ def run(payload):
     exog = build_exog_matrix(payload.get("exogenous", []), len(frame))
     use_exog = exog is not None
     forecast_exog = build_forecast_exog(payload, forecast_days) if use_exog else None
-    holdout = forecast_days
-    split_index = max(1, min(len(frame) - 1, len(frame) - holdout))
+    split_index = chronological_split_index(len(frame))
     holdout = len(frame) - split_index
     train_normalized = normalized[:split_index]
     train_exog = exog[:split_index] if use_exog else None

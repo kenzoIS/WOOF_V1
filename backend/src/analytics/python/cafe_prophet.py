@@ -13,6 +13,17 @@ logging.getLogger("prophet").setLevel(logging.ERROR)
 
 DEFAULT_FORECAST_DAYS = 30
 MAX_FORECAST_DAYS = 90
+EXOG_COLUMNS = [
+    "tempCelsius",
+    "rainFlag",
+    "isHoliday",
+    "dayBeforeHoliday",
+    "dayAfterHoliday",
+    "isWeekend",
+    "promoFlag",
+    "outlierFlag",
+    "isMissingDate",
+]
 
 
 def build_model(changepoint_prior_scale, use_exog=False):
@@ -24,8 +35,8 @@ def build_model(changepoint_prior_scale, use_exog=False):
         interval_width=0.8,
     )
     if use_exog:
-        model.add_regressor("tempCelsius")
-        model.add_regressor("rainFlag")
+        for column in EXOG_COLUMNS:
+            model.add_regressor(column)
     try:
         model.add_country_holidays(country_name="PH")
     except Exception:
@@ -101,18 +112,21 @@ def run(payload):
     if use_exog:
         exog_df = pd.DataFrame(exog)
         exog_df["ds"] = pd.to_datetime(exog_df["date"])
-        frame = frame.merge(exog_df[["ds", "tempCelsius", "rainFlag"]], on="ds", how="left")
+        for column in EXOG_COLUMNS:
+            if column not in exog_df.columns:
+                exog_df[column] = 0.0
+        frame = frame.merge(exog_df[["ds", *EXOG_COLUMNS]], on="ds", how="left")
         frame["tempCelsius"] = frame["tempCelsius"].fillna(28.0).astype(float)
-        frame["rainFlag"] = frame["rainFlag"].fillna(0.0).astype(float)
+        for column in [column for column in EXOG_COLUMNS if column != "tempCelsius"]:
+            frame[column] = frame[column].fillna(0.0).astype(float)
 
     actual = frame["actual"].astype(float).to_numpy()
-    holdout = forecast_days
-    split_index = max(1, min(len(frame) - 1, len(frame) - holdout))
+    split_index = chronological_split_index(len(frame))
     holdout = len(frame) - split_index
 
     if use_exog:
-        train = frame.iloc[:split_index][["ds", "y", "tempCelsius", "rainFlag"]]
-        validation_dates = frame.iloc[split_index:][["ds", "tempCelsius", "rainFlag"]]
+        train = frame.iloc[:split_index][["ds", "y", *EXOG_COLUMNS]]
+        validation_dates = frame.iloc[split_index:][["ds", *EXOG_COLUMNS]]
     else:
         train = frame.iloc[:split_index][["ds", "y"]]
         validation_dates = frame.iloc[split_index:][["ds"]]
@@ -146,7 +160,7 @@ def run(payload):
 
     final_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
     if use_exog:
-        final_model.fit(frame[["ds", "y", "tempCelsius", "rainFlag"]])
+        final_model.fit(frame[["ds", "y", *EXOG_COLUMNS]])
     else:
         final_model.fit(frame[["ds", "y"]])
 
@@ -157,12 +171,16 @@ def run(payload):
     if use_exog:
         exog_forecast_df = pd.DataFrame(exog_forecast)
         exog_forecast_df["ds"] = pd.to_datetime(exog_forecast_df["date"])
-        future = future.merge(exog_forecast_df[["ds", "tempCelsius", "rainFlag"]], on="ds", how="left")
+        for column in EXOG_COLUMNS:
+            if column not in exog_forecast_df.columns:
+                exog_forecast_df[column] = 0.0
+        future = future.merge(exog_forecast_df[["ds", *EXOG_COLUMNS]], on="ds", how="left")
         future["tempCelsius"] = future["tempCelsius"].fillna(28.0).astype(float)
-        future["rainFlag"] = future["rainFlag"].fillna(0.0).astype(float)
+        for column in [column for column in EXOG_COLUMNS if column != "tempCelsius"]:
+            future[column] = future[column].fillna(0.0).astype(float)
 
     prediction = final_model.predict(future)
-    hist_predictions = final_model.predict(frame[["ds", "tempCelsius", "rainFlag"] if use_exog else ["ds"]])
+    hist_predictions = final_model.predict(frame[["ds", *EXOG_COLUMNS] if use_exog else ["ds"]])
     fitted_values = [round(max(0.0, float(v)), 2) for v in hist_predictions["yhat"]]
 
     forecast = [
@@ -194,7 +212,7 @@ def run(payload):
             "weeklySeasonality": True,
             "yearlySeasonality": True,
             "holidayCountry": "PH",
-            "exogenousVariables": ["tempCelsius", "rainFlag"] if use_exog else [],
+            "exogenousVariables": EXOG_COLUMNS if use_exog else [],
         },
     }
 

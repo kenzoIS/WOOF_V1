@@ -14,6 +14,7 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import { existsSync } from 'fs';
 import {
+  DailyValue,
   ForecastModule,
   NormalizedDailyValue,
   normalizeDailySeries,
@@ -151,7 +152,7 @@ export class AnalyticsService {
         {
           $match: {
             ...dateFilter,
-            channel: { $in: ['POS', 'Shopee', 'TikTok Shop'] },
+            channel: { $in: ['POS', 'Shopee', 'TikTok Shop', 'PetHub'] },
           },
         },
         {
@@ -285,12 +286,7 @@ export class AnalyticsService {
     const sectorFilter =
       normalizedSector === 'all'
         ? {}
-        : {
-            sector: normalizedSector,
-            ...(normalizedSector === 'Cafe' || normalizedSector === 'Services'
-              ? { channel: 'POS' }
-              : {}),
-          };
+        : { sector: normalizedSector };
 
     const [kpis, topItems, dailyRevenue, channelBreakdown] = await Promise.all([
       // KPIs
@@ -432,9 +428,61 @@ export class AnalyticsService {
     };
   }
 
+  async getChannelStatus(): Promise<any> {
+    const channels = ['POS', 'Shopee', 'TikTok Shop', 'PetHub'];
+    const [transactionRows, uploadRows] = await Promise.all([
+      this.transactionModel.aggregate([
+        {
+          $group: {
+            _id: '$channel',
+            rows: { $sum: 1 },
+            latestTransactionAt: { $max: '$date' },
+          },
+        },
+      ]),
+      this.csvUploadModel
+        .aggregate([
+          {
+            $group: {
+              _id: '$channel',
+              uploadCount: { $sum: 1 },
+              latestUploadAt: { $max: '$uploadedAt' },
+            },
+          },
+        ])
+        .exec(),
+    ]);
+
+    const byTransactionChannel = new Map(
+      transactionRows.map((row: any) => [row._id, row]),
+    );
+    const byUploadChannel = new Map(uploadRows.map((row: any) => [row._id, row]));
+
+    return {
+      serverNow: new Date().toISOString(),
+      connectionMode: 'placeholder-until-api-webhooks',
+      channels: channels.map((channel) => {
+        const transaction = byTransactionChannel.get(channel) || {};
+        const upload = byUploadChannel.get(channel) || {};
+        const rowCount = Number(transaction.rows) || 0;
+        const uploadCount = Number(upload.uploadCount) || 0;
+        return {
+          channel,
+          label: channel === 'TikTok Shop' ? 'TikTok' : channel,
+          connected: rowCount > 0 || uploadCount > 0,
+          status: rowCount > 0 || uploadCount > 0 ? 'active' : 'pending',
+          rowCount,
+          uploadCount,
+          latestTransactionAt: transaction.latestTransactionAt || null,
+          latestUploadAt: upload.latestUploadAt || null,
+        };
+      }),
+    };
+  }
+
   /**
    * Cafe uses Prophet and Services uses pure SARIMA. Both are validated
-   * against held-out POS history before the strict SMA fallback is applied.
+   * against held-out uploaded sector history before the strict SMA fallback is applied.
    */
   async getForecast(
     sector: string,
@@ -498,26 +546,11 @@ export class AnalyticsService {
         return this.withForecastStartAnchor(cachedPayload);
       }
     }
-    const dailyData = await this.transactionModel.aggregate([
-      { $match: { sector: module, channel: 'POS' } },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
-          revenue: { $sum: '$netSales' },
-          orders: { $addToSet: '$transactionId' },
-          quantity: { $sum: '$quantity' },
-        },
-      },
-      { $addFields: { orderCount: { $size: '$orders' } } },
-      { $sort: { _id: 1 } },
-      { $project: { orders: 0 } },
-    ]);
+    const dailyData = await this.getPreprocessedDailyData(module);
+    const targetVariable =
+      module === 'Services' ? 'service_bookings' : 'quantity_volume';
     const historical = normalizeDailySeries(
-      dailyData.map((point: any) => ({
-        date: point._id,
-        actual: point.quantity,
-        orders: point.orderCount,
-      })),
+      dailyData.map((point: any) => this.toForecastDailyValue(point, module)),
       module,
     );
     const revenueByDate = new Map(
@@ -596,8 +629,12 @@ export class AnalyticsService {
         emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
         missingDaysFilled: historical.filter((point) => point.isMissingDate)
           .length,
-        sourceChannel: 'POS',
-        targetVariable: 'quantity_volume',
+        trueZeroDays: historical.filter((point) => point.isTrueZeroDay).length,
+        outlierDaysCapped: historical.filter((point) => point.isOutlier).length,
+        outlierCap: historical.find((point) => point.outlierCap !== null)
+          ?.outlierCap ?? null,
+        sourceChannel: 'Uploaded sector channels',
+        targetVariable,
         forecastRevenuePayloadVersion: FORECAST_REVENUE_PAYLOAD_VERSION,
         forecastUnit: module === 'Services' ? 'service_bookings' : 'items_sold',
         priceCalibration: priceCostMatrix,
@@ -964,7 +1001,7 @@ export class AnalyticsService {
         {
           $match: {
             ...sectorFilter,
-            channel: { $in: ['Shopee', 'TikTok Shop'] },
+            channel: { $in: ['Shopee', 'TikTok Shop', 'PetHub'] },
           },
         },
         {
@@ -1314,6 +1351,110 @@ export class AnalyticsService {
     );
   }
 
+  private getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {
+    return this.transactionModel.aggregate([
+      { $match: { sector: module } },
+      {
+        $project: {
+          dateKey: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$date',
+              timezone: 'Asia/Manila',
+            },
+          },
+          transactionId: {
+            $ifNull: ['$transactionId', { $toString: '$_id' }],
+          },
+          productName: '$productName',
+          quantity: { $ifNull: ['$quantity', 0] },
+          revenue: { $ifNull: ['$netSales', 0] },
+          discount: { $ifNull: ['$discount', 0] },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            date: '$dateKey',
+            transactionId: '$transactionId',
+          },
+          quantity: { $sum: '$quantity' },
+          revenue: { $sum: '$revenue' },
+          discountAmount: { $sum: '$discount' },
+          lineItems: { $sum: 1 },
+          uniqueItems: { $addToSet: '$productName' },
+        },
+      },
+      {
+        $addFields: {
+          basketItems: { $size: '$uniqueItems' },
+          hasPromotion: { $gt: ['$discountAmount', 0] },
+        },
+      },
+      {
+        $group: {
+          _id: '$_id.date',
+          revenue: { $sum: '$revenue' },
+          quantity: { $sum: '$quantity' },
+          orderCount: { $sum: 1 },
+          lineItems: { $sum: '$lineItems' },
+          basketItems: { $sum: '$basketItems' },
+          discountAmount: { $sum: '$discountAmount' },
+          promoTransactions: {
+            $sum: {
+              $cond: ['$hasPromotion', 1, 0],
+            },
+          },
+        },
+      },
+      {
+        $addFields: {
+          avgBasketSize: {
+            $cond: [
+              { $gt: ['$orderCount', 0] },
+              { $divide: ['$basketItems', '$orderCount'] },
+              0,
+            ],
+          },
+          avgOrderValue: {
+            $cond: [
+              { $gt: ['$orderCount', 0] },
+              { $divide: ['$revenue', '$orderCount'] },
+              0,
+            ],
+          },
+          averageUnitPrice: {
+            $cond: [
+              { $gt: ['$quantity', 0] },
+              { $divide: ['$revenue', '$quantity'] },
+              0,
+            ],
+          },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+  }
+
+  private toForecastDailyValue(point: any, module: ForecastModule): DailyValue {
+    const quantity = Number(point?.quantity) || 0;
+    const orders = Number(point?.orderCount) || 0;
+    const revenue = Number(point?.revenue) || 0;
+    return {
+      date: String(point?._id || ''),
+      actual: module === 'Services' ? orders : quantity,
+      orders,
+      revenue: this.round(revenue),
+      lineItems: Number(point?.lineItems) || 0,
+      basketItems: Number(point?.basketItems) || 0,
+      discountAmount: this.round(Number(point?.discountAmount) || 0),
+      promoTransactions: Number(point?.promoTransactions) || 0,
+      avgBasketSize: this.round(Number(point?.avgBasketSize) || 0),
+      avgOrderValue: this.round(Number(point?.avgOrderValue) || 0),
+      averageUnitPrice: this.round(Number(point?.averageUnitPrice) || 0),
+    };
+  }
+
   private async buildServicesExogenousPayload(
     historical: NormalizedDailyValue[],
     forecastDays: number,
@@ -1355,27 +1496,55 @@ export class AnalyticsService {
         weatherRecords,
         holidayRecords,
       );
+      const historicalByDate = new Map(
+        historical.map((point) => [point.date, point]),
+      );
       const historicalPriceByDate = this.buildHistoricalUnitPriceMap(dailyData);
       const defaultUnitPrice = await this.getCurrentUnitPriceFromTransactions(
         historical[historical.length - 1]?.date,
         module || 'Services',
       );
+      const futureFeatureDefaults =
+        this.buildFutureTransactionFeatureDefaults(historical);
       const historicalExogenous = this.exogenousDataService
         .buildExogenousMatrix(historicalDates, weatherRecords, holidayRecords)
-        .map((row) => ({
-          ...row,
-          average_unit_price:
-            historicalPriceByDate.get(row.date) ?? defaultUnitPrice,
-        }));
+        .map((row) =>
+          this.withModelFeatureColumns(row, historicalByDate.get(row.date), {
+            averageUnitPrice:
+              historicalPriceByDate.get(row.date) ?? defaultUnitPrice,
+          }),
+        );
       (
         exogenousForecast as unknown as Array<Record<string, number | string>>
       ).forEach((row) => {
-        row.average_unit_price = defaultUnitPrice;
+        Object.assign(
+          row,
+          this.withModelFeatureColumns(row, undefined, {
+            averageUnitPrice: defaultUnitPrice,
+            ...futureFeatureDefaults,
+          }),
+        );
       });
 
       const metadata: Record<string, unknown> = {
         weatherDataSource: this.exogenousDataService.getLastWeatherSource(),
         holidayDataSource: this.exogenousDataService.getLastHolidaySource(),
+        preprocessingLayer: 'transaction_day',
+        preprocessingFeatures: [
+          'dayOfWeek',
+          'isWeekend',
+          'isHoliday',
+          'dayBeforeHoliday',
+          'dayAfterHoliday',
+          'tempCelsius',
+          'rainFlag',
+          'promoFlag',
+          'isMissingDate',
+          'outlierFlag',
+          'avgBasketSize',
+          'avgOrderValue',
+          'average_unit_price',
+        ],
       };
 
       if (overrides) {
@@ -1429,6 +1598,66 @@ export class AnalyticsService {
     }
   }
 
+  private withModelFeatureColumns(
+    row: Record<string, any>,
+    point?: NormalizedDailyValue,
+    fallbacks: {
+      averageUnitPrice?: number;
+      avgBasketSize?: number;
+      avgOrderValue?: number;
+      promoFlag?: number;
+    } = {},
+  ): Record<string, number | string> {
+    const date = String(row.date || point?.date || '');
+    const dayOfWeek = point?.dayOfWeek ?? this.getIsoDayOfWeekFromDateKey(date);
+    const radians = (2 * Math.PI * dayOfWeek) / 7;
+    const isWeekend = point?.isWeekend ?? (dayOfWeek === 6 || dayOfWeek === 7);
+
+    return {
+      ...row,
+      isWeekend: isWeekend ? 1 : 0,
+      dayOfWeekSin: this.round(Math.sin(radians)),
+      dayOfWeekCos: this.round(Math.cos(radians)),
+      promoFlag: point?.promoFlag ?? fallbacks.promoFlag ?? 0,
+      outlierFlag: point?.isOutlier ? 1 : 0,
+      isMissingDate: point?.isMissingDate ? 1 : 0,
+      avgBasketSize: this.round(
+        point?.avgBasketSize ?? fallbacks.avgBasketSize ?? 0,
+      ),
+      avgOrderValue: this.round(point?.avgOrderValue ?? fallbacks.avgOrderValue ?? 0),
+      average_unit_price: this.round(
+        fallbacks.averageUnitPrice ?? point?.averageUnitPrice ?? 0,
+      ),
+    };
+  }
+
+  private buildFutureTransactionFeatureDefaults(
+    historical: NormalizedDailyValue[],
+  ): {
+    avgBasketSize: number;
+    avgOrderValue: number;
+    promoFlag: number;
+  } {
+    const recentObserved = historical
+      .filter((point) => !point.isMissingDate)
+      .slice(-14);
+    return {
+      avgBasketSize: this.round(
+        this.average(recentObserved.map((point) => Number(point.avgBasketSize) || 0)),
+      ),
+      avgOrderValue: this.round(
+        this.average(recentObserved.map((point) => Number(point.avgOrderValue) || 0)),
+      ),
+      promoFlag: 0,
+    };
+  }
+
+  private getIsoDayOfWeekFromDateKey(date: string): number {
+    const value = new Date(`${date}T00:00:00.000Z`);
+    const day = value.getUTCDay();
+    return day === 0 ? 7 : day || 1;
+  }
+
   private buildFutureDates(lastDate: string, days: number): string[] {
     const baseDate = new Date(`${lastDate}T00:00:00.000Z`);
     return Array.from({ length: days }, (_, index) => {
@@ -1447,17 +1676,64 @@ export class AnalyticsService {
     normalized: number;
     orders: number;
     revenue: number;
+    rawActual: number;
+    cappedActual: number;
+    isMissingDate: boolean;
+    isTrueZeroDay: boolean;
+    isOutlier: boolean;
+    outlierCap: number | null;
+    dayOfWeek: number;
+    dayName: string;
+    isWeekend: boolean;
+    promoFlag: number;
+    avgBasketSize: number;
+    avgOrderValue: number;
+    averageUnitPrice: number;
     fitted?: number;
   }> {
     const lastIndex = historical.length - 1;
-    return historical.map(({ date, actual, normalized, orders }, index) => ({
-      date,
-      actual,
-      normalized,
-      orders,
-      revenue: revenueByDate.get(date) || 0,
-      fitted: index === lastIndex ? actual : undefined,
-    }));
+    return historical.map((point, index) => {
+      const {
+        date,
+        actual,
+        normalized,
+        orders,
+        rawActual,
+        cappedActual,
+        isMissingDate,
+        isTrueZeroDay,
+        isOutlier,
+        outlierCap,
+        dayOfWeek,
+        dayName,
+        isWeekend,
+        promoFlag,
+        avgBasketSize,
+        avgOrderValue,
+        averageUnitPrice,
+      } = point;
+      return {
+        date,
+        actual,
+        normalized,
+        orders,
+        revenue: revenueByDate.get(date) || 0,
+        rawActual,
+        cappedActual,
+        isMissingDate,
+        isTrueZeroDay,
+        isOutlier,
+        outlierCap,
+        dayOfWeek,
+        dayName,
+        isWeekend,
+        promoFlag,
+        avgBasketSize: avgBasketSize || 0,
+        avgOrderValue: avgOrderValue || 0,
+        averageUnitPrice: averageUnitPrice || 0,
+        fitted: index === lastIndex ? actual : undefined,
+      };
+    });
   }
 
   private async getItemHistory(module: ForecastModule): Promise<any[]> {
@@ -1465,7 +1741,6 @@ export class AnalyticsService {
       {
         $match: {
           sector: module,
-          channel: 'POS',
         },
       },
       {
@@ -1605,7 +1880,6 @@ export class AnalyticsService {
       {
         $match: {
           sector: module,
-          channel: 'POS',
           date: { $gte: new Date('2026-01-01T00:00:00.000Z') },
           unitPrice: { $gt: 0 },
           quantity: { $gt: 0 },
@@ -1657,7 +1931,7 @@ export class AnalyticsService {
     const rows = await this.transactionModel.aggregate([
       {
         $match: {
-          ...(module ? { sector: module, channel: 'POS' } : {}),
+          ...(module ? { sector: module } : {}),
           date: { $gte: minDate },
           unitPrice: { $gt: 0 },
           quantity: { $gt: 0 },
@@ -1997,13 +2271,11 @@ export class AnalyticsService {
           ? this.formatHourLabel(Number(id.hour) || 0)
           : String(id.date || '');
       if (!points.has(label)) {
-        points.set(label, { hour: label, cafe: 0, services: 0, retail: 0, online: 0 });
+        points.set(label, { hour: label, cafe: 0, services: 0, retail: 0 });
       }
       const point = points.get(label);
       const revenue = this.round(Number(row.revenue) || 0);
-      if (id.channel && id.channel !== 'POS') {
-        point.online += revenue;
-      } else if (id.sector === 'Cafe') {
+      if (id.sector === 'Cafe') {
         point.cafe += revenue;
       } else if (id.sector === 'Services') {
         point.services += revenue;
@@ -2017,7 +2289,6 @@ export class AnalyticsService {
       cafe: this.round(point.cafe),
       services: this.round(point.services),
       retail: this.round(point.retail),
-      online: this.round(point.online),
     }));
   }
 
@@ -2046,8 +2317,9 @@ export class AnalyticsService {
       POS: 'Offline Channel (POS)',
       Shopee: 'Online Channel (Shopee)',
       'TikTok Shop': 'Online Channel (TikTok Shop)',
+      PetHub: 'Digital Channel (PetHub)',
     };
-    const order = ['POS', 'Shopee', 'TikTok Shop'];
+    const order = ['POS', 'Shopee', 'TikTok Shop', 'PetHub'];
     const byChannel = new Map(rows.map((row) => [row._id, row]));
 
     return order

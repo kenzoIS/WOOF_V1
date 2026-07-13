@@ -9,7 +9,7 @@ export class CsvUpload {
   filename: string;
 
   @Prop({ required: true })
-  channel: string; // "POS" | "Shopee" | "TikTok Shop"
+  channel: string; // "POS" | "Shopee" | "TikTok Shop" | "PetHub"
 
   @Prop({ default: 'general' })
   purpose: string;

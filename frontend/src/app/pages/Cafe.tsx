@@ -721,7 +721,7 @@ export function Cafe() {
               Cafe Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Active model: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded POS history"}</span>
+              Active model: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
               {forecastRun && <span className="hidden sm:inline"> (MASE: {forecastRun.mase.toFixed(2)}, Accuracy: {forecastRun.accuracy.toFixed(1)}%)</span>}
             </p>
             {forecastRun?.isFallback && (
@@ -909,8 +909,8 @@ export function Cafe() {
             <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
             <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
               {forecastRun
-                ? `${forecastRun.modelName} was evaluated on held-out POS history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
-                : "Upload Cafe POS history to generate a validated forecast."}
+                ? `${forecastRun.modelName} was evaluated on held-out uploaded Cafe history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
+                : "Upload Cafe history from POS or PetHub to generate a validated forecast."}
             </p>
             <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" size="sm">
               Retrain Model
@@ -992,8 +992,8 @@ export function Cafe() {
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
             {forecastRun?.topItems?.[0]
-              ? `${forecastRun.topItems[0].name} leads Cafe POS revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} across ${forecastRun.topItems[0].quantity} units.`
-              : "Upload Cafe POS history to populate item-level insights."}
+              ? `${forecastRun.topItems[0].name} leads Cafe revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} across ${forecastRun.topItems[0].quantity} units.`
+              : "Upload Cafe history from POS or PetHub to populate item-level insights."}
           </p>
         </div>
         <img

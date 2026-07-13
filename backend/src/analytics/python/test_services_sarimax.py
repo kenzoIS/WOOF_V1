@@ -70,7 +70,7 @@ def main():
                 "exogenousForecast": exogenous_forecast,
             }
         )
-        assert_forecast(sarimax, "SARIMAX", 6)
+        assert_forecast(sarimax, "SARIMAX", 12)
 
         sarima = run({"data": data, "forecastDays": 30, "exogenous": []})
         assert_forecast(sarima, "SARIMA", 0)

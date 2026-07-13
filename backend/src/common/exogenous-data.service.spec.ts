@@ -8,6 +8,7 @@ describe('ExogenousDataService', () => {
     updateOne: jest.fn(),
   };
   const holidayCacheModel = {
+    find: jest.fn(),
     findOne: jest.fn(),
     countDocuments: jest.fn(),
     updateOne: jest.fn(),
@@ -21,6 +22,9 @@ describe('ExogenousDataService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     weatherCacheModel.updateOne.mockResolvedValue({});
+    holidayCacheModel.find.mockReturnValue({
+      lean: jest.fn().mockResolvedValue([]),
+    });
     holidayCacheModel.updateOne.mockResolvedValue({});
     configService.get.mockReturnValue(undefined);
     service = new ExogenousDataService(
@@ -102,10 +106,6 @@ describe('ExogenousDataService', () => {
   });
 
   it('falls back to hardcoded Philippine holidays when no API key is configured', async () => {
-    holidayCacheModel.findOne.mockReturnValue({
-      lean: jest.fn().mockResolvedValue(null),
-    });
-
     const holidays = await service.fetchHolidayHistory(2026);
 
     expect(holidays.length).toBeGreaterThanOrEqual(8);
@@ -119,7 +119,7 @@ describe('ExogenousDataService', () => {
       ]),
     );
     expect(holidayCacheModel.updateOne).toHaveBeenCalledWith(
-      { year: 2026, country: 'PH' },
+      { date: '2026-12-25', location: 'PH' },
       expect.any(Object),
       { upsert: true },
     );

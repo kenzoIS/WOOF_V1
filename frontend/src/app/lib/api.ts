@@ -115,6 +115,21 @@ export interface DataRange {
   }>;
 }
 
+export interface ChannelStatus {
+  serverNow: string;
+  connectionMode: string;
+  channels: Array<{
+    channel: string;
+    label: string;
+    connected: boolean;
+    status: 'active' | 'pending';
+    rowCount: number;
+    uploadCount: number;
+    latestTransactionAt: string | null;
+    latestUploadAt: string | null;
+  }>;
+}
+
 export interface CrossSellQuery {
   minSupport?: string;
   minConfidence?: string;
@@ -222,6 +237,10 @@ export async function getForecast(
 
 export async function getDataRange(): Promise<DataRange> {
   return fetchApi('/analytics/data-range');
+}
+
+export async function getChannelStatus(): Promise<ChannelStatus> {
+  return fetchApi('/analytics/channel-status');
 }
 
 export async function getCrossSell(params?: CrossSellQuery) {

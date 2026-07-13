@@ -13,6 +13,7 @@ import { DataValidationService } from './data-validation.service';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import {
+  buildDailyValuesFromTransactionLines,
   ForecastModule,
   normalizeDailySeries,
 } from '../common/time-series';
@@ -24,10 +25,16 @@ const SECTOR_MAP: Record<string, string> = {
   'Pasta/Snacks': 'Cafe',
   'Rice Meals': 'Cafe',
   'Pet Bakery': 'Cafe',
+  'Pet Menu': 'Cafe',
+  'Cafe': 'Cafe',
   'Grooming': 'Services',
   'Events': 'Services',
   'Pet Hotel': 'Services',
+  'Boarding': 'Services',
+  'Services': 'Services',
   'Pet Supplies': 'Retail',
+  'Pet Shop': 'Retail',
+  'Retail': 'Retail',
 };
 
 function mapCategoryToSector(category: string): string {
@@ -44,7 +51,21 @@ function detectChannel(filename: string): string {
   if (lower.includes('pos')) return 'POS';
   if (lower.includes('shopee')) return 'Shopee';
   if (lower.includes('tiktok') || lower.includes('tiktokshop')) return 'TikTok Shop';
+  if (lower.includes('pethub') || lower.includes('pet-hub')) return 'PetHub';
   return 'POS';
+}
+
+function normalizeUploadChannel(channel: string): string {
+  const lower = channel.trim().toLowerCase();
+  if (lower === 'pos') return 'POS';
+  if (lower === 'shopee') return 'Shopee';
+  if (lower === 'tiktok' || lower === 'tiktok shop' || lower === 'tiktokshop') {
+    return 'TikTok Shop';
+  }
+  if (lower === 'pethub' || lower === 'pet hub' || lower === 'pet-hub') {
+    return 'PetHub';
+  }
+  return channel.trim() || 'POS';
 }
 
 @Injectable()
@@ -59,13 +80,22 @@ export class CsvService {
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<CsvUploadDocument> {
-    const channel = userChannel || detectChannel(file.originalname);
+    const channel = normalizeUploadChannel(
+      userChannel || detectChannel(file.originalname),
+    );
     const isExcel = file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls');
 
     let transactions: Partial<Transaction>[];
 
     if (channel === 'POS') {
-      transactions = this.parseFlexibleCsv(file.buffer, file.originalname, channel);
+      transactions = this.parseFlexibleUpload(
+        file.buffer,
+        file.originalname,
+        channel,
+        isExcel,
+      );
+    } else if (channel === 'PetHub') {
+      transactions = this.parsePetHub(file.buffer, file.originalname, isExcel);
     } else if (channel === 'Shopee') {
       if (isExcel) {
         transactions = this.parseShopeeExcel(file.buffer);
@@ -84,11 +114,12 @@ export class CsvService {
       }
     }
 
-    if (transactions.length === 0 && !isExcel) {
-      transactions = this.parseFlexibleCsv(
+    if (transactions.length === 0 && channel !== 'PetHub') {
+      transactions = this.parseFlexibleUpload(
         file.buffer,
         file.originalname,
         channel,
+        isExcel,
       );
     }
 
@@ -255,28 +286,8 @@ export class CsvService {
       );
     }
 
-    const dailyMap = new Map<
-      string,
-      { actual: number; transactionIds: Set<string> }
-    >();
-    for (const transaction of parsed.transactions) {
-      const date = transaction.date!.toISOString().slice(0, 10);
-      const current = dailyMap.get(date) || {
-        actual: 0,
-        transactionIds: new Set<string>(),
-      };
-      current.actual += transaction.quantity || 0;
-      if (transaction.transactionId) {
-        current.transactionIds.add(transaction.transactionId);
-      }
-      dailyMap.set(date, current);
-    }
     const normalizedSeries = normalizeDailySeries(
-      [...dailyMap.entries()].map(([date, value]) => ({
-        date,
-        actual: value.actual,
-        orders: value.transactionIds.size,
-      })),
+      buildDailyValuesFromTransactionLines(parsed.transactions, module),
       module,
     );
 
@@ -305,6 +316,26 @@ export class CsvService {
     channel: string,
   ): Partial<Transaction>[] {
     const records = this.parseCsvRecords(buffer);
+    return this.mapFlexibleRecords(records, filename, channel);
+  }
+
+  private parseFlexibleUpload(
+    buffer: Buffer,
+    filename: string,
+    channel: string,
+    isExcel: boolean,
+  ): Partial<Transaction>[] {
+    const records = isExcel
+      ? this.parseExcelRecords(buffer)
+      : this.parseCsvRecords(buffer);
+    return this.mapFlexibleRecords(records, filename, channel);
+  }
+
+  private mapFlexibleRecords(
+    records: Record<string, unknown>[],
+    filename: string,
+    channel: string,
+  ): Partial<Transaction>[] {
     const fallbackDate = new Date();
 
     return records.map((row, index) =>
@@ -314,6 +345,54 @@ export class CsvService {
         fallbackId: `${filename}-${index + 1}`,
       }),
     );
+  }
+
+  private parsePetHub(
+    buffer: Buffer,
+    filename: string,
+    isExcel: boolean,
+  ): Partial<Transaction>[] {
+    const records = isExcel
+      ? this.parseExcelRecords(buffer)
+      : this.parseCsvRecords(buffer);
+    const fallbackDate = new Date();
+
+    return records
+      .filter((row) => this.isAcceptedPetHubRow(row))
+      .map((row, index) =>
+        this.mapFlexibleRow(row, {
+          channel: 'PetHub',
+          fallbackDate,
+          fallbackId: `${filename}-${index + 1}`,
+        }),
+      );
+  }
+
+  private isAcceptedPetHubRow(row: Record<string, unknown>): boolean {
+    const orderStatus = this.getValue(row, [
+      'order status',
+      'order_status',
+      'booking status',
+      'booking_status',
+      'status',
+    ]).toLowerCase();
+    const paymentStatus = this.getValue(row, [
+      'payment status',
+      'payment_status',
+      'paid status',
+      'paid_status',
+    ]).toLowerCase();
+
+    if (/cancel|refund|void|failed|rejected|unpaid/.test(orderStatus)) {
+      return false;
+    }
+    if (
+      paymentStatus &&
+      !/paid|settled|completed|complete|cod|cash/.test(paymentStatus)
+    ) {
+      return false;
+    }
+    return true;
   }
 
   private parseHistoricalPOS(
@@ -413,9 +492,9 @@ export class CsvService {
     );
   }
 
-  private toNumber(value: string | undefined, fallback: number): number {
+  private toNumber(value: unknown, fallback: number): number {
     const parsedValue = Number.parseFloat(
-      (value || '').replace(/[^0-9.-]/g, ''),
+      String(value ?? '').replace(/[^0-9.-]/g, ''),
     );
     return Number.isFinite(parsedValue) ? parsedValue : fallback;
   }
@@ -462,8 +541,24 @@ export class CsvService {
     }
   }
 
+  private parseExcelRecords(buffer: Buffer): Record<string, unknown>[] {
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      throw new BadRequestException('The uploaded Excel file has no sheets');
+    }
+    const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+      workbook.Sheets[sheetName],
+      { defval: '' },
+    );
+    if (records.length === 0) {
+      throw new BadRequestException('The uploaded Excel file is empty');
+    }
+    return records;
+  }
+
   private mapFlexibleRow(
-    row: Record<string, string>,
+    row: Record<string, unknown>,
     options: {
       channel: string;
       fallbackDate: Date;
@@ -476,6 +571,11 @@ export class CsvService {
         'item names',
         'item name',
         'product name',
+        'product or service name',
+        'product_or_service_name',
+        'service name',
+        'menu item',
+        'item description',
         'product',
         'service',
         'name',
@@ -486,12 +586,27 @@ export class CsvService {
         'category',
         'product category',
         'item category',
+        'service category',
+        'department',
+        'revenue category',
         'type',
       ]) || options.forcedModule || 'Uncategorized';
-    const explicitSector = this.getValue(row, ['sector', 'module']);
+    const explicitSector = this.getValue(row, [
+      'sector',
+      'module',
+      'business sector',
+      'revenue stream',
+      'stream',
+    ]);
+    const sourceType = this.getValue(row, [
+      'source type',
+      'source_type',
+      'record type',
+      'transaction type',
+    ]);
     const sector =
       options.forcedModule ||
-      this.inferFlexibleSector(category, explicitSector, productName);
+      this.inferFlexibleSector(category, explicitSector, productName, sourceType);
     const quantity = Math.max(
       0,
       this.toNumber(
@@ -499,6 +614,9 @@ export class CsvService {
           'items sold',
           'quantity',
           'qty',
+          'qty ordered',
+          'order quantity',
+          'booked quantity',
           'units',
           'count',
         ]),
@@ -508,8 +626,11 @@ export class CsvService {
     const unitPrice = this.toNumber(
       this.getValue(row, [
         'unit price',
+        'unit_price',
         'price',
         'rate',
+        'booking price',
+        'service price',
         'deal price',
         'original price',
       ]),
@@ -520,6 +641,9 @@ export class CsvService {
         'gross sales',
         'gross amount',
         'total amount',
+        'total_amount',
+        'line total',
+        'booking amount',
         'amount',
         'sales',
         'revenue',
@@ -528,13 +652,22 @@ export class CsvService {
       unitPrice * quantity,
     );
     const discount = this.toNumber(
-      this.getValue(row, ['discounts', 'discount', 'total discount']),
+      this.getValue(row, [
+        'discounts',
+        'discount',
+        'discount amount',
+        'discount_amount',
+        'total discount',
+      ]),
       0,
     );
     const netSales = this.toNumber(
       this.getValue(row, [
         'net sales',
+        'net_sales',
         'net amount',
+        'amount paid',
+        'paid amount',
         'subtotal after discount',
       ]),
       grossSales - discount,
@@ -545,23 +678,43 @@ export class CsvService {
         this.parseDate(
           this.getValue(row, [
             'transaction date',
+            'transaction_date',
             'date',
             'order date',
+            'booking date',
+            'appointment date',
+            'service date',
             'created at',
             'created time',
+            'completed at',
+            'paid time',
             'timestamp',
           ]),
         ) || options.fallbackDate,
       transactionId:
         this.getValue(row, [
           'transaction id',
+          'transaction_id',
+          'source id',
+          'source_id',
           'order id',
+          'booking id',
           'invoice id',
           'receipt id',
+          'reference id',
+          'reference no',
           'id',
         ]) || options.fallbackId,
       productName,
-      sku: this.getValue(row, ['sku', 'sku id', 'product id', 'item code']),
+      sku: this.getValue(row, [
+        'sku',
+        'sku id',
+        'sku_id',
+        'product id',
+        'product_id',
+        'item code',
+        'service code',
+      ]),
       category,
       sector,
       quantity,
@@ -571,6 +724,7 @@ export class CsvService {
       netSales,
       paymentType: this.getValue(row, [
         'payment type',
+        'payment_type',
         'payment method',
         'payment',
       ]),
@@ -581,11 +735,15 @@ export class CsvService {
     category: string,
     explicitSector: string,
     productName: string,
+    sourceType = '',
   ): string {
     const sector = explicitSector.trim().toLowerCase();
     if (sector.includes('cafe') || sector.includes('coffee')) return 'Cafe';
     if (sector.includes('service') || sector.includes('groom')) return 'Services';
     if (sector.includes('retail')) return 'Retail';
+
+    const source = sourceType.trim().toLowerCase();
+    if (/booking|appointment|reservation/.test(source)) return 'Services';
 
     const mapped = mapCategoryToSector(category);
     return mapped !== 'Retail' || category.toLowerCase().includes('retail')
@@ -594,18 +752,22 @@ export class CsvService {
   }
 
   private getValue(
-    row: Record<string, string>,
+    row: Record<string, unknown>,
     aliases: string[],
   ): string {
-    const normalizedAliases = aliases.map((alias) => this.normalizeHeader(alias));
+    const valuesByHeader = new Map<string, string>();
     for (const [key, value] of Object.entries(row)) {
-      if (
-        normalizedAliases.includes(this.normalizeHeader(key)) &&
-        value !== undefined &&
-        value !== null
-      ) {
-        return String(value).trim();
+      if (value !== undefined && value !== null) {
+        const normalizedKey = this.normalizeHeader(key);
+        if (!valuesByHeader.has(normalizedKey)) {
+          valuesByHeader.set(normalizedKey, this.cleanCell(value));
+        }
       }
+    }
+
+    for (const alias of aliases) {
+      const value = valuesByHeader.get(this.normalizeHeader(alias));
+      if (value) return value;
     }
     return '';
   }
@@ -614,18 +776,22 @@ export class CsvService {
     return header.toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
-  private firstMeaningfulValue(row: Record<string, string>): string {
-    return (
-      Object.values(row).find(
-        (value) => typeof value === 'string' && value.trim().length > 0,
-      )?.trim() || ''
-    );
+  private firstMeaningfulValue(row: Record<string, unknown>): string {
+    for (const value of Object.values(row)) {
+      const text = this.cleanCell(value);
+      if (text.length > 0) return text;
+    }
+    return '';
   }
 
   private parseDate(value: string): Date | null {
     if (!value) return null;
-    const parsedDate = new Date(value);
+    const parsedDate = new Date(value.replace(/\t/g, '').trim());
     return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+  }
+
+  private cleanCell(value: unknown): string {
+    return String(value ?? '').replace(/\t/g, '').trim();
   }
 
   private parseTikTok(buffer: Buffer): Partial<Transaction>[] {
@@ -648,17 +814,30 @@ export class CsvService {
         return status === 'completed' || status === 'delivered' || status === 'to ship' || status === 'shipped';
       })
       .map((row: any) => {
-        const productCategory = row['Product Category'] || '';
-        const productName = row['Product Name'] || '';
+        const productCategory = this.cleanCell(row['Product Category']);
+        const productName = this.cleanCell(row['Product Name']);
+        const variation = this.cleanCell(row['Variation']);
+        const displayName =
+          variation && variation.toLowerCase() !== 'default'
+            ? `${productName} (${variation})`
+            : productName;
         const sector = this.inferSectorFromProduct(productName, productCategory);
-        const quantity = parseInt(row['Quantity'] || '1', 10);
-        const unitPrice = parseFloat(row['SKU Unit Original Price'] || '0');
-        const subtotalAfterDiscount = parseFloat(row['SKU Subtotal After Discount'] || '0');
-        const platformDiscount = parseFloat(row['SKU Platform Discount'] || '0');
-        const sellerDiscount = parseFloat(row['SKU Seller Discount'] || '0');
+        const quantity = this.toNumber(row['Quantity'], 1);
+        const unitPrice = this.toNumber(row['SKU Unit Original Price'], 0);
+        const subtotalBeforeDiscount = this.toNumber(
+          row['SKU Subtotal Before Discount'],
+          unitPrice * quantity,
+        );
+        const subtotalAfterDiscount = this.toNumber(
+          row['SKU Subtotal After Discount'],
+          subtotalBeforeDiscount,
+        );
+        const platformDiscount = this.toNumber(row['SKU Platform Discount'], 0);
+        const sellerDiscount = this.toNumber(row['SKU Seller Discount'], 0);
+        const paymentDiscount = this.toNumber(row['Payment platform discount'], 0);
 
         // Parse date - TikTok uses "MM/DD/YYYY HH:mm:ss AM/PM" format
-        let dateStr = (row['Created Time'] || '').trim().replace(/\t/g, '');
+        let dateStr = this.cleanCell(row['Created Time']);
         let date: Date;
         try {
           date = new Date(dateStr);
@@ -669,17 +848,17 @@ export class CsvService {
 
         return {
           date,
-          transactionId: (row['Order ID'] || '').trim().replace(/\t/g, ''),
-          productName,
-          sku: (row['SKU ID'] || '').trim().replace(/\t/g, ''),
+          transactionId: this.cleanCell(row['Order ID']),
+          productName: displayName,
+          sku: this.cleanCell(row['Seller SKU']) || this.cleanCell(row['SKU ID']),
           category: productCategory,
           sector,
           quantity,
           unitPrice,
-          totalAmount: unitPrice * quantity,
-          discount: platformDiscount + sellerDiscount,
+          totalAmount: subtotalBeforeDiscount,
+          discount: platformDiscount + sellerDiscount + paymentDiscount,
           netSales: subtotalAfterDiscount,
-          paymentType: '',
+          paymentType: this.cleanCell(row['Payment Method']),
         };
       });
   }
@@ -696,15 +875,25 @@ export class CsvService {
         return status === 'completed';
       })
       .map((row: any) => {
-        const productName = row['Product Name'] || '';
+        const productName = this.cleanCell(row['Product Name']);
+        const variation = this.cleanCell(row['Variation Name']);
+        const displayName = variation ? `${productName} (${variation})` : productName;
         const sector = this.inferSectorFromProduct(productName, '');
-        const quantity = parseInt(row['Quantity'] || '1', 10);
-        const dealPrice = parseFloat(row['Deal Price'] || row['Original Price'] || '0');
-        const totalDiscount = parseFloat(row['Total Discount(PHP)'] || '0');
+        const quantity = this.toNumber(row['Quantity'], 1);
+        const dealPrice = this.toNumber(
+          row['Deal Price'],
+          this.toNumber(row['Original Price'], 0),
+        );
+        const lineGross = dealPrice * quantity;
+        const lineNetSales = this.toNumber(
+          row['Total Buyer Payment'],
+          lineGross - this.toNumber(row['Total Discount(PHP)'], 0),
+        );
+        const totalDiscount = Math.max(0, lineGross - lineNetSales);
 
         let date: Date;
         try {
-          const dateStr = row['Order Creation Date'] || row['Order Paid Time'] || '';
+          const dateStr = this.cleanCell(row['Order Creation Date']) || this.cleanCell(row['Order Paid Time']);
           date = new Date(dateStr);
           if (isNaN(date.getTime())) date = new Date();
         } catch {
@@ -713,17 +902,17 @@ export class CsvService {
 
         return {
           date,
-          transactionId: row['Order ID'] || '',
-          productName,
-          sku: row['SKU Reference No.'] || row['Parent SKU Reference No.'] || '',
+          transactionId: this.cleanCell(row['Order ID']),
+          productName: displayName,
+          sku: this.cleanCell(row['SKU Reference No.']) || this.cleanCell(row['Parent SKU Reference No.']),
           category: this.inferCategoryFromProduct(productName),
           sector,
           quantity,
           unitPrice: dealPrice,
-          totalAmount: dealPrice * quantity,
+          totalAmount: lineGross,
           discount: totalDiscount,
-          netSales: dealPrice * quantity - totalDiscount,
-          paymentType: '',
+          netSales: lineNetSales,
+          paymentType: this.cleanCell(row['Payment Method']),
         };
       });
   }

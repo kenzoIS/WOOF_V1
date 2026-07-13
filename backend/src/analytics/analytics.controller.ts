@@ -20,6 +20,11 @@ export class AnalyticsController {
     return this.analyticsService.getDataRange();
   }
 
+  @Get('channel-status')
+  async getChannelStatus() {
+    return this.analyticsService.getChannelStatus();
+  }
+
   @Get('forecast/:sector')
   async getForecast(
     @Param('sector') sector: string,

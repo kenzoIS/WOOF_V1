@@ -457,7 +457,7 @@ export function Services() {
       .slice(0, 3)
       .map((point) => ({
         time: point.date,
-        service: "Projected Services POS demand",
+        service: "Projected Services demand",
         capacity: Math.round((point.forecast / max) * 100),
         risk: point.forecast >= average * 1.2 ? "High" : "Medium",
         projectedRevenue: point.forecast,
@@ -642,7 +642,7 @@ export function Services() {
               Services Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Active model: <span className="font-semibold text-[#3AE4FA]">{forecastRun?.modelName || "Waiting for uploaded POS history"}</span>
+              Active model: <span className="font-semibold text-[#3AE4FA]">{forecastRun?.modelName || "Waiting for uploaded Services history"}</span>
               {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, Accuracy: ${forecastRun.accuracy.toFixed(1)}%)`}
             </p>
             {forecastRun?.isFallback && (
@@ -820,8 +820,8 @@ export function Services() {
             <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
             <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
               {forecastRun
-                ? `${forecastRun.modelName} was selected using held-out POS history and generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
-                : "Upload Services POS history to generate a validated forecast."}
+                ? `${forecastRun.modelName} was selected using held-out uploaded Services history and generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
+                : "Upload Services history from POS or PetHub to generate a validated forecast."}
             </p>
             <Button onClick={handleRetrainModel} className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs md:text-sm" size="sm">
               Retrain Model
@@ -905,8 +905,8 @@ export function Services() {
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
             {forecastRun?.topItems?.[0]
-              ? `${forecastRun.topItems[0].name} leads Services POS revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} from ${forecastRun.topItems[0].orderCount} bookings.`
-              : "Upload Services POS history to populate service-level insights."}
+              ? `${forecastRun.topItems[0].name} leads Services revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} from ${forecastRun.topItems[0].orderCount} bookings.`
+              : "Upload Services history from POS or PetHub to populate service-level insights."}
           </p>
         </div>
         <img
@@ -1051,7 +1051,7 @@ export function Services() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
             <div>
               <h3 className="text-base md:text-lg font-bold text-[#223047]">Recent Daily Bookings</h3>
-              <p className="text-xs text-[#223047] opacity-60 mt-1">Calculated from uploaded POS transactions</p>
+              <p className="text-xs text-[#223047] opacity-60 mt-1">Calculated from uploaded Services transactions</p>
             </div>
 
             <ResponsiveContainer width="100%" height={180} className="md:!h-[200px]">

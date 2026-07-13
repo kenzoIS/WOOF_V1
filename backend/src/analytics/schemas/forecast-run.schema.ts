@@ -20,6 +20,45 @@ export class HistoricalPoint {
   @Prop({ default: 0 })
   revenue: number;
 
+  @Prop({ default: 0 })
+  rawActual?: number;
+
+  @Prop({ default: 0 })
+  cappedActual?: number;
+
+  @Prop({ default: false })
+  isMissingDate?: boolean;
+
+  @Prop({ default: false })
+  isTrueZeroDay?: boolean;
+
+  @Prop({ default: false })
+  isOutlier?: boolean;
+
+  @Prop({ type: Number, default: null })
+  outlierCap?: number | null;
+
+  @Prop({ default: 1 })
+  dayOfWeek?: number;
+
+  @Prop()
+  dayName?: string;
+
+  @Prop({ default: false })
+  isWeekend?: boolean;
+
+  @Prop({ default: 0 })
+  promoFlag?: number;
+
+  @Prop({ default: 0 })
+  avgBasketSize?: number;
+
+  @Prop({ default: 0 })
+  avgOrderValue?: number;
+
+  @Prop({ default: 0 })
+  averageUnitPrice?: number;
+
   @Prop({ required: false })
   fitted?: number;
 }
