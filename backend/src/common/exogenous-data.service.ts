@@ -15,6 +15,7 @@ export interface WeatherRecord {
   date: string;
   tempCelsius: number;
   rainfallMm: number;
+  relativeHumidity: number;
   isSynthetic: boolean;
 }
 
@@ -28,6 +29,7 @@ export interface ExogenousRow {
   date: string;
   tempCelsius: number;
   rainFlag: number;
+  humidity: number;
   isHoliday: number;
   dayBeforeHoliday: number;
   dayAfterHoliday: number;
@@ -125,6 +127,7 @@ export class ExogenousDataService {
           date,
           tempCelsius: DEFAULT_TEMP_CELSIUS,
           rainfallMm: 0,
+          relativeHumidity: 60,
           isSynthetic: true,
         };
       }
@@ -142,6 +145,7 @@ export class ExogenousDataService {
           date,
           tempCelsius: DEFAULT_TEMP_CELSIUS,
           rainfallMm: 0,
+          relativeHumidity: 60,
           isSynthetic: true,
         },
     );
@@ -213,6 +217,7 @@ export class ExogenousDataService {
         date,
         tempCelsius: round(weather?.tempCelsius ?? DEFAULT_TEMP_CELSIUS),
         rainFlag: (weather?.rainfallMm ?? 0) > 0.5 ? 1 : 0,
+        humidity: round(weather?.relativeHumidity ?? 60),
         isHoliday: holidayDates.has(date) ? 1 : 0,
         dayBeforeHoliday: holidayDates.has(addDays(date, 1)) ? 1 : 0,
         dayAfterHoliday: holidayDates.has(addDays(date, -1)) ? 1 : 0,
@@ -250,7 +255,7 @@ export class ExogenousDataService {
   ): Promise<WeatherRecord | null> {
     try {
       // Use Archive API for historical data. It supports fetching exactly 1 day.
-      const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum&timezone=Asia%2FManila`;
+      const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean&timezone=Asia%2FManila`;
       
       const response = await fetch(url, {
         headers: { 'User-Agent': 'WOOF-App/1.0' },
@@ -267,7 +272,7 @@ export class ExogenousDataService {
       if (!body || !body.daily || !body.daily.time || body.daily.time.length === 0) {
           this.logger.log(`Falling back to forecast API for ${date}`);
           // If Archive API returns nothing (e.g. for today or future dates) or an error, fallback to Forecast API
-          const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum&timezone=Asia%2FManila`;
+          const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean&timezone=Asia%2FManila`;
           const forecastResponse = await fetch(forecastUrl, { headers: { 'User-Agent': 'WOOF-App/1.0' } });
           
           if (!forecastResponse.ok) {
@@ -284,6 +289,7 @@ export class ExogenousDataService {
             date,
             tempCelsius: round(Number(forecastBody.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS)),
             rainfallMm: round(Number(forecastBody.daily.precipitation_sum[0] ?? 0)),
+            relativeHumidity: round(Number(forecastBody.daily.relative_humidity_2m_mean[0] ?? 60)),
             isSynthetic: false,
           };
       }
@@ -292,6 +298,7 @@ export class ExogenousDataService {
         date,
         tempCelsius: round(Number(body.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS)),
         rainfallMm: round(Number(body.daily.precipitation_sum[0] ?? 0)),
+        relativeHumidity: round(Number(body.daily.relative_humidity_2m_mean[0] ?? 60)),
         isSynthetic: false,
       };
     } catch (error) {
@@ -309,6 +316,7 @@ export class ExogenousDataService {
       date: row.date,
       tempCelsius: Number(row.tempCelsius),
       rainfallMm: Number(row.rainfallMm),
+      relativeHumidity: Number(row.relativeHumidity ?? 60),
       isSynthetic: Boolean(row.isSynthetic),
     };
   }

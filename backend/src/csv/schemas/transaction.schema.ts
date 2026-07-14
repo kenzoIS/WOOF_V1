@@ -41,6 +41,21 @@ export class Transaction {
   @Prop({ default: 0 })
   netSales: number;
 
+  @Prop({ default: 0 })
+  costOfGoods: number;
+
+  @Prop({ default: 0 })
+  grossProfit: number;
+
+  @Prop({ default: 0 })
+  margin: number;
+
+  @Prop({ default: 0 })
+  refunds: number;
+
+  @Prop({ default: 0 })
+  itemsRefunded: number;
+
   @Prop({ required: true })
   channel: string; // "POS" | "Shopee" | "TikTok Shop" | "PetHub"
 

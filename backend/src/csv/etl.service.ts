@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { InjectModel } from '@nestjs/mongoose';
@@ -7,6 +8,7 @@ import { Transaction } from './schemas/transaction.schema';
 import { HolidayCache, HolidayCacheDocument } from '../context/schemas/holiday-cache.schema';
 import { WeatherLog, WeatherLogDocument } from '../context/schemas/weather-log.schema';
 import { CsvUpload, CsvUploadDocument } from './schemas/csv-upload.schema';
+import { ExogenousDataService } from '../common/exogenous-data.service';
 
 @Injectable()
 export class EtlService {
@@ -18,6 +20,7 @@ export class EtlService {
     @InjectModel(HolidayCache.name) private holidayCacheModel: Model<HolidayCacheDocument>,
     @InjectModel(WeatherLog.name) private weatherLogModel: Model<WeatherLogDocument>,
     @InjectModel(CsvUpload.name) private csvUploadModel: Model<CsvUploadDocument>,
+    private exogenousDataService: ExogenousDataService,
   ) {
     const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
     const supabaseKey = this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY');
@@ -81,7 +84,7 @@ export class EtlService {
       const servicesMap = new Map<string, any>();
       const factRows: any[] = [];
 
-      // Pre-fetch all holidays for the dates in the transaction batch to avoid 1x1 mongo queries
+      // Pre-fetch all holidays and weather for the dates in the transaction batch to avoid 1x1 mongo queries
       const uniqueDateStrings = new Set<string>();
       for (const t of transactions) {
         const orderDate = new Date(t.date);
@@ -96,8 +99,31 @@ export class EtlService {
         uniqueDateStrings.add(dateAfter.toISOString().slice(0, 10));
       }
 
-      const holidayDocs = await this.holidayCacheModel.find({ date: { $in: Array.from(uniqueDateStrings) } });
-      const holidayMap = new Map(holidayDocs.map(doc => [doc.date, doc]));
+      const dateArray = Array.from(uniqueDateStrings).sort();
+      const minDate = dateArray[0];
+      const maxDate = dateArray[dateArray.length - 1];
+
+      // Pre-fetch/cache weather logs using ExogenousDataService
+      const defaultCoords = this.exogenousDataService.getDefaultCoordinates();
+      this.logger.log(`Pre-population: Ingesting weather from ${minDate} to ${maxDate}...`);
+      const weatherRecords = await this.exogenousDataService.fetchWeatherHistory(
+        defaultCoords.lat,
+        defaultCoords.lng,
+        minDate,
+        maxDate,
+      );
+      const weatherMap = new Map(weatherRecords.map((w) => [w.date, w]));
+
+      // Pre-fetch/cache holidays using ExogenousDataService
+      this.logger.log(`Pre-population: Ingesting holidays...`);
+      const startYear = new Date(minDate).getFullYear();
+      const endYear = new Date(maxDate).getFullYear();
+      const holidayRecords: any[] = [];
+      for (let y = startYear; y <= endYear; y++) {
+        const yearHols = await this.exogenousDataService.fetchHolidayHistory(y);
+        holidayRecords.push(...yearHols);
+      }
+      const holidayMap = new Map(holidayRecords.map((h) => [h.date, h]));
 
       this.logger.log(`Aggregating dimensions in memory...`);
       for (let i = 0; i < transactions.length; i++) {
@@ -136,6 +162,8 @@ export class EtlService {
           const dayOfWeek = this.getIsoDayOfWeek(orderDate);
           const month = orderDate.getMonth() + 1;
 
+          const weather = weatherMap.get(dateString);
+
           datesMap.set(dateId, {
             date_id: dateId,
             full_date: orderDate.toISOString(),
@@ -152,11 +180,14 @@ export class EtlService {
             day_after_holiday: !!dayAfterHoliday,
             holiday_name: holiday ? holiday.name : null,
             season: this.getSeason(month),
+            avg_temperature_celsius: weather ? weather.tempCelsius : 28,
+            rainfall_mm: weather ? weather.rainfallMm : 0,
+            relative_humidity: weather ? weather.relativeHumidity : 60,
           });
         }
 
         // Product / Service
-        const syntheticId = Buffer.from((t.productName || '').trim().toLowerCase()).toString('base64').substring(0, 15);
+        const syntheticId = crypto.createHash('md5').update((t.productName || '').trim().toLowerCase()).digest('hex').substring(0, 16);
         let productId: string | null = null;
         let serviceId: string | null = null;
 
@@ -187,6 +218,10 @@ export class EtlService {
 
         // Fact Row
         const transactionLineId = `${t.transactionId}-${productId || serviceId}-${i + 1}`;
+        const grossVal = Number(t.totalAmount || 0);
+        const discountVal = Number(t.discount || 0);
+        const discountDepth = grossVal > 0 ? (discountVal / grossVal) : 0;
+
         factRows.push({
           transaction_line_id: transactionLineId,
           transaction_id: t.transactionId,
@@ -200,11 +235,17 @@ export class EtlService {
           campaign_id: null,
           segment_id: segment.segment_id,
           quantity_sold: Number(t.quantity || 0),
-          gross_sales: Number(t.totalAmount || 0),
-          discount_amount: Number(t.discount || 0),
+          gross_sales: grossVal,
+          discount_amount: discountVal,
           net_sales: Number(t.netSales || 0),
           order_status: 'completed',
           source_system: channel.channel_name,
+          cost_of_goods: Number(t.costOfGoods || 0),
+          gross_profit: Number(t.grossProfit || 0),
+          margin: Number(t.margin || 0),
+          refunds: Number(t.refunds || 0),
+          discount_depth: discountDepth,
+          payment_type: t.paymentType || 'Cash',
         });
       }
 
@@ -226,13 +267,87 @@ export class EtlService {
         }
       };
 
+      // SCD Type 2 Product Dimension Handling
+      const productsToIngest = Array.from(productsMap.values());
+      const finalProductsToInsert: any[] = [];
+      if (productsToIngest.length > 0) {
+        const productIds = productsToIngest.map(p => p.product_id);
+        const { data: existingProducts, error: fetchErr } = await this.supabase
+          .from('product_dim')
+          .select('*')
+          .in('product_id', productIds);
+          
+        if (fetchErr) {
+          this.logger.error(`Failed to fetch existing products for SCD: ${fetchErr.message}`);
+        }
+        
+        const existingProductsMap = new Map<string, any[]>();
+        if (existingProducts) {
+          for (const ep of existingProducts) {
+            const list = existingProductsMap.get(ep.product_id) || [];
+            list.push(ep);
+            existingProductsMap.set(ep.product_id, list);
+          }
+        }
+        
+        for (const p of productsToIngest) {
+          const versions = existingProductsMap.get(p.product_id);
+          if (!versions || versions.length === 0) {
+            finalProductsToInsert.push({
+              ...p,
+              valid_from: new Date().toISOString(),
+              valid_to: null,
+              is_current: true,
+            });
+          } else {
+            const currentVersion = versions.find(v => v.is_current === true || v.valid_to === null);
+            if (currentVersion) {
+              if (Number(currentVersion.selling_price) !== Number(p.selling_price)) {
+                // Price changed! Versioning.
+                // 1. Close current version
+                await this.supabase
+                  .from('product_dim')
+                  .update({ is_current: false, valid_to: new Date().toISOString() })
+                  .eq('product_id', p.product_id)
+                  .eq('valid_from', currentVersion.valid_from);
+                  
+                // 2. Insert new version
+                finalProductsToInsert.push({
+                  ...p,
+                  valid_from: new Date().toISOString(),
+                  valid_to: null,
+                  is_current: true,
+                });
+              } else {
+                finalProductsToInsert.push({
+                  ...currentVersion,
+                  sku: p.sku || currentVersion.sku,
+                  category: p.category || currentVersion.category,
+                  product_name: p.product_name || currentVersion.product_name,
+                });
+              }
+            } else {
+              finalProductsToInsert.push({
+                ...p,
+                valid_from: new Date().toISOString(),
+                valid_to: null,
+                is_current: true,
+              });
+            }
+          }
+        }
+      }
+
       await Promise.all([
         upsertTable('date_dim', Array.from(datesMap.values()), 'date_id'),
         upsertTable('channel_dim', Array.from(channelsMap.values()), 'channel_id'),
         upsertTable('business_segment_dim', Array.from(segmentsMap.values()), 'segment_id'),
-        upsertTable('product_dim', Array.from(productsMap.values()), 'product_id'),
         upsertTable('service_dim', Array.from(servicesMap.values()), 'service_id'),
       ]);
+
+      if (finalProductsToInsert.length > 0) {
+        await upsertTable('product_dim', finalProductsToInsert, 'product_id,valid_from');
+      }
 
       this.logger.log(`Upserting ${factRows.length} Fact Rows in chunks...`);
       await upsertTable('fact_cross_channel_transactions', factRows, 'transaction_line_id');

@@ -182,11 +182,45 @@ export function Services() {
   const [customForecastEnd, setCustomForecastEnd] = useState("2026-06-30");
   const [weatherScenario, setWeatherScenario] = useState("default");
   const [holidayScenario, setHolidayScenario] = useState("default");
+  const [tempOverride, setTempOverride] = useState(28);
+  const [rainChanceOverride, setRainChanceOverride] = useState(0); // 0 or 1
+  const [humidityOverride, setHumidityOverride] = useState(60);
   const [isSimulating, setIsSimulating] = useState(false);
 
   useEffect(() => {
-    getForecast("services").then(setForecastRun).catch(() => {});
-  }, []);
+    let targetDays = 30;
+    if (viewMode === "next90days") targetDays = 90;
+    else if (viewMode === "next30days") targetDays = 30;
+    else if (viewMode === "next14days") targetDays = 14;
+    else if (viewMode === "next7days") targetDays = 7;
+    else if (viewMode === "custom") {
+      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      targetDays = Math.max(1, Math.min(diffDays, 90));
+    }
+
+    const params: Record<string, string> = { days: String(targetDays) };
+    if (weatherScenario === "sunny") {
+      params.temp = "32";
+      params.rain = "0";
+      params.humidity = "40";
+    } else if (weatherScenario === "rainy") {
+      params.temp = "24";
+      params.rain = "1";
+      params.humidity = "90";
+    } else if (weatherScenario === "custom") {
+      params.temp = String(tempOverride);
+      params.rain = String(rainChanceOverride);
+      params.humidity = String(humidityOverride);
+    }
+
+    if (holidayScenario === "force") {
+      params.holiday = "1";
+    } else if (holidayScenario === "ignore") {
+      params.holiday = "0";
+    }
+
+    getForecast("services", params).then(setForecastRun).catch(() => {});
+  }, [viewMode, customForecastStart, customForecastEnd]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -221,9 +255,15 @@ export function Services() {
     if (weatherScenario === "sunny") {
       params.temp = "32";
       params.rain = "0";
+      params.humidity = "40";
     } else if (weatherScenario === "rainy") {
       params.temp = "24";
       params.rain = "1";
+      params.humidity = "90";
+    } else if (weatherScenario === "custom") {
+      params.temp = String(tempOverride);
+      params.rain = String(rainChanceOverride);
+      params.humidity = String(humidityOverride);
     }
     
     if (holidayScenario === "force") {
@@ -231,6 +271,17 @@ export function Services() {
     } else if (holidayScenario === "ignore") {
       params.holiday = "0";
     }
+
+    let targetDays = 30;
+    if (viewMode === "next90days") targetDays = 90;
+    else if (viewMode === "next30days") targetDays = 30;
+    else if (viewMode === "next14days") targetDays = 14;
+    else if (viewMode === "next7days") targetDays = 7;
+    else if (viewMode === "custom") {
+      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      targetDays = Math.max(1, Math.min(diffDays, 90));
+    }
+    params.days = String(targetDays);
 
     try {
       const res = await getForecast("services", params);
@@ -249,8 +300,22 @@ export function Services() {
     setIsSimulating(true);
     setWeatherScenario("default");
     setHolidayScenario("default");
+    setTempOverride(28);
+    setRainChanceOverride(0);
+    setHumidityOverride(60);
+
+    let targetDays = 30;
+    if (viewMode === "next90days") targetDays = 90;
+    else if (viewMode === "next30days") targetDays = 30;
+    else if (viewMode === "next14days") targetDays = 14;
+    else if (viewMode === "next7days") targetDays = 7;
+    else if (viewMode === "custom") {
+      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      targetDays = Math.max(1, Math.min(diffDays, 90));
+    }
+
     try {
-      const res = await getForecast("services");
+      const res = await getForecast("services", { days: String(targetDays) });
       setForecastRun(res);
       toast.success("Reset successful", {
         description: "Restored live forecast settings.",
@@ -271,7 +336,13 @@ export function Services() {
       INGESTED_HISTORY_END_DATE;
     const bounds = getItemHistoryBounds(forecastRun);
     const horizon =
-      viewMode === "next7days" ? 7 : viewMode === "next14days" ? 14 : 30;
+      viewMode === "next7days"
+        ? 7
+        : viewMode === "next14days"
+          ? 14
+          : viewMode === "next90days"
+            ? 90
+            : 30;
     const selectedRange =
       viewMode === "custom"
         ? {
@@ -299,20 +370,35 @@ export function Services() {
     const hist = [
       ...historicalRows,
       ...(anchorRow ? [anchorRow] : []),
-    ].map((d, index, rows) => ({
-      day: d.date,
-      actual: getHistoricalRevenue(d),
-      forecast:
-        (viewMode !== "custom" || d.date === latestHistoryDate) &&
-        index === rows.length - 1
-          ? getHistoricalRevenue(d)
-          : null,
-    }));
-    const fore = forecastRows.map((d) => ({
-      day: d.date,
-      actual: null,
-      forecast: getProjectedRevenue(d),
-    }));
+    ].map((d, index, rows) => {
+      const rev = getHistoricalRevenue(d);
+      const gp = d.grossProfit !== undefined ? d.grossProfit : Math.round(rev * 0.65);
+      return {
+        day: d.date,
+        actual: rev,
+        grossProfit: gp,
+        forecast:
+          (viewMode !== "custom" || d.date === latestHistoryDate) &&
+          index === rows.length - 1
+            ? rev
+            : null,
+        projectedGrossProfit:
+          (viewMode !== "custom" || d.date === latestHistoryDate) &&
+          index === rows.length - 1
+            ? gp
+            : null,
+      };
+    });
+    const fore = forecastRows.map((d) => {
+      const projRev = getProjectedRevenue(d);
+      return {
+        day: d.date,
+        actual: null,
+        grossProfit: null,
+        forecast: projRev,
+        projectedGrossProfit: d.projectedGrossProfit !== undefined ? d.projectedGrossProfit : Math.round(projRev * 0.65),
+      };
+    });
     return [...hist, ...fore];
   }, [forecastRun, viewMode, customForecastStart, customForecastEnd, globalDateRange]);
 
@@ -474,19 +560,19 @@ export function Services() {
   );
   const servicesForecastStartMin = addDays(latestServicesHistoryDate, 1);
   const servicesForecastMaxDate = minDateString(
-    getMetadataDate(forecastRun, "forecastEndDate", addDays(latestServicesHistoryDate, 30)),
-    addDays(latestServicesHistoryDate, 30),
+    getMetadataDate(forecastRun, "forecastEndDate", addDays(latestServicesHistoryDate, 90)),
+    addDays(latestServicesHistoryDate, 90),
   );
   const servicesForecastEndMax = minDateString(
     servicesForecastMaxDate,
-    addDays(customForecastStart || servicesForecastStartMin, 29),
+    addDays(customForecastStart || servicesForecastStartMin, 89),
   );
 
   useEffect(() => {
     if (viewMode !== "custom") return;
     if (customForecastStart < servicesForecastStartMin || customForecastStart > servicesForecastMaxDate) {
       setCustomForecastStart(servicesForecastStartMin);
-      setCustomForecastEnd(minDateString(servicesForecastMaxDate, addDays(servicesForecastStartMin, 29)));
+      setCustomForecastEnd(minDateString(servicesForecastMaxDate, addDays(servicesForecastStartMin, 89)));
       return;
     }
     if (customForecastEnd < customForecastStart || customForecastEnd > servicesForecastEndMax) {
@@ -653,7 +739,7 @@ export function Services() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {["Next 30 Days", "Next 14 Days", "Next 7 Days", "Custom"].map((view) => (
+            {["Next 90 Days", "Next 30 Days", "Next 14 Days", "Next 7 Days", "Custom"].map((view) => (
               <Button
                 key={view}
                 size="sm"
@@ -682,8 +768,8 @@ export function Services() {
                 const nextStart = event.target.value;
                 setCustomForecastStart(nextStart);
                 setCustomForecastEnd((current) =>
-                  current < nextStart || current > minDateString(servicesForecastMaxDate, addDays(nextStart, 29))
-                    ? minDateString(servicesForecastMaxDate, addDays(nextStart, 29))
+                  current < nextStart || current > minDateString(servicesForecastMaxDate, addDays(nextStart, 89))
+                    ? minDateString(servicesForecastMaxDate, addDays(nextStart, 89))
                     : current,
                 );
               }}
@@ -747,6 +833,27 @@ export function Services() {
               animationDuration={800}
               name="Predicted revenue"
             />
+            <Line
+              key="line-gpprofit-services"
+              type="monotone"
+              dataKey="grossProfit"
+              stroke="#7C3AED"
+              strokeWidth={2}
+              dot={false}
+              animationDuration={800}
+              name="Gross Profit"
+            />
+            <Line
+              key="line-projgpprofit-services"
+              type="monotone"
+              dataKey="projectedGrossProfit"
+              stroke="#A78BFA"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              dot={false}
+              animationDuration={800}
+              name="Projected Gross Profit"
+            />
           </LineChart>
         </ResponsiveContainer>
 
@@ -764,6 +871,20 @@ export function Services() {
               }}
             />
             <span>Predicted revenue</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="h-0.5 w-7 rounded-full bg-[#7C3AED]" />
+            <span>Gross Profit</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="h-0.5 w-7 rounded-full"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to right, #A78BFA 0 6px, transparent 6px 10px)",
+              }}
+            />
+            <span>Projected Gross Profit</span>
           </div>
         </div>
 
@@ -850,8 +971,56 @@ export function Services() {
                     <option value="default">Current Live Weather</option>
                     <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
                     <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
+                    <option value="custom">Custom Climate (Sliders)...</option>
                   </select>
                 </div>
+
+                {weatherScenario === "custom" && (
+                  <div className="space-y-2 border border-[#FFD9EC] bg-[#FFF2FA]/50 p-2.5 rounded-lg mt-2">
+                    <div>
+                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                        <span>Temperature</span>
+                        <span>{tempOverride}°C</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="15"
+                        max="40"
+                        value={tempOverride}
+                        onChange={(e) => setTempOverride(Number(e.target.value))}
+                        className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#3AE4FA]"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                        <span>Relative Humidity</span>
+                        <span>{humidityOverride}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="20"
+                        max="100"
+                        value={humidityOverride}
+                        onChange={(e) => setHumidityOverride(Number(e.target.value))}
+                        className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#3AE4FA]"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                        <span>Rain Chance / Intensity</span>
+                        <span>{rainChanceOverride === 1 ? "Rainy" : "No Rain"}</span>
+                      </div>
+                      <select
+                        value={rainChanceOverride}
+                        onChange={(e) => setRainChanceOverride(Number(e.target.value))}
+                        className="w-full px-2 py-1 bg-white border border-[#FFD9EC] rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-[#3AE4FA]"
+                      >
+                        <option value="0">No Rain</option>
+                        <option value="1">Rainy</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {/* Holiday Select */}
                 <div>

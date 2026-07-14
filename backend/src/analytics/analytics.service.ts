@@ -486,10 +486,10 @@ export class AnalyticsService {
    */
   async getForecast(
     sector: string,
-    overrides?: { temp?: string; rain?: string; holiday?: string; forceRefresh?: string },
+    overrides?: { temp?: string; rain?: string; humidity?: string; holiday?: string; days?: string; forceRefresh?: string },
   ): Promise<any> {
     if (this.normalizeSector(sector) === 'Retail') {
-      return this.getLegacyRetailForecast();
+      return this.getLegacyRetailForecast(overrides?.days);
     }
     const module = this.normalizeForecastModule(sector);
 
@@ -523,13 +523,21 @@ export class AnalyticsService {
       const reqRain = overrides?.rain !== undefined && overrides.rain !== '' ? (overrides.rain === '1' ? 1 : 0) : undefined;
       const cacheRain = metadata.rainOverride !== undefined ? Number(metadata.rainOverride) : undefined;
 
+      const reqHumidity = overrides?.humidity !== undefined && overrides.humidity !== '' ? Number(overrides.humidity) : undefined;
+      const cacheHumidity = metadata.humidityOverride !== undefined ? Number(metadata.humidityOverride) : undefined;
+
       const reqHoliday = overrides?.holiday !== undefined && overrides.holiday !== '' ? (overrides.holiday === '1' ? 1 : 0) : undefined;
       const cacheHoliday = metadata.holidayOverride !== undefined ? Number(metadata.holidayOverride) : undefined;
+
+      const reqDays = overrides?.days !== undefined && overrides.days !== '' ? this.normalizeForecastDays(overrides.days) : DEFAULT_FORECAST_DAYS;
+      const cacheDays = metadata.daysRequested !== undefined ? Number(metadata.daysRequested) : DEFAULT_FORECAST_DAYS;
 
       const isOverridesMatch =
         reqTemp === cacheTemp &&
         reqRain === cacheRain &&
-        reqHoliday === cacheHoliday;
+        reqHumidity === cacheHumidity &&
+        reqHoliday === cacheHoliday &&
+        reqDays === cacheDays;
       const payloadVersion = Number(metadata.forecastRevenuePayloadVersion) || 0;
       const hasRevenuePayload =
         payloadVersion >= 2 &&
@@ -560,7 +568,7 @@ export class AnalyticsService {
       ]),
     );
     const dashboard = await this.getDashboard(module);
-    const forecastDays = this.normalizeForecastDays(DEFAULT_FORECAST_DAYS);
+    const forecastDays = this.normalizeForecastDays(overrides?.days || DEFAULT_FORECAST_DAYS);
     let exogenousPayload: Record<string, unknown> = {};
     let exogenousMetadata: Record<string, unknown> = {};
 
@@ -655,6 +663,7 @@ export class AnalyticsService {
         csvUploadCount: uploadCount,
         latestCsvUploadId: latestUpload ? latestUpload._id.toString() : null,
         latestCsvUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
+        daysRequested: forecastDays,
       },
       generatedAt: new Date(),
     };
@@ -1370,6 +1379,7 @@ export class AnalyticsService {
           quantity: { $ifNull: ['$quantity', 0] },
           revenue: { $ifNull: ['$netSales', 0] },
           discount: { $ifNull: ['$discount', 0] },
+          grossProfit: { $ifNull: ['$grossProfit', 0] },
         },
       },
       {
@@ -1381,6 +1391,7 @@ export class AnalyticsService {
           quantity: { $sum: '$quantity' },
           revenue: { $sum: '$revenue' },
           discountAmount: { $sum: '$discount' },
+          grossProfit: { $sum: '$grossProfit' },
           lineItems: { $sum: 1 },
           uniqueItems: { $addToSet: '$productName' },
         },
@@ -1396,6 +1407,7 @@ export class AnalyticsService {
           _id: '$_id.date',
           revenue: { $sum: '$revenue' },
           quantity: { $sum: '$quantity' },
+          grossProfit: { $sum: '$grossProfit' },
           orderCount: { $sum: 1 },
           lineItems: { $sum: '$lineItems' },
           basketItems: { $sum: '$basketItems' },
@@ -1440,11 +1452,13 @@ export class AnalyticsService {
     const quantity = Number(point?.quantity) || 0;
     const orders = Number(point?.orderCount) || 0;
     const revenue = Number(point?.revenue) || 0;
+    const grossProfit = Number(point?.grossProfit) || 0;
     return {
       date: String(point?._id || ''),
       actual: module === 'Services' ? orders : quantity,
       orders,
       revenue: this.round(revenue),
+      grossProfit: this.round(grossProfit),
       lineItems: Number(point?.lineItems) || 0,
       basketItems: Number(point?.basketItems) || 0,
       discountAmount: this.round(Number(point?.discountAmount) || 0),
@@ -1458,7 +1472,7 @@ export class AnalyticsService {
   private async buildServicesExogenousPayload(
     historical: NormalizedDailyValue[],
     forecastDays: number,
-    overrides?: { temp?: string; rain?: string; holiday?: string },
+    overrides?: { temp?: string; rain?: string; humidity?: string; holiday?: string },
     module?: ForecastModule,
     dailyData: any[] = [],
   ): Promise<{
@@ -1538,6 +1552,7 @@ export class AnalyticsService {
           'dayAfterHoliday',
           'tempCelsius',
           'rainFlag',
+          'humidity',
           'promoFlag',
           'isMissingDate',
           'outlierFlag',
@@ -1563,6 +1578,15 @@ export class AnalyticsService {
             row.rainFlag = rainVal;
           });
           metadata.rainOverride = rainVal;
+        }
+        if (overrides.humidity !== undefined && overrides.humidity !== '') {
+          const humidityVal = Number(overrides.humidity);
+          if (!Number.isNaN(humidityVal)) {
+            exogenousForecast.forEach((row) => {
+              row.humidity = humidityVal;
+            });
+            metadata.humidityOverride = humidityVal;
+          }
         }
         if (overrides.holiday !== undefined && overrides.holiday !== '') {
           const holidayVal = overrides.holiday === '1' ? 1 : 0;
@@ -2565,7 +2589,7 @@ export class AnalyticsService {
     };
   }
 
-  private async getLegacyRetailForecast(): Promise<any> {
+  private async getLegacyRetailForecast(daysRequested?: string): Promise<any> {
     const dailyData = await this.transactionModel.aggregate([
       { $match: { sector: 'Retail' } },
       {
@@ -2595,7 +2619,7 @@ export class AnalyticsService {
         modelInfo: { model: 'Insufficient data', accuracy: 0 },
       };
     }
-    const forecastDays = this.normalizeForecastDays(DEFAULT_FORECAST_DAYS);
+    const forecastDays = this.normalizeForecastDays(daysRequested || DEFAULT_FORECAST_DAYS);
     const result = await this.runPython<any>('forecast.py', {
       data: inputData,
       forecastDays,

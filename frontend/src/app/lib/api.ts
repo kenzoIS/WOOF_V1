@@ -63,6 +63,7 @@ export interface ForecastRun {
     orders: number;
     revenue?: number;
     fitted?: number;
+    grossProfit?: number;
   }>;
   forecast: Array<{
     date: string;
@@ -74,6 +75,7 @@ export interface ForecastRun {
     projectedConfidenceLow?: number;
     projectedConfidenceHigh?: number;
     unitPrice?: number;
+    projectedGrossProfit?: number;
   }>;
   kpis: {
     totalRevenue: number;

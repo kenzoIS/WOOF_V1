@@ -728,6 +728,11 @@ export class CsvService {
         'payment method',
         'payment',
       ]),
+      costOfGoods: this.toNumber(this.getValue(row, ['cost of goods', 'cost_of_goods', 'cogs', 'item cost', 'cost']), 0),
+      grossProfit: this.toNumber(this.getValue(row, ['gross profit', 'gross_profit', 'profit', 'earnings']), 0),
+      margin: this.toNumber(this.getValue(row, ['margin', 'profit margin', 'profit_margin']), 0),
+      refunds: this.toNumber(this.getValue(row, ['refunds', 'refund_amount', 'refund amount']), 0),
+      itemsRefunded: this.toNumber(this.getValue(row, ['items refunded', 'items_refunded', 'refunded quantity', 'refund qty']), 0),
     };
   }
 
@@ -786,8 +791,26 @@ export class CsvService {
 
   private parseDate(value: string): Date | null {
     if (!value) return null;
-    const parsedDate = new Date(value.replace(/\t/g, '').trim());
-    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+    const cleanValue = value.replace(/\t/g, '').trim();
+    const hasTimezone = /[Zz]|[+-]\d{2}:?\d{2}$/.test(cleanValue);
+    
+    let dateStr = cleanValue;
+    if (!hasTimezone) {
+      if (cleanValue.includes(' ')) {
+        dateStr = `${cleanValue} +08:00`;
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(cleanValue)) {
+        dateStr = `${cleanValue}T00:00:00+08:00`;
+      } else {
+        dateStr = `${cleanValue} +08:00`;
+      }
+    }
+    
+    const parsedDate = new Date(dateStr);
+    if (Number.isNaN(parsedDate.getTime())) {
+      const fallback = new Date(cleanValue);
+      return Number.isNaN(fallback.getTime()) ? null : fallback;
+    }
+    return parsedDate;
   }
 
   private cleanCell(value: unknown): string {

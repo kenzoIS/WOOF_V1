@@ -20,6 +20,9 @@ export class WeatherCache {
   @Prop({ required: true })
   rainfallMm: number;
 
+  @Prop({ required: true, default: 60 })
+  relativeHumidity: number;
+
   @Prop({ required: true, default: false })
   isSynthetic: boolean;
 

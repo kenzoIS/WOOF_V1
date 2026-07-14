@@ -13,6 +13,7 @@ export interface DailyValue {
   avgBasketSize?: number;
   avgOrderValue?: number;
   averageUnitPrice?: number;
+  grossProfit?: number;
 }
 
 export interface NormalizedDailyValue extends DailyValue {

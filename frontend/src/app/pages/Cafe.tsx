@@ -207,6 +207,9 @@ export function Cafe() {
   const [customForecastEnd, setCustomForecastEnd] = useState("2026-06-14");
   const [weatherScenario, setWeatherScenario] = useState("default");
   const [holidayScenario, setHolidayScenario] = useState("default");
+  const [tempOverride, setTempOverride] = useState(28);
+  const [rainChanceOverride, setRainChanceOverride] = useState(0); // 0 or 1
+  const [humidityOverride, setHumidityOverride] = useState(60);
   const [isSimulating, setIsSimulating] = useState(false);
 
   useEffect(() => {
@@ -232,9 +235,15 @@ export function Cafe() {
     if (weatherScenario === "sunny") {
       params.temp = "32";
       params.rain = "0";
+      params.humidity = "40";
     } else if (weatherScenario === "rainy") {
       params.temp = "24";
       params.rain = "1";
+      params.humidity = "90";
+    } else if (weatherScenario === "custom") {
+      params.temp = String(tempOverride);
+      params.rain = String(rainChanceOverride);
+      params.humidity = String(humidityOverride);
     }
     
     if (holidayScenario === "force") {
@@ -242,6 +251,16 @@ export function Cafe() {
     } else if (holidayScenario === "ignore") {
       params.holiday = "0";
     }
+
+    let targetDays = 14;
+    if (forecastRangeMode === "next90days") targetDays = 90;
+    else if (forecastRangeMode === "next30days") targetDays = 30;
+    else if (forecastRangeMode === "next7days") targetDays = 7;
+    else if (forecastRangeMode === "custom") {
+      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      targetDays = Math.max(1, Math.min(diffDays, 90));
+    }
+    params.days = String(targetDays);
 
     try {
       const res = await getForecast("cafe", params);
@@ -260,8 +279,21 @@ export function Cafe() {
     setIsSimulating(true);
     setWeatherScenario("default");
     setHolidayScenario("default");
+    setTempOverride(28);
+    setRainChanceOverride(0);
+    setHumidityOverride(60);
+
+    let targetDays = 14;
+    if (forecastRangeMode === "next90days") targetDays = 90;
+    else if (forecastRangeMode === "next30days") targetDays = 30;
+    else if (forecastRangeMode === "next7days") targetDays = 7;
+    else if (forecastRangeMode === "custom") {
+      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      targetDays = Math.max(1, Math.min(diffDays, 90));
+    }
+
     try {
-      const res = await getForecast("cafe");
+      const res = await getForecast("cafe", { days: String(targetDays) });
       setForecastRun(res);
       toast.success("Reset successful", {
         description: "Restored live forecast settings.",
@@ -275,8 +307,38 @@ export function Cafe() {
 
   // API data state
   useEffect(() => {
-    getForecast("cafe").then(setForecastRun).catch(() => {});
-  }, []);
+    let targetDays = 14;
+    if (forecastRangeMode === "next90days") targetDays = 90;
+    else if (forecastRangeMode === "next30days") targetDays = 30;
+    else if (forecastRangeMode === "next7days") targetDays = 7;
+    else if (forecastRangeMode === "custom") {
+      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      targetDays = Math.max(1, Math.min(diffDays, 90));
+    }
+
+    const params: Record<string, string> = { days: String(targetDays) };
+    if (weatherScenario === "sunny") {
+      params.temp = "32";
+      params.rain = "0";
+      params.humidity = "40";
+    } else if (weatherScenario === "rainy") {
+      params.temp = "24";
+      params.rain = "1";
+      params.humidity = "90";
+    } else if (weatherScenario === "custom") {
+      params.temp = String(tempOverride);
+      params.rain = String(rainChanceOverride);
+      params.humidity = String(humidityOverride);
+    }
+
+    if (holidayScenario === "force") {
+      params.holiday = "1";
+    } else if (holidayScenario === "ignore") {
+      params.holiday = "0";
+    }
+
+    getForecast("cafe", params).then(setForecastRun).catch(() => {});
+  }, [forecastRangeMode, customForecastStart, customForecastEnd]);
 
   useEffect(() => {
     if (forecastRangeMode === "custom") return;
@@ -412,7 +474,9 @@ export function Cafe() {
         ? 7
         : forecastRangeMode === "next30days"
           ? 30
-          : 14;
+          : forecastRangeMode === "next90days"
+            ? 90
+            : 14;
     const selectedRange =
       forecastRangeMode === "custom"
         ? {
@@ -441,32 +505,47 @@ export function Cafe() {
     const hist = [
       ...historicalRows,
       ...(anchorRow ? [anchorRow] : []),
-    ].map((d, index, rows) => ({
-      date: d.date,
-      actual: getHistoricalRevenue(d, unitPrice),
-      forecast:
-        (forecastRangeMode !== "custom" || d.date === latestHistoryDate) &&
-        index === rows.length - 1
-          ? getHistoricalRevenue(d, unitPrice)
-          : null,
-      confidenceLow: null as number | null,
-      confidenceHigh: null as number | null,
-    }));
-    const fc = forecastRows.map((d) => ({
-      date: d.date,
-      actual: null as number | null,
-      forecast: getProjectedRevenue(d, unitPrice),
-      confidenceLow:
-        d.projectedConfidenceLow ??
-        (d.confidenceLow !== undefined && unitPrice > 0
-          ? Math.round(d.confidenceLow * unitPrice)
-          : d.confidenceLow),
-      confidenceHigh:
-        d.projectedConfidenceHigh ??
-        (d.confidenceHigh !== undefined && unitPrice > 0
-          ? Math.round(d.confidenceHigh * unitPrice)
-          : d.confidenceHigh),
-    }));
+    ].map((d, index, rows) => {
+      const rev = getHistoricalRevenue(d, unitPrice);
+      const gp = d.grossProfit !== undefined ? d.grossProfit : Math.round(rev * 0.65);
+      return {
+        date: d.date,
+        actual: rev,
+        grossProfit: gp,
+        forecast:
+          (forecastRangeMode !== "custom" || d.date === latestHistoryDate) &&
+          index === rows.length - 1
+            ? rev
+            : null,
+        projectedGrossProfit:
+          (forecastRangeMode !== "custom" || d.date === latestHistoryDate) &&
+          index === rows.length - 1
+            ? gp
+            : null,
+        confidenceLow: null as number | null,
+        confidenceHigh: null as number | null,
+      };
+    });
+    const fc = forecastRows.map((d) => {
+      const projRev = getProjectedRevenue(d, unitPrice);
+      return {
+        date: d.date,
+        actual: null as number | null,
+        grossProfit: null as number | null,
+        forecast: projRev,
+        projectedGrossProfit: d.projectedGrossProfit !== undefined ? d.projectedGrossProfit : Math.round(projRev * 0.65),
+        confidenceLow:
+          d.projectedConfidenceLow ??
+          (d.confidenceLow !== undefined && unitPrice > 0
+            ? Math.round(d.confidenceLow * unitPrice)
+            : d.confidenceLow),
+        confidenceHigh:
+          d.projectedConfidenceHigh ??
+          (d.confidenceHigh !== undefined && unitPrice > 0
+            ? Math.round(d.confidenceHigh * unitPrice)
+            : d.confidenceHigh),
+      };
+    });
     return [...hist, ...fc];
   }, [forecastRun, forecastRangeMode, customForecastStart, customForecastEnd, globalDateRange]);
 
@@ -512,19 +591,19 @@ export function Cafe() {
   );
   const cafeForecastStartMin = addDays(latestCafeHistoryDate, 1);
   const cafeForecastMaxDate = minDateString(
-    getMetadataDate(forecastRun, "forecastEndDate", addDays(latestCafeHistoryDate, 30)),
-    addDays(latestCafeHistoryDate, 30),
+    getMetadataDate(forecastRun, "forecastEndDate", addDays(latestCafeHistoryDate, 90)),
+    addDays(latestCafeHistoryDate, 90),
   );
   const cafeForecastEndMax = minDateString(
     cafeForecastMaxDate,
-    addDays(customForecastStart || cafeForecastStartMin, 29),
+    addDays(customForecastStart || cafeForecastStartMin, 89),
   );
 
   useEffect(() => {
     if (forecastRangeMode !== "custom") return;
     if (customForecastStart < cafeForecastStartMin || customForecastStart > cafeForecastMaxDate) {
       setCustomForecastStart(cafeForecastStartMin);
-      setCustomForecastEnd(minDateString(cafeForecastMaxDate, addDays(cafeForecastStartMin, 13)));
+      setCustomForecastEnd(minDateString(cafeForecastMaxDate, addDays(cafeForecastStartMin, 89)));
       return;
     }
     if (customForecastEnd < customForecastStart || customForecastEnd > cafeForecastEndMax) {
@@ -738,6 +817,7 @@ export function Cafe() {
 
           <div className="flex flex-wrap items-center gap-2">
             {[
+              ["next90days", "Next 90 Days"],
               ["next30days", "Next 30 Days"],
               ["next14days", "Next 14 Days"],
               ["next7days", "Next 7 Days"],
@@ -837,6 +917,27 @@ export function Cafe() {
               animationDuration={800}
               name="Predicted revenue"
             />
+            <Line
+              key="line-gpprofit-cafe"
+              type="monotone"
+              dataKey="grossProfit"
+              stroke="#0F766E"
+              strokeWidth={2}
+              dot={false}
+              animationDuration={800}
+              name="Gross Profit"
+            />
+            <Line
+              key="line-projgpprofit-cafe"
+              type="monotone"
+              dataKey="projectedGrossProfit"
+              stroke="#2DD4BF"
+              strokeWidth={2}
+              strokeDasharray="5 5"
+              dot={false}
+              animationDuration={800}
+              name="Projected Gross Profit"
+            />
           </LineChart>
         </ResponsiveContainer>
 
@@ -854,6 +955,20 @@ export function Cafe() {
               }}
             />
             <span>Predicted revenue</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="h-0.5 w-7 rounded-full bg-[#0F766E]" />
+            <span>Gross Profit</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="h-0.5 w-7 rounded-full"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to right, #2DD4BF 0 6px, transparent 6px 10px)",
+              }}
+            />
+            <span>Projected Gross Profit</span>
           </div>
         </div>
 
@@ -937,8 +1052,56 @@ export function Cafe() {
                     <option value="default">Current Live Weather</option>
                     <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
                     <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
+                    <option value="custom">Custom Climate (Sliders)...</option>
                   </select>
                 </div>
+
+                {weatherScenario === "custom" && (
+                  <div className="space-y-2 border border-[#FFD9EC] bg-[#FFF2FA]/50 p-2.5 rounded-lg mt-2">
+                    <div>
+                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                        <span>Temperature</span>
+                        <span>{tempOverride}°C</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="15"
+                        max="40"
+                        value={tempOverride}
+                        onChange={(e) => setTempOverride(Number(e.target.value))}
+                        className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                        <span>Relative Humidity</span>
+                        <span>{humidityOverride}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="20"
+                        max="100"
+                        value={humidityOverride}
+                        onChange={(e) => setHumidityOverride(Number(e.target.value))}
+                        className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                        <span>Rain Chance / Intensity</span>
+                        <span>{rainChanceOverride === 1 ? "Rainy" : "No Rain"}</span>
+                      </div>
+                      <select
+                        value={rainChanceOverride}
+                        onChange={(e) => setRainChanceOverride(Number(e.target.value))}
+                        className="w-full px-2 py-1 bg-white border border-[#FFD9EC] rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                      >
+                        <option value="0">No Rain</option>
+                        <option value="1">Rainy</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {/* Holiday Select */}
                 <div>

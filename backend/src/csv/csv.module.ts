@@ -7,6 +7,7 @@ import { Transaction, TransactionSchema } from './schemas/transaction.schema';
 import { EtlService } from './etl.service';
 import { DataValidationService } from './data-validation.service';
 import { ContextModule } from '../context/context.module';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ContextModule } from '../context/context.module';
       { name: Transaction.name, schema: TransactionSchema },
     ]),
     ContextModule,
+    CommonModule,
   ],
   controllers: [CsvController],
   providers: [CsvService, EtlService, DataValidationService],
