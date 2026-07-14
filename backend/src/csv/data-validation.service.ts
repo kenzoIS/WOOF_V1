@@ -60,9 +60,9 @@ export class DataValidationService {
       }
 
       // Duplicate Check
-      // Hash based on Transaction ID + Date + Product + Quantity + Row Index to uniquely identify a line item without dropping multi-buys
+      // Hash based on Transaction ID + Date + Product + Quantity to uniquely identify a line item
       const dateStr = row.date ? new Date(row.date).toISOString() : '';
-      const rowHash = `${row.transactionId}_${dateStr}_${row.productName}_${row.quantity}_line_${i}`;
+      const rowHash = `${row.transactionId}_${dateStr}_${row.productName}_${row.quantity}`;
       
       if (uniqueHashes.has(rowHash)) {
         stage1_duplicateCount++;

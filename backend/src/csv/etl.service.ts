@@ -376,4 +376,35 @@ export class EtlService {
       }
     }
   }
+
+  /**
+   * Deletes transactions from Supabase fact tables.
+   * This is used when a CSV upload is deleted from the system or when a rollback occurs.
+   * We chunk the deletes to avoid URL length limits.
+   */
+  async deleteTransactions(transactionIds: string[]): Promise<void> {
+    if (!transactionIds || transactionIds.length === 0) return;
+
+    this.logger.log(`Deleting ${transactionIds.length} transactions from Supabase...`);
+    const chunkSize = 1000;
+    
+    for (let i = 0; i < transactionIds.length; i += chunkSize) {
+      const chunk = transactionIds.slice(i, i + chunkSize);
+      
+      try {
+        const { error } = await this.supabase
+          .from('fact_cross_channel_transactions')
+          .delete()
+          .in('transaction_id', chunk);
+
+        if (error) {
+          this.logger.error(`Error deleting chunk from Supabase: ${error.message}`);
+        }
+      } catch (err: any) {
+        this.logger.error(`Exception during Supabase delete: ${err.message}`);
+      }
+    }
+    
+    this.logger.log(`Finished deleting transactions from Supabase.`);
+  }
 }

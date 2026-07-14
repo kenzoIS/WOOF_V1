@@ -219,7 +219,10 @@ export function Services() {
       params.holiday = "0";
     }
 
-    getForecast("services", params).then(setForecastRun).catch(() => {});
+    getForecast("services", params).then(setForecastRun).catch((err) => {
+      console.error("Forecast fetch failed:", err);
+      toast.error(err.message || "Failed to fetch Services forecast. Please try again.");
+    });
   }, [viewMode, customForecastStart, customForecastEnd]);
 
   useEffect(() => {

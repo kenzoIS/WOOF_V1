@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/backend-api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const DIRECT_UPLOAD_API_BASE =
   process.env.NEXT_PUBLIC_UPLOAD_API_URL ||
   process.env.NEXT_PUBLIC_API_URL ||

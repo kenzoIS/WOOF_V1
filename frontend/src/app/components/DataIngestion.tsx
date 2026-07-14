@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, AlertTriangle, CheckCircle2, FileText } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { toast } from "sonner";
 import { uploadCSV, getUploads, deleteUpload, getMetrics } from "../lib/api";
 
@@ -276,13 +277,66 @@ export function DataIngestion() {
                     )}
                   </div>
                 </div>
-                <Button
-                  size="sm" variant="outline"
-                  className="border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0 ml-2"
-                  onClick={(e) => { e.stopPropagation(); handleDelete(upload._id, upload.filename); }}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                <div className="flex gap-2 ml-2">
+                  {upload.etlReport && (
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <Button
+                          size="sm" variant="outline"
+                          className="border-[#FFD9EC] text-[#F53799] hover:bg-[#FFF0F7] flex-shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent onClick={(e) => e.stopPropagation()}>
+                        <DialogHeader>
+                          <DialogTitle>ETL Summary Report</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4 max-h-[400px] overflow-y-auto mt-2 pr-2">
+                          <div>
+                            <h4 className="font-semibold text-sm mb-1">Stage 1: Data Validation</h4>
+                            <p className="text-sm text-gray-600">Dropped Rows: {upload.etlReport.stage1_droppedCount || 0}</p>
+                            <p className="text-sm text-gray-600">Exact Duplicates: {upload.etlReport.stage1_duplicateCount || 0}</p>
+                            {(upload.etlReport.stage1_dropReasons?.length || 0) > 0 && (
+                              <div className="mt-2 bg-orange-50 p-3 rounded-lg text-xs text-orange-800 border border-orange-100">
+                                <span className="font-semibold text-sm">Drop Reasons:</span>
+                                <ul className="list-disc pl-4 mt-2 space-y-1 font-mono text-[11px] max-h-[150px] overflow-y-auto">
+                                  {upload.etlReport.stage1_dropReasons?.map((reason, i) => (
+                                    <li key={i}>{reason}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                          {upload.etlReport.stage2_droppedCount !== undefined && (
+                            <div>
+                              <h4 className="font-semibold text-sm mb-1">Stage 2: Database Ingestion</h4>
+                              <p className="text-sm text-gray-600">DB Insert Errors: {upload.etlReport.stage2_droppedCount}</p>
+                              {(upload.etlReport.stage2_dropReasons?.length || 0) > 0 && (
+                                <div className="mt-2 bg-red-50 p-3 rounded-lg text-xs text-red-800 border border-red-100">
+                                  <span className="font-semibold text-sm">DB Error Logs:</span>
+                                  <ul className="list-disc pl-4 mt-2 space-y-1 font-mono text-[11px] max-h-[150px] overflow-y-auto">
+                                    {upload.etlReport.stage2_dropReasons?.map((reason, i) => (
+                                      <li key={i}>{reason}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                  <Button
+                    size="sm" variant="outline"
+                    className="border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0"
+                    onClick={(e) => { e.stopPropagation(); handleDelete(upload._id, upload.filename); }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

@@ -1039,12 +1039,27 @@ export class CsvService {
   }
 
   private async rollbackUpload(uploadId: Types.ObjectId): Promise<void> {
+    const transactions = await this.transactionModel.find({ csvUploadId: uploadId }, { transactionId: 1 }).exec();
+    const transactionIds = Array.from(new Set(transactions.map(t => t.transactionId)));
+    
+    if (transactionIds.length > 0) {
+      await this.etlService.deleteTransactions(transactionIds);
+    }
+
     await this.transactionModel.deleteMany({ csvUploadId: uploadId }).exec();
     await this.csvUploadModel.findByIdAndDelete(uploadId).exec();
   }
 
   async deleteUpload(id: string): Promise<{ deleted: boolean }> {
     const objectId = new Types.ObjectId(id);
+
+    const transactions = await this.transactionModel.find({ csvUploadId: objectId }, { transactionId: 1 }).exec();
+    const transactionIds = Array.from(new Set(transactions.map(t => t.transactionId)));
+    
+    if (transactionIds.length > 0) {
+      await this.etlService.deleteTransactions(transactionIds);
+    }
+
     await this.transactionModel.deleteMany({ csvUploadId: objectId }).exec();
     await this.csvUploadModel.findByIdAndDelete(objectId).exec();
     return { deleted: true };
