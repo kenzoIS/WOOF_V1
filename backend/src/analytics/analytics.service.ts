@@ -486,12 +486,19 @@ export class AnalyticsService {
    */
   async getForecast(
     sector: string,
-    overrides?: { temp?: string; rain?: string; humidity?: string; holiday?: string; days?: string; forceRefresh?: string },
+    overrides?: { temp?: string; rain?: string; humidity?: string; holiday?: string; days?: string; forceRefresh?: string; backtestSplit?: string },
   ): Promise<any> {
     if (this.normalizeSector(sector) === 'Retail') {
       return this.getLegacyRetailForecast(overrides?.days);
     }
     const module = this.normalizeForecastModule(sector);
+
+    const reqTemp = overrides?.temp !== undefined && overrides.temp !== '' ? Number(overrides.temp) : undefined;
+    const reqRain = overrides?.rain !== undefined && overrides.rain !== '' ? (overrides.rain === '1' ? 1 : 0) : undefined;
+    const reqHumidity = overrides?.humidity !== undefined && overrides.humidity !== '' ? Number(overrides.humidity) : undefined;
+    const reqHoliday = overrides?.holiday !== undefined && overrides.holiday !== '' ? (overrides.holiday === '1' ? 1 : 0) : undefined;
+    const reqDays = overrides?.days !== undefined && overrides.days !== '' ? this.normalizeForecastDays(overrides.days) : DEFAULT_FORECAST_DAYS;
+    const reqSplit = overrides?.backtestSplit ? '80-10-10' : '80-20';
 
     // Caching check
     const cachedForecast = await this.forecastRunModel
@@ -517,27 +524,20 @@ export class AnalyticsService {
         cacheLatestUploadTime === currentLatestUploadTime;
 
       // Check overrides match
-      const reqTemp = overrides?.temp !== undefined && overrides.temp !== '' ? Number(overrides.temp) : undefined;
       const cacheTemp = metadata.tempOverride !== undefined ? Number(metadata.tempOverride) : undefined;
-      
-      const reqRain = overrides?.rain !== undefined && overrides.rain !== '' ? (overrides.rain === '1' ? 1 : 0) : undefined;
       const cacheRain = metadata.rainOverride !== undefined ? Number(metadata.rainOverride) : undefined;
-
-      const reqHumidity = overrides?.humidity !== undefined && overrides.humidity !== '' ? Number(overrides.humidity) : undefined;
       const cacheHumidity = metadata.humidityOverride !== undefined ? Number(metadata.humidityOverride) : undefined;
-
-      const reqHoliday = overrides?.holiday !== undefined && overrides.holiday !== '' ? (overrides.holiday === '1' ? 1 : 0) : undefined;
       const cacheHoliday = metadata.holidayOverride !== undefined ? Number(metadata.holidayOverride) : undefined;
-
-      const reqDays = overrides?.days !== undefined && overrides.days !== '' ? this.normalizeForecastDays(overrides.days) : DEFAULT_FORECAST_DAYS;
       const cacheDays = metadata.daysRequested !== undefined ? Number(metadata.daysRequested) : DEFAULT_FORECAST_DAYS;
+      const cacheSplit = metadata.splitRatio || '80-20';
 
       const isOverridesMatch =
         reqTemp === cacheTemp &&
         reqRain === cacheRain &&
         reqHumidity === cacheHumidity &&
         reqHoliday === cacheHoliday &&
-        reqDays === cacheDays;
+        reqDays === cacheDays &&
+        reqSplit === cacheSplit;
       const payloadVersion = Number(metadata.forecastRevenuePayloadVersion) || 0;
       const hasRevenuePayload =
         payloadVersion >= 2 &&
@@ -569,19 +569,32 @@ export class AnalyticsService {
     );
     const dashboard = await this.getDashboard(module);
     const forecastDays = this.normalizeForecastDays(overrides?.days || DEFAULT_FORECAST_DAYS);
+
+    const isBacktest = overrides?.backtestSplit !== undefined && overrides.backtestSplit !== '';
+    const splitRatio = isBacktest ? '80-10-10' : '80-20';
+    const truncateDate = '2026-03-31';
+
+    let trainHistorical = historical;
+    let finalForecastDays = forecastDays;
+
+    if (isBacktest) {
+      trainHistorical = historical.filter((point) => point.date <= truncateDate);
+      finalForecastDays = 61 + forecastDays;
+    }
+
     let exogenousPayload: Record<string, unknown> = {};
     let exogenousMetadata: Record<string, unknown> = {};
 
     let selectedModel: ModelResult | null = null;
     let rejectionReason = '';
     let modelQualityWarning = '';
-    if (historical.length >= 21) {
+    if (trainHistorical.length >= 21) {
       try {
         if (module === 'Services' || module === 'Cafe') {
           const servicesExogenous = await this.buildServicesExogenousPayload(
-            historical,
-            forecastDays,
-            overrides,
+            trainHistorical,
+            finalForecastDays,
+            overrides as any,
             module,
             dailyData,
           );
@@ -590,9 +603,10 @@ export class AnalyticsService {
         }
         selectedModel = await this.runForecastModel(
           module,
-          historical,
-          forecastDays,
+          trainHistorical,
+          finalForecastDays,
           exogenousPayload,
+          splitRatio,
         );
         if (!Number.isFinite(selectedModel.mase)) {
           rejectionReason = 'Model returned a non-finite MASE score';
@@ -611,7 +625,7 @@ export class AnalyticsService {
     const useFallback = !selectedModel;
     const finalModel: ModelResult =
       useFallback || !selectedModel
-        ? this.buildSmaFallback(historical, forecastDays, rejectionReason)
+        ? this.buildSmaFallback(trainHistorical, finalForecastDays, rejectionReason)
         : selectedModel;
     const priceCostMatrix = await this.getActivePriceCostMatrix(module);
     const itemHistory = await this.getItemHistory(module);
@@ -634,6 +648,7 @@ export class AnalyticsService {
       itemHistory,
       modelMetadata: {
         ...finalModel.modelMetadata,
+        splitRatio,
         emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
         missingDaysFilled: historical.filter((point) => point.isMissingDate)
           .length,
@@ -658,6 +673,10 @@ export class AnalyticsService {
             0,
           ) * (365 / Math.max(calibratedForecast.length, 1)),
         ),
+        tempOverride: reqTemp,
+        rainOverride: reqRain,
+        humidityOverride: reqHumidity,
+        holidayOverride: reqHoliday,
         ...(modelQualityWarning ? { modelQualityWarning } : {}),
         ...exogenousMetadata,
         csvUploadCount: uploadCount,
@@ -1124,12 +1143,14 @@ export class AnalyticsService {
     historical: NormalizedDailyValue[],
     forecastDays: number,
     extraPayload: Record<string, unknown> = {},
+    splitRatio?: string,
   ): Promise<ModelResult> {
     const scriptName =
       module === 'Cafe' ? 'cafe_prophet.py' : 'services_sarima.py';
     return this.runPython<ModelResult>(scriptName, {
       data: historical,
       forecastDays,
+      splitRatio: splitRatio || '80-20',
       ...extraPayload,
     });
   }
@@ -1973,23 +1994,28 @@ export class AnalyticsService {
     return row?.quantity > 0 ? this.round(row.weightedRevenue / row.quantity) : 0;
   }
 
-  private withForecastStartAnchor<T extends { historical?: any[]; modelMetadata?: Record<string, unknown> }>(
+  private withForecastStartAnchor<T extends { historical?: any[]; forecast?: any[]; modelMetadata?: Record<string, unknown> }>(
     run: T,
   ): T {
     const historical = Array.isArray(run.historical) ? run.historical : [];
+    const forecast = Array.isArray(run.forecast) ? run.forecast : [];
     const lastIndex = historical.length - 1;
     const anchoredHistorical = historical.map((point, index) => {
       const { fitted: _fitted, ...rest } = point;
       return index === lastIndex ? { ...rest, fitted: point.actual } : rest;
     });
 
+    const isBacktest = run.modelMetadata?.splitRatio === '80-10-10' || run.modelMetadata?.splitRatio === '70-15-15';
+    const startsAt = isBacktest && forecast.length > 0
+      ? forecast[0].date
+      : (lastIndex >= 0 ? anchoredHistorical[lastIndex].date : null);
+
     return {
       ...run,
       historical: anchoredHistorical,
       modelMetadata: {
         ...(run.modelMetadata || {}),
-        predictionStartsAt:
-          lastIndex >= 0 ? anchoredHistorical[lastIndex].date : null,
+        predictionStartsAt: startsAt,
         predictionAnchorValue:
           lastIndex >= 0 ? anchoredHistorical[lastIndex].actual : null,
         predictionTrendMode: 'future-anchor',

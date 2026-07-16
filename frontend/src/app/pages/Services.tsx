@@ -185,6 +185,7 @@ export function Services() {
   const [tempOverride, setTempOverride] = useState(28);
   const [rainChanceOverride, setRainChanceOverride] = useState(0); // 0 or 1
   const [humidityOverride, setHumidityOverride] = useState(60);
+  const [backtestSplit, setBacktestSplit] = useState<string>("80-20");
   const [isSimulating, setIsSimulating] = useState(false);
 
   useEffect(() => {
@@ -219,11 +220,15 @@ export function Services() {
       params.holiday = "0";
     }
 
+    if (backtestSplit !== "80-20") {
+      params.backtestSplit = backtestSplit;
+    }
+
     getForecast("services", params).then(setForecastRun).catch((err) => {
       console.error("Forecast fetch failed:", err);
       toast.error(err.message || "Failed to fetch Services forecast. Please try again.");
     });
-  }, [viewMode, customForecastStart, customForecastEnd]);
+  }, [viewMode, customForecastStart, customForecastEnd, backtestSplit]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -275,6 +280,10 @@ export function Services() {
       params.holiday = "0";
     }
 
+    if (backtestSplit !== "80-20") {
+      params.backtestSplit = backtestSplit;
+    }
+
     let targetDays = 30;
     if (viewMode === "next90days") targetDays = 90;
     else if (viewMode === "next30days") targetDays = 30;
@@ -317,8 +326,13 @@ export function Services() {
       targetDays = Math.max(1, Math.min(diffDays, 90));
     }
 
+    const params: Record<string, string> = { days: String(targetDays) };
+    if (backtestSplit !== "80-20") {
+      params.backtestSplit = backtestSplit;
+    }
+
     try {
-      const res = await getForecast("services", { days: String(targetDays) });
+      const res = await getForecast("services", params);
       setForecastRun(res);
       toast.success("Reset successful", {
         description: "Restored live forecast settings.",
@@ -346,6 +360,10 @@ export function Services() {
           : viewMode === "next90days"
             ? 90
             : 30;
+
+    const firstForecastDate = forecastRun.forecast?.[0]?.date;
+    const isBacktest = forecastRun.modelMetadata?.splitRatio === '80-10-10';
+
     const selectedRange =
       viewMode === "custom"
         ? {
@@ -356,14 +374,22 @@ export function Services() {
                 : customForecastStart,
             isCustom: true,
           }
-        : forecastRangeFromHorizon(latestHistoryDate, horizon);
+        : {
+            start: isBacktest && firstForecastDate && firstForecastDate < latestHistoryDate
+              ? firstForecastDate
+              : addDays(latestHistoryDate, 1),
+            end: addDays(latestHistoryDate, horizon),
+            isCustom: false,
+          };
+
     const historyRange =
       viewMode === "custom"
         ? selectedRange
         : parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
-    const forecastRows = filterByDateRange(forecastRun.forecast, selectedRange);
+    const forecastRows = filterByDateRange(forecastRun.forecast || [], selectedRange);
     const shouldAnchorForecast =
+      !isBacktest &&
       forecastRows.length > 0 &&
       (historicalRows.length === 0 ||
         historicalRows[historicalRows.length - 1]?.date !== latestHistoryDate);
@@ -381,11 +407,13 @@ export function Services() {
         actual: rev,
         grossProfit: gp,
         forecast:
+          !isBacktest &&
           (viewMode !== "custom" || d.date === latestHistoryDate) &&
           index === rows.length - 1
             ? rev
             : null,
         projectedGrossProfit:
+          !isBacktest &&
           (viewMode !== "custom" || d.date === latestHistoryDate) &&
           index === rows.length - 1
             ? gp
@@ -402,7 +430,21 @@ export function Services() {
         projectedGrossProfit: d.projectedGrossProfit !== undefined ? d.projectedGrossProfit : Math.round(projRev * 0.65),
       };
     });
-    return [...hist, ...fore];
+
+    const mergedMap = new Map<string, any>();
+    for (const point of hist) {
+      mergedMap.set(point.day, { ...point });
+    }
+    for (const point of fore) {
+      const existing = mergedMap.get(point.day);
+      if (existing) {
+        existing.forecast = point.forecast;
+        existing.projectedGrossProfit = point.projectedGrossProfit;
+      } else {
+        mergedMap.set(point.day, { ...point });
+      }
+    }
+    return [...mergedMap.values()].sort((a, b) => a.day.localeCompare(b.day));
   }, [forecastRun, viewMode, customForecastStart, customForecastEnd, globalDateRange]);
 
   // Aggregated KPI values dynamically calculated from API history based on globalDateRange
@@ -616,7 +658,11 @@ export function Services() {
 
   const handleRetrainModel = () => {
     const toastId = toast.loading("Retraining model with latest data... This may take a few seconds.");
-    getForecast("services", { forceRefresh: "true" })
+    const params: Record<string, string> = { forceRefresh: "true" };
+    if (backtestSplit !== "80-20") {
+      params.backtestSplit = backtestSplit;
+    }
+    getForecast("services", params)
       .then((res) => {
         setForecastRun(res);
         toast.dismiss(toastId);
@@ -633,8 +679,11 @@ export function Services() {
     setErrorModal({ isOpen: false, type: null });
     toast.info("Retrying data synchronization...");
     setTimeout(() => {
-      // Update the last sync time to show data was refreshed
-      void getForecast("services").then(setForecastRun);
+      const params: Record<string, string> = {};
+      if (backtestSplit !== "80-20") {
+        params.backtestSplit = backtestSplit;
+      }
+      void getForecast("services", params).then(setForecastRun);
       setSuccessModal({ isOpen: true, type: "data_sync_success" });
     }, 2000);
   };
@@ -836,27 +885,6 @@ export function Services() {
               animationDuration={800}
               name="Predicted revenue"
             />
-            <Line
-              key="line-gpprofit-services"
-              type="monotone"
-              dataKey="grossProfit"
-              stroke="#7C3AED"
-              strokeWidth={2}
-              dot={false}
-              animationDuration={800}
-              name="Gross Profit"
-            />
-            <Line
-              key="line-projgpprofit-services"
-              type="monotone"
-              dataKey="projectedGrossProfit"
-              stroke="#A78BFA"
-              strokeWidth={2}
-              strokeDasharray="5 5"
-              dot={false}
-              animationDuration={800}
-              name="Projected Gross Profit"
-            />
           </LineChart>
         </ResponsiveContainer>
 
@@ -874,20 +902,6 @@ export function Services() {
               }}
             />
             <span>Predicted revenue</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="h-0.5 w-7 rounded-full bg-[#7C3AED]" />
-            <span>Gross Profit</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span
-              className="h-0.5 w-7 rounded-full"
-              style={{
-                backgroundImage:
-                  "repeating-linear-gradient(to right, #A78BFA 0 6px, transparent 6px 10px)",
-              }}
-            />
-            <span>Projected Gross Profit</span>
           </div>
         </div>
 
@@ -940,14 +954,32 @@ export function Services() {
             )}
           </div>
 
-          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
-            <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
-            <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-              {forecastRun
-                ? `${forecastRun.modelName} was selected using held-out uploaded Services history and generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
-                : "Upload Services history from POS or PetHub to generate a validated forecast."}
-            </p>
-            <Button onClick={handleRetrainModel} className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs md:text-sm" size="sm">
+          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 flex flex-col justify-between">
+            <div className="space-y-3">
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
+              
+              <div>
+                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Backtesting Split</label>
+                <select
+                  value={backtestSplit}
+                  onChange={(e) => setBacktestSplit(e.target.value)}
+                  className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#3AE4FA]"
+                >
+                  <option value="80-20">Live Forecast (80/20 Split)</option>
+                  <option value="80-10-10">Backtesting (80-10-10 Split)</option>
+                </select>
+              </div>
+
+              <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+                {backtestSplit !== "80-20"
+                  ? "Naka-enable ang backtesting mode. Ipinapakita ng graph ang overlap sa pagitan ng actual at predicted revenue para sa Abril at Mayo 2026 upang masukat ang kawastuhan ng model."
+                  : (forecastRun
+                      ? `${forecastRun.modelName} was selected using held-out uploaded Services history and generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
+                      : "Upload Services history from POS or PetHub to generate a validated forecast.")}
+              </p>
+            </div>
+            
+            <Button onClick={handleRetrainModel} className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-xs md:text-sm mt-2" size="sm">
               Retrain Model
             </Button>
           </div>

@@ -66,9 +66,15 @@ def normalize_forecast_days(value):
     return max(1, min(days, MAX_FORECAST_DAYS))
 
 
-def chronological_split_index(length):
-    split_index = int(np.floor(length * 0.8))
-    return min(max(1, split_index), length - 1)
+def parse_splits(length, ratio_str):
+    # Lock strictly to 80-10-10 split
+    train_idx = int(np.floor(length * 0.80))
+    val_idx = int(np.floor(length * 0.90))
+    has_test = True
+    
+    train_idx = min(max(1, train_idx), length - 2)
+    val_idx = min(max(train_idx + 1, val_idx), length)
+    return train_idx, val_idx, has_test
 
 
 def ordered_unique(values):
@@ -197,6 +203,8 @@ def run(payload):
     forecast_days = normalize_forecast_days(
         payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
     )
+    split_ratio = payload.get("splitRatio", "80-20")
+
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
     if len(data) < 21:
@@ -213,28 +221,58 @@ def run(payload):
     exog = build_exog_matrix(payload.get("exogenous", []), len(frame))
     use_exog = exog is not None
     forecast_exog = build_forecast_exog(payload, forecast_days) if use_exog else None
-    split_index = chronological_split_index(len(frame))
-    holdout = len(frame) - split_index
-    train_normalized = normalized[:split_index]
-    train_exog = exog[:split_index] if use_exog else None
-    validation_exog = exog[split_index:] if use_exog else None
-    validation_actual = actual[split_index:]
 
+    train_idx, val_idx, has_test = parse_splits(len(frame), split_ratio)
+    train_normalized = normalized[:train_idx]
+    train_exog = exog[:train_idx] if use_exog else None
+    validation_exog = exog[train_idx:val_idx] if use_exog else None
+    validation_actual = actual[train_idx:val_idx]
+
+    # Step 1: Validation Grid Search to find best model order
     order, seasonal_order, validation_fit, search_metadata = fit_best(
         train_normalized, train_exog
     )
     validation_forecast = validation_fit.get_forecast(
-        steps=holdout, exog=validation_exog
+        steps=val_idx - train_idx, exog=validation_exog
     ).predicted_mean
-    mase, mape, accuracy = metrics(
-        validation_actual, validation_forecast, actual[:split_index]
+    val_mase, val_mape, val_accuracy = metrics(
+        validation_actual, validation_forecast, actual[:train_idx]
     )
 
+    # Step 2: Test Evaluation
+    if has_test:
+        try:
+            test_exog = exog[:val_idx] if use_exog else None
+            test_fit = fit_model(normalized[:val_idx], order, seasonal_order, test_exog)
+            test_forecast_exog = exog[val_idx:] if use_exog else None
+            test_forecast = test_fit.get_forecast(
+                steps=len(frame) - val_idx, exog=test_forecast_exog
+            ).predicted_mean
+            test_mase, test_mape, test_accuracy = metrics(
+                actual[val_idx:], test_forecast, actual[:val_idx]
+            )
+            eval_metrics = {
+                "mase": test_mase,
+                "mape": test_mape,
+                "accuracy": test_accuracy,
+            }
+        except Exception:
+            eval_metrics = {
+                "mase": val_mase,
+                "mape": val_mape,
+                "accuracy": val_accuracy,
+            }
+    else:
+        eval_metrics = {
+            "mase": val_mase,
+            "mape": val_mape,
+            "accuracy": val_accuracy,
+        }
+
+    # Step 3: Fit Final Model on 100% of input data
     final_fit = fit_model(normalized, order, seasonal_order, exog)
     prediction = final_fit.get_forecast(steps=forecast_days, exog=forecast_exog)
     intervals = prediction.conf_int(alpha=0.2)
-    # The model is fit on EMA-normalized demand volume, so predicted_mean is
-    # returned as physical units/bookings. Currency is applied in NestJS.
     means = prediction.predicted_mean
     last_date = pd.to_datetime(frame["date"].iloc[-1])
 
@@ -266,18 +304,19 @@ def run(payload):
             f"({seasonal_order[0]},{seasonal_order[1]},{seasonal_order[2]},7)"
             f"{'+exog' if use_exog else ''}"
         ),
-        "mase": mase,
-        "mape": mape,
-        "accuracy": accuracy,
+        "mase": eval_metrics["mase"],
+        "mape": eval_metrics["mape"],
+        "accuracy": eval_metrics["accuracy"],
         "forecast": forecast,
         "fittedValues": [round(max(0.0, float(v)), 2) for v in final_fit.fittedvalues],
         "modelMetadata": {
             "order": list(order),
             "seasonalOrder": list(seasonal_order),
             "aic": round(float(final_fit.aic), 2),
-            "validationDays": holdout,
-            "trainingDays": split_index,
-            "splitRatio": f"chronological (last {holdout} days holdout)",
+            "validationDays": val_idx - train_idx,
+            "trainingDays": train_idx,
+            "testDays": len(frame) - val_idx if has_test else 0,
+            "splitRatio": split_ratio,
             "univariate": not use_exog,
             "exogenousVariables": EXOG_COLUMNS if use_exog else [],
             **search_metadata,

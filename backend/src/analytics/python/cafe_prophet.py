@@ -54,9 +54,15 @@ def normalize_forecast_days(value):
     return max(1, min(days, MAX_FORECAST_DAYS))
 
 
-def chronological_split_index(length):
-    split_index = int(np.floor(length * 0.8))
-    return min(max(1, split_index), length - 1)
+def parse_splits(length, ratio_str):
+    # Lock strictly to 80-10-10 split
+    train_idx = int(np.floor(length * 0.80))
+    val_idx = int(np.floor(length * 0.90))
+    has_test = True
+    
+    train_idx = min(max(1, train_idx), length - 2)
+    val_idx = min(max(train_idx + 1, val_idx), length)
+    return train_idx, val_idx, has_test
 
 
 def metrics(actual, predicted, training):
@@ -85,6 +91,8 @@ def run(payload):
     forecast_days = normalize_forecast_days(
         payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
     )
+    split_ratio = payload.get("splitRatio", "80-20")
+
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
     if len(data) < 21:
@@ -99,49 +107,37 @@ def run(payload):
     frame["ds"] = pd.to_datetime(frame["date"])
     frame["y"] = frame["normalized"].astype(float)
 
-    # Exogenous data check
-    exog = payload.get("exogenous", [])
+    use_exog = False
     exog_forecast = payload.get("exogenousForecast", [])
-    use_exog = (
-        isinstance(exog, list)
-        and len(exog) == len(frame)
-        and isinstance(exog_forecast, list)
-        and len(exog_forecast) == forecast_days
-    )
-
-    if use_exog:
-        exog_df = pd.DataFrame(exog)
-        exog_df["ds"] = pd.to_datetime(exog_df["date"])
-        for column in EXOG_COLUMNS:
-            if column not in exog_df.columns:
-                exog_df[column] = 0.0
-        frame = frame.merge(exog_df[["ds", *EXOG_COLUMNS]], on="ds", how="left")
-        frame["tempCelsius"] = frame["tempCelsius"].fillna(28.0).astype(float)
-        for column in [column for column in EXOG_COLUMNS if column != "tempCelsius"]:
-            frame[column] = frame[column].fillna(0.0).astype(float)
+    if isinstance(payload.get("exogenous"), list) and len(payload["exogenous"]) == len(frame):
+        exog_frame = pd.DataFrame(payload["exogenous"])
+        if all(col in exog_frame.columns for col in EXOG_COLUMNS):
+            use_exog = True
+            for column in EXOG_COLUMNS:
+                frame[column] = exog_frame[column].fillna(0.0).astype(float)
 
     actual = frame["actual"].astype(float).to_numpy()
-    split_index = chronological_split_index(len(frame))
-    holdout = len(frame) - split_index
+    train_idx, val_idx, has_test = parse_splits(len(frame), split_ratio)
 
     if use_exog:
-        train = frame.iloc[:split_index][["ds", "y", *EXOG_COLUMNS]]
-        validation_dates = frame.iloc[split_index:][["ds", *EXOG_COLUMNS]]
+        train = frame.iloc[:train_idx][["ds", "y", *EXOG_COLUMNS]]
+        val_dates = frame.iloc[train_idx:val_idx][["ds", *EXOG_COLUMNS]]
     else:
-        train = frame.iloc[:split_index][["ds", "y"]]
-        validation_dates = frame.iloc[split_index:][["ds"]]
+        train = frame.iloc[:train_idx][["ds", "y"]]
+        val_dates = frame.iloc[train_idx:val_idx][["ds"]]
 
-    validation_actual = actual[split_index:]
+    val_actual = actual[train_idx:val_idx]
     candidates = [0.01, 0.05, 0.1, 0.5]
     best = None
 
+    # Step 1: Validation Grid Search to find best changepoint_prior_scale
     for candidate in candidates:
         try:
             model = build_model(candidate, use_exog=use_exog)
             model.fit(train)
-            predicted = model.predict(validation_dates)["yhat"].to_numpy()
+            predicted = model.predict(val_dates)["yhat"].to_numpy()
             mase, mape, accuracy = metrics(
-                validation_actual, predicted, actual[:split_index]
+                val_actual, predicted, actual[:train_idx]
             )
             score = (mase, mape)
             if best is None or score < best["score"]:
@@ -158,6 +154,39 @@ def run(payload):
     if best is None:
         raise RuntimeError("Prophet could not fit any changepoint prior candidate")
 
+    # Step 2: Test Evaluation
+    if has_test:
+        try:
+            test_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
+            if use_exog:
+                test_model.fit(frame.iloc[:val_idx][["ds", "y", *EXOG_COLUMNS]])
+                test_dates = frame.iloc[val_idx:][["ds", *EXOG_COLUMNS]]
+            else:
+                test_model.fit(frame.iloc[:val_idx][["ds", "y"]])
+                test_dates = frame.iloc[val_idx:][["ds"]]
+            test_pred = test_model.predict(test_dates)["yhat"].to_numpy()
+            test_mase, test_mape, test_accuracy = metrics(
+                actual[val_idx:], test_pred, actual[:val_idx]
+            )
+            eval_metrics = {
+                "mase": test_mase,
+                "mape": test_mape,
+                "accuracy": test_accuracy,
+            }
+        except Exception:
+            eval_metrics = {
+                "mase": best["mase"],
+                "mape": best["mape"],
+                "accuracy": best["accuracy"],
+            }
+    else:
+        eval_metrics = {
+            "mase": best["mase"],
+            "mape": best["mape"],
+            "accuracy": best["accuracy"],
+        }
+
+    # Step 3: Fit Final Model on 100% of input data
     final_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
     if use_exog:
         final_model.fit(frame[["ds", "y", *EXOG_COLUMNS]])
@@ -198,17 +227,18 @@ def run(payload):
             f"Prophet (weekly + yearly seasonality + PH holidays"
             f"{' + exog' if use_exog else ''})"
         ),
-        "mase": best["mase"],
-        "mape": best["mape"],
-        "accuracy": best["accuracy"],
+        "mase": eval_metrics["mase"],
+        "mape": eval_metrics["mape"],
+        "accuracy": eval_metrics["accuracy"],
         "forecast": forecast,
         "fittedValues": fitted_values,
         "modelMetadata": {
             "changepointPriorScale": best["changepointPriorScale"],
             "testedChangepointPriorScales": candidates,
-            "validationDays": holdout,
-            "trainingDays": split_index,
-            "splitRatio": f"chronological (last {holdout} days holdout)",
+            "validationDays": val_idx - train_idx,
+            "trainingDays": train_idx,
+            "testDays": len(frame) - val_idx if has_test else 0,
+            "splitRatio": split_ratio,
             "weeklySeasonality": True,
             "yearlySeasonality": True,
             "holidayCountry": "PH",
@@ -225,5 +255,6 @@ if __name__ == "__main__":
     except json.JSONDecodeError as error:
         sys.stdout.write(json.dumps({"error": f"Malformed JSON input: {error.msg}"}))
     except Exception as error:
-        sys.stdout.write(json.dumps({"error": str(error)}))
+        import traceback
+        sys.stdout.write(json.dumps({"error": f"{str(error)}\n{traceback.format_exc()}"}))
     sys.exit(0)

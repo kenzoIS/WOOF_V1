@@ -33,8 +33,16 @@ export class AnalyticsController {
     @Query('holiday') holiday?: string,
     @Query('days') days?: string,
     @Query('forceRefresh') forceRefresh?: string,
+    @Query('backtestSplit') backtestSplit?: string,
   ) {
-    return this.analyticsService.getForecast(sector, { temp, rain, holiday, days, forceRefresh });
+    return this.analyticsService.getForecast(sector, {
+      temp,
+      rain,
+      holiday,
+      days,
+      forceRefresh,
+      backtestSplit,
+    });
   }
 
   @Get('forecast-by-channel/retail')
