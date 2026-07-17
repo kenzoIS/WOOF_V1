@@ -16,18 +16,16 @@ DEFAULT_FORECAST_DAYS = 30
 MAX_FORECAST_DAYS = 90
 GRID_SEARCH_TIMEOUT_SECONDS = 15
 EXOG_COLUMNS = [
-    "tempCelsius",
-    "rainFlag",
+    "dayOfWeek",
+    "isWeekend",
     "isHoliday",
     "dayBeforeHoliday",
     "dayAfterHoliday",
-    "average_unit_price",
-    "isWeekend",
-    "dayOfWeekSin",
-    "dayOfWeekCos",
+    "tempCelsius",
+    "rainFlag",
+    "humidity",
     "promoFlag",
-    "outlierFlag",
-    "isMissingDate",
+    "average_unit_price",
 ]
 WEEKLY_SEASONAL_ORDERS = [
     DEFAULT_SEASONAL_ORDER,
@@ -49,13 +47,14 @@ def metrics(actual, predicted, training):
         float(np.mean(np.abs(np.diff(training)))) if len(training) > 1 else 0.0
     )
     mase = mae / naive_mae if naive_mae > 0 else (0.0 if mae == 0 else 999.0)
-    non_zero = actual != 0
-    mape = (
-        float(np.mean(np.abs((actual[non_zero] - predicted[non_zero]) / actual[non_zero])) * 100)
-        if np.any(non_zero)
-        else 0.0
+    denominator = (np.abs(actual) + np.abs(predicted)) / 2.0
+    smape_terms = np.where(
+        denominator == 0,
+        0.0,
+        np.abs(actual - predicted) / denominator * 100.0,
     )
-    return round(mase, 2), round(mape, 2), round(max(0.0, 100.0 - mape), 2)
+    smape = float(np.mean(smape_terms)) if len(smape_terms) else 0.0
+    return round(mase, 2), round(smape, 2), round(max(0.0, 100.0 - smape), 2)
 
 
 def normalize_forecast_days(value):
@@ -87,6 +86,14 @@ def ordered_unique(values):
     return result
 
 
+def default_exog_value(column):
+    if column == "tempCelsius":
+        return 28.0
+    if column == "humidity":
+        return 70.0
+    return 0.0
+
+
 def fit_model(series, order, seasonal_order, exog=None, maxiter=75):
     return SARIMAX(
         series,
@@ -108,9 +115,16 @@ def fit_default(series, reason, exog=None):
     }
 
 
-def fit_best(series, exog=None, timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS):
+def fit_best(
+    series,
+    exog=None,
+    validation_actual=None,
+    validation_exog=None,
+    training_actual=None,
+    timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS,
+):
     best = None
-    best_aic = float("inf")
+    best_score = (float("inf"), float("inf"), float("inf"))
     if len(series) < 90:
         order_candidates = [
             DEFAULT_ORDER,
@@ -138,9 +152,23 @@ def fit_best(series, exog=None, timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS):
 
             try:
                 fitted = fit_model(series, order, seasonal_order, exog, maxiter=50)
-                if np.isfinite(fitted.aic) and fitted.aic < best_aic:
+                aic = float(fitted.aic) if np.isfinite(fitted.aic) else float("inf")
+                if validation_actual is not None and len(validation_actual) > 0:
+                    predicted = fitted.get_forecast(
+                        steps=len(validation_actual),
+                        exog=validation_exog,
+                    ).predicted_mean
+                    mase, smape, _ = metrics(
+                        validation_actual,
+                        predicted,
+                        training_actual if training_actual is not None else series,
+                    )
+                    score = (mase, smape, aic)
+                else:
+                    score = (aic, 0.0, aic)
+                if score < best_score:
                     best = (order, seasonal_order, fitted)
-                    best_aic = float(fitted.aic)
+                    best_score = score
             except Exception:
                 continue
         if timed_out:
@@ -153,6 +181,7 @@ def fit_best(series, exog=None, timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS):
                 "gridSearchTimedOut": True,
                 "usedDefaultOrder": False,
                 "defaultReason": "best_before_timeout",
+                "selectionMetric": "validation_mase_smape",
             }
         return fit_default(series, "timeout", exog)
 
@@ -168,6 +197,7 @@ def fit_best(series, exog=None, timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS):
     return order, seasonal_order, fitted, {
         "gridSearchTimedOut": False,
         "usedDefaultOrder": False,
+        "selectionMetric": "validation_mase_smape",
     }
 
 
@@ -177,7 +207,9 @@ def build_exog_matrix(rows, expected_length):
     matrix = []
     for row in rows:
         try:
-            matrix.append([float(row.get(column, 0)) for column in EXOG_COLUMNS])
+            matrix.append(
+                [float(row.get(column, default_exog_value(column))) for column in EXOG_COLUMNS]
+            )
         except Exception:
             return None
     return np.asarray(matrix, dtype=float)
@@ -189,6 +221,7 @@ def build_forecast_exog(payload, forecast_days):
         return matrix
     fallback_row = [0.0 for _ in EXOG_COLUMNS]
     fallback_row[EXOG_COLUMNS.index("tempCelsius")] = 28.0
+    fallback_row[EXOG_COLUMNS.index("humidity")] = 70.0
     return np.asarray(
         [fallback_row for _ in range(forecast_days)],
         dtype=float,
@@ -211,14 +244,29 @@ def run(payload):
         raise ValueError("Services SARIMA requires at least 21 daily observations")
 
     frame = pd.DataFrame(data)
+    frame["_input_order"] = np.arange(len(frame))
     required_columns = {"date", "actual", "normalized"}
     missing_columns = required_columns.difference(frame.columns)
     if missing_columns:
         raise ValueError(f"Missing required fields: {', '.join(sorted(missing_columns))}")
 
+    frame["ds"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["ds"]).sort_values("ds").reset_index(drop=True)
+    if len(frame) < 21:
+        raise ValueError("Services SARIMA requires at least 21 valid dated observations")
+
+    exog_rows = payload.get("exogenous", [])
+    if isinstance(exog_rows, list) and len(exog_rows) >= len(frame):
+        exog_rows = [exog_rows[int(index)] for index in frame["_input_order"]]
+    exog = build_exog_matrix(exog_rows, len(frame))
+    if "isObservedDemand" in frame.columns:
+        observed_mask = frame["isObservedDemand"].astype(bool).to_numpy()
+        frame = frame[observed_mask].reset_index(drop=True)
+        exog = exog[observed_mask] if exog is not None else None
+        if len(frame) < 21:
+            raise ValueError("Services SARIMA requires at least 21 observed demand days")
     normalized = frame["normalized"].astype(float).to_numpy()
     actual = frame["actual"].astype(float).to_numpy()
-    exog = build_exog_matrix(payload.get("exogenous", []), len(frame))
     use_exog = exog is not None
     forecast_exog = build_forecast_exog(payload, forecast_days) if use_exog else None
 
@@ -230,12 +278,16 @@ def run(payload):
 
     # Step 1: Validation Grid Search to find best model order
     order, seasonal_order, validation_fit, search_metadata = fit_best(
-        train_normalized, train_exog
+        train_normalized,
+        train_exog,
+        validation_actual,
+        validation_exog,
+        actual[:train_idx],
     )
     validation_forecast = validation_fit.get_forecast(
         steps=val_idx - train_idx, exog=validation_exog
     ).predicted_mean
-    val_mase, val_mape, val_accuracy = metrics(
+    val_mase, val_smape, val_accuracy = metrics(
         validation_actual, validation_forecast, actual[:train_idx]
     )
 
@@ -248,24 +300,24 @@ def run(payload):
             test_forecast = test_fit.get_forecast(
                 steps=len(frame) - val_idx, exog=test_forecast_exog
             ).predicted_mean
-            test_mase, test_mape, test_accuracy = metrics(
-                actual[val_idx:], test_forecast, actual[:val_idx]
+            test_mase, test_smape, test_accuracy = metrics(
+                actual[val_idx:], test_forecast, actual[:train_idx]
             )
             eval_metrics = {
                 "mase": test_mase,
-                "mape": test_mape,
+                "smape": test_smape,
                 "accuracy": test_accuracy,
             }
         except Exception:
             eval_metrics = {
                 "mase": val_mase,
-                "mape": val_mape,
+                "smape": val_smape,
                 "accuracy": val_accuracy,
             }
     else:
         eval_metrics = {
             "mase": val_mase,
-            "mape": val_mape,
+            "smape": val_smape,
             "accuracy": val_accuracy,
         }
 
@@ -305,7 +357,7 @@ def run(payload):
             f"{'+exog' if use_exog else ''}"
         ),
         "mase": eval_metrics["mase"],
-        "mape": eval_metrics["mape"],
+        "smape": eval_metrics["smape"],
         "accuracy": eval_metrics["accuracy"],
         "forecast": forecast,
         "fittedValues": [round(max(0.0, float(v)), 2) for v in final_fit.fittedvalues],
@@ -316,6 +368,14 @@ def run(payload):
             "validationDays": val_idx - train_idx,
             "trainingDays": train_idx,
             "testDays": len(frame) - val_idx if has_test else 0,
+            "splitDates": {
+                "trainStart": pd.to_datetime(frame["date"].iloc[0]).strftime("%Y-%m-%d"),
+                "trainEnd": pd.to_datetime(frame["date"].iloc[train_idx - 1]).strftime("%Y-%m-%d"),
+                "validationStart": pd.to_datetime(frame["date"].iloc[train_idx]).strftime("%Y-%m-%d"),
+                "validationEnd": pd.to_datetime(frame["date"].iloc[val_idx - 1]).strftime("%Y-%m-%d"),
+                "testStart": pd.to_datetime(frame["date"].iloc[val_idx]).strftime("%Y-%m-%d") if val_idx < len(frame) else None,
+                "testEnd": pd.to_datetime(frame["date"].iloc[-1]).strftime("%Y-%m-%d") if val_idx < len(frame) else None,
+            },
             "splitRatio": split_ratio,
             "univariate": not use_exog,
             "exogenousVariables": EXOG_COLUMNS if use_exog else [],

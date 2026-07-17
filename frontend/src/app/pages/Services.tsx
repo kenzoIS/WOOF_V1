@@ -185,7 +185,7 @@ export function Services() {
   const [tempOverride, setTempOverride] = useState(28);
   const [rainChanceOverride, setRainChanceOverride] = useState(0); // 0 or 1
   const [humidityOverride, setHumidityOverride] = useState(60);
-  const [backtestSplit, setBacktestSplit] = useState<string>("80-20");
+  const [forecastMode, setForecastMode] = useState<string>("production");
   const [isSimulating, setIsSimulating] = useState(false);
 
   useEffect(() => {
@@ -220,15 +220,16 @@ export function Services() {
       params.holiday = "0";
     }
 
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
 
     getForecast("services", params).then(setForecastRun).catch((err) => {
       console.error("Forecast fetch failed:", err);
       toast.error(err.message || "Failed to fetch Services forecast. Please try again.");
     });
-  }, [viewMode, customForecastStart, customForecastEnd, backtestSplit]);
+  }, [viewMode, customForecastStart, customForecastEnd, forecastMode]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -280,8 +281,9 @@ export function Services() {
       params.holiday = "0";
     }
 
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
 
     let targetDays = 30;
@@ -327,8 +329,9 @@ export function Services() {
     }
 
     const params: Record<string, string> = { days: String(targetDays) };
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
 
     try {
@@ -362,7 +365,10 @@ export function Services() {
             : 30;
 
     const firstForecastDate = forecastRun.forecast?.[0]?.date;
-    const isBacktest = forecastRun.modelMetadata?.splitRatio === '80-10-10';
+    const isBacktest =
+      forecastRun.modelMetadata?.forecastMode === "latest-holdout" ||
+      forecastRun.modelMetadata?.forecastMode === "fixed-window" ||
+      forecastRun.modelMetadata?.splitRatio === "80-10-10";
 
     const selectedRange =
       viewMode === "custom"
@@ -385,6 +391,12 @@ export function Services() {
     const historyRange =
       viewMode === "custom"
         ? selectedRange
+        : isBacktest
+          ? {
+              start: firstForecastDate || "2026-04-01",
+              end: latestHistoryDate,
+              isCustom: false,
+            }
         : parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
     const forecastRows = filterByDateRange(forecastRun.forecast || [], selectedRange);
@@ -659,8 +671,9 @@ export function Services() {
   const handleRetrainModel = () => {
     const toastId = toast.loading("Retraining model with latest data... This may take a few seconds.");
     const params: Record<string, string> = { forceRefresh: "true" };
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
     getForecast("services", params)
       .then((res) => {
@@ -680,8 +693,9 @@ export function Services() {
     toast.info("Retrying data synchronization...");
     setTimeout(() => {
       const params: Record<string, string> = {};
-      if (backtestSplit !== "80-20") {
-        params.backtestSplit = backtestSplit;
+      if (forecastMode !== "production") {
+        params.forecastMode = forecastMode;
+        if (forecastMode === "latest-holdout") params.holdoutDays = "61";
       }
       void getForecast("services", params).then(setForecastRun);
       setSuccessModal({ isOpen: true, type: "data_sync_success" });
@@ -929,8 +943,8 @@ export function Services() {
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.accuracy.toFixed(1)}%` : "—"}</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">MAPE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.mape.toFixed(2)}%` : "—"}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.smape.toFixed(2)}%` : "—"}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
@@ -959,20 +973,23 @@ export function Services() {
               <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
               
               <div>
-                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Backtesting Split</label>
+                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Forecast Mode</label>
                 <select
-                  value={backtestSplit}
-                  onChange={(e) => setBacktestSplit(e.target.value)}
+                  value={forecastMode}
+                  onChange={(e) => setForecastMode(e.target.value)}
                   className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#3AE4FA]"
                 >
-                  <option value="80-20">Live Forecast (80/20 Split)</option>
-                  <option value="80-10-10">Backtesting (80-10-10 Split)</option>
+                  <option value="production">Production forecast</option>
+                  <option value="latest-holdout">Latest holdout backtest</option>
+                  <option value="fixed-window">Thesis fixed-window backtest</option>
                 </select>
               </div>
 
               <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-                {backtestSplit !== "80-20"
-                  ? "Naka-enable ang backtesting mode. Ipinapakita ng graph ang overlap sa pagitan ng actual at predicted revenue para sa Abril at Mayo 2026 upang masukat ang kawastuhan ng model."
+                {forecastMode === "fixed-window"
+                  ? "Thesis backtest mode uses the April-May 2026 overlap for reproducible defense metrics."
+                  : forecastMode === "latest-holdout"
+                    ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
                   : (forecastRun
                       ? `${forecastRun.modelName} was selected using held-out uploaded Services history and generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
                       : "Upload Services history from POS or PetHub to generate a validated forecast.")}
@@ -1390,9 +1407,9 @@ export function Services() {
                 </p>
               </div>
               <div>
-                <strong className="text-sm text-[#3AE4FA]">MAPE (Mean Absolute Percentage Error)</strong>
+                <strong className="text-sm text-[#3AE4FA]">sMAPE (Symmetric Mean Absolute Percentage Error)</strong>
                 <p className="mt-1">
-                  The average margin of error in percentage terms. A **lower percentage** (such as 5%) indicates that the AI's predictions deviate only slightly from reality, ensuring higher precision.
+                  The symmetric percentage error between forecasted and actual demand. It is more stable for low-volume Services days.
                 </p>
               </div>
               <div>

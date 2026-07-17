@@ -20,6 +20,8 @@ export interface NormalizedDailyValue extends DailyValue {
   normalized: number;
   isMissingDate: boolean;
   isTrueZeroDay: boolean;
+  isClosedDay: boolean;
+  isObservedDemand: boolean;
   rawActual: number;
   cappedActual: number;
   isOutlier: boolean;
@@ -173,11 +175,13 @@ export function normalizeDailySeries(
     const existing = byDate.get(date);
     const actual = existing?.actual ?? 0;
     const isMissingDate = !existing;
+    const isClosedDay = actual === 0;
+    const isObservedDemand = !isClosedDay;
     const cappedActual =
       existing && outlierCap !== null ? Math.min(actual, outlierCap) : actual;
-    if (ema === null) {
+    if (ema === null && isObservedDemand) {
       ema = cappedActual;
-    } else if (!isMissingDate) {
+    } else if (ema !== null && isObservedDemand) {
       ema = alpha * cappedActual + (1 - alpha) * ema;
     }
     const calendar = getCalendarFeatures(date);
@@ -203,9 +207,11 @@ export function normalizeDailySeries(
       averageUnitPrice:
         existing?.averageUnitPrice ??
         (actual > 0 ? round(revenue / Math.max(actual, 1)) : 0),
-      normalized: round(ema),
+      normalized: round(ema ?? 0),
       isMissingDate,
-      isTrueZeroDay: !isMissingDate && actual === 0,
+      isTrueZeroDay: false,
+      isClosedDay,
+      isObservedDemand,
       rawActual: round(actual),
       cappedActual: round(cappedActual),
       isOutlier: Boolean(existing && outlierCap !== null && actual > outlierCap),

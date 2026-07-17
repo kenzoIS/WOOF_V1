@@ -2,6 +2,149 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-17 - Closed-Day Semantics and Full sMAPE Switch
+
+### Requested
+
+- Treat historical rows with `0` actual demand as days when the business was closed, not as observed zero-demand days.
+- Fully replace standard MAPE reporting/selection with sMAPE across the forecast pipeline.
+- Keep the system ready for future POS, PetHub, Shopee, and TikTok ingestion where closed days and partial days must be handled consistently.
+
+### Backend Changes
+
+- Updated `normalizeDailySeries` to emit `isClosedDay` and `isObservedDemand` flags.
+- Changed EMA normalization so closed days do not update the demand signal; leading closed days normalize to `0`, and the first open day initializes the signal.
+- Updated forecast planning so latest/fixed backtest windows are still chosen by calendar dates, but model training and backtest scoring use only observed demand days.
+- Filtered Cafe Prophet and Services SARIMA/SARIMAX Python inputs to exclude closed days before splitting, fitting, validation, and test evaluation.
+- Replaced standard MAPE with sMAPE in TypeScript metric recomputation, Cafe Prophet, Services SARIMA/SARIMAX, and the legacy retail forecast helper.
+- Renamed the persisted/API metric field from `mape` to `smape`, added closed-day metadata, and bumped `forecastRevenuePayloadVersion` to `6` so older cached metric payloads are rebuilt.
+- Added/updated tests for closed-day normalization, forecast payload shape, and sMAPE fixtures.
+
+### Frontend Changes
+
+- Updated Cafe and Services model metric cards/modals to display `sMAPE`.
+- Updated the shared forecast API type to expose `smape`, `isClosedDay`, and `isObservedDemand`.
+- Updated the Recursive Learning reliability labels from MAPE to sMAPE.
+
+### Files Changed
+
+- `backend/src/common/time-series.ts`
+- `backend/src/common/time-series.spec.ts`
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/analytics/analytics.service.spec.ts`
+- `backend/src/analytics/schemas/forecast-run.schema.ts`
+- `backend/src/analytics/python/cafe_prophet.py`
+- `backend/src/analytics/python/services_sarima.py`
+- `backend/src/analytics/python/forecast.py`
+- `backend/src/analytics/python/test_cafe_prophet.py`
+- `backend/src/analytics/python/test_services_sarima.py`
+- `frontend/src/app/lib/api.ts`
+- `frontend/src/app/pages/Cafe.tsx`
+- `frontend/src/app/pages/Services.tsx`
+- `frontend/src/app/pages/RecursiveLearning.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm test -- --runInBand analytics.service.spec.ts time-series.spec.ts csv.service.spec.ts` in `backend` (27 tests).
+- Passed: `npm run build` in `backend`.
+- Passed: `python -m py_compile src/analytics/python/cafe_prophet.py src/analytics/python/services_sarima.py src/analytics/python/forecast.py src/analytics/python/cross_sell.py` in `backend`.
+- Passed: `python -m unittest discover -s src/analytics/python -p "test_*.py"` in `backend` (6 tests).
+- Passed: `npm run build` in `frontend` after allowing Next.js build-worker spawning.
+- Note: The CSV rollback test intentionally logs a mocked `database insert failed` error while verifying rollback behavior; the suite still passes.
+
+## 2026-07-17 - Three-Mode Forecast Evaluation Readiness
+
+### Requested
+
+- Replace the fixed-date-only backtest assumption with a system-ready design for current static POS data and future continuous ingestion from POS, Shopee, TikTok, and PetHub.
+- Support three forecast/evaluation modes: production forecast, latest holdout backtest, and fixed thesis backtest.
+- Update the worklog and provide a teammate-facing explanation.
+
+### Backend Changes
+
+- Added `forecastMode` query support in `analytics.controller.ts`, with optional `holdoutDays`, `trainEndDate`, `testStartDate`, and `testEndDate` query params. The legacy `backtestSplit` query still maps to fixed-window mode for backward compatibility.
+- Added a forecast evaluation planner in `analytics.service.ts`:
+  - `production`: trains on all complete eligible historical days and forecasts future dates.
+  - `latest-holdout`: dynamically reserves the latest complete holdout window, defaulting to 61 days, then forecasts across that holdout plus the requested future horizon.
+  - `fixed-window`: keeps the capstone thesis window using March 31, 2026 as train end and April 1-May 31, 2026 as test overlap unless explicit dates are supplied.
+- Added data-readiness handling for future webhook/API ingestion by excluding current/future partial days from model training/evaluation.
+- Added settled-transaction filtering to the forecasting aggregation so canceled, voided, rejected, failed, unpaid, and refunded rows do not enter Cafe/Services forecasting.
+- Extended forecast cache identity to include forecast mode, holdout days, and fixed-window dates so production/latest/fixed results cannot be accidentally reused across modes.
+- Added model metadata describing forecast mode, train/test dates, latest observed date, latest eligible date, incomplete-day exclusions, and source readiness policy.
+- Added unit coverage for latest-holdout and fixed-window backtesting behavior.
+
+### Frontend Changes
+
+- Replaced the Cafe and Services "Backtesting Split" selector with a "Forecast Mode" selector:
+  - Production forecast
+  - Latest holdout backtest
+  - Thesis fixed-window backtest
+- Cafe and Services now send `forecastMode` and, for latest holdout, `holdoutDays=61`.
+- Backtest chart overlap detection now reads `forecastMode` metadata while still tolerating legacy `splitRatio=80-10-10`.
+
+### Files Changed
+
+- [analytics.controller.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.controller.ts)
+- [analytics.service.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.ts)
+- [analytics.service.spec.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.spec.ts)
+- [Cafe.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Cafe.tsx)
+- [Services.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Services.tsx)
+- [WORKLOG.md](file:///D:/Capstone_v3/WOOF_V1/WORKLOG.md)
+
+### Verification
+
+- Passed: `npm test -- --runInBand analytics.service.spec.ts time-series.spec.ts csv.service.spec.ts` in `backend` (26 tests).
+- Passed: `npm run build` in `backend`.
+- Passed: `python -m py_compile src/analytics/python/cafe_prophet.py src/analytics/python/services_sarima.py src/analytics/python/cross_sell.py` in `backend`.
+- Passed: `npm run build` in `frontend` after allowing Next.js build-worker spawning.
+- Note: The CSV rollback test intentionally logs a mocked `database insert failed` error while verifying rollback behavior; the suite still passes.
+
+## 2026-07-17 - Backtesting Audit Fixes and Paper-Compliance Sweep
+
+### Requested
+
+- Implement the fixes from the forecasting audit's Critical, High, Medium, and Next Priority findings.
+- Make the 80-10-10 backtesting path defensible for Cafe Prophet and Services SARIMAX.
+- Update this worklog with the implementation and verification results.
+
+### Backend Changes
+
+- Updated `cafe_prophet.py` to sort input rows by parsed date before splitting, keep exogenous rows aligned after sorting, report split date metadata, and compute test MASE using the training-only naive denominator.
+- Updated `services_sarima.py` to sort input rows by date, use the required SARIMAX exogenous column order, include humidity and day-of-week features, use sensible weather fallbacks, select SARIMA/SARIMAX orders by validation MASE/MAPE instead of AIC alone, and compute test MASE against the training-only denominator.
+- Updated `analytics.service.ts` so backtest mode trains through March 31, 2026, forecasts April 1-May 31, 2026, recomputes reported MASE/MAPE/accuracy against actual April-May overlap rows, and enforces the paper rule that `MASE >= 1.2` falls back to SMA.
+- Added explicit `volumeForecast` and `revenueForecast` vectors to persisted forecast runs while keeping the existing `forecast` field backward-compatible for dashboard consumers.
+- Bumped the forecast payload version to `5` and tightened cache reuse so old forecast payload shapes are rebuilt instead of reused.
+- Changed price calibration to use the sector's latest last-30-day weighted POS unit price instead of a broad 2026 average.
+- Added a two-minute Python child-process timeout so long-running Prophet/SARIMAX/FP-Growth runs fail cleanly.
+- Fixed the CSV rollback unit-test mock to include the `.find().exec()` cleanup path now used by rollback.
+
+### Frontend Changes
+
+- Updated the forecast API type with a shared `ForecastPoint` interface and optional `volumeForecast` / `revenueForecast` arrays.
+- Forced Cafe and Services backtest charts to include the April-May overlap window so actual and forecast lines render together regardless of the global history filter.
+
+### Files Changed
+
+- [cafe_prophet.py](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/python/cafe_prophet.py)
+- [services_sarima.py](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/python/services_sarima.py)
+- [analytics.service.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.ts)
+- [forecast-run.schema.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/schemas/forecast-run.schema.ts)
+- [analytics.service.spec.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/analytics/analytics.service.spec.ts)
+- [csv.service.spec.ts](file:///D:/Capstone_v3/WOOF_V1/backend/src/csv/csv.service.spec.ts)
+- [api.ts](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/lib/api.ts)
+- [Cafe.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Cafe.tsx)
+- [Services.tsx](file:///D:/Capstone_v3/WOOF_V1/frontend/src/app/pages/Services.tsx)
+- [WORKLOG.md](file:///D:/Capstone_v3/WOOF_V1/WORKLOG.md)
+
+### Verification
+
+- Passed: `npm test -- --runInBand analytics.service.spec.ts time-series.spec.ts csv.service.spec.ts` in `backend` (24 tests).
+- Passed: `python -m py_compile src/analytics/python/cafe_prophet.py src/analytics/python/services_sarima.py src/analytics/python/cross_sell.py` in `backend`.
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after allowing Next.js to spawn build workers; the first sandboxed attempt failed with `spawn EPERM`.
+- Note: Python `pytest` was not run because the local Python environment does not have `pytest` installed.
+
 ## 2026-07-14 - PetHub Sample ETL Normalization
 
 ### Requested

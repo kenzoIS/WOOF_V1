@@ -48,12 +48,25 @@ async function apiError(
   return new Error(message || fallback);
 }
 
+export interface ForecastPoint {
+  date: string;
+  forecast: number;
+  confidenceLow?: number;
+  confidenceHigh?: number;
+  forecastQuantity?: number;
+  projectedNetSales?: number;
+  projectedConfidenceLow?: number;
+  projectedConfidenceHigh?: number;
+  unitPrice?: number;
+  projectedGrossProfit?: number;
+}
+
 export interface ForecastRun {
   _id: string;
   module: 'Cafe' | 'Services';
   modelName: string;
   mase: number;
-  mape: number;
+  smape: number;
   accuracy: number;
   isFallback: boolean;
   historical: Array<{
@@ -64,19 +77,12 @@ export interface ForecastRun {
     revenue?: number;
     fitted?: number;
     grossProfit?: number;
+    isClosedDay?: boolean;
+    isObservedDemand?: boolean;
   }>;
-  forecast: Array<{
-    date: string;
-    forecast: number;
-    confidenceLow?: number;
-    confidenceHigh?: number;
-    forecastQuantity?: number;
-    projectedNetSales?: number;
-    projectedConfidenceLow?: number;
-    projectedConfidenceHigh?: number;
-    unitPrice?: number;
-    projectedGrossProfit?: number;
-  }>;
+  forecast: ForecastPoint[];
+  volumeForecast?: ForecastPoint[];
+  revenueForecast?: ForecastPoint[];
   kpis: {
     totalRevenue: number;
     totalOrders: number;

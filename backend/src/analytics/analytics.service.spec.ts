@@ -59,6 +59,31 @@ describe('AnalyticsService getForecast', () => {
       };
     });
 
+  const forecastRowsFromActuals = (
+    rows: Array<{ _id: string; quantity: number }>,
+    startIndex: number,
+    days: number,
+  ) =>
+    Array.from({ length: days }, (_, index) => {
+      const row = rows[startIndex + index];
+      if (row) {
+        return {
+          date: row._id,
+          forecast: row.quantity,
+          confidenceLow: Math.max(0, row.quantity - 1),
+          confidenceHigh: row.quantity + 1,
+        };
+      }
+      const lastDate = new Date(`${rows[rows.length - 1]._id}T00:00:00.000Z`);
+      lastDate.setUTCDate(lastDate.getUTCDate() + index - (rows.length - startIndex) + 1);
+      return {
+        date: lastDate.toISOString().slice(0, 10),
+        forecast: 120,
+        confidenceLow: 110,
+        confidenceHigh: 130,
+      };
+    });
+
   const mockForecastAggregates = (days: number) => {
     const rows = dailyRows(days);
     transactionModel.aggregate
@@ -83,6 +108,7 @@ describe('AnalyticsService getForecast', () => {
       ])
       .mockResolvedValueOnce(rows)
       .mockResolvedValueOnce([{ _id: 'POS', revenue: 2500, count: 25 }])
+      .mockResolvedValueOnce([{ date: rows[rows.length - 1]?._id ? new Date(`${rows[rows.length - 1]._id}T00:00:00.000Z`) : new Date() }])
       .mockResolvedValueOnce([
         {
           weightedRevenue: 12000,
@@ -136,7 +162,7 @@ describe('AnalyticsService getForecast', () => {
     jest.spyOn(service as any, 'runPython').mockResolvedValue({
       modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
       mase: 0.8,
-      mape: 15,
+      smape: 15,
       accuracy: 85,
       forecast: forecastRows(30),
       fittedValues: Array.from({ length: 21 }, (_, index) => 95 + index),
@@ -149,7 +175,7 @@ describe('AnalyticsService getForecast', () => {
         module: 'Cafe',
         modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
         mase: 0.8,
-        mape: 15,
+        smape: 15,
         accuracy: 85,
         isFallback: false,
         kpis: expect.any(Object),
@@ -175,8 +201,10 @@ describe('AnalyticsService getForecast', () => {
       }),
     );
     expect(result.modelMetadata.targetVariable).toBe('quantity_volume');
-    expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(4);
+    expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(6);
     expect(result.modelMetadata.annualDemandQuantity).toBeGreaterThan(0);
+    expect(result.volumeForecast).toHaveLength(30);
+    expect(result.revenueForecast).toHaveLength(30);
     expect(result.historical.slice(0, -1).every((point) => point.fitted === undefined)).toBe(true);
     expect(result.historical[20].fitted).toBe(result.historical[20].actual);
     expect(result.modelMetadata.predictionStartsAt).toBe(result.historical[20].date);
@@ -184,7 +212,7 @@ describe('AnalyticsService getForecast', () => {
     expect(result).toHaveProperty('module');
     expect(result).toHaveProperty('modelName');
     expect(result).toHaveProperty('mase');
-    expect(result).toHaveProperty('mape');
+    expect(result).toHaveProperty('smape');
     expect(result).toHaveProperty('accuracy');
     expect(result).toHaveProperty('historical');
     expect(result).toHaveProperty('forecast');
@@ -194,26 +222,91 @@ describe('AnalyticsService getForecast', () => {
     );
   });
 
-  it('keeps the selected Cafe model when MASE exceeds 1.2 and reports a quality warning', async () => {
+  it('falls back to SMA when selected Cafe model MASE is at or above 1.2', async () => {
     mockForecastAggregates(21);
     jest.spyOn(service as any, 'runPython').mockResolvedValue({
       modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
       mase: 1.5,
-      mape: 25,
+      smape: 25,
       accuracy: 75,
       forecast: forecastRows(30),
     });
 
     const result = await service.getForecast('cafe');
 
-    expect(result.isFallback).toBe(false);
-    expect(result.modelName).toBe('Prophet (weekly + yearly seasonality + PH holidays)');
-    expect(result.rejectionReason).toBeUndefined();
-    expect(result.modelMetadata.modelQualityWarning).toContain('exceeded 1.2');
+    expect(result.isFallback).toBe(true);
+    expect(result.modelName).toBe('SMA (7-day fallback)');
+    expect(result.rejectionReason).toContain('exceeded the 1.2 threshold');
     expect(result.forecast.map((point) => point.projectedNetSales).slice(0, 14)).toEqual([
-      18000, 18120, 18240, 18360, 18480, 18600, 18720, 18840, 18960, 19080,
-      19200, 19320, 19440, 19560,
+      3240, 3240, 3240, 3240, 3240, 3240, 3240, 3240, 3240, 3240, 3240,
+      3240, 3240, 3240,
     ]);
+  });
+
+  it('uses the most recent complete window for latest-holdout backtesting', async () => {
+    const rows = dailyRows(180);
+    mockForecastAggregates(180);
+    const runPythonSpy = jest.spyOn(service as any, 'runPython').mockResolvedValue({
+      modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
+      mase: 0.8,
+      smape: 15,
+      accuracy: 85,
+      forecast: forecastRowsFromActuals(rows, 166, 44),
+    });
+
+    const result = await service.getForecast('cafe', {
+      forecastMode: 'latest-holdout',
+      holdoutDays: '14',
+    });
+
+    expect(result.isFallback).toBe(false);
+    expect(result.modelMetadata.forecastMode).toBe('latest-holdout');
+    expect(result.modelMetadata.holdoutDays).toBe(14);
+    expect(result.modelMetadata.backtestMetricSource).toBe('latest_complete_holdout');
+    expect(result.modelMetadata.trainEndDate).toBe(rows[165]._id);
+    expect(result.modelMetadata.testStartDate).toBe(rows[166]._id);
+    expect(result.modelMetadata.testEndDate).toBe(rows[179]._id);
+    expect(runPythonSpy).toHaveBeenCalledWith(
+      'cafe_prophet.py',
+      expect.objectContaining({
+        data: expect.arrayContaining([expect.objectContaining({ date: rows[165]._id })]),
+        forecastDays: 44,
+        splitRatio: '80-10-10',
+      }),
+    );
+    expect((runPythonSpy.mock.calls[0][1] as any).data).toHaveLength(166);
+  });
+
+  it('keeps the April-May thesis window available as fixed-window backtesting', async () => {
+    const rows = dailyRows(160);
+    mockForecastAggregates(160);
+    const runPythonSpy = jest.spyOn(service as any, 'runPython').mockResolvedValue({
+      modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
+      mase: 0.8,
+      smape: 15,
+      accuracy: 85,
+      forecast: forecastRowsFromActuals(rows, 90, 91),
+    });
+
+    const result = await service.getForecast('cafe', {
+      forecastMode: 'fixed-window',
+    });
+
+    expect(result.isFallback).toBe(false);
+    expect(result.modelMetadata.forecastMode).toBe('fixed-window');
+    expect(result.modelMetadata.backtestMetricSource).toBe('fixed_window_overlap');
+    expect(result.modelMetadata.trainEndDate).toBe('2026-03-31');
+    expect(result.modelMetadata.testStartDate).toBe('2026-04-01');
+    expect(result.modelMetadata.testEndDate).toBe('2026-05-31');
+    expect(result.modelMetadata.testDays).toBe(61);
+    expect(runPythonSpy).toHaveBeenCalledWith(
+      'cafe_prophet.py',
+      expect.objectContaining({
+        forecastDays: 91,
+        splitRatio: '80-10-10',
+      }),
+    );
+    expect((runPythonSpy.mock.calls[0][1] as any).data).toHaveLength(90);
   });
 
   it('falls back to SMA when fewer than 21 daily observations exist', async () => {
@@ -361,7 +454,7 @@ describe('AnalyticsService getForecast', () => {
         module: 'Cafe',
         modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
         mase: 0.8,
-        mape: 15,
+        smape: 15,
         accuracy: 85,
         isFallback: false,
         historical: [
@@ -376,7 +469,7 @@ describe('AnalyticsService getForecast', () => {
           csvUploadCount: 2,
           latestCsvUploadId: 'upload-id-1',
           latestCsvUploadTime: 123456789,
-          forecastRevenuePayloadVersion: 4,
+          forecastRevenuePayloadVersion: 6,
         },
         generatedAt: new Date(),
         toObject: function() { return this; }
@@ -411,12 +504,12 @@ describe('AnalyticsService getForecast', () => {
       expect(result.itemHistory).toEqual([]);
     });
 
-    it('reuses legacy cached revenue forecasts without forcing a Python retrain', async () => {
+    it('rebuilds legacy cached revenue forecasts that lack the current payload version', async () => {
       const cached = {
         module: 'Cafe',
         modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
         mase: 0.8,
-        mape: 15,
+        smape: 15,
         accuracy: 85,
         isFallback: false,
         historical: [
@@ -450,14 +543,21 @@ describe('AnalyticsService getForecast', () => {
       csvUploadModel.countDocuments.mockReturnValue({
         exec: jest.fn().mockResolvedValue(2),
       });
-      const runPythonSpy = jest.spyOn(service as any, 'runPython');
+      mockForecastAggregates(21);
+      const runPythonSpy = jest.spyOn(service as any, 'runPython').mockResolvedValue({
+        modelName: 'Prophet (weekly + yearly seasonality + PH holidays)',
+        mase: 0.8,
+        smape: 15,
+        accuracy: 85,
+        forecast: forecastRows(30),
+      });
 
       const result = await service.getForecast('cafe');
 
-      expect(runPythonSpy).not.toHaveBeenCalled();
-      expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(4);
-      expect(result.modelMetadata.historyEndDate).toBe('2026-01-02');
-      expect(result.modelMetadata.forecastEndDate).toBe('2026-01-03');
+      expect(runPythonSpy).toHaveBeenCalled();
+      expect(result.modelMetadata.forecastRevenuePayloadVersion).toBe(6);
+      expect(result.volumeForecast).toHaveLength(30);
+      expect(result.revenueForecast).toHaveLength(30);
     });
   });
 
@@ -571,3 +671,4 @@ describe('AnalyticsService getForecast', () => {
     });
   });
 });
+

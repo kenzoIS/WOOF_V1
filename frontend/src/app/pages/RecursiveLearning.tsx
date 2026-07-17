@@ -26,7 +26,7 @@ export function RecursiveLearning() {
       timestamp: "2 hours ago",
       model: "XGBoost Revenue Predictor",
       dataPoints: "2,847 new transactions",
-      improvement: "MAPE reduced by 0.4%",
+      improvement: "sMAPE reduced by 0.4%",
       status: "success"
     },
     {
@@ -79,7 +79,7 @@ export function RecursiveLearning() {
             </div>
             <div className="text-2xl font-bold text-slate-900">5.1%</div>
           </div>
-          <div className="text-sm text-slate-600">Avg MAPE</div>
+          <div className="text-sm text-slate-600">Avg sMAPE</div>
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -110,7 +110,7 @@ export function RecursiveLearning() {
         {/* Model Reliability */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <div className="mb-6">
-            <h2 className="text-lg font-semibold text-slate-900">Model Reliability (MAPE %)</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Model Reliability (sMAPE %)</h2>
             <p className="text-sm text-slate-600 mt-1">Lower is better • 6-week improvement trend</p>
           </div>
 
@@ -119,7 +119,7 @@ export function RecursiveLearning() {
               <LineChart data={reliabilityData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="week" stroke="#64748b" />
-                <YAxis stroke="#64748b" label={{ value: 'MAPE %', angle: -90, position: 'insideLeft' }} />
+                <YAxis stroke="#64748b" label={{ value: 'sMAPE %', angle: -90, position: 'insideLeft' }} />
                 <Tooltip 
                   contentStyle={{ 
                     backgroundColor: 'white', 
@@ -150,12 +150,12 @@ export function RecursiveLearning() {
 
           <div className="mt-4 grid grid-cols-2 gap-4">
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="text-xs text-slate-600 mb-1">Prophet MAPE</div>
+              <div className="text-xs text-slate-600 mb-1">Prophet sMAPE</div>
               <div className="text-2xl font-bold text-blue-600">5.9%</div>
               <div className="text-xs text-green-600 mt-1">↓ 2.3% from Week 1</div>
             </div>
             <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg">
-              <div className="text-xs text-slate-600 mb-1">XGBoost MAPE</div>
+              <div className="text-xs text-slate-600 mb-1">XGBoost sMAPE</div>
               <div className="text-2xl font-bold text-teal-600">4.5%</div>
               <div className="text-xs text-green-600 mt-1">↓ 2.0% from Week 1</div>
             </div>

@@ -33,6 +33,11 @@ export class AnalyticsController {
     @Query('holiday') holiday?: string,
     @Query('days') days?: string,
     @Query('forceRefresh') forceRefresh?: string,
+    @Query('forecastMode') forecastMode?: string,
+    @Query('holdoutDays') holdoutDays?: string,
+    @Query('trainEndDate') trainEndDate?: string,
+    @Query('testStartDate') testStartDate?: string,
+    @Query('testEndDate') testEndDate?: string,
     @Query('backtestSplit') backtestSplit?: string,
   ) {
     return this.analyticsService.getForecast(sector, {
@@ -41,6 +46,11 @@ export class AnalyticsController {
       holiday,
       days,
       forceRefresh,
+      forecastMode,
+      holdoutDays,
+      trainEndDate,
+      testStartDate,
+      testEndDate,
       backtestSplit,
     });
   }

@@ -74,13 +74,14 @@ def metrics(actual, predicted, training):
         float(np.mean(np.abs(np.diff(training)))) if len(training) > 1 else 0.0
     )
     mase = mae / naive_mae if naive_mae > 0 else (0.0 if mae == 0 else 999.0)
-    non_zero = actual != 0
-    mape = (
-        float(np.mean(np.abs((actual[non_zero] - predicted[non_zero]) / actual[non_zero])) * 100)
-        if np.any(non_zero)
-        else 0.0
+    denominator = (np.abs(actual) + np.abs(predicted)) / 2.0
+    smape_terms = np.where(
+        denominator == 0,
+        0.0,
+        np.abs(actual - predicted) / denominator * 100.0,
     )
-    return round(mase, 2), round(mape, 2), round(max(0.0, 100.0 - mape), 2)
+    smape = float(np.mean(smape_terms)) if len(smape_terms) else 0.0
+    return round(mase, 2), round(smape, 2), round(max(0.0, 100.0 - smape), 2)
 
 
 def run(payload):
@@ -99,12 +100,17 @@ def run(payload):
         raise ValueError("Cafe Prophet requires at least 21 daily observations")
 
     frame = pd.DataFrame(data)
+    frame["_input_order"] = np.arange(len(frame))
     required_columns = {"date", "actual", "normalized"}
     missing_columns = required_columns.difference(frame.columns)
     if missing_columns:
         raise ValueError(f"Missing required fields: {', '.join(sorted(missing_columns))}")
 
-    frame["ds"] = pd.to_datetime(frame["date"])
+    frame["ds"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["ds"]).sort_values("ds").reset_index(drop=True)
+    if len(frame) < 21:
+        raise ValueError("Cafe Prophet requires at least 21 valid dated observations")
+    frame["ds"] = frame["ds"].dt.tz_localize(None)
     frame["y"] = frame["normalized"].astype(float)
 
     use_exog = False
@@ -112,9 +118,17 @@ def run(payload):
     if isinstance(payload.get("exogenous"), list) and len(payload["exogenous"]) == len(frame):
         exog_frame = pd.DataFrame(payload["exogenous"])
         if all(col in exog_frame.columns for col in EXOG_COLUMNS):
+            exog_frame["_input_order"] = np.arange(len(exog_frame))
+            exog_frame = exog_frame[["_input_order", *EXOG_COLUMNS]]
+            frame = frame.merge(exog_frame, on="_input_order", how="left")
             use_exog = True
             for column in EXOG_COLUMNS:
-                frame[column] = exog_frame[column].fillna(0.0).astype(float)
+                frame[column] = frame[column].fillna(0.0).astype(float)
+
+    if "isObservedDemand" in frame.columns:
+        frame = frame[frame["isObservedDemand"].astype(bool)].reset_index(drop=True)
+        if len(frame) < 21:
+            raise ValueError("Cafe Prophet requires at least 21 observed demand days")
 
     actual = frame["actual"].astype(float).to_numpy()
     train_idx, val_idx, has_test = parse_splits(len(frame), split_ratio)
@@ -136,16 +150,16 @@ def run(payload):
             model = build_model(candidate, use_exog=use_exog)
             model.fit(train)
             predicted = model.predict(val_dates)["yhat"].to_numpy()
-            mase, mape, accuracy = metrics(
+            mase, smape, accuracy = metrics(
                 val_actual, predicted, actual[:train_idx]
             )
-            score = (mase, mape)
+            score = (mase, smape)
             if best is None or score < best["score"]:
                 best = {
                     "score": score,
                     "changepointPriorScale": candidate,
                     "mase": mase,
-                    "mape": mape,
+                    "smape": smape,
                     "accuracy": accuracy,
                 }
         except Exception:
@@ -165,24 +179,24 @@ def run(payload):
                 test_model.fit(frame.iloc[:val_idx][["ds", "y"]])
                 test_dates = frame.iloc[val_idx:][["ds"]]
             test_pred = test_model.predict(test_dates)["yhat"].to_numpy()
-            test_mase, test_mape, test_accuracy = metrics(
-                actual[val_idx:], test_pred, actual[:val_idx]
+            test_mase, test_smape, test_accuracy = metrics(
+                actual[val_idx:], test_pred, actual[:train_idx]
             )
             eval_metrics = {
                 "mase": test_mase,
-                "mape": test_mape,
+                "smape": test_smape,
                 "accuracy": test_accuracy,
             }
         except Exception:
             eval_metrics = {
                 "mase": best["mase"],
-                "mape": best["mape"],
+                "smape": best["smape"],
                 "accuracy": best["accuracy"],
             }
     else:
         eval_metrics = {
             "mase": best["mase"],
-            "mape": best["mape"],
+            "smape": best["smape"],
             "accuracy": best["accuracy"],
         }
 
@@ -228,7 +242,7 @@ def run(payload):
             f"{' + exog' if use_exog else ''})"
         ),
         "mase": eval_metrics["mase"],
-        "mape": eval_metrics["mape"],
+        "smape": eval_metrics["smape"],
         "accuracy": eval_metrics["accuracy"],
         "forecast": forecast,
         "fittedValues": fitted_values,
@@ -238,6 +252,14 @@ def run(payload):
             "validationDays": val_idx - train_idx,
             "trainingDays": train_idx,
             "testDays": len(frame) - val_idx if has_test else 0,
+            "splitDates": {
+                "trainStart": frame["ds"].iloc[0].strftime("%Y-%m-%d"),
+                "trainEnd": frame["ds"].iloc[train_idx - 1].strftime("%Y-%m-%d"),
+                "validationStart": frame["ds"].iloc[train_idx].strftime("%Y-%m-%d"),
+                "validationEnd": frame["ds"].iloc[val_idx - 1].strftime("%Y-%m-%d"),
+                "testStart": frame["ds"].iloc[val_idx].strftime("%Y-%m-%d") if val_idx < len(frame) else None,
+                "testEnd": frame["ds"].iloc[-1].strftime("%Y-%m-%d") if val_idx < len(frame) else None,
+            },
             "splitRatio": split_ratio,
             "weeklySeasonality": True,
             "yearlySeasonality": True,

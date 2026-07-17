@@ -31,19 +31,16 @@ import {
 
 /**
  * Forecasting limitations for the current capstone implementation:
- * 1. Python child process timeout is not implemented yet; long-running fits can
- *    block the Node request path until Python exits. Phase 2 should add
- *    process-level cancellation from Node.
- * 2. Forecast results are not cached; every API call re-runs the selected
+ * 1. Forecast results are not cached; every API call re-runs the selected
  *    Python model. Phase 3 should cache recent ForecastRun results.
- * 3. Services forecasting now attempts SARIMAX with weather and holiday
+ * 2. Services forecasting now attempts SARIMAX with weather and holiday
  *    regressors when exogenous data is available, then degrades to pure SARIMA.
  *    Deeper exogenous validation remains a Phase 1 improvement.
  */
 interface ModelResult {
   modelName: string;
   mase: number;
-  mape: number;
+  smape: number;
   accuracy: number;
   forecast: {
     date: string;
@@ -72,9 +69,42 @@ interface CrossSellOptions {
 }
 
 type HomeRange = 'today' | 'week' | 'month' | 'custom';
-const FORECAST_REVENUE_PAYLOAD_VERSION = 4;
+type ForecastMode = 'production' | 'latest-holdout' | 'fixed-window';
+interface ForecastOverrides {
+  temp?: string;
+  rain?: string;
+  humidity?: string;
+  holiday?: string;
+  days?: string;
+  forceRefresh?: string;
+  forecastMode?: string;
+  holdoutDays?: string;
+  trainEndDate?: string;
+  testStartDate?: string;
+  testEndDate?: string;
+  backtestSplit?: string;
+}
+interface ForecastEvaluationPlan {
+  mode: ForecastMode;
+  isBacktest: boolean;
+  splitRatio: string;
+  trainingHistorical: NormalizedDailyValue[];
+  evaluationHistorical: NormalizedDailyValue[];
+  forecastDays: number;
+  holdoutDays?: number;
+  trainEndDate: string | null;
+  testStartDate: string | null;
+  testEndDate: string | null;
+  backtestMetricSource: string;
+}
+const FORECAST_REVENUE_PAYLOAD_VERSION = 6;
 const DEFAULT_FORECAST_DAYS = 30;
 const MAX_FORECAST_DAYS = 90;
+const PYTHON_TIMEOUT_MS = 120_000;
+const DEFAULT_LATEST_HOLDOUT_DAYS = 61;
+const BACKTEST_TRAIN_END_DATE = '2026-03-31';
+const BACKTEST_TEST_START_DATE = '2026-04-01';
+const BACKTEST_TEST_END_DATE = '2026-05-31';
 
 @Injectable()
 export class AnalyticsService {
@@ -486,7 +516,7 @@ export class AnalyticsService {
    */
   async getForecast(
     sector: string,
-    overrides?: { temp?: string; rain?: string; humidity?: string; holiday?: string; days?: string; forceRefresh?: string; backtestSplit?: string },
+    overrides?: ForecastOverrides,
   ): Promise<any> {
     if (this.normalizeSector(sector) === 'Retail') {
       return this.getLegacyRetailForecast(overrides?.days);
@@ -498,7 +528,27 @@ export class AnalyticsService {
     const reqHumidity = overrides?.humidity !== undefined && overrides.humidity !== '' ? Number(overrides.humidity) : undefined;
     const reqHoliday = overrides?.holiday !== undefined && overrides.holiday !== '' ? (overrides.holiday === '1' ? 1 : 0) : undefined;
     const reqDays = overrides?.days !== undefined && overrides.days !== '' ? this.normalizeForecastDays(overrides.days) : DEFAULT_FORECAST_DAYS;
-    const reqSplit = overrides?.backtestSplit ? '80-10-10' : '80-20';
+    const reqMode = this.normalizeForecastMode(
+      overrides?.forecastMode,
+      overrides?.backtestSplit,
+    );
+    const reqHoldoutDays =
+      reqMode === 'latest-holdout'
+        ? this.normalizeHoldoutDays(overrides?.holdoutDays)
+        : undefined;
+    const reqTrainEndDate =
+      reqMode === 'fixed-window'
+        ? this.normalizeDateKey(overrides?.trainEndDate) || BACKTEST_TRAIN_END_DATE
+        : undefined;
+    const reqTestStartDate =
+      reqMode === 'fixed-window'
+        ? this.normalizeDateKey(overrides?.testStartDate) || BACKTEST_TEST_START_DATE
+        : undefined;
+    const reqTestEndDate =
+      reqMode === 'fixed-window'
+        ? this.normalizeDateKey(overrides?.testEndDate) || BACKTEST_TEST_END_DATE
+        : undefined;
+    const reqSplit = reqMode === 'production' ? '80-20' : '80-10-10';
 
     // Caching check
     const cachedForecast = await this.forecastRunModel
@@ -530,6 +580,12 @@ export class AnalyticsService {
       const cacheHoliday = metadata.holidayOverride !== undefined ? Number(metadata.holidayOverride) : undefined;
       const cacheDays = metadata.daysRequested !== undefined ? Number(metadata.daysRequested) : DEFAULT_FORECAST_DAYS;
       const cacheSplit = metadata.splitRatio || '80-20';
+      const cacheMode = metadata.forecastMode || 'production';
+      const cacheHoldoutDays =
+        metadata.holdoutDays !== undefined ? Number(metadata.holdoutDays) : undefined;
+      const cacheTrainEndDate = metadata.trainEndDate || undefined;
+      const cacheTestStartDate = metadata.testStartDate || undefined;
+      const cacheTestEndDate = metadata.testEndDate || undefined;
 
       const isOverridesMatch =
         reqTemp === cacheTemp &&
@@ -537,10 +593,15 @@ export class AnalyticsService {
         reqHumidity === cacheHumidity &&
         reqHoliday === cacheHoliday &&
         reqDays === cacheDays &&
-        reqSplit === cacheSplit;
+        reqSplit === cacheSplit &&
+        reqMode === cacheMode &&
+        reqHoldoutDays === cacheHoldoutDays &&
+        reqTrainEndDate === cacheTrainEndDate &&
+        reqTestStartDate === cacheTestStartDate &&
+        reqTestEndDate === cacheTestEndDate;
       const payloadVersion = Number(metadata.forecastRevenuePayloadVersion) || 0;
       const hasRevenuePayload =
-        payloadVersion >= 2 &&
+        payloadVersion >= FORECAST_REVENUE_PAYLOAD_VERSION &&
         Array.isArray(cachedForecast.historical) &&
         cachedForecast.historical.some((point: any) => Number(point?.revenue) > 0);
 
@@ -561,6 +622,11 @@ export class AnalyticsService {
       dailyData.map((point: any) => this.toForecastDailyValue(point, module)),
       module,
     );
+    const completeHistorical = this.filterCompleteHistorical(historical);
+    const observedHistorical = this.filterObservedDemand(completeHistorical);
+    const excludedIncompleteDays = historical.length - completeHistorical.length;
+    const excludedClosedDays =
+      completeHistorical.length - observedHistorical.length;
     const revenueByDate = new Map(
       dailyData.map((point: any) => [
         point._id,
@@ -570,24 +636,29 @@ export class AnalyticsService {
     const dashboard = await this.getDashboard(module);
     const forecastDays = this.normalizeForecastDays(overrides?.days || DEFAULT_FORECAST_DAYS);
 
-    const isBacktest = overrides?.backtestSplit !== undefined && overrides.backtestSplit !== '';
-    const splitRatio = isBacktest ? '80-10-10' : '80-20';
-    const truncateDate = '2026-03-31';
-
-    let trainHistorical = historical;
-    let finalForecastDays = forecastDays;
-
-    if (isBacktest) {
-      trainHistorical = historical.filter((point) => point.date <= truncateDate);
-      finalForecastDays = 61 + forecastDays;
-    }
+    const evaluationPlan = this.resolveForecastEvaluationPlan(
+      completeHistorical,
+      forecastDays,
+      reqMode,
+      {
+        holdoutDays: reqHoldoutDays,
+        trainEndDate: reqTrainEndDate,
+        testStartDate: reqTestStartDate,
+        testEndDate: reqTestEndDate,
+      },
+    );
+    const {
+      isBacktest,
+      splitRatio,
+      trainingHistorical: trainHistorical,
+      forecastDays: finalForecastDays,
+    } = evaluationPlan;
 
     let exogenousPayload: Record<string, unknown> = {};
     let exogenousMetadata: Record<string, unknown> = {};
 
     let selectedModel: ModelResult | null = null;
     let rejectionReason = '';
-    let modelQualityWarning = '';
     if (trainHistorical.length >= 21) {
       try {
         if (module === 'Services' || module === 'Cafe') {
@@ -608,11 +679,20 @@ export class AnalyticsService {
           exogenousPayload,
           splitRatio,
         );
+        if (isBacktest) {
+          selectedModel = this.withBacktestEvaluation(
+            selectedModel,
+            evaluationPlan.evaluationHistorical,
+            trainHistorical,
+            evaluationPlan,
+          );
+        }
         if (!Number.isFinite(selectedModel.mase)) {
           rejectionReason = 'Model returned a non-finite MASE score';
           selectedModel = null;
-        } else if (selectedModel.mase > 1.2) {
-          modelQualityWarning = `${selectedModel.modelName} MASE ${selectedModel.mase} exceeded 1.2; using the selected model output instead of flattening to an SMA fallback.`;
+        } else if (selectedModel.mase >= 1.2) {
+          rejectionReason = `${selectedModel.modelName} MASE ${selectedModel.mase} exceeded the 1.2 threshold`;
+          selectedModel = null;
         }
       } catch (error) {
         rejectionReason =
@@ -623,26 +703,37 @@ export class AnalyticsService {
     }
 
     const useFallback = !selectedModel;
-    const finalModel: ModelResult =
+    let finalModel: ModelResult =
       useFallback || !selectedModel
         ? this.buildSmaFallback(trainHistorical, finalForecastDays, rejectionReason)
         : selectedModel;
+    if (isBacktest) {
+      finalModel = this.withBacktestEvaluation(
+        finalModel,
+        evaluationPlan.evaluationHistorical,
+        trainHistorical,
+        evaluationPlan,
+      );
+    }
     const priceCostMatrix = await this.getActivePriceCostMatrix(module);
     const itemHistory = await this.getItemHistory(module);
     const calibratedForecast = this.applyPriceCalibration(
       finalModel.forecast,
       priceCostMatrix,
     );
+    const volumeForecast = this.buildVolumeForecast(finalModel.forecast);
     const payload = {
       module,
       modelName: finalModel.modelName,
       mase: finalModel.mase,
-      mape: finalModel.mape,
+      smape: finalModel.smape,
       accuracy: finalModel.accuracy,
       isFallback: useFallback,
       rejectionReason: useFallback ? rejectionReason : undefined,
-      historical: this.buildAnchoredHistoricalPayload(historical, revenueByDate),
+      historical: this.buildAnchoredHistoricalPayload(completeHistorical, revenueByDate),
       forecast: calibratedForecast,
+      volumeForecast,
+      revenueForecast: calibratedForecast,
       kpis: dashboard.kpis,
       topItems: dashboard.topItems,
       itemHistory,
@@ -650,19 +741,38 @@ export class AnalyticsService {
         ...finalModel.modelMetadata,
         splitRatio,
         emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
-        missingDaysFilled: historical.filter((point) => point.isMissingDate)
+        forecastMode: evaluationPlan.mode,
+        holdoutDays: evaluationPlan.holdoutDays,
+        trainEndDate: evaluationPlan.trainEndDate,
+        testStartDate: evaluationPlan.testStartDate,
+        testEndDate: evaluationPlan.testEndDate,
+        backtestMetricSource: evaluationPlan.backtestMetricSource,
+        incompleteDaysExcluded: excludedIncompleteDays,
+        closedDaysExcluded: excludedClosedDays,
+        latestObservedDate: historical[historical.length - 1]?.date || null,
+        latestEligibleDate: completeHistorical[completeHistorical.length - 1]?.date || null,
+        dataReadinessPolicy:
+          'Uses only complete days for model training/evaluation; current/future partial days are excluded for webhook/API/manual ingestion readiness.',
+        sourceReadinessPolicy:
+          'POS and PetHub may route into Cafe/Services/Retail; Shopee and TikTok are Retail-only. Rows should be settled, paid, deduplicated, and sector-routed before forecasting.',
+        missingDaysFilled: completeHistorical.filter((point) => point.isMissingDate)
           .length,
-        trueZeroDays: historical.filter((point) => point.isTrueZeroDay).length,
-        outlierDaysCapped: historical.filter((point) => point.isOutlier).length,
-        outlierCap: historical.find((point) => point.outlierCap !== null)
+        trueZeroDays: completeHistorical.filter((point) => point.isTrueZeroDay).length,
+        closedDays: completeHistorical.filter((point) => point.isClosedDay).length,
+        observedDemandDays: observedHistorical.length,
+        outlierDaysCapped: completeHistorical.filter((point) => point.isOutlier).length,
+        outlierCap: completeHistorical.find((point) => point.outlierCap !== null)
           ?.outlierCap ?? null,
         sourceChannel: 'Uploaded sector channels',
         targetVariable,
+        percentageErrorMetric: 'sMAPE',
+        closedDayPolicy:
+          'actual=0 means the business was closed; closed days are excluded from demand model fitting and error metrics.',
         forecastRevenuePayloadVersion: FORECAST_REVENUE_PAYLOAD_VERSION,
         forecastUnit: module === 'Services' ? 'service_bookings' : 'items_sold',
         priceCalibration: priceCostMatrix,
-        historyStartDate: historical[0]?.date || null,
-        historyEndDate: historical[historical.length - 1]?.date || null,
+        historyStartDate: completeHistorical[0]?.date || null,
+        historyEndDate: completeHistorical[completeHistorical.length - 1]?.date || null,
         forecastStartDate: calibratedForecast[0]?.date || null,
         forecastEndDate: calibratedForecast[calibratedForecast.length - 1]?.date || null,
         serverGeneratedAt: new Date().toISOString(),
@@ -677,7 +787,6 @@ export class AnalyticsService {
         rainOverride: reqRain,
         humidityOverride: reqHumidity,
         holidayOverride: reqHoliday,
-        ...(modelQualityWarning ? { modelQualityWarning } : {}),
         ...exogenousMetadata,
         csvUploadCount: uploadCount,
         latestCsvUploadId: latestUpload ? latestUpload._id.toString() : null,
@@ -1138,6 +1247,198 @@ export class AnalyticsService {
     );
   }
 
+  private normalizeForecastMode(
+    mode?: string,
+    legacyBacktestSplit?: string,
+  ): ForecastMode {
+    const normalized = String(mode || '').trim().toLowerCase();
+    if (normalized === 'latest-holdout' || normalized === 'latest') {
+      return 'latest-holdout';
+    }
+    if (
+      normalized === 'fixed-window' ||
+      normalized === 'fixed' ||
+      normalized === 'thesis'
+    ) {
+      return 'fixed-window';
+    }
+    if (legacyBacktestSplit !== undefined && legacyBacktestSplit !== '') {
+      return 'fixed-window';
+    }
+    return 'production';
+  }
+
+  private normalizeHoldoutDays(value?: string | number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_LATEST_HOLDOUT_DAYS;
+    }
+    return Math.min(Math.max(Math.trunc(parsed), 7), 365);
+  }
+
+  private normalizeDateKey(value?: string): string | null {
+    if (!value) return null;
+    const match = String(value).match(/^\d{4}-\d{2}-\d{2}$/);
+    if (!match) return null;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isFinite(date.getTime()) ? value : null;
+  }
+
+  private filterCompleteHistorical(
+    historical: NormalizedDailyValue[],
+  ): NormalizedDailyValue[] {
+    const today = this.getDateKeyInTimeZone(new Date(), 'Asia/Manila');
+    return historical.filter((point) => point.date < today);
+  }
+
+  private filterObservedDemand(
+    historical: NormalizedDailyValue[],
+  ): NormalizedDailyValue[] {
+    return historical.filter((point) => point.isObservedDemand);
+  }
+
+  private resolveForecastEvaluationPlan(
+    historical: NormalizedDailyValue[],
+    requestedForecastDays: number,
+    mode: ForecastMode,
+    options: {
+      holdoutDays?: number;
+      trainEndDate?: string;
+      testStartDate?: string;
+      testEndDate?: string;
+    } = {},
+  ): ForecastEvaluationPlan {
+    if (mode === 'latest-holdout') {
+      return this.resolveLatestHoldoutPlan(
+        historical,
+        requestedForecastDays,
+        options.holdoutDays,
+      );
+    }
+    if (mode === 'fixed-window') {
+      return this.resolveFixedWindowPlan(
+        historical,
+        requestedForecastDays,
+        options,
+      );
+    }
+    const latest = historical[historical.length - 1]?.date || null;
+    return {
+      mode: 'production',
+      isBacktest: false,
+      splitRatio: '80-20',
+      trainingHistorical: this.filterObservedDemand(historical),
+      evaluationHistorical: [],
+      forecastDays: requestedForecastDays,
+      trainEndDate: latest,
+      testStartDate: null,
+      testEndDate: null,
+      backtestMetricSource: 'production_internal_model_validation',
+    };
+  }
+
+  private resolveLatestHoldoutPlan(
+    historical: NormalizedDailyValue[],
+    requestedForecastDays: number,
+    holdoutDays = DEFAULT_LATEST_HOLDOUT_DAYS,
+  ): ForecastEvaluationPlan {
+    const safeHoldoutDays = this.normalizeHoldoutDays(holdoutDays);
+    const minimumTrainingDays = 21;
+    const splitIndex = Math.max(
+      minimumTrainingDays,
+      historical.length - safeHoldoutDays,
+    );
+    const trainingWindow = historical.slice(0, splitIndex);
+    const evaluationWindow = historical.slice(splitIndex);
+    const trainingHistorical = this.filterObservedDemand(trainingWindow);
+    const evaluationHistorical = this.filterObservedDemand(evaluationWindow);
+    const testStartDate = evaluationWindow[0]?.date || null;
+    const testEndDate =
+      evaluationWindow[evaluationWindow.length - 1]?.date || null;
+    const trainEndDate =
+      trainingWindow[trainingWindow.length - 1]?.date || null;
+
+    return {
+      mode: 'latest-holdout',
+      isBacktest: evaluationHistorical.length > 0,
+      splitRatio: '80-10-10',
+      trainingHistorical,
+      evaluationHistorical,
+      forecastDays: evaluationWindow.length + requestedForecastDays,
+      holdoutDays: safeHoldoutDays,
+      trainEndDate,
+      testStartDate,
+      testEndDate,
+      backtestMetricSource: 'latest_complete_holdout',
+    };
+  }
+
+  private resolveFixedWindowPlan(
+    historical: NormalizedDailyValue[],
+    requestedForecastDays: number,
+    options: {
+      trainEndDate?: string;
+      testStartDate?: string;
+      testEndDate?: string;
+    },
+  ): ForecastEvaluationPlan {
+    const trainEndDate = options.trainEndDate || BACKTEST_TRAIN_END_DATE;
+    const testStartDate = options.testStartDate || BACKTEST_TEST_START_DATE;
+    const testEndDate = options.testEndDate || BACKTEST_TEST_END_DATE;
+    const trainingWindow = historical.filter(
+      (point) => point.date <= trainEndDate,
+    );
+    const evaluationWindow = historical.filter(
+      (point) => point.date >= testStartDate && point.date <= testEndDate,
+    );
+    const trainingHistorical = this.filterObservedDemand(trainingWindow);
+    const evaluationHistorical = this.filterObservedDemand(evaluationWindow);
+    const lastTrainDate =
+      trainingWindow[trainingWindow.length - 1]?.date || trainEndDate;
+    const overlapForecastDays =
+      this.daysBetweenInclusive(this.addDaysKey(lastTrainDate, 1), testEndDate) ||
+      evaluationHistorical.length;
+
+    return {
+      mode: 'fixed-window',
+      isBacktest: true,
+      splitRatio: '80-10-10',
+      trainingHistorical,
+      evaluationHistorical,
+      forecastDays: Math.max(0, overlapForecastDays) + requestedForecastDays,
+      trainEndDate,
+      testStartDate,
+      testEndDate,
+      backtestMetricSource: 'fixed_window_overlap',
+    };
+  }
+
+  private getDateKeyInTimeZone(date: Date, timeZone: string): string {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const lookup = new Map(parts.map((part) => [part.type, part.value]));
+    return `${lookup.get('year')}-${lookup.get('month')}-${lookup.get('day')}`;
+  }
+
+  private addDaysKey(date: string, days: number): string {
+    const value = new Date(`${date}T00:00:00.000Z`);
+    value.setUTCDate(value.getUTCDate() + days);
+    return value.toISOString().slice(0, 10);
+  }
+
+  private daysBetweenInclusive(start: string, end: string): number {
+    const startTime = new Date(`${start}T00:00:00.000Z`).getTime();
+    const endTime = new Date(`${end}T00:00:00.000Z`).getTime();
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) {
+      return 0;
+    }
+    return Math.floor((endTime - startTime) / (24 * 60 * 60 * 1000)) + 1;
+  }
+
   private async runForecastModel(
     module: ForecastModule,
     historical: NormalizedDailyValue[],
@@ -1383,7 +1684,7 @@ export class AnalyticsService {
 
   private getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {
     return this.transactionModel.aggregate([
-      { $match: { sector: module } },
+      { $match: this.buildForecastTransactionMatch(module) },
       {
         $project: {
           dateKey: {
@@ -1467,6 +1768,31 @@ export class AnalyticsService {
       },
       { $sort: { _id: 1 } },
     ]);
+  }
+
+  private buildForecastTransactionMatch(module: ForecastModule): Record<string, unknown> {
+    const invalidOrderPattern =
+      /(cancelled|canceled|void|voided|refund|refunded|failed|rejected)/i;
+    const invalidPaymentPattern = /(unpaid|failed|refunded|void|voided)/i;
+    return {
+      sector: module,
+      $and: [
+        {
+          $or: [
+            { orderStatus: { $exists: false } },
+            { orderStatus: null },
+            { orderStatus: { $not: invalidOrderPattern } },
+          ],
+        },
+        {
+          $or: [
+            { paymentStatus: { $exists: false } },
+            { paymentStatus: null },
+            { paymentStatus: { $not: invalidPaymentPattern } },
+          ],
+        },
+      ],
+    };
   }
 
   private toForecastDailyValue(point: any, module: ForecastModule): DailyValue {
@@ -1660,6 +1986,7 @@ export class AnalyticsService {
 
     return {
       ...row,
+      dayOfWeek,
       isWeekend: isWeekend ? 1 : 0,
       dayOfWeekSin: this.round(Math.sin(radians)),
       dayOfWeekCos: this.round(Math.cos(radians)),
@@ -1725,6 +2052,8 @@ export class AnalyticsService {
     cappedActual: number;
     isMissingDate: boolean;
     isTrueZeroDay: boolean;
+    isClosedDay: boolean;
+    isObservedDemand: boolean;
     isOutlier: boolean;
     outlierCap: number | null;
     dayOfWeek: number;
@@ -1747,6 +2076,8 @@ export class AnalyticsService {
         cappedActual,
         isMissingDate,
         isTrueZeroDay,
+        isClosedDay,
+        isObservedDemand,
         isOutlier,
         outlierCap,
         dayOfWeek,
@@ -1767,6 +2098,8 @@ export class AnalyticsService {
         cappedActual,
         isMissingDate,
         isTrueZeroDay,
+        isClosedDay,
+        isObservedDemand,
         isOutlier,
         outlierCap,
         dayOfWeek,
@@ -1873,6 +2206,84 @@ export class AnalyticsService {
     };
   }
 
+  private withBacktestEvaluation(
+    result: ModelResult,
+    evaluationHistorical: NormalizedDailyValue[],
+    training: NormalizedDailyValue[],
+    plan: ForecastEvaluationPlan,
+  ): ModelResult {
+    const predictedByDate = new Map(
+      result.forecast.map((point) => [
+        point.date,
+        Number(point.forecastQuantity ?? point.forecast) || 0,
+      ]),
+    );
+    const testRows = evaluationHistorical.filter((point) =>
+      predictedByDate.has(point.date),
+    );
+
+    if (testRows.length === 0) {
+      return {
+        ...result,
+        modelMetadata: {
+          ...(result.modelMetadata || {}),
+          backtestMetricSource: 'unavailable',
+          backtestMetricWarning:
+            'No actual holdout rows overlapped forecast dates.',
+          forecastMode: plan.mode,
+          trainEndDate: plan.trainEndDate,
+          testStartDate: plan.testStartDate,
+          testEndDate: plan.testEndDate,
+          testDays: 0,
+        },
+      };
+    }
+
+    const metrics = this.calculateMetrics(
+      testRows.map((point) => point.actual),
+      testRows.map((point) => predictedByDate.get(point.date) ?? 0),
+      training.map((point) => point.actual),
+    );
+
+    return {
+      ...result,
+      ...metrics,
+      modelMetadata: {
+        ...(result.modelMetadata || {}),
+        backtestMetricSource: plan.backtestMetricSource,
+        forecastMode: plan.mode,
+        trainEndDate: plan.trainEndDate,
+        testStartDate: plan.testStartDate,
+        testEndDate: plan.testEndDate,
+        testDays: testRows.length,
+        trainingDaysForMase: training.length,
+      },
+    };
+  }
+
+  private buildVolumeForecast(
+    forecast: ModelResult['forecast'],
+  ): ModelResult['forecast'] {
+    return forecast.map((point) => {
+      const forecastQuantity = this.round(
+        Math.max(0, Number(point.forecastQuantity ?? point.forecast) || 0),
+      );
+      return {
+        date: point.date,
+        forecast: forecastQuantity,
+        forecastQuantity,
+        confidenceLow:
+          point.confidenceLow === undefined
+            ? undefined
+            : this.round(Math.max(0, Number(point.confidenceLow) || 0)),
+        confidenceHigh:
+          point.confidenceHigh === undefined
+            ? undefined
+            : this.round(Math.max(0, Number(point.confidenceHigh) || 0)),
+      };
+    });
+  }
+
   private applyPriceCalibration(
     forecast: ModelResult['forecast'],
     matrix: {
@@ -1921,11 +2332,30 @@ export class AnalyticsService {
     unitCost: number;
     source: string;
   }> {
+    const latestRows = await this.transactionModel.aggregate([
+      {
+        $match: {
+          sector: module,
+          unitPrice: { $gt: 0 },
+          quantity: { $gt: 0 },
+        },
+      },
+      { $sort: { date: -1 } },
+      { $limit: 1 },
+      { $project: { _id: 0, date: 1 } },
+    ]);
+    const latestDate =
+      Array.isArray(latestRows) && latestRows[0]?.date instanceof Date
+        ? latestRows[0].date
+        : null;
+    const minDate = latestDate
+      ? new Date(latestDate.getTime() - 30 * 24 * 60 * 60 * 1000)
+      : new Date('2026-01-01T00:00:00.000Z');
     const rows = await this.transactionModel.aggregate([
       {
         $match: {
           sector: module,
-          date: { $gte: new Date('2026-01-01T00:00:00.000Z') },
+          date: { $gte: minDate },
           unitPrice: { $gt: 0 },
           quantity: { $gt: 0 },
         },
@@ -1950,7 +2380,7 @@ export class AnalyticsService {
     return {
       unitPrice,
       unitCost: Number.isFinite(parsedCost) ? this.round(parsedCost) : 0,
-      source: unitPrice > 0 ? '2026_pos_weighted_average' : 'unavailable',
+      source: unitPrice > 0 ? 'last_30_day_pos_weighted_average' : 'unavailable',
     };
   }
 
@@ -2005,7 +2435,11 @@ export class AnalyticsService {
       return index === lastIndex ? { ...rest, fitted: point.actual } : rest;
     });
 
-    const isBacktest = run.modelMetadata?.splitRatio === '80-10-10' || run.modelMetadata?.splitRatio === '70-15-15';
+    const isBacktest =
+      run.modelMetadata?.forecastMode === 'latest-holdout' ||
+      run.modelMetadata?.forecastMode === 'fixed-window' ||
+      run.modelMetadata?.splitRatio === '80-10-10' ||
+      run.modelMetadata?.splitRatio === '70-15-15';
     const startsAt = isBacktest && forecast.length > 0
       ? forecast[0].date
       : (lastIndex >= 0 ? anchoredHistorical[lastIndex].date : null);
@@ -2043,6 +2477,16 @@ export class AnalyticsService {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        pythonProcess.kill();
+        reject(
+          new Error(
+            `${scriptName} timed out after ${Math.round(PYTHON_TIMEOUT_MS / 1000)} seconds`,
+          ),
+        );
+      }, PYTHON_TIMEOUT_MS);
 
       pythonProcess.stdout.on('data', (data) => {
         stdout += data.toString();
@@ -2053,6 +2497,7 @@ export class AnalyticsService {
       pythonProcess.on('error', (error) => {
         if (!settled) {
           settled = true;
+          clearTimeout(timeout);
           reject(
             new Error(
               `Unable to start Python using "${pythonCommand}": ${error.message}`,
@@ -2063,6 +2508,7 @@ export class AnalyticsService {
       pythonProcess.on('close', (code) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timeout);
         if (code !== 0) {
           reject(
             new Error(
@@ -2090,6 +2536,7 @@ export class AnalyticsService {
       pythonProcess.stdin.on('error', (error) => {
         if (!settled) {
           settled = true;
+          clearTimeout(timeout);
           reject(
             new Error(
               `Failed to send input to ${scriptName}: ${error.message}`,
@@ -2135,7 +2582,7 @@ export class AnalyticsService {
       return {
         modelName: 'SMA (7-day fallback)',
         mase: 0,
-        mape: 0,
+        smape: 0,
         accuracy: 0,
         forecast: [],
         modelMetadata: { fallbackReason: reason, windowDays: 7 },
@@ -2590,28 +3037,30 @@ export class AnalyticsService {
     actual: number[],
     predicted: number[],
     training: number[],
-  ): Pick<ModelResult, 'mase' | 'mape' | 'accuracy'> {
+  ): Pick<ModelResult, 'mase' | 'smape' | 'accuracy'> {
     if (actual.length === 0) {
-      return { mase: 0, mape: 0, accuracy: 0 };
+      return { mase: 0, smape: 0, accuracy: 0 };
     }
     const absoluteErrors = actual.map((value, index) =>
-      Math.abs(value - predicted[index]),
+      Math.abs(value - (Number.isFinite(predicted[index]) ? predicted[index] : 0)),
     );
     const mae = this.average(absoluteErrors);
     const naiveErrors = training
       .slice(1)
       .map((value, index) => Math.abs(value - training[index]));
     const naiveMae = this.average(naiveErrors);
-    const percentageErrors = actual
-      .map((value, index) =>
-        value === 0 ? null : Math.abs((value - predicted[index]) / value) * 100,
-      )
-      .filter((value): value is number => value !== null);
-    const mape = this.average(percentageErrors);
+    const percentageErrors = actual.map((value, index) => {
+      const forecast = Number.isFinite(predicted[index]) ? predicted[index] : 0;
+      const denominator = (Math.abs(value) + Math.abs(forecast)) / 2;
+      return denominator === 0
+        ? 0
+        : (Math.abs(value - forecast) / denominator) * 100;
+    });
+    const smape = this.average(percentageErrors);
     return {
       mase: this.round(naiveMae > 0 ? mae / naiveMae : mae === 0 ? 0 : 999),
-      mape: this.round(mape),
-      accuracy: this.round(Math.max(0, 100 - mape)),
+      smape: this.round(smape),
+      accuracy: this.round(Math.max(0, 100 - smape)),
     };
   }
 

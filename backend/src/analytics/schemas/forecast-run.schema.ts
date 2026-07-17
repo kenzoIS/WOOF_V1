@@ -33,6 +33,12 @@ export class HistoricalPoint {
   isTrueZeroDay?: boolean;
 
   @Prop({ default: false })
+  isClosedDay?: boolean;
+
+  @Prop({ default: true })
+  isObservedDemand?: boolean;
+
+  @Prop({ default: false })
   isOutlier?: boolean;
 
   @Prop({ type: Number, default: null })
@@ -114,7 +120,7 @@ export class ForecastRun {
   mase: number;
 
   @Prop({ required: true })
-  mape: number;
+  smape: number;
 
   @Prop({ required: true })
   accuracy: number;
@@ -130,6 +136,12 @@ export class ForecastRun {
 
   @Prop({ type: [ForecastPoint], default: [] })
   forecast: ForecastPoint[];
+
+  @Prop({ type: [ForecastPoint], default: [] })
+  volumeForecast: ForecastPoint[];
+
+  @Prop({ type: [ForecastPoint], default: [] })
+  revenueForecast: ForecastPoint[];
 
   @Prop({ type: Object, default: {} })
   kpis: Record<string, number>;

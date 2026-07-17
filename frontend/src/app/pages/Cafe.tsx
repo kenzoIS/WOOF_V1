@@ -210,7 +210,7 @@ export function Cafe() {
   const [tempOverride, setTempOverride] = useState(28);
   const [rainChanceOverride, setRainChanceOverride] = useState(0); // 0 or 1
   const [humidityOverride, setHumidityOverride] = useState(60);
-  const [backtestSplit, setBacktestSplit] = useState<string>("80-20");
+  const [forecastMode, setForecastMode] = useState<string>("production");
   const [isSimulating, setIsSimulating] = useState(false);
 
   useEffect(() => {
@@ -253,8 +253,9 @@ export function Cafe() {
       params.holiday = "0";
     }
 
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
 
     let targetDays = 14;
@@ -298,8 +299,9 @@ export function Cafe() {
     }
 
     const params: Record<string, string> = { days: String(targetDays) };
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
 
     try {
@@ -347,12 +349,13 @@ export function Cafe() {
       params.holiday = "0";
     }
 
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
 
     getForecast("cafe", params).then(setForecastRun).catch(() => {});
-  }, [forecastRangeMode, customForecastStart, customForecastEnd, backtestSplit]);
+  }, [forecastRangeMode, customForecastStart, customForecastEnd, forecastMode]);
 
   useEffect(() => {
     if (forecastRangeMode === "custom") return;
@@ -493,7 +496,10 @@ export function Cafe() {
             : 14;
 
     const firstForecastDate = forecastRun.forecast?.[0]?.date;
-    const isBacktest = forecastRun.modelMetadata?.splitRatio === '80-10-10';
+    const isBacktest =
+      forecastRun.modelMetadata?.forecastMode === "latest-holdout" ||
+      forecastRun.modelMetadata?.forecastMode === "fixed-window" ||
+      forecastRun.modelMetadata?.splitRatio === "80-10-10";
 
     const selectedRange =
       forecastRangeMode === "custom"
@@ -516,6 +522,12 @@ export function Cafe() {
     const historyRange =
       forecastRangeMode === "custom"
         ? selectedRange
+        : isBacktest
+          ? {
+              start: firstForecastDate || "2026-04-01",
+              end: latestHistoryDate,
+              isCustom: false,
+            }
         : parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
     const forecastRows = filterByDateRange(forecastRun.forecast || [], selectedRange);
@@ -682,8 +694,9 @@ export function Cafe() {
   const handleRetrainModel = () => {
     const toastId = toast.loading("Retraining model with latest data... This may take a few seconds.");
     const params: Record<string, string> = { forceRefresh: "true" };
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
     getForecast("cafe", params)
       .then((res) => {
@@ -710,8 +723,9 @@ export function Cafe() {
     setErrorModal({ isOpen: false, type: null });
     const toastId = toast.loading("Retrying model training...");
     const params: Record<string, string> = { forceRefresh: "true" };
-    if (backtestSplit !== "80-20") {
-      params.backtestSplit = backtestSplit;
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
     getForecast("cafe", params)
       .then((res) => {
@@ -749,8 +763,9 @@ export function Cafe() {
     toast.info("Retrying data synchronization...");
     setTimeout(() => {
       const params: Record<string, string> = {};
-      if (backtestSplit !== "80-20") {
-        params.backtestSplit = backtestSplit;
+      if (forecastMode !== "production") {
+        params.forecastMode = forecastMode;
+        if (forecastMode === "latest-holdout") params.holdoutDays = "61";
       }
       void getForecast("cafe", params).then(setForecastRun);
       setSuccessModal({ isOpen: true, type: "data_sync_success" });
@@ -861,11 +876,6 @@ export function Cafe() {
             {forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
                 SMA fallback active: selected model could not run
-              </Badge>
-            )}
-            {!forecastRun?.isFallback && Boolean(forecastRun?.modelMetadata?.modelQualityWarning) && (
-              <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
-                Selected model active with quality warning
               </Badge>
             )}
           </div>
@@ -1016,8 +1026,8 @@ export function Cafe() {
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.accuracy.toFixed(1)}%` : "—"}</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">MAPE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.mape.toFixed(2)}%` : "—"}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.smape.toFixed(2)}%` : "—"}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
@@ -1031,11 +1041,6 @@ export function Cafe() {
                 {!!forecastRun.modelMetadata.exogenousVariables && (
                   <div>Exogenous: {Array.isArray(forecastRun.modelMetadata.exogenousVariables) ? (forecastRun.modelMetadata.exogenousVariables as any).join(", ") : String(forecastRun.modelMetadata.exogenousVariables)}</div>
                 )}
-                {!!forecastRun.modelMetadata.modelQualityWarning && (
-                  <div className="text-amber-700 opacity-100">
-                    {String(forecastRun.modelMetadata.modelQualityWarning)}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1045,20 +1050,23 @@ export function Cafe() {
               <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
               
               <div>
-                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Backtesting Split</label>
+                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Forecast Mode</label>
                 <select
-                  value={backtestSplit}
-                  onChange={(e) => setBacktestSplit(e.target.value)}
+                  value={forecastMode}
+                  onChange={(e) => setForecastMode(e.target.value)}
                   className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
                 >
-                  <option value="80-20">Live Forecast (80/20 Split)</option>
-                  <option value="80-10-10">Backtesting (80-10-10 Split)</option>
+                  <option value="production">Production forecast</option>
+                  <option value="latest-holdout">Latest holdout backtest</option>
+                  <option value="fixed-window">Thesis fixed-window backtest</option>
                 </select>
               </div>
 
               <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-                {backtestSplit !== "80-20"
-                  ? "Naka-enable ang backtesting mode. Ipinapakita ng graph ang overlap sa pagitan ng actual at predicted revenue para sa Abril at Mayo 2026 upang masukat ang kawastuhan ng model."
+                {forecastMode === "fixed-window"
+                  ? "Thesis backtest mode uses the April-May 2026 overlap for reproducible defense metrics."
+                  : forecastMode === "latest-holdout"
+                    ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
                   : (forecastRun
                       ? `${forecastRun.modelName} was evaluated on held-out uploaded Cafe history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
                       : "Upload Cafe history from POS or PetHub to generate a validated forecast.")}
@@ -1516,9 +1524,9 @@ export function Cafe() {
                 </p>
               </div>
               <div>
-                <strong className="text-sm text-[#F53799]">MAPE (Mean Absolute Percentage Error)</strong>
+                <strong className="text-sm text-[#F53799]">sMAPE (Symmetric Mean Absolute Percentage Error)</strong>
                 <p className="mt-1">
-                  The average margin of error in percentage terms. A **lower percentage** (such as 5%) indicates that the AI's predictions deviate only slightly from reality, ensuring higher precision.
+                  The symmetric percentage error between forecasted and actual demand. It is more stable for low-volume Cafe days.
                 </p>
               </div>
               <div>

@@ -28,7 +28,7 @@ def build_payload():
 def main():
     try:
         result = run(build_payload())
-        for key in ["modelName", "mase", "mape", "accuracy", "forecast"]:
+        for key in ["modelName", "mase", "smape", "accuracy", "forecast"]:
             assert key in result, f"missing result key: {key}"
         assert len(result["forecast"]) == 30, "forecast should contain 30 items"
         assert isinstance(result["mase"], float), "mase should be a float"

@@ -5,6 +5,7 @@ describe('CsvService flexible uploads', () => {
   const create = jest.fn(async (value) => ({ _id: 'upload-id', ...value }));
   const findByIdAndUpdate = jest.fn(async () => undefined);
   const insertMany = jest.fn(async (values) => values);
+  const find = jest.fn(() => ({ exec: jest.fn(async () => []) }));
   const deleteMany = jest.fn(() => ({ exec: jest.fn(async () => undefined) }));
   const findByIdAndDelete = jest.fn(() => ({
     exec: jest.fn(async () => undefined),
@@ -20,7 +21,7 @@ describe('CsvService flexible uploads', () => {
   }));
   const service = new CsvService(
     { create, findByIdAndDelete, findByIdAndUpdate, updateOne: jest.fn() } as any,
-    { insertMany, deleteMany } as any,
+    { insertMany, find, deleteMany } as any,
     { processTransactions } as any,
     { validateBatch } as any,
   );

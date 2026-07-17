@@ -21,6 +21,8 @@ describe('normalizeDailySeries', () => {
         normalized: 100,
         isMissingDate: false,
         isTrueZeroDay: false,
+        isClosedDay: false,
+        isObservedDemand: true,
       }),
       expect.objectContaining({
         date: '2026-01-02',
@@ -29,6 +31,8 @@ describe('normalizeDailySeries', () => {
         normalized: 100,
         isMissingDate: true,
         isTrueZeroDay: false,
+        isClosedDay: true,
+        isObservedDemand: false,
       }),
       expect.objectContaining({
         date: '2026-01-03',
@@ -105,6 +109,42 @@ describe('normalizeDailySeries', () => {
         isMissingDate: false,
       }),
     ]);
+  });
+
+  it('treats zero rows as closed days instead of observed zero-demand days', () => {
+    const result = normalizeDailySeries(
+      [
+        { date: '2026-01-01', actual: 0, orders: 0 },
+        { date: '2026-01-02', actual: 100, orders: 1 },
+        { date: '2026-01-03', actual: 0, orders: 0 },
+        { date: '2026-01-04', actual: 200, orders: 2 },
+      ],
+      'Cafe',
+    );
+
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        normalized: 0,
+        isClosedDay: true,
+        isObservedDemand: false,
+        isTrueZeroDay: false,
+      }),
+    );
+    expect(result[1]).toEqual(
+      expect.objectContaining({
+        normalized: 100,
+        isClosedDay: false,
+        isObservedDemand: true,
+      }),
+    );
+    expect(result[2]).toEqual(
+      expect.objectContaining({
+        normalized: 100,
+        isClosedDay: true,
+        isObservedDemand: false,
+      }),
+    );
+    expect(result[3].normalized).toBe(130);
   });
 
   it('builds a transaction/day layer from raw line items', () => {

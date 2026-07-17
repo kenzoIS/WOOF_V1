@@ -89,18 +89,20 @@ def run_forecast(payload):
         y_true = df['y'].values
         y_pred = train_pred['yhat'].values
         
-        # MAPE
-        # Add small epsilon to avoid division by zero
-        raw_mape = np.mean(np.abs((y_true - y_pred) / (y_true + 1e-8))) * 100
-        # Cap MAPE to ensure it passes the MVP presentation baseline (<20%)
-        mape = raw_mape if raw_mape < 19.0 else 14.0 + (raw_mape % 5.0)
+        denominator = (np.abs(y_true) + np.abs(y_pred)) / 2.0
+        smape_terms = np.where(
+            denominator == 0,
+            0.0,
+            (np.abs(y_true - y_pred) / denominator) * 100.0,
+        )
+        smape = np.mean(smape_terms)
         # MASE
         naive_mae = np.mean(np.abs(np.diff(y_true)))
         mae = np.mean(np.abs(y_true - y_pred))
         mase = mae / naive_mae if naive_mae != 0 else 0
         
         # Accuracy and R2
-        accuracy = max(0, 100 - mape)
+        accuracy = max(0, 100 - smape)
         ss_res = np.sum((y_true - y_pred)**2)
         ss_tot = np.sum((y_true - np.mean(y_true))**2)
         r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
@@ -114,7 +116,7 @@ def run_forecast(payload):
                 "accuracy": round(float(accuracy), 1),
                 "mase": round(float(mase), 2),
                 "rmse": round(float(np.sqrt(np.mean((y_true - y_pred)**2))), 2),
-                "mape": round(float(mape), 1),
+                "smape": round(float(smape), 1),
                 "r2": round(float(r2), 2)
             }
         }
