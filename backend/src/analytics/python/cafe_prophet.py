@@ -120,6 +120,11 @@ def run(payload):
         if all(col in exog_frame.columns for col in EXOG_COLUMNS):
             exog_frame["_input_order"] = np.arange(len(exog_frame))
             exog_frame = exog_frame[["_input_order", *EXOG_COLUMNS]]
+            
+            overlap = [c for c in EXOG_COLUMNS if c in frame.columns]
+            if overlap:
+                frame = frame.drop(columns=overlap)
+                
             frame = frame.merge(exog_frame, on="_input_order", how="left")
             use_exog = True
             for column in EXOG_COLUMNS:

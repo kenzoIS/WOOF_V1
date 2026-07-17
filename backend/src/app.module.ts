@@ -39,6 +39,7 @@ import { ContextModule } from './context/context.module';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         uri: configService.getOrThrow<string>('MONGODB_URI'),
+        dbName: configService.get<string>('MONGODB_DB') || 'woof_staging',
         serverSelectionTimeoutMS: 10000,
         connectTimeoutMS: 10000,
         retryAttempts: 1,

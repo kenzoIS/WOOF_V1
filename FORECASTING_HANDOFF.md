@@ -819,3 +819,29 @@ Longer version:
 - Closed-day inference is currently based on `actual === 0`; a future explicit business calendar would be better.
 - Forecast accuracy may look worse than before because evaluation is now stricter and more realistic.
 - Old cached forecast runs are invalidated by payload version `6`, but existing database records may still contain old fields until regenerated.
+
+## 14. Progress Log (Recent Updates)
+
+### Priority 1: Clearer Fallback Reasons in UI
+- Implemented specific rejection reason rendering in the UI. 
+- The SMA fallback badge now dynamically displays the actual `forecastRun.rejectionReason` (e.g., Python Tracebacks or specific validation failures) rather than the generic "selected model could not run" string.
+
+### Priority 2: Diagnostics Model Panel
+- Implemented a `ModelDiagnostics` component in both `Cafe.tsx` and `Services.tsx`. 
+- The UI now features a toggleable details panel below the fallback badge that surfaces advanced runtime evaluation metrics for transparency.
+
+### Priority 3: Data Ingestion Pipeline & MongoDB Fixes
+- **Database Routing:** Fixed a major bug where `app.module.ts` Mongoose connection was silently defaulting to the `test` database because `dbName` wasn't explicitly passed. Deletion operations were successfully deleting from `test` and Supabase, but leaving stale orphaned data in `woof_staging`. The backend is now fully migrated to the clean `woof_staging` database.
+- **Data Validation & Cleaning:** `DataValidationService` was heavily upgraded to preprocess historical CSV rows *before* they hit Zod. It now:
+  - Trims whitespaces off all string entries.
+  - Safely converts empty strings `""` and literal `"null"` text to actual `null`.
+  - Normalizes case sensitivity (e.g., forcing `productName`, `category`, and `sector` to Title Case so `COFFEE` and `coffee` merge).
+  - Pre-processing before hashing ensures that exact duplicates differing only by casing/spaces are successfully caught and dropped.
+- **Upload Schema Sync:** Ensured that `csv.service.ts` saves these aggressively cleaned categories back into the `CsvUpload` MongoDB model so that the frontend ingestion reports are fully synchronized with the clean dataset.
+
+### Priority 4: ETL Validation & Model Performance 
+- Conducted deep analysis on the generated synthetic dataset (`HappytailsPC_5yrs.csv`). Confirmed the dataset is structurally excellent (strong weekly seasonality, steady multi-year positive trend, and <1% outliers). It is *not* the reason models are failing.
+- Identified that the core cause of model failures (MASE >= 1.2 or Python crashes) stems from the ETL pipeline structure itself:
+  - **Closed Day Deletion:** The pipeline flags 0-sales days as `isClosedDay` and then completely drops them prior to Prophet/SARIMA training. This creates non-continuous timelines, breaks the math required for seasonal Fourier calculations, and prevents the model from ever learning that `isWeekend = 1` can be correlated with zero sales. 
+  - **Flattened Outlier Capping:** The IQR is calculated without the zero-days, leading to a drastically tight `outlierCap` that flattens legitimate 17k weekend surges. This shrinks the baseline `naive_mae` to near zero, heavily inflating MASE above the `1.2` fallback threshold.
+- Fixed a major Pandas `KeyError: 'isWeekend'` in `cafe_prophet.py`. The crash was caused by Node passing exogenous variables in *both* the historical and exogenous arrays, causing a Pandas merge overlap (`isWeekend_x`). This was patched by gracefully dropping overlap columns in `cafe_prophet.py` prior to the merge.

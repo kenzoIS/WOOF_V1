@@ -69,6 +69,7 @@ export interface ForecastRun {
   smape: number;
   accuracy: number;
   isFallback: boolean;
+  rejectionReason?: string;
   historical: Array<{
     date: string;
     actual: number;

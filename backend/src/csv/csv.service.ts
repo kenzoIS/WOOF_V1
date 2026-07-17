@@ -158,8 +158,11 @@ export class CsvService {
       const { cleanedTransactions, report } = this.dataValidationService.validateBatch(transactionsWithUploadId, channel);
       reportPayload = report;
 
+      const cleanedCategories = [...new Set(cleanedTransactions.map(t => t.category).filter((c): c is string => Boolean(c)))];
+
       await this.csvUploadModel.findByIdAndUpdate(uploadId, {
         recordCount: cleanedTransactions.length,
+        categories: cleanedCategories,
         $set: { etlReport: {
           stage1_droppedCount: report.stage1_droppedCount,
           stage1_duplicateCount: report.stage1_duplicateCount,
@@ -255,8 +258,11 @@ export class CsvService {
       const { cleanedTransactions, report } = this.dataValidationService.validateBatch(transactionsWithUploadId, 'POS');
       reportPayload = report;
 
+      const cleanedCategories = [...new Set(cleanedTransactions.map(t => t.category).filter((c): c is string => Boolean(c)))];
+
       await this.csvUploadModel.findByIdAndUpdate(uploadId, {
         recordCount: cleanedTransactions.length,
+        categories: cleanedCategories,
         $set: { etlReport: {
           stage1_droppedCount: report.stage1_droppedCount,
           stage1_duplicateCount: report.stage1_duplicateCount,

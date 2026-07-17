@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, AlertTriangle, CheckCircle2, FileText } from "lucide-react";
+import { Upload, Trash2, FileSpreadsheet, Database, ShoppingCart, DollarSign, Hash, Radio, AlertTriangle, CheckCircle2, FileText, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
@@ -47,6 +47,7 @@ export function DataIngestion() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<string>("POS");
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [deletingIds, setDeletingIds] = useState<string[]>([]);
 
   const [lastReport, setLastReport] = useState<any>(null);
 
@@ -87,11 +88,14 @@ export function DataIngestion() {
 
   const handleDelete = async (id: string, filename: string) => {
     try {
+      setDeletingIds((prev) => [...prev, id]);
       await deleteUpload(id);
       toast.success("Deleted", { description: `${filename} removed.` });
       await refreshData();
     } catch (err: any) {
       toast.error("Delete failed", { description: err.message });
+    } finally {
+      setDeletingIds((prev) => prev.filter((prevId) => prevId !== id));
     }
   };
 
@@ -332,9 +336,14 @@ export function DataIngestion() {
                   <Button
                     size="sm" variant="outline"
                     className="border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0"
+                    disabled={deletingIds.includes(upload._id)}
                     onClick={(e) => { e.stopPropagation(); handleDelete(upload._id, upload.filename); }}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    {deletingIds.includes(upload._id) ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
                   </Button>
                 </div>
               </div>

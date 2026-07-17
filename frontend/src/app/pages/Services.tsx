@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
+import { ModelDiagnostics } from "../components/ModelDiagnostics";
 import servicesMascot from "../../imports/no_bg_Services-1.png";
 import { ForecastRun, getForecast } from "../lib/api";
 import {
@@ -799,9 +800,10 @@ export function Services() {
             </p>
             {forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
-                SMA fallback active: selected model did not meet the MASE threshold
+                SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
               </Badge>
             )}
+            <ModelDiagnostics forecastRun={forecastRun} />
           </div>
 
           <div className="flex flex-wrap gap-2">

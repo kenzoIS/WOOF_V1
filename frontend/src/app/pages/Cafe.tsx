@@ -6,6 +6,7 @@ import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
+import { ModelDiagnostics } from "../components/ModelDiagnostics";
 import { ForecastRun, getForecast } from "../lib/api";
 import {
   HISTORY_START_DATE,
@@ -875,9 +876,10 @@ export function Cafe() {
             </p>
             {forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
-                SMA fallback active: selected model could not run
+                SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
               </Badge>
             )}
+            <ModelDiagnostics forecastRun={forecastRun} />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

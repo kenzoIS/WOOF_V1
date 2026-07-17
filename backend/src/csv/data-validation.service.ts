@@ -42,6 +42,31 @@ export class DataValidationService {
 
     for (let i = 0; i < transactions.length; i++) {
       const row = transactions[i];
+
+      // 1. Whitespace handling & Null Columns
+      const stringFields = ['transactionId', 'productName', 'sku', 'category', 'sector', 'channel', 'paymentType'] as const;
+      for (const field of stringFields) {
+        if (typeof row[field] === 'string') {
+          let val = (row[field] as string).trim();
+          if (val === '' || val.toLowerCase() === 'null') {
+            (row as any)[field] = null;
+          } else {
+            (row as any)[field] = val;
+          }
+        }
+      }
+
+      // 2. Case sensitivity standardization (e.g. COFFEE -> Coffee)
+      if (typeof row.category === 'string') {
+        row.category = row.category.charAt(0).toUpperCase() + row.category.slice(1).toLowerCase();
+      }
+      if (typeof row.sector === 'string') {
+        row.sector = row.sector.charAt(0).toUpperCase() + row.sector.slice(1).toLowerCase();
+      }
+      if (typeof row.productName === 'string') {
+        row.productName = row.productName.split(/\s+/).map(w => w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : '').join(' ').trim();
+      }
+
       const result = transactionSchema.safeParse(row);
 
       if (!result.success) {
