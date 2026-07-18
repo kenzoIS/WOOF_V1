@@ -284,3 +284,76 @@ export async function getExogenousStatus() {
   return fetchApi('/analytics/exogenous/status');
 }
 
+export interface SmartReport {
+  _id: string;
+  title: string;
+  dateRange: { start: string; end: string };
+  sectors: string[];
+  aggregatedData: {
+    totalRevenue: number;
+    totalGrossProfit: number;
+    averageMargin: number;
+    channelRevenue: Record<string, number>;
+    categorySales: Record<string, number>;
+  };
+  extrapolatedTrends: {
+    horizonDays: number;
+    dates: string[];
+    projectedRevenue: number[];
+    projectedGrowthRate: number;
+    trendDirection: 'UPWARD' | 'DOWNWARD' | 'STABLE';
+  };
+  dataCompleteness: number;
+  uatFeedback: {
+    accuracyRating: number | null;
+    usefulnessRating: number | null;
+    ownerApproved: boolean;
+    feedbackText: string | null;
+    reviewedAt: string | null;
+  };
+  nlgSummary: string;
+  generatedAt: string;
+}
+
+export async function generateSmartReport(dto: {
+  title: string;
+  startDate: string;
+  endDate: string;
+  sectors: string[];
+}): Promise<SmartReport> {
+  return fetchApi('/smart-reports/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
+export async function getSmartReports(): Promise<SmartReport[]> {
+  return fetchApi('/smart-reports');
+}
+
+export async function getSmartReportById(id: string): Promise<SmartReport> {
+  return fetchApi(`/smart-reports/${id}`);
+}
+
+export async function deleteSmartReport(id: string): Promise<{ success: boolean }> {
+  return fetchApi(`/smart-reports/${id}`, { method: 'DELETE' });
+}
+
+export async function submitSmartReportFeedback(
+  id: string,
+  dto: {
+    accuracyRating: number;
+    usefulnessRating: number;
+    ownerApproved: boolean;
+    feedbackText?: string;
+  }
+): Promise<SmartReport> {
+  return fetchApi(`/smart-reports/${id}/feedback`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
+

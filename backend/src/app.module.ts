@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { CsvModule } from './csv/csv.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { SmartReportsModule } from './smart-reports/smart-reports.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
@@ -48,6 +49,7 @@ import { ContextModule } from './context/context.module';
     CsvModule,
     AnalyticsModule,
     ContextModule,
+    SmartReportsModule,
   ],
 })
 export class AppModule {}

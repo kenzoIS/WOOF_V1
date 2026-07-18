@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Home, Coffee, Scissors, ShoppingBag, FlaskConical, Settings, MessageSquareHeart, FileText, X } from "lucide-react";
+import { Home, Coffee, Scissors, ShoppingBag, FlaskConical, Settings, MessageSquareHeart, FileText, X, TrendingUp } from "lucide-react";
 import { Badge } from "./ui/badge";
 import logoImg from "../../imports/happytailslogo-removebg-preview-2.png";
 
@@ -10,6 +10,7 @@ const navItems = [
   { path: "/services", label: "Services", icon: Scissors },
   { path: "/retail", label: "Retail", icon: ShoppingBag },
   { path: "/ai-simulation", label: "AI Simulation", icon: FlaskConical },
+  { path: "/smart-reports", label: "Smart Reports", icon: TrendingUp },
   { path: "/feedback", label: "Feedback", icon: MessageSquareHeart },
   { path: "/audit", label: "Audit", icon: FileText },
   { path: "/settings", label: "Settings", icon: Settings },

@@ -76,6 +76,13 @@ const getProjectedRevenue = (point: ForecastRun["forecast"][number]) =>
     ? Number(point.projectedNetSales)
     : Number(point.forecast) || 0;
 
+const getServicesForecastUnitPrice = (forecastRun: ForecastRun | null) => {
+  const matrix = forecastRun?.modelMetadata?.priceCalibration as { unitPrice?: number } | undefined;
+  const forecastUnitPrice = forecastRun?.forecast?.find((point) => Number(point.unitPrice) > 0)?.unitPrice;
+  const modelUnitPrice = Number(matrix?.unitPrice || forecastUnitPrice || 0);
+  return Number.isFinite(modelUnitPrice) && modelUnitPrice > 0 ? modelUnitPrice : 0;
+};
+
 const aggregateServiceHistory = (
   rows: NonNullable<ForecastRun["itemHistory"]>,
 ) => {
@@ -401,6 +408,7 @@ export function Services() {
         : parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
     const historicalRows = filterByDateRange(forecastRun.historical, historyRange);
     const forecastRows = filterByDateRange(forecastRun.forecast || [], selectedRange);
+    const unitPrice = getServicesForecastUnitPrice(forecastRun);
     const shouldAnchorForecast =
       !isBacktest &&
       forecastRows.length > 0 &&
@@ -431,6 +439,7 @@ export function Services() {
           index === rows.length - 1
             ? gp
             : null,
+        fitted: d.fitted !== undefined && unitPrice > 0 ? Math.round(d.fitted * unitPrice) : null,
       };
     });
     const fore = forecastRows.map((d) => {
@@ -891,6 +900,18 @@ export function Services() {
               name="Revenue"
             />
             <Line
+              key="line-fitted"
+              type="monotone"
+              dataKey="fitted"
+              stroke="#36A2EB"
+              strokeWidth={2}
+              strokeDasharray="4 4"
+              dot={false}
+              connectNulls
+              animationDuration={800}
+              name="Backtest Fit"
+            />
+            <Line
               key="line-forecast"
               type="monotone"
               dataKey="forecast"
@@ -908,6 +929,16 @@ export function Services() {
           <div className="flex items-center gap-2">
             <span className="h-0.5 w-7 rounded-full bg-[#223047]" />
             <span>Historical revenue</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="h-0.5 w-7 rounded-full bg-[#36A2EB] dashed-legend-line"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to right, #36A2EB 0 4px, transparent 4px 8px)",
+              }}
+            />
+            <span>Backtest Fit</span>
           </div>
           <div className="flex items-center gap-2">
             <span

@@ -565,6 +565,7 @@ export function Cafe() {
             : null,
         confidenceLow: null as number | null,
         confidenceHigh: null as number | null,
+        fitted: d.fitted !== undefined && unitPrice > 0 ? Math.round(d.fitted * unitPrice) : null,
       };
     });
     const fc = forecastRows.map((d) => {
@@ -974,6 +975,18 @@ export function Cafe() {
               name="Revenue"
             />
             <Line
+              key="line-fitted-cafe"
+              type="monotone"
+              dataKey="fitted"
+              stroke="#36A2EB"
+              strokeWidth={2}
+              strokeDasharray="4 4"
+              dot={false}
+              connectNulls
+              animationDuration={800}
+              name="Backtest Fit"
+            />
+            <Line
               key="line-forecast-cafe"
               type="monotone"
               dataKey="forecast"
@@ -991,6 +1004,16 @@ export function Cafe() {
           <div className="flex items-center gap-2">
             <span className="h-0.5 w-7 rounded-full bg-[#223047]" />
             <span>Historical revenue</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="h-0.5 w-7 rounded-full bg-[#36A2EB] dashed-legend-line"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(to right, #36A2EB 0 4px, transparent 4px 8px)",
+              }}
+            />
+            <span>Backtest Fit</span>
           </div>
           <div className="flex items-center gap-2">
             <span
@@ -1498,6 +1521,7 @@ export function Cafe() {
       <ModelDetailsModal
         isOpen={showModelDetails}
         onClose={() => setShowModelDetails(false)}
+        forecastRun={forecastRun}
       />
       {/* Model Performance Metrics Guide modal */}
       {showInfoModal && (

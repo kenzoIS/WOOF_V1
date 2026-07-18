@@ -730,7 +730,12 @@ export class AnalyticsService {
       accuracy: finalModel.accuracy,
       isFallback: useFallback,
       rejectionReason: useFallback ? rejectionReason : undefined,
-      historical: this.buildAnchoredHistoricalPayload(completeHistorical, revenueByDate),
+      historical: this.buildAnchoredHistoricalPayload(
+        completeHistorical,
+        revenueByDate,
+        finalModel.fittedValues,
+        trainHistorical,
+      ),
       forecast: calibratedForecast,
       volumeForecast,
       revenueForecast: calibratedForecast,
@@ -2042,6 +2047,8 @@ export class AnalyticsService {
   private buildAnchoredHistoricalPayload(
     historical: NormalizedDailyValue[],
     revenueByDate = new Map<string, number>(),
+    fittedValues?: number[],
+    trainHistorical?: NormalizedDailyValue[],
   ): Array<{
     date: string;
     actual: number;
@@ -2066,6 +2073,17 @@ export class AnalyticsService {
     fitted?: number;
   }> {
     const lastIndex = historical.length - 1;
+    const fittedMap = new Map<string, number>();
+    if (fittedValues && trainHistorical) {
+      const len = Math.min(fittedValues.length, trainHistorical.length);
+      for (let i = 0; i < len; i++) {
+        const date = trainHistorical[i].date;
+        const val = fittedValues[i];
+        if (date && typeof val === 'number') {
+          fittedMap.set(date, val);
+        }
+      }
+    }
     return historical.map((point, index) => {
       const {
         date,
@@ -2109,7 +2127,7 @@ export class AnalyticsService {
         avgBasketSize: avgBasketSize || 0,
         avgOrderValue: avgOrderValue || 0,
         averageUnitPrice: averageUnitPrice || 0,
-        fitted: index === lastIndex ? actual : undefined,
+        fitted: fittedMap.has(date) ? this.round(fittedMap.get(date)!) : (index === lastIndex ? actual : undefined),
       };
     });
   }
