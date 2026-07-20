@@ -7,6 +7,14 @@ import numpy as np
 import pandas as pd
 from prophet import Prophet
 
+from model_metrics import evaluate_forecast_metrics
+from model_preprocessing import (
+    ExogenousStandardizer,
+    build_target_transformer,
+    compute_vif_diagnostics,
+    target_values,
+)
+
 warnings.filterwarnings("ignore")
 logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
 logging.getLogger("prophet").setLevel(logging.ERROR)
@@ -23,6 +31,12 @@ EXOG_COLUMNS = [
     "promoFlag",
     "outlierFlag",
     "isMissingDate",
+    "humidity",
+    "dayOfWeekSin",
+    "dayOfWeekCos",
+    "avgBasketSize",
+    "avgOrderValue",
+    "average_unit_price",
 ]
 
 
@@ -36,7 +50,7 @@ def build_model(changepoint_prior_scale, use_exog=False):
     )
     if use_exog:
         for column in EXOG_COLUMNS:
-            model.add_regressor(column)
+            model.add_regressor(column, standardize=False)
     try:
         model.add_country_holidays(country_name="PH")
     except Exception:
@@ -63,25 +77,6 @@ def parse_splits(length, ratio_str):
     train_idx = min(max(1, train_idx), length - 2)
     val_idx = min(max(train_idx + 1, val_idx), length)
     return train_idx, val_idx, has_test
-
-
-def metrics(actual, predicted, training):
-    actual = np.asarray(actual, dtype=float)
-    predicted = np.asarray(predicted, dtype=float)
-    training = np.asarray(training, dtype=float)
-    mae = float(np.mean(np.abs(actual - predicted)))
-    naive_mae = (
-        float(np.mean(np.abs(np.diff(training)))) if len(training) > 1 else 0.0
-    )
-    mase = mae / naive_mae if naive_mae > 0 else (0.0 if mae == 0 else 999.0)
-    denominator = (np.abs(actual) + np.abs(predicted)) / 2.0
-    smape_terms = np.where(
-        denominator == 0,
-        0.0,
-        np.abs(actual - predicted) / denominator * 100.0,
-    )
-    smape = float(np.mean(smape_terms)) if len(smape_terms) else 0.0
-    return round(mase, 2), round(smape, 2), round(max(0.0, 100.0 - smape), 2)
 
 
 def run(payload):
@@ -111,7 +106,9 @@ def run(payload):
     if len(frame) < 21:
         raise ValueError("Cafe Prophet requires at least 21 valid dated observations")
     frame["ds"] = frame["ds"].dt.tz_localize(None)
-    frame["y"] = frame["normalized"].astype(float)
+    target_transformer = build_target_transformer(frame)
+    demand_target = target_values(frame, target_transformer)
+    frame["y"] = target_transformer.transform(demand_target)
 
     use_exog = False
     exog_forecast = payload.get("exogenousForecast", [])
@@ -134,14 +131,31 @@ def run(payload):
         frame = frame[frame["isObservedDemand"].astype(bool)].reset_index(drop=True)
         if len(frame) < 21:
             raise ValueError("Cafe Prophet requires at least 21 observed demand days")
+        demand_target = target_values(frame, target_transformer)
+        frame["y"] = target_transformer.transform(demand_target)
 
-    actual = frame["actual"].astype(float).to_numpy()
+    actual = demand_target
     train_idx, val_idx, has_test = parse_splits(len(frame), split_ratio)
 
     if use_exog:
-        train = frame.iloc[:train_idx][["ds", "y", *EXOG_COLUMNS]]
-        val_dates = frame.iloc[train_idx:val_idx][["ds", *EXOG_COLUMNS]]
+        exog_diagnostics = compute_vif_diagnostics(
+            frame[EXOG_COLUMNS].astype(float).to_numpy(),
+            EXOG_COLUMNS,
+        )
+        train_standardizer = ExogenousStandardizer(EXOG_COLUMNS).fit(
+            frame.iloc[:train_idx][EXOG_COLUMNS].astype(float).to_numpy()
+        )
+        train = frame.iloc[:train_idx][["ds", "y", *EXOG_COLUMNS]].copy()
+        train.loc[:, EXOG_COLUMNS] = train_standardizer.transform(
+            train[EXOG_COLUMNS].astype(float).to_numpy()
+        )
+        val_dates = frame.iloc[train_idx:val_idx][["ds", *EXOG_COLUMNS]].copy()
+        val_dates.loc[:, EXOG_COLUMNS] = train_standardizer.transform(
+            val_dates[EXOG_COLUMNS].astype(float).to_numpy()
+        )
     else:
+        exog_diagnostics = {"vifAvailable": False, "reason": "univariate_model"}
+        train_standardizer = ExogenousStandardizer(EXOG_COLUMNS)
         train = frame.iloc[:train_idx][["ds", "y"]]
         val_dates = frame.iloc[train_idx:val_idx][["ds"]]
 
@@ -154,18 +168,18 @@ def run(payload):
         try:
             model = build_model(candidate, use_exog=use_exog)
             model.fit(train)
-            predicted = model.predict(val_dates)["yhat"].to_numpy()
-            mase, smape, accuracy = metrics(
+            predicted = target_transformer.inverse(
+                model.predict(val_dates)["yhat"].to_numpy()
+            )
+            metric_result = evaluate_forecast_metrics(
                 val_actual, predicted, actual[:train_idx]
             )
-            score = (mase, smape)
+            score = (metric_result["mase"], metric_result["smape"])
             if best is None or score < best["score"]:
                 best = {
                     "score": score,
                     "changepointPriorScale": candidate,
-                    "mase": mase,
-                    "smape": smape,
-                    "accuracy": accuracy,
+                    "metrics": metric_result,
                 }
         except Exception:
             continue
@@ -178,38 +192,46 @@ def run(payload):
         try:
             test_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
             if use_exog:
-                test_model.fit(frame.iloc[:val_idx][["ds", "y", *EXOG_COLUMNS]])
-                test_dates = frame.iloc[val_idx:][["ds", *EXOG_COLUMNS]]
+                test_standardizer = ExogenousStandardizer(EXOG_COLUMNS).fit(
+                    frame.iloc[:val_idx][EXOG_COLUMNS].astype(float).to_numpy()
+                )
+                test_train = frame.iloc[:val_idx][["ds", "y", *EXOG_COLUMNS]].copy()
+                test_train.loc[:, EXOG_COLUMNS] = test_standardizer.transform(
+                    test_train[EXOG_COLUMNS].astype(float).to_numpy()
+                )
+                test_model.fit(test_train)
+                test_dates = frame.iloc[val_idx:][["ds", *EXOG_COLUMNS]].copy()
+                test_dates.loc[:, EXOG_COLUMNS] = test_standardizer.transform(
+                    test_dates[EXOG_COLUMNS].astype(float).to_numpy()
+                )
             else:
                 test_model.fit(frame.iloc[:val_idx][["ds", "y"]])
                 test_dates = frame.iloc[val_idx:][["ds"]]
-            test_pred = test_model.predict(test_dates)["yhat"].to_numpy()
-            test_mase, test_smape, test_accuracy = metrics(
+            test_pred = target_transformer.inverse(
+                test_model.predict(test_dates)["yhat"].to_numpy()
+            )
+            test_metrics = evaluate_forecast_metrics(
                 actual[val_idx:], test_pred, actual[:train_idx]
             )
-            eval_metrics = {
-                "mase": test_mase,
-                "smape": test_smape,
-                "accuracy": test_accuracy,
-            }
+            eval_metrics = test_metrics
         except Exception:
-            eval_metrics = {
-                "mase": best["mase"],
-                "smape": best["smape"],
-                "accuracy": best["accuracy"],
-            }
+            eval_metrics = best["metrics"]
     else:
-        eval_metrics = {
-            "mase": best["mase"],
-            "smape": best["smape"],
-            "accuracy": best["accuracy"],
-        }
+        eval_metrics = best["metrics"]
 
     # Step 3: Fit Final Model on 100% of input data
     final_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
     if use_exog:
-        final_model.fit(frame[["ds", "y", *EXOG_COLUMNS]])
+        final_standardizer = ExogenousStandardizer(EXOG_COLUMNS).fit(
+            frame[EXOG_COLUMNS].astype(float).to_numpy()
+        )
+        final_train = frame[["ds", "y", *EXOG_COLUMNS]].copy()
+        final_train.loc[:, EXOG_COLUMNS] = final_standardizer.transform(
+            final_train[EXOG_COLUMNS].astype(float).to_numpy()
+        )
+        final_model.fit(final_train)
     else:
+        final_standardizer = train_standardizer
         final_model.fit(frame[["ds", "y"]])
 
     future = final_model.make_future_dataframe(
@@ -226,10 +248,24 @@ def run(payload):
         future["tempCelsius"] = future["tempCelsius"].fillna(28.0).astype(float)
         for column in [column for column in EXOG_COLUMNS if column != "tempCelsius"]:
             future[column] = future[column].fillna(0.0).astype(float)
+        future.loc[:, EXOG_COLUMNS] = final_standardizer.transform(
+            future[EXOG_COLUMNS].astype(float).to_numpy()
+        )
 
     prediction = final_model.predict(future)
-    hist_predictions = final_model.predict(frame[["ds", *EXOG_COLUMNS] if use_exog else ["ds"]])
-    fitted_values = [round(max(0.0, float(v)), 2) for v in hist_predictions["yhat"]]
+    prediction["yhat"] = target_transformer.inverse(prediction["yhat"].to_numpy())
+    prediction["yhat_lower"] = target_transformer.inverse(prediction["yhat_lower"].to_numpy())
+    prediction["yhat_upper"] = target_transformer.inverse(prediction["yhat_upper"].to_numpy())
+    if use_exog:
+        hist_frame = frame[["ds", *EXOG_COLUMNS]].copy()
+        hist_frame.loc[:, EXOG_COLUMNS] = final_standardizer.transform(
+            hist_frame[EXOG_COLUMNS].astype(float).to_numpy()
+        )
+        hist_predictions = final_model.predict(hist_frame)
+    else:
+        hist_predictions = final_model.predict(frame[["ds"]])
+    fitted_original = target_transformer.inverse(hist_predictions["yhat"].to_numpy())
+    fitted_values = [round(max(0.0, float(v)), 2) for v in fitted_original]
 
     forecast = [
         {
@@ -249,11 +285,19 @@ def run(payload):
         "mase": eval_metrics["mase"],
         "smape": eval_metrics["smape"],
         "accuracy": eval_metrics["accuracy"],
+        "mae": eval_metrics.get("mae", 0),
+        "rmse": eval_metrics.get("rmse", 0),
+        "mape": eval_metrics.get("mape", 0),
+        "r2": eval_metrics.get("r2", 0),
         "forecast": forecast,
         "fittedValues": fitted_values,
         "modelMetadata": {
             "changepointPriorScale": best["changepointPriorScale"],
             "testedChangepointPriorScales": candidates,
+            **target_transformer.metadata(),
+            **final_standardizer.metadata(),
+            **exog_diagnostics,
+            "metricImplementation": eval_metrics.get("metricImplementation", {}),
             "validationDays": val_idx - train_idx,
             "trainingDays": train_idx,
             "testDays": len(frame) - val_idx if has_test else 0,

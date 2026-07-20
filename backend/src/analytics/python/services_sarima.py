@@ -8,6 +8,14 @@ import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
+from model_metrics import evaluate_forecast_metrics
+from model_preprocessing import (
+    ExogenousStandardizer,
+    build_target_transformer,
+    compute_vif_diagnostics,
+    target_values,
+)
+
 warnings.filterwarnings("ignore")
 
 DEFAULT_ORDER = (1, 1, 1)
@@ -17,6 +25,8 @@ MAX_FORECAST_DAYS = 90
 GRID_SEARCH_TIMEOUT_SECONDS = 15
 EXOG_COLUMNS = [
     "dayOfWeek",
+    "dayOfWeekSin",
+    "dayOfWeekCos",
     "isWeekend",
     "isHoliday",
     "dayBeforeHoliday",
@@ -36,25 +46,6 @@ WEEKLY_SEASONAL_ORDERS = [
     (1, 0, 1, 7),
     (0, 0, 0, 7),
 ]
-
-
-def metrics(actual, predicted, training):
-    actual = np.asarray(actual, dtype=float)
-    predicted = np.asarray(predicted, dtype=float)
-    training = np.asarray(training, dtype=float)
-    mae = float(np.mean(np.abs(actual - predicted)))
-    naive_mae = (
-        float(np.mean(np.abs(np.diff(training)))) if len(training) > 1 else 0.0
-    )
-    mase = mae / naive_mae if naive_mae > 0 else (0.0 if mae == 0 else 999.0)
-    denominator = (np.abs(actual) + np.abs(predicted)) / 2.0
-    smape_terms = np.where(
-        denominator == 0,
-        0.0,
-        np.abs(actual - predicted) / denominator * 100.0,
-    )
-    smape = float(np.mean(smape_terms)) if len(smape_terms) else 0.0
-    return round(mase, 2), round(smape, 2), round(max(0.0, 100.0 - smape), 2)
 
 
 def normalize_forecast_days(value):
@@ -121,6 +112,7 @@ def fit_best(
     validation_actual=None,
     validation_exog=None,
     training_actual=None,
+    target_transformer=None,
     timeout_seconds=GRID_SEARCH_TIMEOUT_SECONDS,
 ):
     best = None
@@ -158,12 +150,14 @@ def fit_best(
                         steps=len(validation_actual),
                         exog=validation_exog,
                     ).predicted_mean
-                    mase, smape, _ = metrics(
+                    if target_transformer is not None:
+                        predicted = target_transformer.inverse(predicted)
+                    metric_result = evaluate_forecast_metrics(
                         validation_actual,
                         predicted,
                         training_actual if training_actual is not None else series,
                     )
-                    score = (mase, smape, aic)
+                    score = (metric_result["mase"], metric_result["smape"], aic)
                 else:
                     score = (aic, 0.0, aic)
                 if score < best_score:
@@ -265,67 +259,88 @@ def run(payload):
         exog = exog[observed_mask] if exog is not None else None
         if len(frame) < 21:
             raise ValueError("Services SARIMA requires at least 21 observed demand days")
-    normalized = frame["normalized"].astype(float).to_numpy()
-    actual = frame["actual"].astype(float).to_numpy()
+    target_transformer = build_target_transformer(frame)
+    actual = target_values(frame, target_transformer)
+    transformed_target = target_transformer.transform(actual)
     use_exog = exog is not None
-    forecast_exog = build_forecast_exog(payload, forecast_days) if use_exog else None
+    forecast_exog_raw = build_forecast_exog(payload, forecast_days) if use_exog else None
+    exog_diagnostics = (
+        compute_vif_diagnostics(exog, EXOG_COLUMNS)
+        if use_exog
+        else {"vifAvailable": False, "reason": "univariate_model"}
+    )
 
     train_idx, val_idx, has_test = parse_splits(len(frame), split_ratio)
-    train_normalized = normalized[:train_idx]
-    train_exog = exog[:train_idx] if use_exog else None
-    validation_exog = exog[train_idx:val_idx] if use_exog else None
+    train_target = transformed_target[:train_idx]
+    train_exog_raw = exog[:train_idx] if use_exog else None
+    validation_exog_raw = exog[train_idx:val_idx] if use_exog else None
+    validation_standardizer = (
+        ExogenousStandardizer(EXOG_COLUMNS).fit(train_exog_raw) if use_exog else ExogenousStandardizer(EXOG_COLUMNS)
+    )
+    train_exog = validation_standardizer.transform(train_exog_raw) if use_exog else None
+    validation_exog = (
+        validation_standardizer.transform(validation_exog_raw) if use_exog else None
+    )
     validation_actual = actual[train_idx:val_idx]
 
     # Step 1: Validation Grid Search to find best model order
     order, seasonal_order, validation_fit, search_metadata = fit_best(
-        train_normalized,
+        train_target,
         train_exog,
         validation_actual,
         validation_exog,
         actual[:train_idx],
+        target_transformer,
     )
     validation_forecast = validation_fit.get_forecast(
         steps=val_idx - train_idx, exog=validation_exog
     ).predicted_mean
-    val_mase, val_smape, val_accuracy = metrics(
+    validation_forecast = target_transformer.inverse(validation_forecast)
+    val_metrics = evaluate_forecast_metrics(
         validation_actual, validation_forecast, actual[:train_idx]
     )
 
     # Step 2: Test Evaluation
     if has_test:
         try:
-            test_exog = exog[:val_idx] if use_exog else None
-            test_fit = fit_model(normalized[:val_idx], order, seasonal_order, test_exog)
-            test_forecast_exog = exog[val_idx:] if use_exog else None
+            test_standardizer = (
+                ExogenousStandardizer(EXOG_COLUMNS).fit(exog[:val_idx])
+                if use_exog
+                else ExogenousStandardizer(EXOG_COLUMNS)
+            )
+            test_exog = (
+                test_standardizer.transform(exog[:val_idx]) if use_exog else None
+            )
+            test_fit = fit_model(transformed_target[:val_idx], order, seasonal_order, test_exog)
+            test_forecast_exog = (
+                test_standardizer.transform(exog[val_idx:]) if use_exog else None
+            )
             test_forecast = test_fit.get_forecast(
                 steps=len(frame) - val_idx, exog=test_forecast_exog
             ).predicted_mean
-            test_mase, test_smape, test_accuracy = metrics(
+            test_forecast = target_transformer.inverse(test_forecast)
+            eval_metrics = evaluate_forecast_metrics(
                 actual[val_idx:], test_forecast, actual[:train_idx]
             )
-            eval_metrics = {
-                "mase": test_mase,
-                "smape": test_smape,
-                "accuracy": test_accuracy,
-            }
         except Exception:
-            eval_metrics = {
-                "mase": val_mase,
-                "smape": val_smape,
-                "accuracy": val_accuracy,
-            }
+            eval_metrics = val_metrics
     else:
-        eval_metrics = {
-            "mase": val_mase,
-            "smape": val_smape,
-            "accuracy": val_accuracy,
-        }
+        eval_metrics = val_metrics
 
     # Step 3: Fit Final Model on 100% of input data
-    final_fit = fit_model(normalized, order, seasonal_order, exog)
+    final_standardizer = (
+        ExogenousStandardizer(EXOG_COLUMNS).fit(exog)
+        if use_exog
+        else ExogenousStandardizer(EXOG_COLUMNS)
+    )
+    final_exog = final_standardizer.transform(exog) if use_exog else None
+    forecast_exog = (
+        final_standardizer.transform(forecast_exog_raw) if use_exog else None
+    )
+    final_fit = fit_model(transformed_target, order, seasonal_order, final_exog)
     prediction = final_fit.get_forecast(steps=forecast_days, exog=forecast_exog)
     intervals = prediction.conf_int(alpha=0.2)
-    means = prediction.predicted_mean
+    means = target_transformer.inverse(prediction.predicted_mean)
     last_date = pd.to_datetime(frame["date"].iloc[-1])
 
     forecast = []
@@ -341,6 +356,8 @@ def run(payload):
             if hasattr(intervals, "iloc")
             else intervals[index, 1]
         )
+        lower = target_transformer.inverse([lower])[0]
+        upper = target_transformer.inverse([upper])[0]
         forecast.append(
             {
                 "date": date.strftime("%Y-%m-%d"),
@@ -359,12 +376,23 @@ def run(payload):
         "mase": eval_metrics["mase"],
         "smape": eval_metrics["smape"],
         "accuracy": eval_metrics["accuracy"],
+        "mae": eval_metrics.get("mae", 0),
+        "rmse": eval_metrics.get("rmse", 0),
+        "mape": eval_metrics.get("mape", 0),
+        "r2": eval_metrics.get("r2", 0),
         "forecast": forecast,
-        "fittedValues": [round(max(0.0, float(v)), 2) for v in final_fit.fittedvalues],
+        "fittedValues": [
+            round(max(0.0, float(v)), 2)
+            for v in target_transformer.inverse(final_fit.fittedvalues)
+        ],
         "modelMetadata": {
             "order": list(order),
             "seasonalOrder": list(seasonal_order),
             "aic": round(float(final_fit.aic), 2),
+            **target_transformer.metadata(),
+            **final_standardizer.metadata(),
+            **exog_diagnostics,
+            "metricImplementation": eval_metrics.get("metricImplementation", {}),
             "validationDays": val_idx - train_idx,
             "trainingDays": train_idx,
             "testDays": len(frame) - val_idx if has_test else 0,

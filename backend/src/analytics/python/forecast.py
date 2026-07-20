@@ -6,6 +6,8 @@ import pandas as pd
 from prophet import Prophet
 import statsmodels.api as sm
 
+from model_metrics import evaluate_forecast_metrics
+
 # Suppress warnings for clean stdout JSON
 warnings.filterwarnings('ignore')
 logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
@@ -83,29 +85,12 @@ def run_forecast(payload):
                 "confidenceHigh": round(float(yhat_upper), 2)
             })
             
-        # Calculate training error metrics using Prophet predictions
+        # Calculate training error metrics using library-backed helpers where installed.
         import numpy as np
         train_pred = m.predict(df)
         y_true = df['y'].values
         y_pred = train_pred['yhat'].values
-        
-        denominator = (np.abs(y_true) + np.abs(y_pred)) / 2.0
-        smape_terms = np.where(
-            denominator == 0,
-            0.0,
-            (np.abs(y_true - y_pred) / denominator) * 100.0,
-        )
-        smape = np.mean(smape_terms)
-        # MASE
-        naive_mae = np.mean(np.abs(np.diff(y_true)))
-        mae = np.mean(np.abs(y_true - y_pred))
-        mase = mae / naive_mae if naive_mae != 0 else 0
-        
-        # Accuracy and R2
-        accuracy = max(0, 100 - smape)
-        ss_res = np.sum((y_true - y_pred)**2)
-        ss_tot = np.sum((y_true - np.mean(y_true))**2)
-        r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+        metric_result = evaluate_forecast_metrics(y_true, y_pred, y_true, seasonal_period=7)
 
         return {
             "historical": data,
@@ -113,11 +98,14 @@ def run_forecast(payload):
             "fittedValues": [round(max(0.0, float(v)), 2) for v in y_pred],
             "modelInfo": {
                 "model": "Prophet + SARIMAX Ensemble" if sarimax_mean is not None else "Prophet",
-                "accuracy": round(float(accuracy), 1),
-                "mase": round(float(mase), 2),
-                "rmse": round(float(np.sqrt(np.mean((y_true - y_pred)**2))), 2),
-                "smape": round(float(smape), 1),
-                "r2": round(float(r2), 2)
+                "accuracy": metric_result["accuracy"],
+                "mase": metric_result["mase"],
+                "mae": metric_result["mae"],
+                "rmse": metric_result["rmse"],
+                "mape": metric_result["mape"],
+                "smape": metric_result["smape"],
+                "r2": metric_result["r2"],
+                "metricImplementation": metric_result["metricImplementation"],
             }
         }
     except Exception as e:

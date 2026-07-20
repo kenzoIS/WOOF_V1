@@ -1100,5 +1100,74 @@ This file records requested revisions, implementation details, verification, and
 - Verified: Navigated to `/retail` via browser subagent and verified that the dashboard renders descriptive channels (Physical POS vs. Online) without prediction lines, metrics, or forecasting cards.
 
 
+## 2026-07-20 - Library-Backed Forecast Metrics, Scaling, and Diagnostics
+
+### Requested
+
+- Address technical adviser feedback that model formulas and metrics should be derived from trusted Python libraries where possible.
+- Import/use `sklearn` and `sktime` in the forecasting model layer.
+- Add standardization/log-scaling support and multicollinearity visibility for exogenous features.
+- Improve preprocessing defensibility without changing unrelated frontend/backend features.
+
+### Backend / Python Model Changes
+
+- Added `scikit-learn` and conditional `sktime` dependencies in `backend/requirements.txt`.
+  - `sktime` is enabled for Python versions below 3.13 because the current local Python 3.13 environment has no compatible `sktime` wheel.
+  - The model code still attempts to import and use `sktime` automatically when the runtime supports it.
+- Added shared forecasting utility modules:
+  - `backend/src/analytics/python/model_metrics.py`
+    - Uses `sktime.performance_metrics.forecasting.mean_absolute_scaled_error` for MASE when available.
+    - Uses `sktime` symmetric MAPE for sMAPE when available.
+    - Uses `sklearn.metrics` for MAE, RMSE, MAPE, and R2.
+    - Keeps manual fallbacks only for environment compatibility, and reports the metric source in metadata.
+  - `backend/src/analytics/python/model_preprocessing.py`
+    - Adds `log1p` target transformation and `expm1` inverse transformation.
+    - Adds `sklearn.preprocessing.StandardScaler` for continuous exogenous variables.
+    - Adds `statsmodels` VIF diagnostics to flag multicollinearity risk.
+- Updated `cafe_prophet.py`:
+  - Trains Prophet on log-transformed outlier-capped demand instead of directly fitting the smoothed normalized signal.
+  - Inverse-transforms forecasts and fitted values back to normal demand units before returning data to NestJS.
+  - Scales exogenous regressors before fitting and prediction.
+  - Adds MAE, RMSE, MAPE, R2, target transformation, scaling, metric source, and VIF diagnostics to model metadata.
+- Updated `services_sarima.py`:
+  - Trains SARIMA/SARIMAX on log-transformed outlier-capped demand.
+  - Scores validation/test predictions after inverse transformation so metrics are computed on the real demand scale.
+  - Standardizes continuous exogenous variables with `sklearn`.
+  - Expands the exogenous matrix to include cyclic day-of-week features and transaction-derived fields already produced by NestJS.
+  - Adds VIF diagnostics and library-backed metric metadata.
+- Updated `forecast.py` legacy model metrics to use the shared metric helper instead of duplicated manual MASE/sMAPE/R2 calculations.
+- Updated `analytics.service.ts`:
+  - Preserves the existing API/database shape while carrying additional MAE, RMSE, MAPE, and R2 values into `modelMetadata.additionalRegressionMetrics`.
+  - Adds an explicit `accuracyLabel` clarifying that dashboard accuracy is a forecast score defined as `max(0, 100 - sMAPE)`.
+  - Adds a `targetEvaluationPolicy` explaining that primary Python models train/evaluate on outlier-capped demand with log1p/expm1 transformation while raw actuals remain visible.
+  - Aligns TypeScript fallback/backtest metrics with weekly seasonal MASE where enough history exists.
+
+### Why This Improves The Models
+
+- The model evaluation layer is now more defensible for adviser/manuscript review because MASE/sMAPE and regression metrics come from recognized libraries when supported.
+- Log transformation reduces the impact of high sales spikes and helps stabilize variance, which can make fitted trends less reactive to one-off outliers.
+- Scaling continuous exogenous variables prevents large-unit fields like price or humidity from dominating smaller binary indicators.
+- VIF diagnostics do not automatically improve accuracy, but they expose multicollinearity risk so feature sets can be justified or pruned scientifically.
+- Forecasts are still returned in ordinary demand units, so existing charts and API consumers do not need frontend changes.
+
+### Files Changed
+
+- `backend/requirements.txt`
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/analytics/python/model_metrics.py`
+- `backend/src/analytics/python/model_preprocessing.py`
+- `backend/src/analytics/python/cafe_prophet.py`
+- `backend/src/analytics/python/services_sarima.py`
+- `backend/src/analytics/python/forecast.py`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `pip install -r backend/requirements.txt` on local Python 3.13. `sktime` was conditionally skipped because no compatible Python 3.13 package was available.
+- Passed: Python compile check for `model_metrics.py`, `model_preprocessing.py`, `cafe_prophet.py`, `services_sarima.py`, and `forecast.py`.
+- Passed: `python backend/src/analytics/python/test_services_sarima.py`.
+- Passed: `python backend/src/analytics/python/test_services_sarimax.py`.
+- Passed: Backend Jest tests (`31` tests passed across `5` suites).
+- Not completed: Full `test_cafe_prophet.py` validation was interrupted before completion because Prophet candidate fitting was taking too long in the local environment.
 
 

@@ -42,6 +42,10 @@ interface ModelResult {
   mase: number;
   smape: number;
   accuracy: number;
+  mae?: number;
+  rmse?: number;
+  mape?: number;
+  r2?: number;
   forecast: {
     date: string;
     forecast: number;
@@ -744,6 +748,16 @@ export class AnalyticsService {
       itemHistory,
       modelMetadata: {
         ...finalModel.modelMetadata,
+        additionalRegressionMetrics: {
+          mae: finalModel.mae,
+          rmse: finalModel.rmse,
+          mape: finalModel.mape,
+          r2: finalModel.r2,
+        },
+        accuracyLabel:
+          'Forecast Score = max(0, 100 - sMAPE); sMAPE remains the primary percentage error metric.',
+        targetEvaluationPolicy:
+          'Primary Python models train and evaluate on outlier-capped demand using log1p/expm1 target transformation; raw actuals remain visible in history.',
         splitRatio,
         emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
         forecastMode: evaluationPlan.mode,
@@ -2258,9 +2272,9 @@ export class AnalyticsService {
     }
 
     const metrics = this.calculateMetrics(
-      testRows.map((point) => point.actual),
+      testRows.map((point) => point.cappedActual ?? point.actual),
       testRows.map((point) => predictedByDate.get(point.date) ?? 0),
-      training.map((point) => point.actual),
+      training.map((point) => point.cappedActual ?? point.actual),
     );
 
     return {
@@ -2275,6 +2289,8 @@ export class AnalyticsService {
         testEndDate: plan.testEndDate,
         testDays: testRows.length,
         trainingDaysForMase: training.length,
+        backtestMetricImplementation:
+          'TypeScript seasonal MASE/sMAPE recalculation over holdout dates; Python model training metrics use sktime/sklearn when installed.',
       },
     };
   }
@@ -2603,11 +2619,19 @@ export class AnalyticsService {
         smape: 0,
         accuracy: 0,
         forecast: [],
-        modelMetadata: { fallbackReason: reason, windowDays: 7 },
+        modelMetadata: {
+          fallbackReason: reason,
+          windowDays: 7,
+          metricImplementation: {
+            mase: 'typescript seasonal naive fallback',
+            smape: 'typescript symmetric percentage error fallback',
+            seasonalPeriod: 7,
+          },
+        },
       };
     }
 
-    const actuals = historical.map((point) => point.actual);
+    const actuals = historical.map((point) => point.cappedActual ?? point.actual);
     const windowSize = Math.min(7, actuals.length);
     const forecastValue = this.average(actuals.slice(-windowSize));
     const lastDate = new Date(
@@ -2650,7 +2674,15 @@ export class AnalyticsService {
       ...metrics,
       forecast,
       fittedValues,
-      modelMetadata: { fallbackReason: reason, windowDays: 7 },
+      modelMetadata: {
+        fallbackReason: reason,
+        windowDays: 7,
+        metricImplementation: {
+          mase: 'typescript seasonal naive fallback',
+          smape: 'typescript symmetric percentage error fallback',
+          seasonalPeriod: 7,
+        },
+      },
     };
   }
 
@@ -3064,9 +3096,12 @@ export class AnalyticsService {
     );
     const mae = this.average(absoluteErrors);
     const naiveErrors = training
+      .slice(7)
+      .map((value, index) => Math.abs(value - training[index]));
+    const oneStepNaiveErrors = training
       .slice(1)
       .map((value, index) => Math.abs(value - training[index]));
-    const naiveMae = this.average(naiveErrors);
+    const naiveMae = this.average(naiveErrors.length > 0 ? naiveErrors : oneStepNaiveErrors);
     const percentageErrors = actual.map((value, index) => {
       const forecast = Number.isFinite(predicted[index]) ? predicted[index] : 0;
       const denominator = (Math.abs(value) + Math.abs(forecast)) / 2;
