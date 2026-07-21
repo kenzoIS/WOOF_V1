@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map, Zap } from "lucide-react";
+import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map, Zap, HelpCircle, Info, Tag, ShoppingBag } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 import { getCrossSell } from "../lib/api";
 import aiMascot from "../../imports/no_bg_AI.png";
 import {
@@ -17,7 +18,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer,
   ZAxis,
   Cell,
@@ -37,6 +38,11 @@ interface CrossSellRule {
   cooccurrences?: number;
   isMultiItem?: boolean;
   crossSector?: boolean;
+  itemAPrice?: number;
+  itemBPrice?: number;
+  regularPrice?: number;
+  bundlePrice?: number;
+  savings?: number;
 }
 
 interface BundleCandidate {
@@ -58,6 +64,11 @@ interface BundleCandidate {
   consequentSectors?: string[];
   crossSector?: boolean;
   isLowAssociation?: boolean;
+  itemAPrice?: number;
+  itemBPrice?: number;
+  regularPrice?: number;
+  bundlePrice?: number;
+  savings?: number;
 }
 
 interface ItemMetric {
@@ -163,9 +174,10 @@ export function AISimulation() {
     { id: "scenario-builder", label: "Scenario Builder", icon: FlaskConical },
   ];
 
-  const handleDeployBundle = (bundle: string) => {
+  const handleDeployBundle = (bundle: string, bundlePrice?: number, savings?: number) => {
+    const priceText = bundlePrice && bundlePrice > 0 ? ` at ₱${bundlePrice.toFixed(2)} (Save ₱${(savings || 0).toFixed(2)})` : "";
     toast.success("Bundle deployed!", {
-      description: `${bundle} is now active and will be promoted at optimal times.`,
+      description: `${bundle}${priceText} is now active and will be promoted at optimal customer touchpoints.`,
     });
   };
 
@@ -261,27 +273,42 @@ export function AISimulation() {
     });
   }, [dataTime, rawAnalysis]);
 
-  // Co-purchase patterns based on time
+  // Co-purchase patterns based on time - deduplicated symmetric pairs
   const coPurchaseData = useMemo(() => {
-    return rules
-      .slice()
-      .sort((a, b) => (b.cooccurrences || 0) - (a.cooccurrences || 0))
-      .slice(0, 5)
-      .map((rule) => ({
-        pair: formatPair(rule.itemA, rule.itemB),
-        frequency: rule.cooccurrences || 0,
-      }));
+    const seen = new Set<string>();
+    const list: Array<{ pair: string; frequency: number }> = [];
+
+    const sortedRules = rules.slice().sort((a, b) => (b.cooccurrences || 0) - (a.cooccurrences || 0));
+    for (const rule of sortedRules) {
+      const canonicalKey = [rule.itemA, rule.itemB].sort().join(" + ");
+      if (!seen.has(canonicalKey)) {
+        seen.add(canonicalKey);
+        list.push({
+          pair: formatPair(rule.itemA, rule.itemB),
+          frequency: rule.cooccurrences || 0,
+        });
+      }
+      if (list.length >= 5) break;
+    }
+    return list;
   }, [rules]);
 
-  // Bundle predictions based on time analysis
+  // Bundle predictions based on time analysis with real item prices
   const bundlePredictions = useMemo(() => {
     const lowAssociation = bundleCandidates.map((candidate) => ({
       bundle: formatPair(candidate.anchorItem, candidate.bundleItem),
+      itemA: candidate.anchorItem,
+      itemB: candidate.bundleItem,
       confidence: Math.round((candidate.confidence || 0) * 100),
       lift: candidate.lift || 0,
       score: Math.round((candidate.opportunityScore || 0) * 100),
       frequency: candidate.cooccurrences || 0,
-      type: "Fast + Slow opportunity",
+      type: "Fast + Slow Opportunity",
+      itemAPrice: candidate.itemAPrice || 0,
+      itemBPrice: candidate.itemBPrice || 0,
+      regularPrice: candidate.regularPrice || 0,
+      bundlePrice: candidate.bundlePrice || 0,
+      savings: candidate.savings || 0,
       sectors: [
         firstSector(candidate.antecedentSectors),
         firstSector(candidate.consequentSectors),
@@ -296,11 +323,18 @@ export function AISimulation() {
     }));
     const significantRules = rules.map((rule) => ({
       bundle: formatPair(rule.itemA, rule.itemB),
+      itemA: rule.itemA,
+      itemB: rule.itemB,
       confidence: Math.round((rule.confidence || 0) * 100),
       lift: rule.lift || 0,
       score: Math.round(Math.min(99, (rule.lift || 0) * 35)),
       frequency: rule.cooccurrences || 0,
-      type: rule.isMultiItem ? "Multi-item FP-Growth rule" : "Significant FP-Growth rule",
+      type: rule.isMultiItem ? "Multi-item Pattern Rule" : "Significant Association Rule",
+      itemAPrice: rule.itemAPrice || 0,
+      itemBPrice: rule.itemBPrice || 0,
+      regularPrice: rule.regularPrice || 0,
+      bundlePrice: rule.bundlePrice || 0,
+      savings: rule.savings || 0,
       sectors: [
         firstSector(rule.antecedentSectors),
         firstSector(rule.consequentSectors),
@@ -309,10 +343,23 @@ export function AISimulation() {
         firstSector(rule.antecedentSectors),
         firstSector(rule.consequentSectors),
       ]),
-      reason: "Significant association rule mined from ingested transaction baskets.",
+      reason: rule.regularPrice && rule.regularPrice > 0 && rule.bundlePrice
+        ? `Co-purchased ${rule.cooccurrences || 0}x in transaction history. Regular: ₱${rule.regularPrice.toFixed(2)}, Promotional Bundle: ₱${rule.bundlePrice.toFixed(2)} (${rule.lift.toFixed(2)}x sales lift multiplier).`
+        : `Co-purchased ${rule.cooccurrences || 0}x in transaction history with ${rule.lift.toFixed(2)}x sales lift multiplier.`,
     }));
 
-    return [...lowAssociation, ...significantRules]
+    const seenKeys = new Set<string>();
+    const combined: typeof significantRules = [];
+
+    [...lowAssociation, ...significantRules].forEach((item) => {
+      const canonicalKey = [item.itemA, item.itemB].sort().join(" + ");
+      if (!seenKeys.has(canonicalKey)) {
+        seenKeys.add(canonicalKey);
+        combined.push(item);
+      }
+    });
+
+    return combined
       .sort(
         (a, b) =>
           b.score - a.score ||
@@ -341,6 +388,9 @@ export function AISimulation() {
         color,
         sectorPair: bundle.sectorPair,
         rank: index + 1,
+        regularPrice: bundle.regularPrice,
+        bundlePrice: bundle.bundlePrice,
+        savings: bundle.savings,
       };
     });
   }, [bundlePredictions]);
@@ -429,33 +479,39 @@ export function AISimulation() {
       );
   }, [confidenceLevel, networkNodes, rules, supportThreshold]);
 
-  // Top AI Insights from network analysis
+  // Top AI Insights from network analysis - distinct categories
   const topInsights = useMemo(() => {
-    const topConnection = networkConnections.length > 0 ? networkConnections[0] : null;
-    const topBundle = bundlePredictions[0];
-    const crossSectorConnection = networkConnections.find((conn) => conn.crossSector);
-    const crossSectorBundle = bundlePredictions.find(
-      (bundle) => bundle.sectors[0] !== bundle.sectors[1],
-    );
+    const sortedRules = rules.slice().sort((a, b) => (b.lift || 0) - (a.lift || 0));
+    const topLiftRule = sortedRules[0];
+
+    const sortedCandidates = bundleCandidates.slice().sort((a, b) => (b.opportunityScore || 0) - (a.opportunityScore || 0));
+    const topOpportunityCandidate = sortedCandidates[0];
+
+    const crossSectorMatch = rules.find((r) => r.crossSector) || bundleCandidates.find((c) => c.crossSector);
 
     return {
-      topBundle: topConnection
-        ? formatPair(topConnection.sourceName, topConnection.targetName)
+      topBundle: topLiftRule
+        ? formatPair(topLiftRule.itemA, topLiftRule.itemB)
         : "No patterns detected",
-      bundleConfidence: topConnection ? topConnection.confidence : 0,
-      bundleLift: topConnection ? topConnection.lift : 0,
-      emergingTrend: topBundle?.bundle || "No bundle candidates",
-      trendGrowth: topBundle ? `${topBundle.score}% score` : "0% score",
-      crossSell: crossSectorConnection
-        ? formatPair(crossSectorConnection.sourceName, crossSectorConnection.targetName)
-        : crossSectorBundle?.bundle || "No cross-sector pattern",
-      crossSellRate: crossSectorConnection
-        ? `${crossSectorConnection.confidence}%`
-        : crossSectorBundle
-          ? `${crossSectorBundle.confidence}%`
-          : "0%",
+      bundleConfidence: topLiftRule ? Math.round(topLiftRule.confidence * 100) : 0,
+      bundleLift: topLiftRule ? topLiftRule.lift : 0,
+      emergingTrend: topOpportunityCandidate
+        ? formatPair(topOpportunityCandidate.anchorItem, topOpportunityCandidate.bundleItem)
+        : "No bundle candidates",
+      trendGrowth: topOpportunityCandidate
+        ? `${Math.round((topOpportunityCandidate.opportunityScore || 0) * 100)}% score`
+        : "0% score",
+      crossSell: crossSectorMatch
+        ? formatPair(
+            ("itemA" in crossSectorMatch ? crossSectorMatch.itemA : crossSectorMatch.anchorItem) || "",
+            ("itemB" in crossSectorMatch ? crossSectorMatch.itemB : crossSectorMatch.bundleItem) || ""
+          )
+        : "No cross-sector pattern",
+      crossSellRate: crossSectorMatch
+        ? `${Math.round((crossSectorMatch.confidence || 0) * 100)}%`
+        : "0%",
     };
-  }, [bundlePredictions, networkConnections]);
+  }, [bundleCandidates, rules]);
 
   // Dynamic pricing data based on discount slider
   const pricingScenarios = useMemo(() => {
@@ -596,53 +652,95 @@ export function AISimulation() {
       </div>
 
       {/* KPI ROW */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          {/* Active Simulations */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
-              <FlaskConical className="w-4 h-4 md:w-5 md:h-5 text-white" />
+      <TooltipProvider>
+        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+            {/* Active Patterns */}
+            <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+                <FlaskConical className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
+                  <span className="truncate">Discovered Item Bundles</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3 h-3 text-[#F53799] cursor-pointer" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[220px]">
+                      Number of statistically validated product combination rules automatically extracted from customer transaction history.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">{rules.length}</div>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">FP-Growth Rules</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{rules.length}</div>
-            </div>
-          </div>
 
-          {/* Deployed Bundles */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
-              <Target className="w-4 h-4 md:w-5 md:h-5 text-white" />
+            {/* Bundle Candidates */}
+            <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+                <Target className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
+                  <span className="truncate">Bundle Candidates</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3 h-3 text-[#3AE4FA] cursor-pointer" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[220px]">
+                      High-potential product pairs combining popular fast-sellers with slower-moving offers to boost revenue.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">{bundleCandidates.length}</div>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Bundle Candidates</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{bundleCandidates.length}</div>
-            </div>
-          </div>
 
-          {/* Avg Lift Prediction */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
-              <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+            {/* Avg Rule Lift */}
+            <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+                <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
+                  <span className="truncate">Avg Sales Boost (Lift)</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3 h-3 text-[#F53799] cursor-pointer" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[240px]">
+                      Lift measures how much more frequently two items are bought together compared to random chance. 2.0x means double the normal co-purchase probability.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">{avgRuleLift.toFixed(2)}x</div>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Rule Lift</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{avgRuleLift.toFixed(2)}x</div>
-            </div>
-          </div>
 
-          {/* Confidence Score */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Confidence</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{formatPercent(avgRuleConfidence)}</div>
+            {/* Avg Confidence */}
+            <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
+                  <span className="truncate">Avg Confidence</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3 h-3 text-[#3AE4FA] cursor-pointer" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[220px]">
+                      Confidence measures the likelihood that a customer purchasing Item A will also purchase Item B.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">{formatPercent(avgRuleConfidence)}</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </TooltipProvider>
 
       {/* TAB NAVIGATION */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-2 flex flex-wrap gap-2">
@@ -737,7 +835,7 @@ export function AISimulation() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
                     <XAxis dataKey="hour" stroke="#223047" style={{ fontSize: "10px" }} />
                     <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
-                    <Tooltip
+                    <RechartsTooltip
                       contentStyle={{
                         backgroundColor: "white",
                         border: "1px solid #FFD9EC",
@@ -769,7 +867,7 @@ export function AISimulation() {
                   {coPurchaseData.map((item, idx) => (
                     <div key={idx} className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-[#223047]">{item.pair}</span>
+                        <span className="text-[#223047] font-medium">{item.pair}</span>
                         <span className="font-bold text-[#F53799]">{item.frequency}×</span>
                       </div>
                       <div className="h-2 bg-[#FFD9EC] rounded-full overflow-hidden">
@@ -872,6 +970,7 @@ export function AISimulation() {
 
                       return (
                         <g key={idx}>
+                          <title>{`${conn.sourceName} + ${conn.targetName} | Confidence: ${conn.confidence}%, Lift: ${conn.lift.toFixed(2)}x, Co-occurrences: ${conn.cooccurrences}`}</title>
                           <line
                             x1={sourcePos.x}
                             y1={sourcePos.y}
@@ -890,11 +989,27 @@ export function AISimulation() {
                     {/* Product Nodes - Varying sizes based on frequency */}
                     {networkNodes.map((node) => {
                       const pos = { x: node.x, y: node.y };
-                      // Node size based on frequency (28-58px radius)
-                      const radius = 28 + (node.frequency / 100) * 30;
+                      // Node size based on frequency (32-56px radius)
+                      const radius = 32 + (node.frequency / 100) * 24;
+
+                      // Smart SVG text wrapping
+                      const words = (node.name || "").split(" ");
+                      const lines: string[] = [];
+                      let currentLine = "";
+                      words.forEach((w) => {
+                        if ((currentLine + " " + w).trim().length <= 11) {
+                          currentLine = (currentLine + " " + w).trim();
+                        } else {
+                          if (currentLine) lines.push(currentLine);
+                          currentLine = w.length > 11 ? w.slice(0, 10) + "…" : w;
+                        }
+                      });
+                      if (currentLine) lines.push(currentLine);
+                      const displayLines = lines.slice(0, 3);
 
                       return (
                         <g key={node.id}>
+                          <title>{`${node.name} (${formatSector(node.category)}) - Frequency: ${node.frequency}%, Basket Count: ${node.basketCount}`}</title>
                           {/* Outer glow for high-frequency nodes */}
                           {node.frequency > 80 && (
                             <circle
@@ -921,25 +1036,29 @@ export function AISimulation() {
                             y={pos.y}
                             textAnchor="middle"
                             dominantBaseline="middle"
-                            className="text-xs font-bold pointer-events-none"
+                            className="text-[10px] font-bold pointer-events-none"
                             fill="#223047"
                           >
-                            {node.name.split(" ").map((word: string, i: number) => (
-                              <tspan key={i} x={pos.x} dy={i === 0 ? 0 : 14}>
-                                {word}
-                              </tspan>
-                            ))}
+                            {displayLines.map((line: string, i: number, arr: string[]) => {
+                              const total = arr.length;
+                              const startDy = total === 1 ? 0 : total === 2 ? -5 : -10;
+                              return (
+                                <tspan key={i} x={pos.x} dy={i === 0 ? startDy : 12}>
+                                  {line}
+                                </tspan>
+                              );
+                            })}
                           </text>
                           {/* Frequency badge */}
                           <circle
-                            cx={pos.x + radius - 8}
-                            cy={pos.y - radius + 8}
-                            r="12"
+                            cx={pos.x + radius - 6}
+                            cy={pos.y - radius + 6}
+                            r="11"
                             fill={node.color}
                           />
                           <text
-                            x={pos.x + radius - 8}
-                            y={pos.y - radius + 8}
+                            x={pos.x + radius - 6}
+                            y={pos.y - radius + 6}
                             textAnchor="middle"
                             dominantBaseline="middle"
                             className="text-[9px] font-bold"
@@ -993,89 +1112,111 @@ export function AISimulation() {
               </div>
 
               {/* Interactive AI Controls Panel */}
-              <div className="space-y-3 md:space-y-4">
-                <div className="bg-gradient-to-br from-[#F53799] to-[#D42A7D] border border-[#F53799] rounded-xl md:rounded-2xl p-4 md:p-6 text-white shadow-xl">
-                  <div className="flex items-center gap-2 mb-3 md:mb-4">
-                    <Target className="w-4 h-4 md:w-5 md:h-5" />
-                    <h3 className="text-sm md:text-base font-bold">Interactive AI Controls</h3>
-                  </div>
-                  <p className="text-xs opacity-90 mb-4 md:mb-6">
-                    Adjust thresholds to dynamically filter patterns and recalculate the network graph
-                  </p>
+              <TooltipProvider>
+                <div className="space-y-3 md:space-y-4">
+                  <div className="bg-gradient-to-br from-[#F53799] to-[#D42A7D] border border-[#F53799] rounded-xl md:rounded-2xl p-4 md:p-6 text-white shadow-xl">
+                    <div className="flex items-center gap-2 mb-3 md:mb-4">
+                      <Target className="w-4 h-4 md:w-5 md:h-5" />
+                      <h3 className="text-sm md:text-base font-bold">Interactive AI Controls</h3>
+                    </div>
+                    <p className="text-xs opacity-90 mb-4 md:mb-6">
+                      Adjust thresholds to dynamically filter patterns and recalculate the network graph
+                    </p>
 
-                  {/* Support Threshold Slider */}
-                  <div className="space-y-3 mb-6">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold tracking-wide">SUPPORT THRESHOLD (%)</span>
-                      <span className="text-lg font-bold bg-white/20 backdrop-blur px-3 py-1 rounded-lg">
-                        {supportThreshold[0]}%
-                      </span>
+                    {/* Support Threshold Slider */}
+                    <div className="space-y-3 mb-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide">
+                          <span>SUPPORT THRESHOLD (%)</span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <HelpCircle className="w-3.5 h-3.5 text-white/80 cursor-pointer" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-[220px]">
+                              Minimum transaction percentage required for a product pair to appear in network patterns.
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-lg font-bold bg-white/20 backdrop-blur px-3 py-1 rounded-lg">
+                          {supportThreshold[0]}%
+                        </span>
+                      </div>
+                      <Slider
+                        value={supportThreshold}
+                        onValueChange={setSupportThreshold}
+                        max={100}
+                        min={0}
+                        step={5}
+                        className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
+                      />
+                      <div className="flex justify-between text-[10px] opacity-75">
+                        <span>0%</span>
+                        <span>50%</span>
+                        <span>100%</span>
+                      </div>
                     </div>
-                    <Slider
-                      value={supportThreshold}
-                      onValueChange={setSupportThreshold}
-                      max={100}
-                      min={0}
-                      step={5}
-                      className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
-                    />
-                    <div className="flex justify-between text-[10px] opacity-75">
-                      <span>0%</span>
-                      <span>50%</span>
-                      <span>100%</span>
+
+                    {/* Confidence Level Slider */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide">
+                          <span>CONFIDENCE LEVEL (%)</span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <HelpCircle className="w-3.5 h-3.5 text-white/80 cursor-pointer" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-[220px]">
+                              Minimum co-purchase probability required to form a connection between products.
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <span className="text-lg font-bold bg-white/20 backdrop-blur px-3 py-1 rounded-lg">
+                          {confidenceLevel[0]}%
+                        </span>
+                      </div>
+                      <Slider
+                        value={confidenceLevel}
+                        onValueChange={setConfidenceLevel}
+                        max={100}
+                        min={0}
+                        step={5}
+                        className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
+                      />
+                      <div className="flex justify-between text-[10px] opacity-75">
+                        <span>0%</span>
+                        <span>50%</span>
+                        <span>100%</span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Confidence Level Slider */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold tracking-wide">CONFIDENCE LEVEL (%)</span>
-                      <span className="text-lg font-bold bg-white/20 backdrop-blur px-3 py-1 rounded-lg">
-                        {confidenceLevel[0]}%
-                      </span>
-                    </div>
-                    <Slider
-                      value={confidenceLevel}
-                      onValueChange={setConfidenceLevel}
-                      max={100}
-                      min={0}
-                      step={5}
-                      className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
-                    />
-                    <div className="flex justify-between text-[10px] opacity-75">
-                      <span>0%</span>
-                      <span>50%</span>
-                      <span>100%</span>
+                  {/* Real-time Metrics */}
+                  <div className="bg-gradient-to-br from-[#FFF7FB] to-white border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-5 space-y-3 md:space-y-4">
+                    <div className="text-xs font-bold text-[#223047] tracking-wider mb-2 md:mb-3">REAL-TIME METRICS</div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-3 bg-[#F53799]/5 rounded-lg">
+                        <span className="text-xs text-[#223047]">Active Rules</span>
+                        <span className="text-lg font-bold text-[#F53799]">{networkConnections.length}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 bg-[#3AE4FA]/5 rounded-lg">
+                        <span className="text-xs text-[#223047]">Pattern Nodes</span>
+                        <span className="text-lg font-bold text-[#3AE4FA]">{networkNodes.length}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 bg-[#D42A7D]/5 rounded-lg">
+                        <span className="text-xs text-[#223047]">Avg Confidence</span>
+                        <span className="text-lg font-bold text-[#D42A7D]">
+                          {networkConnections.length > 0
+                            ? Math.round(networkConnections.reduce((sum, c) => sum + c.confidence, 0) / networkConnections.length)
+                            : 0}%
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
-
-                {/* Real-time Metrics */}
-                <div className="bg-gradient-to-br from-[#FFF7FB] to-white border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-5 space-y-3 md:space-y-4">
-                  <div className="text-xs font-bold text-[#223047] tracking-wider mb-2 md:mb-3">REAL-TIME METRICS</div>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 bg-[#F53799]/5 rounded-lg">
-                      <span className="text-xs text-[#223047]">Active Rules</span>
-                      <span className="text-lg font-bold text-[#F53799]">{networkConnections.length}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 bg-[#3AE4FA]/5 rounded-lg">
-                      <span className="text-xs text-[#223047]">Pattern Nodes</span>
-                      <span className="text-lg font-bold text-[#3AE4FA]">{networkNodes.length}</span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 bg-[#D42A7D]/5 rounded-lg">
-                      <span className="text-xs text-[#223047]">Avg Confidence</span>
-                      <span className="text-lg font-bold text-[#D42A7D]">
-                        {networkConnections.length > 0
-                          ? Math.round(networkConnections.reduce((sum, c) => sum + c.confidence, 0) / networkConnections.length)
-                          : 0}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              </TooltipProvider>
             </div>
 
             {/* SECTION 3: AI-Detected Patterns & Top Insights */}
@@ -1225,6 +1366,7 @@ export function AISimulation() {
                         {bundle.sectorPair}
                       </Badge>
                     </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-6 text-xs md:text-sm mb-2">
                       <div>
                         <span className="text-[#223047] opacity-60">Lift:</span>
@@ -1239,13 +1381,38 @@ export function AISimulation() {
                         <span className="ml-2 font-semibold text-[#223047]">{bundle.frequency} times</span>
                       </div>
                     </div>
+
+                    {/* Pricing Breakdown Bar */}
+                    {bundle.regularPrice > 0 ? (
+                      <div className="flex flex-wrap items-center gap-3 my-2.5 bg-[#FFF2FA] p-3 rounded-xl border border-[#FFD9EC]/70">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#223047]">
+                          <Tag className="w-3.5 h-3.5 text-[#F53799]" />
+                          <span>{bundle.itemA}: {bundle.itemAPrice > 0 ? `₱${bundle.itemAPrice.toFixed(2)}` : 'Market Rate'}</span>
+                          <span className="text-gray-400">+</span>
+                          <span>{bundle.itemB}: {bundle.itemBPrice > 0 ? `₱${bundle.itemBPrice.toFixed(2)}` : 'Market Rate'}</span>
+                        </div>
+                        <div className="flex items-center gap-2.5 ml-auto">
+                          <span className="line-through text-gray-400 text-xs font-medium">₱{bundle.regularPrice.toFixed(2)}</span>
+                          <span className="font-extrabold text-[#F53799] text-base">₱{bundle.bundlePrice.toFixed(2)}</span>
+                          <Badge className="bg-emerald-500 text-white text-[11px] px-2.5 py-0.5 font-bold">
+                            Save ₱{bundle.savings.toFixed(2)} (15% OFF)
+                          </Badge>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-[#223047] opacity-60 my-1">
+                        Suggested 15% Bundle Discount applied upon deployment.
+                      </div>
+                    )}
+
                     <div className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
                       {bundle.type}: {bundle.reason}
                     </div>
                   </div>
+
                   <Button
-                    onClick={() => handleDeployBundle(bundle.bundle)}
-                    className="bg-[#F53799] hover:bg-[#D42A7D] text-sm md:text-base w-full md:w-auto"
+                    onClick={() => handleDeployBundle(bundle.bundle, bundle.bundlePrice, bundle.savings)}
+                    className="bg-[#F53799] hover:bg-[#D42A7D] text-sm md:text-base w-full md:w-auto font-bold shadow-md"
                   >
                     Deploy Bundle
                   </Button>
@@ -1300,6 +1467,17 @@ export function AISimulation() {
                       <p className="text-sm text-[#223047]" style={{ lineHeight: "1.6" }}>
                         {rec.advice}
                       </p>
+
+                      {rec.regularPrice > 0 && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold bg-[#FFF7FB] border border-[#FFD9EC] rounded-lg px-3 py-2 mt-3">
+                          <span className="text-[#223047] opacity-60">Bundle Price:</span>
+                          <span className="line-through text-gray-400">₱{rec.regularPrice.toFixed(2)}</span>
+                          <span className="text-[#F53799] font-bold">₱{rec.bundlePrice.toFixed(2)}</span>
+                          <Badge className="bg-emerald-500 text-white text-[10px] px-2 py-0.5 font-bold ml-auto">
+                            Save ₱{rec.savings.toFixed(2)}
+                          </Badge>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1389,7 +1567,7 @@ export function AISimulation() {
                 style={{ fontSize: "12px" }}
               />
               <ZAxis dataKey="demand" range={[50, 400]} />
-              <Tooltip
+              <RechartsTooltip
                 cursor={{ strokeDasharray: "3 3" }}
                 contentStyle={{
                   backgroundColor: "white",
@@ -1538,7 +1716,7 @@ export function AISimulation() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
                 <XAxis dataKey="day" stroke="#223047" style={{ fontSize: "12px" }} />
                 <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
-                <Tooltip
+                <RechartsTooltip
                   contentStyle={{
                     backgroundColor: "white",
                     border: "1px solid #FFD9EC",
@@ -1615,7 +1793,7 @@ export function AISimulation() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
                     <XAxis dataKey="date" stroke="#223047" style={{ fontSize: "11px" }} />
                     <YAxis stroke="#223047" style={{ fontSize: "11px" }} />
-                    <Tooltip
+                    <RechartsTooltip
                       contentStyle={{
                         backgroundColor: "white",
                         border: "1px solid #FFD9EC",

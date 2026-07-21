@@ -21,6 +21,7 @@ def parse_payload(payload):
             "minConfidence": DEFAULT_MIN_CONFIDENCE,
             "minLift": DEFAULT_MIN_LIFT,
             "maxBundleCandidates": DEFAULT_MAX_BUNDLE_CANDIDATES,
+            "itemPrices": {},
         }
 
     if isinstance(payload, dict):
@@ -48,6 +49,7 @@ def parse_payload(payload):
                     config.get("maxBundleCandidates", DEFAULT_MAX_BUNDLE_CANDIDATES),
                 )
             ),
+            "itemPrices": payload.get("itemPrices", config.get("itemPrices", {})),
         }
 
     return [], {
@@ -55,6 +57,7 @@ def parse_payload(payload):
         "minConfidence": DEFAULT_MIN_CONFIDENCE,
         "minLift": DEFAULT_MIN_LIFT,
         "maxBundleCandidates": DEFAULT_MAX_BUNDLE_CANDIDATES,
+        "itemPrices": {},
     }
 
 
@@ -171,7 +174,9 @@ def build_low_association_bundles(
     min_confidence,
     min_lift,
     max_candidates,
+    item_prices=None,
 ):
+    item_prices = item_prices or {}
     total_baskets = len(dataset)
     if total_baskets == 0:
         return []
@@ -223,6 +228,12 @@ def build_low_association_bundles(
             anchor_sectors = sorted(sector_set_for_items([anchor], product_sectors))
             bundle_sectors = sorted(sector_set_for_items([bundle_item], product_sectors))
 
+            price_a = float(item_prices.get(anchor, 0))
+            price_b = float(item_prices.get(bundle_item, 0))
+            regular_price = round(price_a + price_b, 2)
+            bundle_price = round(regular_price * 0.85, 2)
+            savings = round(regular_price - bundle_price, 2)
+
             candidates.append({
                 "anchorItem": anchor,
                 "bundleItem": bundle_item,
@@ -242,6 +253,11 @@ def build_low_association_bundles(
                 "consequentSectors": bundle_sectors,
                 "crossSector": is_cross_sector([anchor], [bundle_item], product_sectors),
                 "isLowAssociation": True,
+                "itemAPrice": price_a,
+                "itemBPrice": price_b,
+                "regularPrice": regular_price,
+                "bundlePrice": bundle_price,
+                "savings": savings,
             })
 
     return sorted(
@@ -296,6 +312,7 @@ def run_cross_sell(baskets, config=None):
     max_bundle_candidates = int(
         config.get("maxBundleCandidates", DEFAULT_MAX_BUNDLE_CANDIDATES)
     )
+    item_prices = config.get("itemPrices") or {}
 
     try:
         started_basket_count = len(baskets)
@@ -330,6 +347,7 @@ def run_cross_sell(baskets, config=None):
             min_confidence,
             min_lift,
             max_bundle_candidates,
+            item_prices,
         )
              
         te = TransactionEncoder()
@@ -349,10 +367,8 @@ def run_cross_sell(baskets, config=None):
             }
             
         try:
-            # Note: mlxtend association_rules sometimes returns a DataFrame with frozen sets
             rules = association_rules(frequent_itemsets, metric="lift", min_threshold=min_lift)
         except Exception as e:
-            # Fallback if metric lift fails
             rules = pd.DataFrame()
             
         if rules.empty:
@@ -381,20 +397,24 @@ def run_cross_sell(baskets, config=None):
                 "cleanedItems": cleaned_items,
             }
             
-        rules_output = []
+        deduped_rules = {}
         for _, row in rules.iterrows():
             antecedents = sorted(str(item) for item in row['antecedents'])
             consequents = sorted(str(item) for item in row['consequents'])
             antecedent_sectors = sorted(sector_set_for_items(antecedents, product_sectors))
             consequent_sectors = sorted(sector_set_for_items(consequents, product_sectors))
 
-            # Dashboard pair displays use the first antecedent and consequent as
-            # itemA/itemB. Multi-item itemsets are still emitted in full via the
-            # antecedents/consequents arrays and flagged with isMultiItem.
             item_a = antecedents[0] if antecedents else "Unknown"
             item_b = consequents[0] if consequents else "Unknown"
             is_multi_item = len(antecedents) > 1 or len(consequents) > 1
-            rules_output.append({
+
+            price_a = float(item_prices.get(item_a, 0))
+            price_b = float(item_prices.get(item_b, 0))
+            regular_price = round(price_a + price_b, 2)
+            bundle_price = round(regular_price * 0.85, 2)
+            savings = round(regular_price - bundle_price, 2)
+
+            rule_obj = {
                 "itemA": str(item_a),
                 "itemB": str(item_b),
                 "antecedents": antecedents,
@@ -407,10 +427,25 @@ def run_cross_sell(baskets, config=None):
                 "cooccurrences": int(row['support'] * len(dataset)),
                 "isMultiItem": is_multi_item,
                 "crossSector": is_cross_sector(antecedents, consequents, product_sectors),
-            })
-            
+                "itemAPrice": price_a,
+                "itemBPrice": price_b,
+                "regularPrice": regular_price,
+                "bundlePrice": bundle_price,
+                "savings": savings,
+            }
+
+            # Deduplicate symmetric pairs (A=>B vs B=>A), keeping higher confidence direction
+            if not is_multi_item:
+                pair_key = tuple(sorted([item_a, item_b]))
+                if pair_key not in deduped_rules or rule_obj["confidence"] > deduped_rules[pair_key]["confidence"]:
+                    deduped_rules[pair_key] = rule_obj
+            else:
+                multi_key = (tuple(antecedents), tuple(consequents))
+                if multi_key not in deduped_rules or rule_obj["confidence"] > deduped_rules[multi_key]["confidence"]:
+                    deduped_rules[multi_key] = rule_obj
+
         rules_output = sorted(
-            rules_output,
+            list(deduped_rules.values()),
             key=lambda x: (x['lift'], x['confidence']),
             reverse=True,
         )[:50]
@@ -441,3 +476,4 @@ if __name__ == "__main__":
         print(json.dumps(result))
     except Exception as e:
         print(json.dumps({"error": "Invalid JSON input or script error: " + str(e)}))
+

@@ -871,7 +871,7 @@ export class AnalyticsService {
     }
 
     // Group items by transaction to build baskets
-    const [baskets, rawSummaryRows, hourlyRows, sectorRows] =
+    const [baskets, rawSummaryRows, hourlyRows, sectorRows, itemPriceRows] =
       await Promise.all([
         this.transactionModel.aggregate([
           ...(transactionMatch ? [{ $match: transactionMatch }] : []),
@@ -913,6 +913,7 @@ export class AnalyticsService {
           },
         ]),
         this.transactionModel.aggregate([
+          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
           {
             $group: {
               _id: {
@@ -953,7 +954,23 @@ export class AnalyticsService {
           },
           { $sort: { transactionCount: -1 } },
         ]),
+        this.transactionModel.aggregate([
+          {
+            $group: {
+              _id: '$productName',
+              avgPrice: { $avg: '$unitPrice' },
+            },
+          },
+        ]),
       ]);
+
+    const itemPrices: Record<string, number> = {};
+    for (const row of itemPriceRows) {
+      if (row._id && typeof row.avgPrice === 'number' && Number.isFinite(row.avgPrice)) {
+        itemPrices[String(row._id)] = this.round(row.avgPrice);
+      }
+    }
+
     const rawAnalysis = this.buildCrossSellRawAnalysis(
       rawSummaryRows[0],
       hourlyRows,
@@ -990,6 +1007,7 @@ export class AnalyticsService {
     try {
       const result = await this.runPython<any>('cross_sell.py', {
         baskets: inputData,
+        itemPrices,
         ...thresholds,
       });
       const rules = Array.isArray(result.rules) ? result.rules : [];
