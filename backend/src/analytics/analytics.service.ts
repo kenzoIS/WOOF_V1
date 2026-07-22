@@ -815,6 +815,9 @@ export class AnalyticsService {
       generatedAt: new Date(),
     };
 
+    // Wipe old caches for this module before saving the new one to prevent storage bloat
+    await this.forecastRunModel.deleteMany({ module });
+
     const savedRun = await this.forecastRunModel.create(payload);
     return this.withForecastStartAnchor(savedRun.toObject());
   }

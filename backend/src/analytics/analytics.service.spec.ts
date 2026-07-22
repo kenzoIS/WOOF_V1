@@ -13,6 +13,7 @@ describe('AnalyticsService getForecast', () => {
   const forecastRunModel = {
     create: jest.fn(),
     findOne: jest.fn(),
+    deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
   };
   const crossSellCacheModel = {
     create: jest.fn(),
@@ -651,6 +652,11 @@ describe('AnalyticsService getForecast', () => {
           { sector: 'Cafe', lineItems: 10, transactionCount: 10 },
           { sector: 'Retail', lineItems: 10, transactionCount: 10 },
           { sector: 'Services', lineItems: 5, transactionCount: 5 },
+        ])
+        .mockResolvedValueOnce([
+          { _id: 'Latte', avgPrice: 150 },
+          { _id: 'Dog Treats', avgPrice: 200 },
+          { _id: 'Grooming', avgPrice: 500 },
         ]);
       mockPythonSpawn(pythonOutput);
 
@@ -667,7 +673,7 @@ describe('AnalyticsService getForecast', () => {
       );
       expect(second.cached).toBe(true);
       expect(spawn).toHaveBeenCalledTimes(1);
-      expect(transactionModel.aggregate).toHaveBeenCalledTimes(4);
+      expect(transactionModel.aggregate).toHaveBeenCalledTimes(5);
     });
   });
 });

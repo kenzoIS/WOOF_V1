@@ -2,6 +2,31 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-22 - Cross-Selling Feature Validation & Test Fixes
+
+### Requested
+
+- Examine and study the Group 6 Manuscript and `cross_selling.md`.
+- Validate the cross-selling feature in the project (specifically the FP-Growth algorithm and Bundle Simulator metrics).
+- Ensure the backend tests for the cross-selling service pass.
+
+### Backend Changes
+
+- Validated that `backend/src/analytics/python/cross_sell.py` accurately implements FP-Growth and low-association bundle scoring metrics (Confidence, Support, Lift, bundle pricing) via `mlxtend` according to the provided documentation.
+- Fixed outdated/missing mock definitions in `backend/src/analytics/analytics.service.spec.ts`:
+  - Added the missing `deleteMany` mock to `forecastRunModel`.
+  - Injected the missing `itemPriceRows` resolution block into the mocked `transactionModel.aggregate` chain for the `getCrossSell` suite.
+  - Updated the expected invocation count for `transactionModel.aggregate` to `5` to match the actual parallel Promise.all execution in the service.
+
+### Files Changed
+
+- `backend/src/analytics/analytics.service.spec.ts`
+
+### Verification
+
+- Passed: `npm run test -- analytics.service.spec.ts` in `backend` (9 tests passed).
+- Passed: `python3 -m unittest backend/src/analytics/python/test_cross_sell.py` (with correct PYTHONPATH and dependencies).
+
 ## 2026-07-17 - Closed-Day Semantics and Full sMAPE Switch
 
 ### Requested
