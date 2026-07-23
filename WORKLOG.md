@@ -9,6 +9,7 @@ This file records requested revisions, implementation details, verification, and
 - Implement the cross-selling audit recommendations after the technical sweep.
 - Fix the backend startup issue introduced by the new campaign draft schema.
 - Update documentation/worklog with the implemented changes.
+- Replace the hardcoded 15% bundle promotion with an educated, margin-aware discount suggestion based on ingested cost and margin data.
 
 ### Backend Changes
 
@@ -24,6 +25,9 @@ This file records requested revisions, implementation details, verification, and
 - Added `CampaignDraft` persistence for owner-reviewed bundle recommendations.
 - Added `POST /api/analytics/cross-sell/campaign-drafts` so selected bundles are saved as `pending` instead of being activated directly.
 - Fixed the backend startup crash by explicitly typing nullable Mongoose number fields in `CampaignDraft`.
+- Added item economics aggregation for current-year Cost of Goods, Gross Profit, and Margin.
+- Replaced fixed 15% bundle pricing with a margin-aware discount suggestion, projected gross profit, projected margin, minimum margin, and safe discount ceiling.
+- Persisted both the system-suggested discount and the owner-selected discount on campaign drafts.
 
 ### Frontend Changes
 
@@ -33,16 +37,22 @@ This file records requested revisions, implementation details, verification, and
 - Added debounce handling for support, confidence, and hour changes before re-fetching FP-Growth results.
 - Aligned slider floors with backend/paper thresholds: support starts at 5%, confidence starts at 60%.
 - Added an SVG empty state when no association rules match the selected thresholds.
+- Renamed visible Bundle Simulator labels from plain confidence/opportunity wording to **Historical Confidence** and **Model Score** so users do not read 100%/99 values as future guarantees.
+- Added an owner-adjustable discount slider to bundle opportunities.
+- Added margin-aware sub-descriptions when the owner chooses a discount above or below the recommendation, including projected gross profit/margin context when cost data is available.
 
 ### Documentation Changes
 
 - Updated `cross_selling.md` with a 2026-07-23 implementation note covering owner approval, proposed pricing, current-year prices, sector filters, cache keying, aggregation safety, Python output metadata, debounce behavior, and empty states.
 - Corrected the old deployment wording in `cross_selling.md` to describe the pending approval workflow.
+- Documented the Historical Confidence / Model Score terminology for AI-Predicted Bundle Opportunities.
+- Updated `cross_selling.md` to describe margin-aware discount suggestions, owner-selected discounts, projected gross profit, projected margin, and safe discount ceilings.
 
 ### Files Changed
 
 - `backend/src/analytics/python/cross_sell.py`
 - `backend/src/analytics/analytics.service.ts`
+- `backend/src/analytics/analytics.service.spec.ts`
 - `backend/src/analytics/analytics.controller.ts`
 - `backend/src/analytics/analytics.module.ts`
 - `backend/src/analytics/schemas/cross-sell-cache.schema.ts`
@@ -55,6 +65,7 @@ This file records requested revisions, implementation details, verification, and
 ### Verification
 
 - Passed: `python backend/src/analytics/python/test_cross_sell.py`.
+- Passed: `npm test -- --testPathPatterns=analytics.service.spec --runInBand` in `backend`.
 - Passed: `npm run build` in `backend`.
 - Passed: `npm run build` in `frontend` after allowing Next.js build-worker spawning.
 - Passed: `npm run start` in `backend` now boots NestJS and maps routes.

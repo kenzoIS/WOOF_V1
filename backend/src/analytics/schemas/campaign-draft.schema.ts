@@ -20,8 +20,29 @@ export class CampaignDraft {
   @Prop({ type: Number, default: null })
   proposedBundlePrice?: number | null;
 
-  @Prop({ required: true, default: 15 })
+  @Prop({ type: Number, default: null })
+  regularCost?: number | null;
+
+  @Prop({ type: Number, default: null })
+  suggestedDiscountPercent?: number | null;
+
+  @Prop({ required: true, default: 0 })
+  selectedDiscountPercent: number;
+
+  @Prop({ required: true, default: 0 })
   proposedDiscountPercent: number;
+
+  @Prop({ type: Number, default: null })
+  projectedGrossProfit?: number | null;
+
+  @Prop({ type: Number, default: null })
+  projectedMarginPercent?: number | null;
+
+  @Prop({ type: Number, default: null })
+  minimumMarginPercent?: number | null;
+
+  @Prop({ type: Number, default: null })
+  maxSafeDiscountPercent?: number | null;
 
   @Prop({
     required: true,

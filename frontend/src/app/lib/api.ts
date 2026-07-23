@@ -279,7 +279,14 @@ export async function createCampaignDraft(dto: {
   itemB: string;
   regularPrice: number | null;
   proposedBundlePrice: number | null;
+  regularCost?: number | null;
+  suggestedDiscountPercent?: number | null;
+  selectedDiscountPercent?: number;
   proposedDiscountPercent: number;
+  projectedGrossProfit?: number | null;
+  projectedMarginPercent?: number | null;
+  minimumMarginPercent?: number | null;
+  maxSafeDiscountPercent?: number | null;
   support?: number;
   confidence: number;
   lift: number;

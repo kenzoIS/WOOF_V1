@@ -40,9 +40,19 @@ interface CrossSellRule {
   crossSector?: boolean;
   itemAPrice?: number;
   itemBPrice?: number;
+  itemACost?: number | null;
+  itemBCost?: number | null;
+  regularCost?: number | null;
   regularPrice?: number;
   bundlePrice?: number;
   savings?: number;
+  projectedGrossProfit?: number | null;
+  projectedMarginPercent?: number | null;
+  suggestedDiscountPercent?: number | null;
+  proposedDiscountPercent?: number | null;
+  minimumMarginPercent?: number | null;
+  maxSafeDiscountPercent?: number | null;
+  discountRationale?: string;
 }
 
 interface BundleCandidate {
@@ -66,9 +76,19 @@ interface BundleCandidate {
   isLowAssociation?: boolean;
   itemAPrice?: number;
   itemBPrice?: number;
+  itemACost?: number | null;
+  itemBCost?: number | null;
+  regularCost?: number | null;
   regularPrice?: number;
   bundlePrice?: number;
   savings?: number;
+  projectedGrossProfit?: number | null;
+  projectedMarginPercent?: number | null;
+  suggestedDiscountPercent?: number | null;
+  proposedDiscountPercent?: number | null;
+  minimumMarginPercent?: number | null;
+  maxSafeDiscountPercent?: number | null;
+  discountRationale?: string;
 }
 
 interface ItemMetric {
@@ -129,9 +149,55 @@ const slugify = (value: string) =>
 const formatPercent = (value?: number) =>
   `${Math.round((value || 0) * 100)}%`;
 
+const formatCurrency = (value?: number | null) =>
+  value !== undefined && value !== null && Number.isFinite(value)
+    ? `₱${value.toFixed(2)}`
+    : "Unavailable";
+
 const formatPair = (left: string, right: string) => `${left} + ${right}`;
 
 const firstSector = (sectors?: string[]) => sectors?.[0] || "unknown";
+
+const getBundleKey = (itemA: string, itemB: string) =>
+  [itemA, itemB].sort().join("::");
+
+const calculateDiscountEconomics = (
+  regularPrice: number,
+  regularCost: number | null | undefined,
+  discountPercent: number,
+) => {
+  if (!regularPrice || regularPrice <= 0) {
+    return {
+      bundlePrice: 0,
+      savings: 0,
+      projectedGrossProfit: null,
+      projectedMarginPercent: null,
+    };
+  }
+
+  const bundlePrice = Math.round(regularPrice * (1 - discountPercent / 100) * 100) / 100;
+  const savings = Math.round((regularPrice - bundlePrice) * 100) / 100;
+  if (regularCost === undefined || regularCost === null) {
+    return {
+      bundlePrice,
+      savings,
+      projectedGrossProfit: null,
+      projectedMarginPercent: null,
+    };
+  }
+
+  const projectedGrossProfit = Math.round((bundlePrice - regularCost) * 100) / 100;
+  const projectedMarginPercent = bundlePrice > 0
+    ? Math.round((projectedGrossProfit / bundlePrice) * 1000) / 10
+    : null;
+
+  return {
+    bundlePrice,
+    savings,
+    projectedGrossProfit,
+    projectedMarginPercent,
+  };
+};
 
 const formatSector = (sector?: string) => {
   const value = sector || "unknown";
@@ -168,6 +234,7 @@ export function AISimulation() {
   const [crossSellData, setCrossSellData] = useState<CrossSellResponse | null>(null);
   const [crossSellLoading, setCrossSellLoading] = useState(false);
   const [crossSellError, setCrossSellError] = useState<string | null>(null);
+  const [bundleDiscountOverrides, setBundleDiscountOverrides] = useState<Record<string, number>>({});
   const debouncedSupportThreshold = useDebouncedValue(supportThreshold[0]);
   const debouncedConfidenceLevel = useDebouncedValue(confidenceLevel[0]);
   const debouncedDataTime = useDebouncedValue(dataTime[0]);
@@ -198,7 +265,14 @@ export function AISimulation() {
     itemA: string;
     itemB: string;
     regularPrice: number;
+    regularCost?: number | null;
     bundlePrice: number;
+    suggestedDiscountPercent?: number | null;
+    selectedDiscountPercent: number;
+    projectedGrossProfit?: number | null;
+    projectedMarginPercent?: number | null;
+    minimumMarginPercent?: number | null;
+    maxSafeDiscountPercent?: number | null;
     confidence: number;
     lift: number;
     support?: number;
@@ -210,7 +284,14 @@ export function AISimulation() {
         itemB: bundle.itemB,
         regularPrice: bundle.regularPrice > 0 ? bundle.regularPrice : null,
         proposedBundlePrice: bundle.bundlePrice > 0 ? bundle.bundlePrice : null,
-        proposedDiscountPercent: 15,
+        regularCost: bundle.regularCost ?? null,
+        suggestedDiscountPercent: bundle.suggestedDiscountPercent ?? null,
+        selectedDiscountPercent: bundle.selectedDiscountPercent,
+        proposedDiscountPercent: bundle.selectedDiscountPercent,
+        projectedGrossProfit: bundle.projectedGrossProfit ?? null,
+        projectedMarginPercent: bundle.projectedMarginPercent ?? null,
+        minimumMarginPercent: bundle.minimumMarginPercent ?? null,
+        maxSafeDiscountPercent: bundle.maxSafeDiscountPercent ?? null,
         support: bundle.support || 0,
         confidence: bundle.confidence / 100,
         lift: bundle.lift,
@@ -347,9 +428,18 @@ export function AISimulation() {
       type: "Fast + Slow Opportunity",
       itemAPrice: candidate.itemAPrice || 0,
       itemBPrice: candidate.itemBPrice || 0,
+      itemACost: candidate.itemACost ?? null,
+      itemBCost: candidate.itemBCost ?? null,
+      regularCost: candidate.regularCost ?? null,
       regularPrice: candidate.regularPrice || 0,
       bundlePrice: candidate.bundlePrice || 0,
       savings: candidate.savings || 0,
+      projectedGrossProfit: candidate.projectedGrossProfit ?? null,
+      projectedMarginPercent: candidate.projectedMarginPercent ?? null,
+      suggestedDiscountPercent: candidate.suggestedDiscountPercent ?? candidate.proposedDiscountPercent ?? null,
+      minimumMarginPercent: candidate.minimumMarginPercent ?? null,
+      maxSafeDiscountPercent: candidate.maxSafeDiscountPercent ?? null,
+      discountRationale: candidate.discountRationale,
       sectors: [
         firstSector(candidate.antecedentSectors),
         firstSector(candidate.consequentSectors),
@@ -374,9 +464,18 @@ export function AISimulation() {
       type: rule.isMultiItem ? "Multi-item Pattern Rule" : "Significant Association Rule",
       itemAPrice: rule.itemAPrice || 0,
       itemBPrice: rule.itemBPrice || 0,
+      itemACost: rule.itemACost ?? null,
+      itemBCost: rule.itemBCost ?? null,
+      regularCost: rule.regularCost ?? null,
       regularPrice: rule.regularPrice || 0,
       bundlePrice: rule.bundlePrice || 0,
       savings: rule.savings || 0,
+      projectedGrossProfit: rule.projectedGrossProfit ?? null,
+      projectedMarginPercent: rule.projectedMarginPercent ?? null,
+      suggestedDiscountPercent: rule.suggestedDiscountPercent ?? rule.proposedDiscountPercent ?? null,
+      minimumMarginPercent: rule.minimumMarginPercent ?? null,
+      maxSafeDiscountPercent: rule.maxSafeDiscountPercent ?? null,
+      discountRationale: rule.discountRationale,
       sectors: [
         firstSector(rule.antecedentSectors),
         firstSector(rule.consequentSectors),
@@ -385,9 +484,7 @@ export function AISimulation() {
         firstSector(rule.antecedentSectors),
         firstSector(rule.consequentSectors),
       ]),
-      reason: rule.regularPrice && rule.regularPrice > 0 && rule.bundlePrice
-        ? `Co-purchased ${rule.cooccurrences || 0}x in transaction history. Regular: ₱${rule.regularPrice.toFixed(2)}, Promotional Bundle: ₱${rule.bundlePrice.toFixed(2)} (${rule.lift.toFixed(2)}x sales lift multiplier).`
-        : `Co-purchased ${rule.cooccurrences || 0}x in transaction history with ${rule.lift.toFixed(2)}x sales lift multiplier.`,
+      reason: `Co-purchased ${rule.cooccurrences || 0}x in transaction history with ${rule.lift.toFixed(2)}x sales lift multiplier. Pricing is recalculated from the selected owner-review discount.`,
     }));
 
     const seenKeys = new Set<string>();
@@ -408,8 +505,36 @@ export function AISimulation() {
           b.confidence - a.confidence ||
           b.lift - a.lift,
       )
-      .slice(0, 8);
-  }, [bundleCandidates, rules]);
+      .slice(0, 8)
+      .map((item) => {
+        const key = getBundleKey(item.itemA, item.itemB);
+        const suggestedDiscount = Math.max(0, Math.round(item.suggestedDiscountPercent || 0));
+        const selectedDiscount = bundleDiscountOverrides[key] ?? suggestedDiscount;
+        const economics = calculateDiscountEconomics(
+          item.regularPrice,
+          item.regularCost,
+          selectedDiscount,
+        );
+        const minimumMargin = item.minimumMarginPercent ?? null;
+        const maxSafeDiscount = item.maxSafeDiscountPercent ?? null;
+        return {
+          ...item,
+          key,
+          suggestedDiscountPercent: suggestedDiscount,
+          selectedDiscountPercent: selectedDiscount,
+          bundlePrice: economics.bundlePrice,
+          savings: economics.savings,
+          projectedGrossProfit: economics.projectedGrossProfit,
+          projectedMarginPercent: economics.projectedMarginPercent,
+          minimumMarginPercent: minimumMargin,
+          maxSafeDiscountPercent: maxSafeDiscount,
+          marginIsSafe:
+            minimumMargin === null ||
+            economics.projectedMarginPercent === null ||
+            economics.projectedMarginPercent >= minimumMargin,
+        };
+      });
+  }, [bundleCandidates, bundleDiscountOverrides, rules]);
 
   const proximityRecommendations = useMemo(() => {
     return bundlePredictions.slice(0, 6).map((bundle, index) => {
@@ -541,8 +666,8 @@ export function AISimulation() {
         ? formatPair(topOpportunityCandidate.anchorItem, topOpportunityCandidate.bundleItem)
         : "No bundle candidates",
       trendGrowth: topOpportunityCandidate
-        ? `${Math.round((topOpportunityCandidate.opportunityScore || 0) * 100)}% score`
-        : "0% score",
+        ? `${Math.round((topOpportunityCandidate.opportunityScore || 0) * 100)}`
+        : "0",
       crossSell: crossSectorMatch
         ? formatPair(
             ("itemA" in crossSectorMatch ? crossSectorMatch.itemA : crossSectorMatch.anchorItem) || "",
@@ -760,20 +885,20 @@ export function AISimulation() {
               </div>
             </div>
 
-            {/* Avg Confidence */}
+            {/* Avg Historical Confidence */}
             <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
               <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
                 <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-white" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
-                  <span className="truncate">Avg Confidence</span>
+                  <span className="truncate">Avg Historical Confidence</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <HelpCircle className="w-3 h-3 text-[#3AE4FA] cursor-pointer" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-[220px]">
-                      Confidence measures the likelihood that a customer purchasing Item A will also purchase Item B.
+                      Historical confidence measures how often Item B appeared in uploaded baskets that contained Item A.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -1010,7 +1135,7 @@ export function AISimulation() {
                       </text>
                     )}
 
-                    {/* Connection Lines - Varying thickness based on confidence */}
+                    {/* Connection Lines - Varying thickness based on historical confidence */}
                     {networkConnections.map((conn, idx) => {
                       const sourceNode = networkNodes.find(n => n.id === conn.source);
                       const targetNode = networkNodes.find(n => n.id === conn.target);
@@ -1019,13 +1144,13 @@ export function AISimulation() {
                       const sourcePos = { x: sourceNode.x, y: sourceNode.y };
                       const targetPos = { x: targetNode.x, y: targetNode.y };
 
-                      // Line thickness based on confidence (2-12px)
+                      // Line thickness based on historical confidence (2-12px)
                       const thickness = 2 + (conn.confidence / 100) * 10;
                       const opacity = 0.3 + (conn.confidence / 100) * 0.5;
 
                       return (
                         <g key={idx}>
-                          <title>{`${conn.sourceName} + ${conn.targetName} | Confidence: ${conn.confidence}%, Lift: ${conn.lift.toFixed(2)}x, Co-occurrences: ${conn.cooccurrences}`}</title>
+                          <title>{`${conn.sourceName} + ${conn.targetName} | Historical Confidence: ${conn.confidence}%, Lift: ${conn.lift.toFixed(2)}x, Co-occurrences: ${conn.cooccurrences}`}</title>
                           <line
                             x1={sourcePos.x}
                             y1={sourcePos.y}
@@ -1215,7 +1340,7 @@ export function AISimulation() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide">
-                          <span>CONFIDENCE LEVEL (%)</span>
+                          <span>HISTORICAL CONFIDENCE (%)</span>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <HelpCircle className="w-3.5 h-3.5 text-white/80 cursor-pointer" />
@@ -1261,7 +1386,7 @@ export function AISimulation() {
                       </div>
 
                       <div className="flex items-center justify-between p-3 bg-[#D42A7D]/5 rounded-lg">
-                        <span className="text-xs text-[#223047]">Avg Confidence</span>
+                        <span className="text-xs text-[#223047]">Avg Historical Confidence</span>
                         <span className="text-lg font-bold text-[#D42A7D]">
                           {networkConnections.length > 0
                             ? Math.round(networkConnections.reduce((sum, c) => sum + c.confidence, 0) / networkConnections.length)
@@ -1288,7 +1413,7 @@ export function AISimulation() {
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                   <div>
-                    <span className="text-[#223047] opacity-60">Confidence:</span>
+                    <span className="text-[#223047] opacity-60">Historical Confidence:</span>
                     <span className="ml-1 font-bold text-[#F53799]">{topInsights.bundleConfidence}%</span>
                   </div>
                   <div>
@@ -1316,11 +1441,11 @@ export function AISimulation() {
                   {topInsights.emergingTrend}
                 </div>
                 <div className="text-sm text-[#223047] opacity-60 mb-3">
-                  Highest-ranked model opportunity
+                  Highest-ranked model recommendation
                 </div>
                 <div className="mt-3 pt-3 border-t border-[#3AE4FA]/20">
                   <div className="text-xs text-green-600 font-semibold">
-                    {topInsights.trendGrowth} model score
+                    Model Score: {topInsights.trendGrowth}
                   </div>
                 </div>
               </div>
@@ -1415,7 +1540,7 @@ export function AISimulation() {
                     <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
                       <h3 className="text-base md:text-lg font-bold text-[#223047]">{bundle.bundle}</h3>
                       <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs">
-                        {bundle.confidence}% Confidence
+                        {bundle.confidence}% Historical Confidence
                       </Badge>
                       <Badge variant="outline" className="text-xs border-[#F53799] text-[#F53799]">
                         {bundle.sectorPair}
@@ -1428,8 +1553,8 @@ export function AISimulation() {
                         <span className="ml-2 font-bold text-[#F53799]">{bundle.lift.toFixed(2)}x</span>
                       </div>
                       <div>
-                        <span className="text-[#223047] opacity-60">Opportunity:</span>
-                        <span className="ml-2 font-semibold text-[#223047]">{bundle.score}%</span>
+                        <span className="text-[#223047] opacity-60">Model Score:</span>
+                        <span className="ml-2 font-semibold text-[#223047]">{bundle.score}</span>
                       </div>
                       <div>
                         <span className="text-[#223047] opacity-60">Co-occurrence:</span>
@@ -1439,27 +1564,84 @@ export function AISimulation() {
 
                     {/* Pricing Breakdown Bar */}
                     {bundle.regularPrice > 0 ? (
-                      <div className="flex flex-wrap items-center gap-3 my-2.5 bg-[#FFF2FA] p-3 rounded-xl border border-[#FFD9EC]/70">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#223047]">
-                          <Tag className="w-3.5 h-3.5 text-[#F53799]" />
-                          <span>{bundle.itemA}: {bundle.itemAPrice > 0 ? `₱${bundle.itemAPrice.toFixed(2)}` : 'Market Rate'}</span>
-                          <span className="text-gray-400">+</span>
-                          <span>{bundle.itemB}: {bundle.itemBPrice > 0 ? `₱${bundle.itemBPrice.toFixed(2)}` : 'Market Rate'}</span>
+                      <div className="my-2.5 bg-[#FFF2FA] p-3 rounded-xl border border-[#FFD9EC]/70 space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-[#223047]">
+                            <Tag className="w-3.5 h-3.5 text-[#F53799]" />
+                            <span>{bundle.itemA}: {formatCurrency(bundle.itemAPrice)}</span>
+                            <span className="text-gray-400">+</span>
+                            <span>{bundle.itemB}: {formatCurrency(bundle.itemBPrice)}</span>
+                          </div>
+                          <div className="flex items-center gap-2.5 ml-auto">
+                            <span className="line-through text-gray-400 text-xs font-medium">{formatCurrency(bundle.regularPrice)}</span>
+                            <span className="font-extrabold text-[#F53799] text-base">{formatCurrency(bundle.bundlePrice)}</span>
+                            <Badge className="bg-emerald-500 text-white text-[11px] px-2.5 py-0.5 font-bold">
+                              Save {formatCurrency(bundle.savings)} ({bundle.selectedDiscountPercent}% OFF)
+                            </Badge>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2.5 ml-auto">
-                          <span className="line-through text-gray-400 text-xs font-medium">₱{bundle.regularPrice.toFixed(2)}</span>
-                          <span className="font-extrabold text-[#F53799] text-base">₱{bundle.bundlePrice.toFixed(2)}</span>
-                          <Badge className="bg-emerald-500 text-white text-[11px] px-2.5 py-0.5 font-bold">
-                            Save ₱{bundle.savings.toFixed(2)} (15% OFF)
-                          </Badge>
+
+                        <div className="grid gap-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                            <div className="text-xs font-semibold text-[#223047]">
+                              Suggested Discount: {bundle.suggestedDiscountPercent}%
+                            </div>
+                            <div className="text-xs text-[#223047] opacity-70">
+                              Selected: {bundle.selectedDiscountPercent}%
+                            </div>
+                          </div>
+                          <Slider
+                            value={[bundle.selectedDiscountPercent]}
+                            onValueChange={(value) =>
+                              setBundleDiscountOverrides((prev) => ({
+                                ...prev,
+                                [bundle.key]: value[0],
+                              }))
+                            }
+                            max={Math.max(1, Math.floor(bundle.maxSafeDiscountPercent || 25))}
+                            min={0}
+                            step={1}
+                            className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
+                          />
+                          <div className="text-[11px] text-[#223047] opacity-70">
+                            {bundle.discountRationale || "WOOF recommends a discount only when price and cost data can protect margin."}
+                          </div>
+                          {bundle.selectedDiscountPercent !== bundle.suggestedDiscountPercent && (
+                            <div className={`text-[11px] font-semibold ${bundle.marginIsSafe ? "text-emerald-700" : "text-red-600"}`}>
+                              {bundle.selectedDiscountPercent > bundle.suggestedDiscountPercent
+                                ? `You chose ${bundle.selectedDiscountPercent - bundle.suggestedDiscountPercent} percentage points above the suggestion.`
+                                : `You chose ${bundle.suggestedDiscountPercent - bundle.selectedDiscountPercent} percentage points below the suggestion.`}
+                              {bundle.projectedMarginPercent !== null
+                                ? ` Projected margin is ${bundle.projectedMarginPercent}% against the ${bundle.minimumMarginPercent ?? 30}% minimum.`
+                                : " Margin impact cannot be computed without cost data."}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-[#223047]">
+                          <div className="bg-white/70 rounded-lg p-2">
+                            <div className="opacity-60">Projected Gross Profit</div>
+                            <div className="font-bold">{formatCurrency(bundle.projectedGrossProfit)}</div>
+                          </div>
+                          <div className="bg-white/70 rounded-lg p-2">
+                            <div className="opacity-60">Projected Margin</div>
+                            <div className={`font-bold ${bundle.marginIsSafe ? "text-emerald-700" : "text-red-600"}`}>
+                              {bundle.projectedMarginPercent !== null ? `${bundle.projectedMarginPercent}%` : "Unavailable"}
+                            </div>
+                          </div>
+                          <div className="bg-white/70 rounded-lg p-2">
+                            <div className="opacity-60">Safe Discount Ceiling</div>
+                            <div className="font-bold">
+                              {bundle.maxSafeDiscountPercent !== null ? `${bundle.maxSafeDiscountPercent}%` : "Unavailable"}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ) : (
                       <div className="text-xs text-[#223047] opacity-60 my-1">
-                        Suggested 15% bundle discount pending owner review.
+                        Price or cost data is incomplete, so the owner must set promotion terms manually before approval.
                       </div>
                     )}
-
                     <div className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
                       {bundle.type}: {bundle.reason}
                     </div>

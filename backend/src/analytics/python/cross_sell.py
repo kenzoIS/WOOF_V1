@@ -1,6 +1,7 @@
 import sys
 import json
 import warnings
+import math
 from collections import defaultdict
 import pandas as pd
 from mlxtend.frequent_patterns import fpgrowth, association_rules
@@ -12,6 +13,7 @@ DEFAULT_MIN_SUPPORT = 0.05
 DEFAULT_MIN_CONFIDENCE = 0.60
 DEFAULT_MIN_LIFT = 1.20
 DEFAULT_MAX_BUNDLE_CANDIDATES = 20
+DEFAULT_MINIMUM_MARGIN = 0.30
 MAX_BUNDLE_CANDIDATES = 100
 MAX_DENSE_MATRIX_CELLS = 25_000_000
 MAX_BASKETS_WITHOUT_GUARD = 50_000
@@ -25,6 +27,7 @@ def parse_payload(payload):
             "minLift": DEFAULT_MIN_LIFT,
             "maxBundleCandidates": DEFAULT_MAX_BUNDLE_CANDIDATES,
             "itemPrices": {},
+            "itemEconomics": {},
         }
 
     if isinstance(payload, dict):
@@ -56,6 +59,10 @@ def parse_payload(payload):
                 MAX_BUNDLE_CANDIDATES,
             ),
             "itemPrices": payload.get("itemPrices", config.get("itemPrices", {})),
+            "itemEconomics": payload.get(
+                "itemEconomics",
+                config.get("itemEconomics", {}),
+            ),
         }
 
     return [], {
@@ -64,6 +71,7 @@ def parse_payload(payload):
         "minLift": DEFAULT_MIN_LIFT,
         "maxBundleCandidates": DEFAULT_MAX_BUNDLE_CANDIDATES,
         "itemPrices": {},
+        "itemEconomics": {},
     }
 
 
@@ -96,35 +104,150 @@ def get_price(item_prices, item_name):
     return round(price, 2), True
 
 
-def build_pricing_fields(item_prices, item_a, item_b, is_multi_item=False):
+def get_item_economics(item_prices, item_economics, item_name):
+    economics = item_economics.get(item_name, {}) if isinstance(item_economics, dict) else {}
+    price_value = economics.get("price") if isinstance(economics, dict) else None
+    cost_value = economics.get("unitCost") if isinstance(economics, dict) else None
+    price, has_price = get_price({"value": price_value}, "value")
+    if not has_price:
+        price, has_price = get_price(item_prices, item_name)
+
+    try:
+        cost = float(cost_value)
+    except (TypeError, ValueError):
+        cost = None
+    if cost is None or cost < 0:
+        cost = None
+
+    return price, cost, has_price, cost is not None
+
+
+def suggested_discount_from_margin(regular_price, regular_cost, minimum_margin):
+    if not regular_price or regular_price <= 0 or regular_cost is None:
+        return {
+            "suggestedDiscountPercent": None,
+            "maxSafeDiscountPercent": None,
+            "minimumMarginPercent": round(minimum_margin * 100, 1),
+            "discountRationale": "Cost-of-goods data is unavailable, so WOOF cannot compute a margin-safe discount.",
+        }
+
+    if regular_cost <= 0:
+        max_safe_discount = 0.25
+    else:
+        max_safe_discount = 1 - (regular_cost / (regular_price * (1 - minimum_margin)))
+        max_safe_discount = max(0, min(max_safe_discount, 0.50))
+
+    if max_safe_discount <= 0:
+        suggested_discount = 0
+    else:
+        raw_suggestion = min(max_safe_discount * 0.60, 0.20)
+        if max_safe_discount >= 0.05:
+            raw_suggestion = max(raw_suggestion, 0.05)
+        suggested_discount = min(raw_suggestion, max_safe_discount)
+
+    suggested_percent = int(math.floor(suggested_discount * 100))
+    max_safe_percent = round(max_safe_discount * 100, 1)
+    minimum_margin_percent = round(minimum_margin * 100, 1)
+
+    return {
+        "suggestedDiscountPercent": suggested_percent,
+        "maxSafeDiscountPercent": max_safe_percent,
+        "minimumMarginPercent": minimum_margin_percent,
+        "discountRationale": (
+            f"Suggested {suggested_percent}% keeps projected gross margin at or above "
+            f"{minimum_margin_percent}% while staying below the estimated safe ceiling of "
+            f"{max_safe_percent}%."
+        ),
+    }
+
+
+def build_pricing_fields(
+    item_prices,
+    item_economics,
+    item_a,
+    item_b,
+    is_multi_item=False,
+    minimum_margin=DEFAULT_MINIMUM_MARGIN,
+):
     if is_multi_item:
         return {
             "itemAPrice": None,
             "itemBPrice": None,
+            "itemACost": None,
+            "itemBCost": None,
+            "regularCost": None,
             "regularPrice": None,
             "bundlePrice": None,
             "savings": None,
+            "projectedGrossProfit": None,
+            "projectedMarginPercent": None,
             "hasPriceData": False,
+            "hasCostData": False,
             "pricingStatus": "proposed_pending_owner_approval",
-            "proposedDiscountPercent": 15,
+            "proposedDiscountPercent": None,
+            "suggestedDiscountPercent": None,
+            "maxSafeDiscountPercent": None,
+            "minimumMarginPercent": round(minimum_margin * 100, 1),
+            "discountRationale": "Multi-item rules need owner review before WOOF can compute item-level margin-safe pricing.",
         }
 
-    price_a, has_price_a = get_price(item_prices, item_a)
-    price_b, has_price_b = get_price(item_prices, item_b)
+    price_a, cost_a, has_price_a, has_cost_a = get_item_economics(
+        item_prices,
+        item_economics,
+        item_a,
+    )
+    price_b, cost_b, has_price_b, has_cost_b = get_item_economics(
+        item_prices,
+        item_economics,
+        item_b,
+    )
     has_price_data = has_price_a and has_price_b
+    has_cost_data = has_cost_a and has_cost_b
     regular_price = round(price_a + price_b, 2) if has_price_data else None
-    bundle_price = round(regular_price * 0.85, 2) if has_price_data else None
-    savings = round(regular_price - bundle_price, 2) if has_price_data else None
+    regular_cost = round(cost_a + cost_b, 2) if has_cost_data else None
+    discount_fields = suggested_discount_from_margin(
+        regular_price,
+        regular_cost,
+        minimum_margin,
+    )
+    suggested_discount = discount_fields["suggestedDiscountPercent"]
+    bundle_price = (
+        round(regular_price * (1 - suggested_discount / 100), 2)
+        if regular_price is not None and suggested_discount is not None
+        else None
+    )
+    savings = (
+        round(regular_price - bundle_price, 2)
+        if regular_price is not None and bundle_price is not None
+        else None
+    )
+    projected_gross_profit = (
+        round(bundle_price - regular_cost, 2)
+        if bundle_price is not None and regular_cost is not None
+        else None
+    )
+    projected_margin_percent = (
+        round((projected_gross_profit / bundle_price) * 100, 1)
+        if projected_gross_profit is not None and bundle_price
+        else None
+    )
 
     return {
         "itemAPrice": price_a,
         "itemBPrice": price_b,
+        "itemACost": round(cost_a, 2) if cost_a is not None else None,
+        "itemBCost": round(cost_b, 2) if cost_b is not None else None,
+        "regularCost": regular_cost,
         "regularPrice": regular_price,
         "bundlePrice": bundle_price,
         "savings": savings,
+        "projectedGrossProfit": projected_gross_profit,
+        "projectedMarginPercent": projected_margin_percent,
         "hasPriceData": has_price_data,
+        "hasCostData": has_cost_data,
         "pricingStatus": "proposed_pending_owner_approval",
-        "proposedDiscountPercent": 15,
+        "proposedDiscountPercent": suggested_discount,
+        **discount_fields,
     }
 
 
@@ -275,8 +398,10 @@ def build_low_association_bundles(
     min_lift,
     max_candidates,
     item_prices=None,
+    item_economics=None,
 ):
     item_prices = item_prices or {}
+    item_economics = item_economics or {}
     total_baskets = len(dataset)
     if total_baskets == 0:
         return []
@@ -330,6 +455,7 @@ def build_low_association_bundles(
 
             pricing_fields = build_pricing_fields(
                 item_prices,
+                item_economics,
                 anchor,
                 bundle_item,
             )
@@ -412,6 +538,7 @@ def run_cross_sell(baskets, config=None):
         MAX_BUNDLE_CANDIDATES,
     )
     item_prices = config.get("itemPrices") or {}
+    item_economics = config.get("itemEconomics") or {}
     thresholds = {
         "minSupport": min_support,
         "minConfidence": min_confidence,
@@ -461,6 +588,7 @@ def run_cross_sell(baskets, config=None):
             min_lift,
             max_bundle_candidates,
             item_prices,
+            item_economics,
         )
 
         unique_products = sorted({item for basket in dataset for item in basket})
@@ -556,6 +684,7 @@ def run_cross_sell(baskets, config=None):
             item_b = " + ".join(consequents) if consequents else "Unknown"
             pricing_fields = build_pricing_fields(
                 item_prices,
+                item_economics,
                 item_a,
                 item_b,
                 is_multi_item,

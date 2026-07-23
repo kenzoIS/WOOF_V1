@@ -977,18 +977,57 @@ export class AnalyticsService {
             },
           },
           {
+            $project: {
+              productName: 1,
+              unitPrice: { $ifNull: ['$unitPrice', 0] },
+              unitCost: {
+                $cond: [
+                  { $gt: ['$quantity', 0] },
+                  { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
+                  { $ifNull: ['$costOfGoods', 0] },
+                ],
+              },
+              unitGrossProfit: {
+                $cond: [
+                  { $gt: ['$quantity', 0] },
+                  { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
+                  { $ifNull: ['$grossProfit', 0] },
+                ],
+              },
+              margin: { $ifNull: ['$margin', 0] },
+            },
+          },
+          {
             $group: {
               _id: '$productName',
               avgPrice: { $avg: '$unitPrice' },
+              avgUnitCost: { $avg: '$unitCost' },
+              avgUnitGrossProfit: { $avg: '$unitGrossProfit' },
+              avgMargin: { $avg: '$margin' },
             },
           },
         ]).allowDiskUse(true).exec(),
       ]);
 
     const itemPrices: Record<string, number> = {};
+    const itemEconomics: Record<
+      string,
+      {
+        price: number;
+        unitCost: number;
+        unitGrossProfit: number;
+        margin: number;
+      }
+    > = {};
     for (const row of itemPriceRows) {
       if (row._id && typeof row.avgPrice === 'number' && Number.isFinite(row.avgPrice)) {
         itemPrices[String(row._id)] = this.round(row.avgPrice);
+        itemEconomics[String(row._id)] = {
+          price: this.round(row.avgPrice),
+          unitCost: this.round(Number(row.avgUnitCost) || 0),
+          unitGrossProfit: this.round(Number(row.avgUnitGrossProfit) || 0),
+          margin: this.round(Number(row.avgMargin) || 0),
+        };
       }
     }
 
@@ -1029,6 +1068,7 @@ export class AnalyticsService {
       const result = await this.runPython<any>('cross_sell.py', {
         baskets: inputData,
         itemPrices,
+        itemEconomics,
         ...thresholds,
       });
       const rules = Array.isArray(result.rules) ? result.rules : [];
@@ -1183,9 +1223,13 @@ export class AnalyticsService {
       );
     }
 
-    const proposedDiscountPercent = Math.min(
-      Math.max(Number(dto?.proposedDiscountPercent) || 15, 0),
-      100,
+    const proposedDiscountPercent = this.clampPercent(
+      dto?.proposedDiscountPercent,
+      0,
+    );
+    const selectedDiscountPercent = this.clampPercent(
+      dto?.selectedDiscountPercent,
+      proposedDiscountPercent,
     );
 
     return this.campaignDraftModel.create({
@@ -1194,7 +1238,20 @@ export class AnalyticsService {
       itemB,
       regularPrice: this.nullableFiniteNumber(dto?.regularPrice),
       proposedBundlePrice: this.nullableFiniteNumber(dto?.proposedBundlePrice),
+      regularCost: this.nullableFiniteNumber(dto?.regularCost),
+      suggestedDiscountPercent: this.nullableFiniteNumber(
+        dto?.suggestedDiscountPercent,
+      ),
+      selectedDiscountPercent,
       proposedDiscountPercent,
+      projectedGrossProfit: this.nullableFiniteNumber(dto?.projectedGrossProfit),
+      projectedMarginPercent: this.nullableFiniteNumber(
+        dto?.projectedMarginPercent,
+      ),
+      minimumMarginPercent: this.nullableFiniteNumber(dto?.minimumMarginPercent),
+      maxSafeDiscountPercent: this.nullableFiniteNumber(
+        dto?.maxSafeDiscountPercent,
+      ),
       status: 'pending',
       metrics: {
         support: Number(dto?.support) || 0,
@@ -1654,6 +1711,14 @@ export class AnalyticsService {
   private nullableFiniteNumber(value: unknown): number | null {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? this.round(parsed) : null;
+  }
+
+  private clampPercent(value: unknown, fallback: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    return Math.min(Math.max(this.round(parsed), 0), 100);
   }
 
   private parseBoundedInteger(

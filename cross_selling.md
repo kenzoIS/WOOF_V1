@@ -12,7 +12,9 @@ The cross-selling implementation now enforces the paper's human-in-the-loop requ
 
 - Bundle recommendations are not deployed directly from the simulator.
 - The frontend action is **Submit for Review**, which creates a pending `CampaignDraft` through `POST /api/analytics/cross-sell/campaign-drafts`.
-- Suggested bundle prices are marked with `pricingStatus: "proposed_pending_owner_approval"` and `proposedDiscountPercent: 15`.
+- Suggested bundle prices are marked with `pricingStatus: "proposed_pending_owner_approval"` and now use margin-aware `suggestedDiscountPercent` values instead of a hardcoded 15% promotion.
+- Discount suggestions use current item price plus ingested Cost of Goods, Gross Profit, and Margin data to estimate projected gross profit, projected margin, and a safe discount ceiling before owner review.
+- The owner can still choose a different discount; the simulator recalculates bundle price, savings, gross profit, margin, and warns when the chosen discount moves above or below the suggestion.
 - Missing or non-positive price data is returned as `null` with `hasPriceData: false`.
 - Item pricing is based on current-year 2026 transaction prices instead of five-year historical averages.
 - Cross-sell requests support `sector=all|cafe|retail|services`, and sector is part of the cache key.
@@ -20,13 +22,14 @@ The cross-selling implementation now enforces the paper's human-in-the-loop requ
 - Python output includes `totalBaskets`, `multiItemBaskets`, `crossSectorBaskets`, `crossSectorRate`, and `uniqueItemCount` where applicable.
 - The Python dense TransactionEncoder path has a matrix-size guard to avoid runaway FP-Growth jobs.
 - Frontend threshold/time controls are debounced, support starts at 5%, confidence starts at 60%, and the SVG graph has an empty state.
+- Bundle opportunity cards label confidence as **Historical Confidence** and the normalized rank as **Model Score** so high values are not mistaken for future certainty or probability.
 
 The **AI Simulation Laboratory (Bundle Simulator)** is an intelligence engine designed to discover customer buying patterns, uncover cross-sector synergies (Cafe, Pet Retail, Pet Grooming/Services), and boost **Average Order Value (AOV)**.
 
 ### Core Goals:
 1. **Automated Cross-Selling**: Extract statistically proven product combinations from real customer transactions using machine learning.
 2. **Inventory Velocity Optimization**: Pair fast-selling anchor products (e.g., *Iced Latte*, *Dog Food*) with slower-moving high-margin offers (e.g., *Pet Cologne*, *Nail Trim*) to accelerate inventory turnover.
-3. **Dynamic Bundle Pricing**: Automatically calculate item-level market rates, regular combined totals, a **15% discounted bundle price**, and total customer savings in ₱ (PHP).
+3. **Margin-Aware Bundle Pricing**: Automatically calculate item-level market rates, regular combined totals, suggested discount percent, safe discount ceiling, projected gross profit, projected margin, and total customer savings in PHP.
 4. **Cross-Sector Synergies**: Bridge transactions across different sectors (e.g., a customer bringing their pet for grooming also purchasing coffee at the cafe).
 
 ---
@@ -141,8 +144,14 @@ To provide actionable business utility, `cross_sell.py` enriches every rule and 
 | `itemAPrice` | `itemPrices.get(itemA)` | Real-time average unit price of Product A from MongoDB. |
 | `itemBPrice` | `itemPrices.get(itemB)` | Real-time average unit price of Product B from MongoDB. |
 | `regularPrice` | $Price_A + Price_B$ | Combined un-discounted price for both items. |
-| `bundlePrice` | $RegularPrice \times 0.85$ | Promotional bundle price reflecting a **15% discount**. |
-| `savings` | $RegularPrice - BundlePrice$ | Exact customer savings amount in ₱ (PHP). |
+| `regularCost` | $Cost_A + Cost_B$ | Combined cost basis from ingested Cost of Goods data. |
+| `suggestedDiscountPercent` | Margin-aware recommendation | Discount suggested only after checking price, cost, target minimum margin, and safe discount ceiling. |
+| `selectedDiscountPercent` | Owner-selected value | The discount currently chosen in the simulator before review submission. |
+| `bundlePrice` | $RegularPrice \times (1 - SelectedDiscountPercent)$ | Promotional bundle price recalculated from the selected discount. |
+| `savings` | $RegularPrice - BundlePrice$ | Exact customer savings amount in PHP. |
+| `projectedGrossProfit` | $BundlePrice - RegularCost$ | Estimated gross profit after the selected discount. |
+| `projectedMarginPercent` | $ProjectedGrossProfit / BundlePrice$ | Estimated margin after the selected discount. |
+| `maxSafeDiscountPercent` | Cost and minimum-margin ceiling | Highest discount the current cost data supports while preserving the configured minimum margin. |
 
 ---
 
@@ -183,9 +192,9 @@ The frontend UI is built using React, Lucide Icons, Recharts, Radix UI Tooltips,
 #### 4. AI-Predicted Bundle Opportunity Cards
 Each card renders:
 * **Bundle Name**: e.g., *Iced Latte + Dog Grooming Package*
-* **Metrics**: Confidence %, Lift Multiplier, Co-occurrence frequency.
+* **Metrics**: Historical Confidence %, Lift Multiplier, Model Score, and Co-occurrence frequency.
 * **Pricing Tag**:
-  $$\text{₱ItemA} + \text{₱ItemB} \longrightarrow \text{Original: }\cancel{\text{₱Regular}} \quad \mathbf{\text{₱BundlePrice}} \quad \text{\color{green}[Save ₱Savings (15% OFF)]}$$
+  $$\text{ItemA + ItemB} \longrightarrow \text{Regular Price, Suggested Discount, Selected Discount, Bundle Price, Savings, Projected Gross Profit, Projected Margin, Safe Discount Ceiling}$$
 * **Approval Action**: Clicking **Submit for Review** creates a pending `CampaignDraft`. The recommendation is not active until approved by the owner.
 
 ---

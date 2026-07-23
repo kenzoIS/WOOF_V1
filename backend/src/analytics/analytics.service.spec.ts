@@ -19,6 +19,9 @@ describe('AnalyticsService getForecast', () => {
     create: jest.fn(),
     findOne: jest.fn(),
   };
+  const campaignDraftModel = {
+    create: jest.fn(),
+  };
   const csvUploadModel = {
     findOne: jest.fn(),
     countDocuments: jest.fn(),
@@ -134,6 +137,7 @@ describe('AnalyticsService getForecast', () => {
       exec: jest.fn().mockResolvedValue(null),
     });
     crossSellCacheModel.create.mockImplementation(async (payload) => payload);
+    campaignDraftModel.create.mockImplementation(async (payload) => payload);
     configService.get.mockImplementation((key: string) =>
       key === 'CURRENT_UNIT_COST_CAFE'
         ? '45'
@@ -152,6 +156,7 @@ describe('AnalyticsService getForecast', () => {
       transactionModel as any,
       forecastRunModel as any,
       crossSellCacheModel as any,
+      campaignDraftModel as any,
       csvUploadModel as any,
       configService as any,
       exogenousDataService as any,
@@ -634,30 +639,34 @@ describe('AnalyticsService getForecast', () => {
         cachedCrossSell = payload;
         return payload;
       });
+      const aggregateResult = (value: unknown) => ({
+        allowDiskUse: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(value),
+      });
       transactionModel.aggregate
-        .mockResolvedValueOnce(syntheticBaskets())
-        .mockResolvedValueOnce([
+        .mockImplementationOnce(() => aggregateResult(syntheticBaskets()))
+        .mockImplementationOnce(() => aggregateResult([
           {
             totalLineItems: 25,
             totalRevenue: 2500,
             totalTransactions: 10,
             uniqueItemCount: 3,
           },
-        ])
-        .mockResolvedValueOnce([
+        ]))
+        .mockImplementationOnce(() => aggregateResult([
           { _id: 13, transactions: 10 },
           { _id: 14, transactions: 4 },
-        ])
-        .mockResolvedValueOnce([
+        ]))
+        .mockImplementationOnce(() => aggregateResult([
           { sector: 'Cafe', lineItems: 10, transactionCount: 10 },
           { sector: 'Retail', lineItems: 10, transactionCount: 10 },
           { sector: 'Services', lineItems: 5, transactionCount: 5 },
-        ])
-        .mockResolvedValueOnce([
-          { _id: 'Latte', avgPrice: 150 },
-          { _id: 'Dog Treats', avgPrice: 200 },
-          { _id: 'Grooming', avgPrice: 500 },
-        ]);
+        ]))
+        .mockImplementationOnce(() => aggregateResult([
+          { _id: 'Latte', avgPrice: 150, avgUnitCost: 60, avgUnitGrossProfit: 90, avgMargin: 0.6 },
+          { _id: 'Dog Treats', avgPrice: 200, avgUnitCost: 80, avgUnitGrossProfit: 120, avgMargin: 0.6 },
+          { _id: 'Grooming', avgPrice: 500, avgUnitCost: 240, avgUnitGrossProfit: 260, avgMargin: 0.52 },
+        ]));
       mockPythonSpawn(pythonOutput);
 
       const first = await service.getCrossSell();
