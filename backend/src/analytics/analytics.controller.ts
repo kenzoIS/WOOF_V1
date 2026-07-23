@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
@@ -77,6 +77,7 @@ export class AnalyticsController {
     @Query('minLift') minLift?: string,
     @Query('maxBundleCandidates') maxBundleCandidates?: string,
     @Query('hour') hour?: string,
+    @Query('sector') sector?: string,
     @Query('forceRefresh') forceRefresh?: string,
   ) {
     return this.analyticsService.getCrossSell({
@@ -85,8 +86,14 @@ export class AnalyticsController {
       minLift,
       maxBundleCandidates,
       hour,
+      sector,
       forceRefresh,
     });
+  }
+
+  @Post('cross-sell/campaign-drafts')
+  async createCrossSellCampaignDraft(@Body() dto: any) {
+    return this.analyticsService.createCrossSellCampaignDraft(dto);
   }
 
   @Get('cross-sell/config')
@@ -96,6 +103,7 @@ export class AnalyticsController {
     @Query('minLift') minLift?: string,
     @Query('maxBundleCandidates') maxBundleCandidates?: string,
     @Query('hour') hour?: string,
+    @Query('sector') sector?: string,
   ) {
     return this.analyticsService.getCrossSellConfig({
       minSupport,
@@ -103,6 +111,7 @@ export class AnalyticsController {
       minLift,
       maxBundleCandidates,
       hour,
+      sector,
     });
   }
 
@@ -113,6 +122,7 @@ export class AnalyticsController {
     @Query('minLift') minLift?: string,
     @Query('maxBundleCandidates') maxBundleCandidates?: string,
     @Query('hour') hour?: string,
+    @Query('sector') sector?: string,
     @Query('forceRefresh') forceRefresh?: string,
   ) {
     return this.analyticsService.getCrossSellBySector({
@@ -121,6 +131,7 @@ export class AnalyticsController {
       minLift,
       maxBundleCandidates,
       hour,
+      sector,
       forceRefresh,
     });
   }
@@ -132,6 +143,7 @@ export class AnalyticsController {
     @Query('minLift') minLift?: string,
     @Query('maxBundleCandidates') maxBundleCandidates?: string,
     @Query('hour') hour?: string,
+    @Query('sector') sector?: string,
     @Query('forceRefresh') forceRefresh?: string,
   ) {
     return this.analyticsService.getCrossSellBundles({
@@ -140,6 +152,7 @@ export class AnalyticsController {
       minLift,
       maxBundleCandidates,
       hour,
+      sector,
       forceRefresh,
     });
   }

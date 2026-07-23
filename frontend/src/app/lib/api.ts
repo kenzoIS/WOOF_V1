@@ -145,6 +145,7 @@ export interface CrossSellQuery {
   minLift?: string;
   maxBundleCandidates?: string;
   hour?: string;
+  sector?: 'all' | 'cafe' | 'retail' | 'services';
   forceRefresh?: string;
 }
 
@@ -270,6 +271,24 @@ export async function getCrossSellBySector(params?: CrossSellQuery) {
 export async function getCrossSellBundles(params?: CrossSellQuery) {
   const query = toQueryString(params);
   return fetchApi(`/analytics/cross-sell/bundles${query}`);
+}
+
+export async function createCampaignDraft(dto: {
+  bundleName: string;
+  itemA: string;
+  itemB: string;
+  regularPrice: number | null;
+  proposedBundlePrice: number | null;
+  proposedDiscountPercent: number;
+  support?: number;
+  confidence: number;
+  lift: number;
+}) {
+  return fetchApi('/analytics/cross-sell/campaign-drafts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
 }
 
 export async function getRetailForecastByChannel() {

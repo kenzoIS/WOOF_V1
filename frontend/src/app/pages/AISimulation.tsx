@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { getCrossSell } from "../lib/api";
+import { createCampaignDraft, getCrossSell } from "../lib/api";
 import aiMascot from "../../imports/no_bg_AI.png";
 import {
   BarChart,
@@ -144,6 +144,17 @@ const formatSector = (sector?: string) => {
 const formatSectorPair = (sectors: string[]) =>
   sectors.map(formatSector).join(" + ");
 
+function useDebouncedValue<T>(value: T, delayMs = 400): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
+}
+
 export function AISimulation() {
   const [activeTab, setActiveTab] = useState("bundle-simulator");
   const [discountValue, setDiscountValue] = useState([15]);
@@ -157,6 +168,9 @@ export function AISimulation() {
   const [crossSellData, setCrossSellData] = useState<CrossSellResponse | null>(null);
   const [crossSellLoading, setCrossSellLoading] = useState(false);
   const [crossSellError, setCrossSellError] = useState<string | null>(null);
+  const debouncedSupportThreshold = useDebouncedValue(supportThreshold[0]);
+  const debouncedConfidenceLevel = useDebouncedValue(confidenceLevel[0]);
+  const debouncedDataTime = useDebouncedValue(dataTime[0]);
 
   // Scenario Builder states
   const [scenarioName, setScenarioName] = useState("Weekend Promo Campaign");
@@ -174,16 +188,41 @@ export function AISimulation() {
     { id: "scenario-builder", label: "Scenario Builder", icon: FlaskConical },
   ];
 
-  const handleDeployBundle = (bundle: string, bundlePrice?: number, savings?: number) => {
-    const priceText = bundlePrice && bundlePrice > 0 ? ` at ₱${bundlePrice.toFixed(2)} (Save ₱${(savings || 0).toFixed(2)})` : "";
-    toast.success("Bundle deployed!", {
-      description: `${bundle}${priceText} is now active and will be promoted at optimal customer touchpoints.`,
-    });
-  };
-
   const handleBundleTimeChange = (value: number[]) => {
     setDataTime(value);
     setFpGrowthTime(value);
+  };
+
+  const handleSubmitBundleForReview = async (bundle: {
+    bundle: string;
+    itemA: string;
+    itemB: string;
+    regularPrice: number;
+    bundlePrice: number;
+    confidence: number;
+    lift: number;
+    support?: number;
+  }) => {
+    try {
+      await createCampaignDraft({
+        bundleName: bundle.bundle,
+        itemA: bundle.itemA,
+        itemB: bundle.itemB,
+        regularPrice: bundle.regularPrice > 0 ? bundle.regularPrice : null,
+        proposedBundlePrice: bundle.bundlePrice > 0 ? bundle.bundlePrice : null,
+        proposedDiscountPercent: 15,
+        support: bundle.support || 0,
+        confidence: bundle.confidence / 100,
+        lift: bundle.lift,
+      });
+      toast.success("Bundle submitted for owner review", {
+        description: `${bundle.bundle} is saved as a pending campaign draft and is not active until approved.`,
+      });
+    } catch (error) {
+      toast.error("Unable to submit bundle", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    }
   };
 
   useEffect(() => {
@@ -192,11 +231,12 @@ export function AISimulation() {
     setCrossSellError(null);
 
     getCrossSell({
-      minSupport: (supportThreshold[0] / 100).toFixed(2),
-      minConfidence: (confidenceLevel[0] / 100).toFixed(2),
+      minSupport: (debouncedSupportThreshold / 100).toFixed(2),
+      minConfidence: (debouncedConfidenceLevel / 100).toFixed(2),
       minLift: "1.20",
       maxBundleCandidates: "20",
-      hour: String(dataTime[0]),
+      hour: String(debouncedDataTime),
+      sector: "all",
     })
       .then((result: CrossSellResponse) => {
         if (!cancelled) {
@@ -221,7 +261,7 @@ export function AISimulation() {
     return () => {
       cancelled = true;
     };
-  }, [supportThreshold, confidenceLevel, dataTime]);
+  }, [debouncedSupportThreshold, debouncedConfidenceLevel, debouncedDataTime]);
 
   const handleRunSimulation = () => {
     toast.info("Running simulation...", {
@@ -301,6 +341,7 @@ export function AISimulation() {
       itemB: candidate.bundleItem,
       confidence: Math.round((candidate.confidence || 0) * 100),
       lift: candidate.lift || 0,
+      support: candidate.pairSupport || 0,
       score: Math.round((candidate.opportunityScore || 0) * 100),
       frequency: candidate.cooccurrences || 0,
       type: "Fast + Slow Opportunity",
@@ -327,6 +368,7 @@ export function AISimulation() {
       itemB: rule.itemB,
       confidence: Math.round((rule.confidence || 0) * 100),
       lift: rule.lift || 0,
+      support: rule.support || 0,
       score: Math.round(Math.min(99, (rule.lift || 0) * 35)),
       frequency: rule.cooccurrences || 0,
       type: rule.isMultiItem ? "Multi-item Pattern Rule" : "Significant Association Rule",
@@ -955,6 +997,19 @@ export function AISimulation() {
                       </linearGradient>
                     </defs>
 
+                    {networkNodes.length === 0 && (
+                      <text
+                        x="300"
+                        y="240"
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        className="text-sm font-semibold"
+                        fill="#223047"
+                      >
+                        No association rules match the selected thresholds.
+                      </text>
+                    )}
+
                     {/* Connection Lines - Varying thickness based on confidence */}
                     {networkConnections.map((conn, idx) => {
                       const sourceNode = networkNodes.find(n => n.id === conn.source);
@@ -1145,12 +1200,12 @@ export function AISimulation() {
                         value={supportThreshold}
                         onValueChange={setSupportThreshold}
                         max={100}
-                        min={0}
+                        min={5}
                         step={5}
                         className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
                       />
                       <div className="flex justify-between text-[10px] opacity-75">
-                        <span>0%</span>
+                        <span>5%</span>
                         <span>50%</span>
                         <span>100%</span>
                       </div>
@@ -1178,12 +1233,12 @@ export function AISimulation() {
                         value={confidenceLevel}
                         onValueChange={setConfidenceLevel}
                         max={100}
-                        min={0}
+                        min={60}
                         step={5}
                         className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
                       />
                       <div className="flex justify-between text-[10px] opacity-75">
-                        <span>0%</span>
+                        <span>60%</span>
                         <span>50%</span>
                         <span>100%</span>
                       </div>
@@ -1401,7 +1456,7 @@ export function AISimulation() {
                       </div>
                     ) : (
                       <div className="text-xs text-[#223047] opacity-60 my-1">
-                        Suggested 15% Bundle Discount applied upon deployment.
+                        Suggested 15% bundle discount pending owner review.
                       </div>
                     )}
 
@@ -1411,10 +1466,10 @@ export function AISimulation() {
                   </div>
 
                   <Button
-                    onClick={() => handleDeployBundle(bundle.bundle, bundle.bundlePrice, bundle.savings)}
+                    onClick={() => handleSubmitBundleForReview(bundle)}
                     className="bg-[#F53799] hover:bg-[#D42A7D] text-sm md:text-base w-full md:w-auto font-bold shadow-md"
                   >
-                    Deploy Bundle
+                    Submit for Review
                   </Button>
                 </div>
               ))}

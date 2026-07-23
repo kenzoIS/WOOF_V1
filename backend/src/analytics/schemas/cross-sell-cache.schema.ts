@@ -30,7 +30,7 @@ export class CrossSellCache {
   computationDurationMs: number;
 
   @Prop({ type: Object, default: {} })
-  thresholds: Record<string, number>;
+  thresholds: Record<string, number | string>;
 
   @Prop({ type: Object, default: {} })
   uploadState: Record<string, unknown>;
@@ -56,6 +56,7 @@ CrossSellCacheSchema.index({
   'thresholds.minLift': 1,
   'thresholds.maxBundleCandidates': 1,
   'thresholds.hour': 1,
+  'thresholds.sector': 1,
   'uploadState.uploadCount': 1,
   'uploadState.latestUploadId': 1,
   'uploadState.latestUploadTime': 1,

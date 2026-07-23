@@ -6,6 +6,21 @@
 
 ## 📌 1. Business Objective & Executive Summary
 
+## 2026-07-23 Implementation Update
+
+The cross-selling implementation now enforces the paper's human-in-the-loop requirement:
+
+- Bundle recommendations are not deployed directly from the simulator.
+- The frontend action is **Submit for Review**, which creates a pending `CampaignDraft` through `POST /api/analytics/cross-sell/campaign-drafts`.
+- Suggested bundle prices are marked with `pricingStatus: "proposed_pending_owner_approval"` and `proposedDiscountPercent: 15`.
+- Missing or non-positive price data is returned as `null` with `hasPriceData: false`.
+- Item pricing is based on current-year 2026 transaction prices instead of five-year historical averages.
+- Cross-sell requests support `sector=all|cafe|retail|services`, and sector is part of the cache key.
+- Large MongoDB aggregations use `allowDiskUse(true)`.
+- Python output includes `totalBaskets`, `multiItemBaskets`, `crossSectorBaskets`, `crossSectorRate`, and `uniqueItemCount` where applicable.
+- The Python dense TransactionEncoder path has a matrix-size guard to avoid runaway FP-Growth jobs.
+- Frontend threshold/time controls are debounced, support starts at 5%, confidence starts at 60%, and the SVG graph has an empty state.
+
 The **AI Simulation Laboratory (Bundle Simulator)** is an intelligence engine designed to discover customer buying patterns, uncover cross-sector synergies (Cafe, Pet Retail, Pet Grooming/Services), and boost **Average Order Value (AOV)**.
 
 ### Core Goals:
@@ -29,7 +44,8 @@ flowchart TD
     F -->|7. Dynamic Pricing Engine| H[Bundle Prices & Savings Computation]
     G & H -->|8. JSON Output via stdout| B
     B -->|9. HTTP GET /api/analytics/cross-sell| I[React Frontend: AISimulation.tsx]
-    I -->|10. Interactive Controls & SVG Web| J[User Dashboard & One-Click Deployment]
+    I -->|10. Interactive Controls & SVG Web| J[User Dashboard & Owner Review Submission]
+    I -->|11. POST /api/analytics/cross-sell/campaign-drafts| K[Pending CampaignDraft Approval Gate]
 ```
 
 ---
@@ -39,14 +55,16 @@ flowchart TD
 ### Step 1: MongoDB Aggregation (`analytics.service.ts`)
 When the frontend requests `/api/analytics/cross-sell`, NestJS executes 4 parallel MongoDB aggregations:
 1. **Multi-Item Baskets Aggregation**: Groups line items by `transactionId`. Filters out single-item baskets (`{ $match: { 'items.1': { $exists: true } } }`).
-2. **Item Pricing Aggregation**: Calculates average unit price per product across all transactions:
+2. **Item Pricing Aggregation**: Calculates average unit price per product from current-year price data so bundle suggestions do not mix stale 2021 prices with 2026 prices:
    ```typescript
    this.transactionModel.aggregate([
+     { $match: { date: { $gte: new Date('2026-01-01T00:00:00.000+08:00') }, unitPrice: { $gt: 0 } } },
      { $group: { _id: '$productName', avgPrice: { $avg: '$unitPrice' } } }
-   ])
+   ]).allowDiskUse(true).exec()
    ```
 3. **Hourly Volume Aggregation**: Computes transaction counts per hour ($7\text{ AM} - 7\text{ PM}$) in `Asia/Manila` timezone.
 4. **Sector Summary**: Aggregates line items and transaction counts for Cafe, Services, and Retail.
+5. **Safety and Cache Controls**: The cross-sell request supports `sector`, `hour`, threshold values, cache bypass through `forceRefresh`, and disk-backed aggregation for large basket queries.
 
 ### Step 2: Python Interop (`cross_sell.py`)
 NestJS passes the baskets, user thresholds, and `itemPrices` map to `cross_sell.py` via Python child process standard I/O (`stdin` / `stdout`).
@@ -158,8 +176,9 @@ The frontend UI is built using React, Lucide Icons, Recharts, Radix UI Tooltips,
   * Line thickness scales with confidence ($2\text{px} - 12\text{px}$).
   * High-confidence rules ($\ge 85\%$) feature an active SVG glow filter.
 * **Interactive AI Sliders**:
-  * **Support Threshold Slider ($0\% - 100\%$)**: Filters out rare/infrequent item combinations.
-  * **Confidence Level Slider ($0\% - 100\%$)**: Sets minimum co-purchase probability threshold.
+  * **Support Threshold Slider ($5\% - 100\%$)**: Filters out rare/infrequent item combinations while matching the backend minimum.
+  * **Confidence Level Slider ($60\% - 100\%$)**: Sets minimum co-purchase probability threshold while matching the paper requirement.
+  * Slider-triggered API calls are debounced to avoid repeated FP-Growth runs while dragging.
 
 #### 4. AI-Predicted Bundle Opportunity Cards
 Each card renders:
@@ -167,7 +186,7 @@ Each card renders:
 * **Metrics**: Confidence %, Lift Multiplier, Co-occurrence frequency.
 * **Pricing Tag**:
   $$\text{₱ItemA} + \text{₱ItemB} \longrightarrow \text{Original: }\cancel{\text{₱Regular}} \quad \mathbf{\text{₱BundlePrice}} \quad \text{\color{green}[Save ₱Savings (15% OFF)]}$$
-* **Deploy Action**: Clicking **Deploy Bundle** fires a toast notification confirming activation and pricing setup.
+* **Approval Action**: Clicking **Submit for Review** creates a pending `CampaignDraft`. The recommendation is not active until approved by the owner.
 
 ---
 
@@ -242,7 +261,7 @@ Each card renders:
 2. **"No Frequent Itemsets Found" Warning**:
    If customer transactions in the system are low or sparse, lower the **Support Threshold** to $1\% - 5\%$ or the **Confidence Level** to $30\% - 50\%$ using the interactive sliders on the dashboard.
 3. **Price Calculation Fallback**:
-   If an item has `unitPrice = null` or 0 in MongoDB transactions, `itemAPrice` defaults gracefully to `0.00`, and the UI displays standard bundle promotional text without crashing.
+   If an item has `unitPrice = null` or 0 in current-year MongoDB transactions, price fields return `null`, `hasPriceData` is `false`, and the UI displays the bundle as a proposed discount pending owner review.
 
 ---
 *Document Version: 1.0 (WOOF Capstone Dev)*

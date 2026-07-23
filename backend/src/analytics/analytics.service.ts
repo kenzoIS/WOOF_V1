@@ -28,6 +28,10 @@ import {
   CrossSellCache,
   CrossSellCacheDocument,
 } from './schemas/cross-sell-cache.schema';
+import {
+  CampaignDraft,
+  CampaignDraftDocument,
+} from './schemas/campaign-draft.schema';
 
 /**
  * Forecasting limitations for the current capstone implementation:
@@ -69,6 +73,7 @@ interface CrossSellOptions {
   minLift?: number | string;
   maxBundleCandidates?: number | string;
   hour?: number | string;
+  sector?: string;
   forceRefresh?: boolean | string;
 }
 
@@ -119,6 +124,8 @@ export class AnalyticsService {
     private forecastRunModel: Model<ForecastRunDocument>,
     @InjectModel(CrossSellCache.name)
     private crossSellCacheModel: Model<CrossSellCacheDocument>,
+    @InjectModel(CampaignDraft.name)
+    private campaignDraftModel: Model<CampaignDraftDocument>,
     @InjectModel(CsvUpload.name)
     private csvUploadModel: Model<CsvUploadDocument>,
     private readonly configService: ConfigService,
@@ -829,7 +836,10 @@ export class AnalyticsService {
   async getCrossSell(options: CrossSellOptions = {}): Promise<any> {
     const thresholds = this.normalizeCrossSellThresholds(options);
     const hour = this.parseHour(options.hour);
-    const transactionMatch = this.buildHourMatch(hour);
+    const sector = this.normalizeCrossSellSector(options.sector);
+    const transactionMatch = this.buildCrossSellMatch(hour, sector);
+    const hasTransactionMatch = Object.keys(transactionMatch).length > 0;
+    const currentPricingStart = new Date('2026-01-01T00:00:00.000+08:00');
     const forceRefresh =
       options.forceRefresh === true || options.forceRefresh === 'true';
     const cacheCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -844,6 +854,7 @@ export class AnalyticsService {
           'thresholds.minLift': thresholds.minLift,
           'thresholds.maxBundleCandidates': thresholds.maxBundleCandidates,
           'thresholds.hour': thresholds.hour,
+          'thresholds.sector': thresholds.sector,
           'uploadState.uploadCount': uploadState.uploadCount,
           'uploadState.latestUploadId': uploadState.latestUploadId,
           'uploadState.latestUploadTime': uploadState.latestUploadTime,
@@ -877,7 +888,7 @@ export class AnalyticsService {
     const [baskets, rawSummaryRows, hourlyRows, sectorRows, itemPriceRows] =
       await Promise.all([
         this.transactionModel.aggregate([
-          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
           {
             $group: {
               _id: '$transactionId',
@@ -893,9 +904,9 @@ export class AnalyticsService {
             },
           },
           { $match: { 'items.1': { $exists: true } } }, // Only baskets with 2+ items
-        ]),
+        ]).allowDiskUse(true).exec(),
         this.transactionModel.aggregate([
-          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
           {
             $group: {
               _id: null,
@@ -914,9 +925,9 @@ export class AnalyticsService {
               uniqueItemCount: { $size: '$uniqueItems' },
             },
           },
-        ]),
+        ]).allowDiskUse(true).exec(),
         this.transactionModel.aggregate([
-          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
           {
             $group: {
               _id: {
@@ -937,9 +948,9 @@ export class AnalyticsService {
             },
           },
           { $sort: { _id: 1 } },
-        ]),
+        ]).allowDiskUse(true).exec(),
         this.transactionModel.aggregate([
-          ...(transactionMatch ? [{ $match: transactionMatch }] : []),
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
           {
             $group: {
               _id: '$sector',
@@ -956,15 +967,22 @@ export class AnalyticsService {
             },
           },
           { $sort: { transactionCount: -1 } },
-        ]),
+        ]).allowDiskUse(true).exec(),
         this.transactionModel.aggregate([
+          {
+            $match: {
+              ...(sector === 'all' ? {} : { sector: this.normalizeSector(sector) }),
+              date: { $gte: currentPricingStart },
+              unitPrice: { $gt: 0 },
+            },
+          },
           {
             $group: {
               _id: '$productName',
               avgPrice: { $avg: '$unitPrice' },
             },
           },
-        ]),
+        ]).allowDiskUse(true).exec(),
       ]);
 
     const itemPrices: Record<string, number> = {};
@@ -1094,6 +1112,7 @@ export class AnalyticsService {
         'thresholds.minLift': thresholds.minLift,
         'thresholds.maxBundleCandidates': thresholds.maxBundleCandidates,
         'thresholds.hour': thresholds.hour,
+        'thresholds.sector': thresholds.sector,
       })
       .sort({ computedAt: -1 })
       .lean()
@@ -1151,6 +1170,38 @@ export class AnalyticsService {
       ...result,
       bundleCandidates,
     };
+  }
+
+  async createCrossSellCampaignDraft(dto: any): Promise<any> {
+    const bundleName = String(dto?.bundleName || '').trim();
+    const itemA = String(dto?.itemA || '').trim();
+    const itemB = String(dto?.itemB || '').trim();
+
+    if (!bundleName || !itemA || !itemB) {
+      throw new BadRequestException(
+        'Bundle name, itemA, and itemB are required to create a campaign draft.',
+      );
+    }
+
+    const proposedDiscountPercent = Math.min(
+      Math.max(Number(dto?.proposedDiscountPercent) || 15, 0),
+      100,
+    );
+
+    return this.campaignDraftModel.create({
+      bundleName,
+      itemA,
+      itemB,
+      regularPrice: this.nullableFiniteNumber(dto?.regularPrice),
+      proposedBundlePrice: this.nullableFiniteNumber(dto?.proposedBundlePrice),
+      proposedDiscountPercent,
+      status: 'pending',
+      metrics: {
+        support: Number(dto?.support) || 0,
+        confidence: Number(dto?.confidence) || 0,
+        lift: Number(dto?.lift) || 0,
+      },
+    });
   }
 
   /**
@@ -1502,6 +1553,7 @@ export class AnalyticsService {
     minLift: number;
     maxBundleCandidates: number;
     hour?: number;
+    sector: string;
   } {
     return {
       minSupport: Math.max(this.parseThreshold(options.minSupport, 0.05), 0.05),
@@ -1510,13 +1562,16 @@ export class AnalyticsService {
         0.6,
       ),
       minLift: Math.max(this.parseThreshold(options.minLift, 1.2), 1.2),
-      maxBundleCandidates: this.parseThreshold(
+      maxBundleCandidates: this.parseBoundedInteger(
         options.maxBundleCandidates,
         20,
+        1,
+        100,
       ),
       ...(this.parseHour(options.hour) !== undefined
         ? { hour: this.parseHour(options.hour) }
         : {}),
+      sector: this.normalizeCrossSellSector(options.sector),
     };
   }
 
@@ -1553,6 +1608,40 @@ export class AnalyticsService {
     };
   }
 
+  private buildCrossSellMatch(
+    hour: number | undefined,
+    sector: string,
+  ): Record<string, unknown> {
+    const match: Record<string, unknown> = {};
+    if (sector !== 'all') {
+      match.sector = this.normalizeSector(sector);
+    }
+    if (hour !== undefined) {
+      match.$expr = {
+        $eq: [
+          {
+            $hour: {
+              date: '$date',
+              timezone: 'Asia/Manila',
+            },
+          },
+          hour,
+        ],
+      };
+    }
+    return match;
+  }
+
+  private normalizeCrossSellSector(value?: string): string {
+    const lower = String(value || 'all').trim().toLowerCase();
+    if (lower === 'cafe' || lower === 'coffee') return 'cafe';
+    if (lower === 'retail' || lower === 'pet supplies') return 'retail';
+    if (lower === 'services' || lower === 'service' || lower === 'grooming') {
+      return 'services';
+    }
+    return 'all';
+  }
+
   private parseThreshold(value: number | string | undefined, fallback: number): number {
     if (value === undefined || value === '') {
       return fallback;
@@ -1560,6 +1649,24 @@ export class AnalyticsService {
 
     const parsed = Number(value);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  private nullableFiniteNumber(value: unknown): number | null {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? this.round(parsed) : null;
+  }
+
+  private parseBoundedInteger(
+    value: number | string | undefined,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    return Math.min(Math.max(Math.trunc(parsed), min), max);
   }
 
   private normalizeForecastDays(value: number | string | undefined): number {

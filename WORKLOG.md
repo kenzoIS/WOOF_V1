@@ -2,6 +2,65 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-23 - Cross-Selling Audit Fixes and Owner Approval Gate
+
+### Requested
+
+- Implement the cross-selling audit recommendations after the technical sweep.
+- Fix the backend startup issue introduced by the new campaign draft schema.
+- Update documentation/worklog with the implemented changes.
+
+### Backend Changes
+
+- Hardened `backend/src/analytics/python/cross_sell.py`:
+  - Added bounded `maxBundleCandidates` parsing.
+  - Added a dense TransactionEncoder matrix guard to avoid runaway FP-Growth jobs.
+  - Added consistent `totalBaskets`, `multiItemBaskets`, `crossSectorBaskets`, `crossSectorRate`, and `uniqueItemCount` output metadata.
+  - Added `hasPriceData`, `pricingStatus: "proposed_pending_owner_approval"`, and `proposedDiscountPercent`.
+  - Changed missing/non-positive price handling to return `null` pricing values instead of fake zero-price bundles.
+- Added sector filtering support to cross-sell requests and included `thresholds.sector` in cache matching.
+- Changed cross-sell item pricing to use current-year 2026 transaction prices with `unitPrice > 0` instead of five-year historical averages.
+- Added `allowDiskUse(true)` to the large cross-sell MongoDB aggregations.
+- Added `CampaignDraft` persistence for owner-reviewed bundle recommendations.
+- Added `POST /api/analytics/cross-sell/campaign-drafts` so selected bundles are saved as `pending` instead of being activated directly.
+- Fixed the backend startup crash by explicitly typing nullable Mongoose number fields in `CampaignDraft`.
+
+### Frontend Changes
+
+- Added `createCampaignDraft()` to `frontend/src/app/lib/api.ts`.
+- Updated `AISimulation.tsx` so bundle cards use **Submit for Review** instead of **Deploy Bundle**.
+- The submit action now creates a pending campaign draft and shows copy clarifying that the bundle is not active until owner approval.
+- Added debounce handling for support, confidence, and hour changes before re-fetching FP-Growth results.
+- Aligned slider floors with backend/paper thresholds: support starts at 5%, confidence starts at 60%.
+- Added an SVG empty state when no association rules match the selected thresholds.
+
+### Documentation Changes
+
+- Updated `cross_selling.md` with a 2026-07-23 implementation note covering owner approval, proposed pricing, current-year prices, sector filters, cache keying, aggregation safety, Python output metadata, debounce behavior, and empty states.
+- Corrected the old deployment wording in `cross_selling.md` to describe the pending approval workflow.
+
+### Files Changed
+
+- `backend/src/analytics/python/cross_sell.py`
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/analytics/analytics.controller.ts`
+- `backend/src/analytics/analytics.module.ts`
+- `backend/src/analytics/schemas/cross-sell-cache.schema.ts`
+- `backend/src/analytics/schemas/campaign-draft.schema.ts`
+- `frontend/src/app/lib/api.ts`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `cross_selling.md`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `python backend/src/analytics/python/test_cross_sell.py`.
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after allowing Next.js build-worker spawning.
+- Passed: `npm run start` in `backend` now boots NestJS and maps routes.
+- Verified: `GET http://localhost:3001/api/analytics/data-range` returned HTTP 200 from the running backend.
+- Note: `FORECASTING_HANDOFF.md` was already deleted in the working tree and was not changed as part of this work.
+
 ## 2026-07-22 - Cross-Selling Feature Validation & Test Fixes
 
 ### Requested

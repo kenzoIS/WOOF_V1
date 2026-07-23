@@ -12,6 +12,9 @@ DEFAULT_MIN_SUPPORT = 0.05
 DEFAULT_MIN_CONFIDENCE = 0.60
 DEFAULT_MIN_LIFT = 1.20
 DEFAULT_MAX_BUNDLE_CANDIDATES = 20
+MAX_BUNDLE_CANDIDATES = 100
+MAX_DENSE_MATRIX_CELLS = 25_000_000
+MAX_BASKETS_WITHOUT_GUARD = 50_000
 
 
 def parse_payload(payload):
@@ -43,11 +46,14 @@ def parse_payload(payload):
                 )
             ),
             "minLift": float(payload.get("minLift", config.get("minLift", DEFAULT_MIN_LIFT))),
-            "maxBundleCandidates": int(
+            "maxBundleCandidates": safe_int(
                 payload.get(
                     "maxBundleCandidates",
                     config.get("maxBundleCandidates", DEFAULT_MAX_BUNDLE_CANDIDATES),
-                )
+                ),
+                DEFAULT_MAX_BUNDLE_CANDIDATES,
+                1,
+                MAX_BUNDLE_CANDIDATES,
             ),
             "itemPrices": payload.get("itemPrices", config.get("itemPrices", {})),
         }
@@ -70,6 +76,100 @@ def normalize_sector(sector):
     if value in ("services", "grooming"):
         return "services"
     return value
+
+
+def safe_int(value, fallback, min_value=1, max_value=MAX_BUNDLE_CANDIDATES):
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        parsed = fallback
+    return max(min_value, min(parsed, max_value))
+
+
+def get_price(item_prices, item_name):
+    try:
+        price = float(item_prices.get(item_name, 0))
+    except (TypeError, ValueError):
+        return None, False
+    if price <= 0:
+        return None, False
+    return round(price, 2), True
+
+
+def build_pricing_fields(item_prices, item_a, item_b, is_multi_item=False):
+    if is_multi_item:
+        return {
+            "itemAPrice": None,
+            "itemBPrice": None,
+            "regularPrice": None,
+            "bundlePrice": None,
+            "savings": None,
+            "hasPriceData": False,
+            "pricingStatus": "proposed_pending_owner_approval",
+            "proposedDiscountPercent": 15,
+        }
+
+    price_a, has_price_a = get_price(item_prices, item_a)
+    price_b, has_price_b = get_price(item_prices, item_b)
+    has_price_data = has_price_a and has_price_b
+    regular_price = round(price_a + price_b, 2) if has_price_data else None
+    bundle_price = round(regular_price * 0.85, 2) if has_price_data else None
+    savings = round(regular_price - bundle_price, 2) if has_price_data else None
+
+    return {
+        "itemAPrice": price_a,
+        "itemBPrice": price_b,
+        "regularPrice": regular_price,
+        "bundlePrice": bundle_price,
+        "savings": savings,
+        "hasPriceData": has_price_data,
+        "pricingStatus": "proposed_pending_owner_approval",
+        "proposedDiscountPercent": 15,
+    }
+
+
+def cross_sector_basket_count(baskets):
+    return sum(
+        1
+        for basket in baskets
+        if len(basket.get("items", [])) > 1
+        and len(set(basket.get("sectors", []))) > 1
+    )
+
+
+def base_result(
+    rules,
+    bundle_candidates,
+    item_metrics,
+    total_baskets,
+    multi_item_baskets,
+    cleaned_items,
+    thresholds,
+    baskets=None,
+    message=None,
+    extra=None,
+):
+    cross_sector_baskets = cross_sector_basket_count(baskets or [])
+    result = {
+        "rules": rules,
+        "bundleCandidates": bundle_candidates,
+        "itemMetrics": item_metrics,
+        "totalBaskets": int(total_baskets),
+        "multiItemBaskets": int(multi_item_baskets),
+        "crossSectorBaskets": int(cross_sector_baskets),
+        "crossSectorRate": (
+            round(cross_sector_baskets / multi_item_baskets, 4)
+            if multi_item_baskets
+            else 0
+        ),
+        "cleanedItems": int(cleaned_items),
+        "thresholds": thresholds,
+    }
+    if message:
+        result["message"] = message
+    if extra:
+        result.update(extra)
+    return result
 
 
 def clean_baskets(baskets):
@@ -228,11 +328,11 @@ def build_low_association_bundles(
             anchor_sectors = sorted(sector_set_for_items([anchor], product_sectors))
             bundle_sectors = sorted(sector_set_for_items([bundle_item], product_sectors))
 
-            price_a = float(item_prices.get(anchor, 0))
-            price_b = float(item_prices.get(bundle_item, 0))
-            regular_price = round(price_a + price_b, 2)
-            bundle_price = round(regular_price * 0.85, 2)
-            savings = round(regular_price - bundle_price, 2)
+            pricing_fields = build_pricing_fields(
+                item_prices,
+                anchor,
+                bundle_item,
+            )
 
             candidates.append({
                 "anchorItem": anchor,
@@ -253,11 +353,7 @@ def build_low_association_bundles(
                 "consequentSectors": bundle_sectors,
                 "crossSector": is_cross_sector([anchor], [bundle_item], product_sectors),
                 "isLowAssociation": True,
-                "itemAPrice": price_a,
-                "itemBPrice": price_b,
-                "regularPrice": regular_price,
-                "bundlePrice": bundle_price,
-                "savings": savings,
+                **pricing_fields,
             })
 
     return sorted(
@@ -309,10 +405,19 @@ def run_cross_sell(baskets, config=None):
     min_support = float(config.get("minSupport", DEFAULT_MIN_SUPPORT))
     min_confidence = float(config.get("minConfidence", DEFAULT_MIN_CONFIDENCE))
     min_lift = float(config.get("minLift", DEFAULT_MIN_LIFT))
-    max_bundle_candidates = int(
-        config.get("maxBundleCandidates", DEFAULT_MAX_BUNDLE_CANDIDATES)
+    max_bundle_candidates = safe_int(
+        config.get("maxBundleCandidates", DEFAULT_MAX_BUNDLE_CANDIDATES),
+        DEFAULT_MAX_BUNDLE_CANDIDATES,
+        1,
+        MAX_BUNDLE_CANDIDATES,
     )
     item_prices = config.get("itemPrices") or {}
+    thresholds = {
+        "minSupport": min_support,
+        "minConfidence": min_confidence,
+        "minLift": min_lift,
+        "maxBundleCandidates": max_bundle_candidates,
+    }
 
     try:
         started_basket_count = len(baskets)
@@ -321,23 +426,31 @@ def run_cross_sell(baskets, config=None):
             print(f"Cleaned invalid cross-sell items: {cleaned_items}", file=sys.stderr)
 
         if not baskets or len(baskets) < 5:
-            return {
-                "rules": [],
-                "bundleCandidates": [],
-                "totalBaskets": started_basket_count,
-                "message": "Not enough data",
-                "cleanedItems": cleaned_items,
-            }
+            return base_result(
+                [],
+                [],
+                [],
+                started_basket_count,
+                0,
+                cleaned_items,
+                thresholds,
+                baskets,
+                "Not enough data",
+            )
             
         dataset = [b['items'] for b in baskets if len(b['items']) > 1]
         if len(dataset) < 5:
-             return {
-                 "rules": [],
-                 "bundleCandidates": [],
-                 "totalBaskets": started_basket_count,
-                 "message": "Not enough multi-item baskets",
-                 "cleanedItems": cleaned_items,
-             }
+             return base_result(
+                 [],
+                 [],
+                 [],
+                 started_basket_count,
+                 len(dataset),
+                 cleaned_items,
+                 thresholds,
+                 baskets,
+                 "Not enough multi-item baskets",
+             )
 
         item_stats, item_metrics = build_item_metrics(dataset, product_sectors)
         bundle_candidates = build_low_association_bundles(
@@ -349,6 +462,28 @@ def run_cross_sell(baskets, config=None):
             max_bundle_candidates,
             item_prices,
         )
+
+        unique_products = sorted({item for basket in dataset for item in basket})
+        matrix_cells = len(dataset) * len(unique_products)
+        if (
+            len(dataset) > MAX_BASKETS_WITHOUT_GUARD
+            and matrix_cells > MAX_DENSE_MATRIX_CELLS
+        ):
+            return base_result(
+                [],
+                bundle_candidates,
+                item_metrics,
+                started_basket_count,
+                len(dataset),
+                cleaned_items,
+                thresholds,
+                baskets,
+                "Dataset too large for dense FP-Growth; raise support, filter by sector/hour, or use top-N product filtering.",
+                {
+                    "uniqueItemCount": int(len(unique_products)),
+                    "matrixCells": int(matrix_cells),
+                },
+            )
              
         te = TransactionEncoder()
         te_ary = te.fit(dataset).transform(dataset)
@@ -357,14 +492,18 @@ def run_cross_sell(baskets, config=None):
         # FP-Growth
         frequent_itemsets = fpgrowth(df, min_support=min_support, use_colnames=True)
         if frequent_itemsets.empty:
-            return {
-                "rules": [],
-                "bundleCandidates": bundle_candidates,
-                "itemMetrics": item_metrics,
-                "totalBaskets": started_basket_count,
-                "message": "No frequent itemsets found",
-                "cleanedItems": cleaned_items,
-            }
+            return base_result(
+                [],
+                bundle_candidates,
+                item_metrics,
+                started_basket_count,
+                len(dataset),
+                cleaned_items,
+                thresholds,
+                baskets,
+                "No frequent itemsets found at current thresholds",
+                {"uniqueItemCount": int(len(unique_products))},
+            )
             
         try:
             rules = association_rules(frequent_itemsets, metric="lift", min_threshold=min_lift)
@@ -372,14 +511,18 @@ def run_cross_sell(baskets, config=None):
             rules = pd.DataFrame()
             
         if rules.empty:
-            return {
-                "rules": [],
-                "bundleCandidates": bundle_candidates,
-                "itemMetrics": item_metrics,
-                "totalBaskets": started_basket_count,
-                "message": "No association rules found",
-                "cleanedItems": cleaned_items,
-            }
+            return base_result(
+                [],
+                bundle_candidates,
+                item_metrics,
+                started_basket_count,
+                len(dataset),
+                cleaned_items,
+                thresholds,
+                baskets,
+                "No association rules found",
+                {"uniqueItemCount": int(len(unique_products))},
+            )
 
         rules = rules[
             (rules["support"] >= min_support)
@@ -388,14 +531,18 @@ def run_cross_sell(baskets, config=None):
         ]
 
         if rules.empty:
-            return {
-                "rules": [],
-                "bundleCandidates": bundle_candidates,
-                "itemMetrics": item_metrics,
-                "totalBaskets": started_basket_count,
-                "message": "No rules met the configured thresholds",
-                "cleanedItems": cleaned_items,
-            }
+            return base_result(
+                [],
+                bundle_candidates,
+                item_metrics,
+                started_basket_count,
+                len(dataset),
+                cleaned_items,
+                thresholds,
+                baskets,
+                "No rules met the configured thresholds",
+                {"uniqueItemCount": int(len(unique_products))},
+            )
             
         deduped_rules = {}
         for _, row in rules.iterrows():
@@ -404,15 +551,15 @@ def run_cross_sell(baskets, config=None):
             antecedent_sectors = sorted(sector_set_for_items(antecedents, product_sectors))
             consequent_sectors = sorted(sector_set_for_items(consequents, product_sectors))
 
-            item_a = antecedents[0] if antecedents else "Unknown"
-            item_b = consequents[0] if consequents else "Unknown"
             is_multi_item = len(antecedents) > 1 or len(consequents) > 1
-
-            price_a = float(item_prices.get(item_a, 0))
-            price_b = float(item_prices.get(item_b, 0))
-            regular_price = round(price_a + price_b, 2)
-            bundle_price = round(regular_price * 0.85, 2)
-            savings = round(regular_price - bundle_price, 2)
+            item_a = " + ".join(antecedents) if antecedents else "Unknown"
+            item_b = " + ".join(consequents) if consequents else "Unknown"
+            pricing_fields = build_pricing_fields(
+                item_prices,
+                item_a,
+                item_b,
+                is_multi_item,
+            )
 
             rule_obj = {
                 "itemA": str(item_a),
@@ -427,11 +574,7 @@ def run_cross_sell(baskets, config=None):
                 "cooccurrences": int(row['support'] * len(dataset)),
                 "isMultiItem": is_multi_item,
                 "crossSector": is_cross_sector(antecedents, consequents, product_sectors),
-                "itemAPrice": price_a,
-                "itemBPrice": price_b,
-                "regularPrice": regular_price,
-                "bundlePrice": bundle_price,
-                "savings": savings,
+                **pricing_fields,
             }
 
             # Deduplicate symmetric pairs (A=>B vs B=>A), keeping higher confidence direction
@@ -450,20 +593,17 @@ def run_cross_sell(baskets, config=None):
             reverse=True,
         )[:50]
         
-        return {
-            "rules": rules_output,
-            "bundleCandidates": bundle_candidates,
-            "itemMetrics": item_metrics,
-            "totalBaskets": started_basket_count,
-            "multiItemBaskets": len(dataset),
-            "cleanedItems": cleaned_items,
-            "thresholds": {
-                "minSupport": min_support,
-                "minConfidence": min_confidence,
-                "minLift": min_lift,
-                "maxBundleCandidates": max_bundle_candidates,
-            },
-        }
+        return base_result(
+            rules_output,
+            bundle_candidates,
+            item_metrics,
+            started_basket_count,
+            len(dataset),
+            cleaned_items,
+            thresholds,
+            baskets,
+            extra={"uniqueItemCount": int(len(unique_products))},
+        )
     except Exception as e:
         return {"error": str(e)}
 
