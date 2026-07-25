@@ -1,0 +1,21 @@
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { AnalyticsModule } from '../analytics/analytics.module';
+import { ActivationController } from './activation.controller';
+import { ActivationService } from './activation.service';
+import {
+  CampaignActivation,
+  CampaignActivationSchema,
+} from './schemas/campaign-activation.schema';
+
+@Module({
+  imports: [
+    AnalyticsModule,
+    MongooseModule.forFeature([
+      { name: CampaignActivation.name, schema: CampaignActivationSchema },
+    ]),
+  ],
+  controllers: [ActivationController],
+  providers: [ActivationService],
+})
+export class ActivationModule {}

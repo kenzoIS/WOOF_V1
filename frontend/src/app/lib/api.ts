@@ -310,6 +310,37 @@ export async function getExogenousStatus() {
   return fetchApi('/analytics/exogenous/status');
 }
 
+export async function getActivationRecommendations() {
+  return fetchApi('/activation/recommendations');
+}
+
+export async function getActivationCampaigns() {
+  return fetchApi('/activation/campaigns');
+}
+
+export async function generateActivationCampaign(recommendation: unknown) {
+  return fetchApi('/activation/campaigns/generate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ recommendation }),
+  });
+}
+
+export async function updateActivationCampaignStatus(
+  campaignId: string,
+  status: 'draft' | 'approved' | 'queued' | 'published',
+) {
+  return fetchApi(`/activation/campaigns/${encodeURIComponent(campaignId)}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ status }),
+  });
+}
+
 export interface SmartReport {
   _id: string;
   title: string;
@@ -381,5 +412,4 @@ export async function submitSmartReportFeedback(
     body: JSON.stringify(dto),
   });
 }
-
 

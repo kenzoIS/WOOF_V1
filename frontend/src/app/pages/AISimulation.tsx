@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map, Zap, HelpCircle, Info, Tag, ShoppingBag } from "lucide-react";
+import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 import { createCampaignDraft, getCrossSell } from "../lib/api";
+import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import aiMascot from "../../imports/no_bg_AI.png";
 import {
   BarChart,
@@ -280,6 +281,7 @@ export function AISimulation() {
     { id: "pricing-lab", label: "Pricing Laboratory", icon: TrendingUp },
     { id: "traffic-optimizer", label: "Traffic Optimizer", icon: Map },
     { id: "scenario-builder", label: "Scenario Builder", icon: FlaskConical },
+    { id: "activation-layer", label: "Activation Layer", icon: Megaphone },
   ];
 
   const handleBundleTimeChange = (value: number[]) => {
@@ -2359,6 +2361,10 @@ export function AISimulation() {
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === "activation-layer" && (
+        <CampaignActivationLayer />
       )}
     </div>
   );

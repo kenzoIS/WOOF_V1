@@ -15,5 +15,6 @@ import { CommonModule } from '../common/common.module';
   ],
   controllers: [AnalyticsController],
   providers: [AnalyticsService],
+  exports: [AnalyticsService],
 })
 export class AnalyticsModule {}
