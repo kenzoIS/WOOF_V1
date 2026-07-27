@@ -69,6 +69,10 @@ interface BundleCandidate {
   lift: number;
   cooccurrences?: number;
   opportunityScore?: number;
+  baseOpportunityScore?: number;
+  businessFitScore?: number;
+  bundleCategory?: string;
+  bundleFitReason?: string;
   reason?: string;
   antecedentSectors?: string[];
   consequentSectors?: string[];
@@ -210,6 +214,28 @@ const formatSector = (sector?: string) => {
 const formatSectorPair = (sectors: string[]) =>
   sectors.map(formatSector).join(" + ");
 
+const sectorSortOrder: Record<string, number> = {
+  cafe: 0,
+  services: 1,
+  service: 1,
+  retail: 2,
+  unknown: 3,
+};
+
+const normalizeSectorForCategory = (sector?: string) => {
+  const value = (sector || "unknown").toLowerCase();
+  return value === "service" ? "services" : value;
+};
+
+const getBundleCategoryKey = (sectors: string[]) =>
+  sectors
+    .map(normalizeSectorForCategory)
+    .sort((a, b) => (sectorSortOrder[a] ?? 99) - (sectorSortOrder[b] ?? 99) || a.localeCompare(b))
+    .join("__");
+
+const formatBundleCategoryKey = (key: string) =>
+  key.split("__").map(formatSector).join(" + ");
+
 function useDebouncedValue<T>(value: T, delayMs = 400): T {
   const [debounced, setDebounced] = useState(value);
 
@@ -235,6 +261,7 @@ export function AISimulation() {
   const [crossSellLoading, setCrossSellLoading] = useState(false);
   const [crossSellError, setCrossSellError] = useState<string | null>(null);
   const [bundleDiscountOverrides, setBundleDiscountOverrides] = useState<Record<string, number>>({});
+  const [bundleCategoryFilter, setBundleCategoryFilter] = useState("all");
   const debouncedSupportThreshold = useDebouncedValue(supportThreshold[0]);
   const debouncedConfidenceLevel = useDebouncedValue(confidenceLevel[0]);
   const debouncedDataTime = useDebouncedValue(dataTime[0]);
@@ -374,7 +401,6 @@ export function AISimulation() {
     rules.length > 0
       ? rules.reduce((sum, rule) => sum + (rule.confidence || 0), 0) / rules.length
       : 0;
-  const peakHourLabel = rawAnalysis?.peakHour?.label || "No data";
   const maxCoPurchaseFrequency = Math.max(
     1,
     ...rules.map((rule) => rule.cooccurrences || 0),
@@ -415,7 +441,7 @@ export function AISimulation() {
   }, [rules]);
 
   // Bundle predictions based on time analysis with real item prices
-  const bundlePredictions = useMemo(() => {
+  const allBundlePredictions = useMemo(() => {
     const lowAssociation = bundleCandidates.map((candidate) => ({
       bundle: formatPair(candidate.anchorItem, candidate.bundleItem),
       itemA: candidate.anchorItem,
@@ -424,6 +450,8 @@ export function AISimulation() {
       lift: candidate.lift || 0,
       support: candidate.pairSupport || 0,
       score: Math.round((candidate.opportunityScore || 0) * 100),
+      businessFitScore: candidate.businessFitScore ?? null,
+      bundleFitReason: candidate.bundleFitReason,
       frequency: candidate.cooccurrences || 0,
       type: "Fast + Slow Opportunity",
       itemAPrice: candidate.itemAPrice || 0,
@@ -444,12 +472,19 @@ export function AISimulation() {
         firstSector(candidate.antecedentSectors),
         firstSector(candidate.consequentSectors),
       ],
+      bundleCategory:
+        candidate.bundleCategory ||
+        getBundleCategoryKey([
+          firstSector(candidate.antecedentSectors),
+          firstSector(candidate.consequentSectors),
+        ]),
       sectorPair: formatSectorPair([
         firstSector(candidate.antecedentSectors),
         firstSector(candidate.consequentSectors),
       ]),
       reason:
         candidate.reason ||
+        candidate.bundleFitReason ||
         "Fast-moving item paired with a slower-moving item that is not already strongly associated.",
     }));
     const significantRules = rules.map((rule) => ({
@@ -460,6 +495,8 @@ export function AISimulation() {
       lift: rule.lift || 0,
       support: rule.support || 0,
       score: Math.round(Math.min(99, (rule.lift || 0) * 35)),
+      businessFitScore: null,
+      bundleFitReason: undefined,
       frequency: rule.cooccurrences || 0,
       type: rule.isMultiItem ? "Multi-item Pattern Rule" : "Significant Association Rule",
       itemAPrice: rule.itemAPrice || 0,
@@ -480,6 +517,10 @@ export function AISimulation() {
         firstSector(rule.antecedentSectors),
         firstSector(rule.consequentSectors),
       ],
+      bundleCategory: getBundleCategoryKey([
+        firstSector(rule.antecedentSectors),
+        firstSector(rule.consequentSectors),
+      ]),
       sectorPair: formatSectorPair([
         firstSector(rule.antecedentSectors),
         firstSector(rule.consequentSectors),
@@ -488,7 +529,7 @@ export function AISimulation() {
     }));
 
     const seenKeys = new Set<string>();
-    const combined: typeof significantRules = [];
+    const combined: Array<(typeof lowAssociation)[number] | (typeof significantRules)[number]> = [];
 
     [...lowAssociation, ...significantRules].forEach((item) => {
       const canonicalKey = [item.itemA, item.itemB].sort().join(" + ");
@@ -505,7 +546,6 @@ export function AISimulation() {
           b.confidence - a.confidence ||
           b.lift - a.lift,
       )
-      .slice(0, 8)
       .map((item) => {
         const key = getBundleKey(item.itemA, item.itemB);
         const suggestedDiscount = Math.max(0, Math.round(item.suggestedDiscountPercent || 0));
@@ -536,8 +576,22 @@ export function AISimulation() {
       });
   }, [bundleCandidates, bundleDiscountOverrides, rules]);
 
+  const bundleCategoryOptions = useMemo(() => {
+    return Array.from(new Set(allBundlePredictions.map((bundle) => bundle.bundleCategory)))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [allBundlePredictions]);
+
+  const bundlePredictions = useMemo(() => {
+    const filtered =
+      bundleCategoryFilter === "all"
+        ? allBundlePredictions
+        : allBundlePredictions.filter((bundle) => bundle.bundleCategory === bundleCategoryFilter);
+    return filtered.slice(0, 8);
+  }, [allBundlePredictions, bundleCategoryFilter]);
+
   const proximityRecommendations = useMemo(() => {
-    return bundlePredictions.slice(0, 6).map((bundle, index) => {
+    return allBundlePredictions.slice(0, 6).map((bundle, index) => {
       const color =
         sectorColors[bundle.sectors[0]] ||
         sectorColors[bundle.sectors[1]] ||
@@ -560,7 +614,7 @@ export function AISimulation() {
         savings: bundle.savings,
       };
     });
-  }, [bundlePredictions]);
+  }, [allBundlePredictions]);
 
   // Live Behavioral Web Network Data - Responsive to AI Controls
   const networkNodes = useMemo(() => {
@@ -1049,25 +1103,6 @@ export function AISimulation() {
               </div>
             </div>
 
-            {/* Transaction Insight Summary */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 pt-3 md:pt-4 border-t border-[#FFD9EC]">
-              <div className="p-3 md:p-4 bg-gradient-to-br from-[#F53799]/10 to-[#F53799]/5 border border-[#F53799]/20 rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Peak Transaction Hour</div>
-                <div className="text-base md:text-lg font-bold text-[#F53799]">{peakHourLabel}</div>
-              </div>
-              <div className="p-3 md:p-4 bg-gradient-to-br from-[#3AE4FA]/10 to-[#3AE4FA]/5 border border-[#3AE4FA]/20 rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Avg. Items per Cart</div>
-                <div className="text-base md:text-lg font-bold text-[#3AE4FA]">
-                  {(rawAnalysis?.avgItemsPerBasket || 0).toFixed(1)}
-                </div>
-              </div>
-              <div className="p-3 md:p-4 bg-gradient-to-br from-[#D42A7D]/10 to-[#D42A7D]/5 border border-[#D42A7D]/20 rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Cross-Category %</div>
-                <div className="text-base md:text-lg font-bold text-[#D42A7D]">
-                  {formatPercent(rawAnalysis?.crossSectorBasketRate)}
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* LIVE BEHAVIORAL WEB - FP-GROWTH PATTERN DETECTION ENGINE */}
@@ -1189,7 +1224,7 @@ export function AISimulation() {
 
                       return (
                         <g key={node.id}>
-                          <title>{`${node.name} (${formatSector(node.category)}) - Frequency: ${node.frequency}%, Basket Count: ${node.basketCount}`}</title>
+                          <title>{`${node.name} (${formatSector(node.category)}) - Appears in ${node.frequency}% of baskets, Basket Count: ${node.basketCount}`}</title>
                           {/* Outer glow for high-frequency nodes */}
                           {node.frequency > 80 && (
                             <circle
@@ -1229,22 +1264,24 @@ export function AISimulation() {
                               );
                             })}
                           </text>
-                          {/* Frequency badge */}
-                          <circle
-                            cx={pos.x + radius - 6}
-                            cy={pos.y - radius + 6}
-                            r="11"
+                          {/* Basket appearance badge */}
+                          <rect
+                            x={pos.x + radius - 42}
+                            y={pos.y - radius - 4}
+                            width="54"
+                            height="24"
+                            rx="8"
                             fill={node.color}
                           />
                           <text
-                            x={pos.x + radius - 6}
-                            y={pos.y - radius + 6}
+                            x={pos.x + radius - 15}
+                            y={pos.y - radius + 4}
                             textAnchor="middle"
-                            dominantBaseline="middle"
-                            className="text-[9px] font-bold"
+                            className="text-[8px] font-bold"
                             fill="white"
                           >
-                            {Math.round(node.frequency)}
+                            <tspan x={pos.x + radius - 15} dy="0">{Math.round(node.frequency)}%</tspan>
+                            <tspan x={pos.x + radius - 15} dy="9">of baskets</tspan>
                           </text>
                         </g>
                       );
@@ -1273,7 +1310,8 @@ export function AISimulation() {
 
                 {/* Node Size Legend */}
                 <div className="absolute bottom-3 md:bottom-6 right-3 md:right-6 bg-white/95 backdrop-blur border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 shadow-lg z-10 hidden sm:block">
-                  <div className="text-[9px] md:text-[10px] font-bold text-[#223047] mb-1.5 md:mb-2 tracking-wider">NODE SIZE = FREQUENCY</div>
+                  <div className="text-[9px] md:text-[10px] font-bold text-[#223047] mb-1.5 md:mb-2 tracking-wider">NODE SIZE = ITEM APPEARANCE</div>
+                  <div className="text-[9px] md:text-[10px] text-[#223047] opacity-70 mb-2">Badge shows % of baskets containing the item.</div>
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 md:gap-3">
                     <div className="flex items-center gap-1">
                       <div className="w-3 h-3 md:w-4 md:h-4 rounded-full border-2 border-[#D2B48C] bg-white" />
@@ -1297,23 +1335,47 @@ export function AISimulation() {
                   <div className="bg-gradient-to-br from-[#F53799] to-[#D42A7D] border border-[#F53799] rounded-xl md:rounded-2xl p-4 md:p-6 text-white shadow-xl">
                     <div className="flex items-center gap-2 mb-3 md:mb-4">
                       <Target className="w-4 h-4 md:w-5 md:h-5" />
-                      <h3 className="text-sm md:text-base font-bold">Interactive AI Controls</h3>
+                      <h3 className="text-sm md:text-base font-bold">Pattern Filters</h3>
                     </div>
                     <p className="text-xs opacity-90 mb-4 md:mb-6">
-                      Adjust thresholds to dynamically filter patterns and recalculate the network graph
+                      Choose how strict the graph should be when showing repeated item appearances and co-purchase links.
                     </p>
 
-                    {/* Support Threshold Slider */}
+                    <div className="grid grid-cols-3 gap-2 mb-5">
+                      {[
+                        { label: "Explore", support: 5, confidence: 60 },
+                        { label: "Balanced", support: 10, confidence: 70 },
+                        { label: "Strict", support: 20, confidence: 85 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => {
+                            setSupportThreshold([preset.support]);
+                            setConfidenceLevel([preset.confidence]);
+                          }}
+                          className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition ${
+                            supportThreshold[0] === preset.support && confidenceLevel[0] === preset.confidence
+                              ? "bg-white text-[#D42A7D] border-white"
+                              : "bg-white/10 text-white border-white/30 hover:bg-white/20"
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Product Appearance Slider */}
                     <div className="space-y-3 mb-6">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide">
-                          <span>SUPPORT THRESHOLD (%)</span>
+                          <span>ITEM APPEARANCE FLOOR</span>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <HelpCircle className="w-3.5 h-3.5 text-white/80 cursor-pointer" />
                             </TooltipTrigger>
                             <TooltipContent className="max-w-[220px]">
-                              Minimum transaction percentage required for a product pair to appear in network patterns.
+                              The smallest basket share an item or pair must reach before it appears in the graph.
                             </TooltipContent>
                           </Tooltip>
                         </div>
@@ -1336,17 +1398,17 @@ export function AISimulation() {
                       </div>
                     </div>
 
-                    {/* Confidence Level Slider */}
+                    {/* Connection Strength Slider */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide">
-                          <span>HISTORICAL CONFIDENCE (%)</span>
+                          <span>CONNECTION STRENGTH FLOOR</span>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <HelpCircle className="w-3.5 h-3.5 text-white/80 cursor-pointer" />
                             </TooltipTrigger>
                             <TooltipContent className="max-w-[220px]">
-                              Minimum co-purchase probability required to form a connection between products.
+                              The minimum historical chance that the second item appears when the first item is purchased.
                             </TooltipContent>
                           </Tooltip>
                         </div>
@@ -1364,7 +1426,7 @@ export function AISimulation() {
                       />
                       <div className="flex justify-between text-[10px] opacity-75">
                         <span>60%</span>
-                        <span>50%</span>
+                        <span>80%</span>
                         <span>100%</span>
                       </div>
                     </div>
@@ -1372,7 +1434,7 @@ export function AISimulation() {
 
                   {/* Real-time Metrics */}
                   <div className="bg-gradient-to-br from-[#FFF7FB] to-white border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-5 space-y-3 md:space-y-4">
-                    <div className="text-xs font-bold text-[#223047] tracking-wider mb-2 md:mb-3">REAL-TIME METRICS</div>
+                    <div className="text-xs font-bold text-[#223047] tracking-wider mb-2 md:mb-3">VISIBLE PATTERNS</div>
 
                     <div className="space-y-3">
                       <div className="flex items-center justify-between p-3 bg-[#F53799]/5 rounded-lg">
@@ -1521,14 +1583,42 @@ export function AISimulation() {
                 </p>
               </div>
               <Badge className="bg-[#5CE1E6] text-white hover:bg-[#5CE1E6] text-xs md:text-sm">
-                {bundlePredictions.length} Bundles Detected
+                {bundlePredictions.length} of {allBundlePredictions.length} Bundles Shown
               </Badge>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setBundleCategoryFilter("all")}
+                className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
+                  bundleCategoryFilter === "all"
+                    ? "bg-[#F53799] text-white border-[#F53799]"
+                    : "bg-white text-[#223047] border-[#FFD9EC] hover:border-[#F53799]"
+                }`}
+              >
+                All Bundle Types
+              </button>
+              {bundleCategoryOptions.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => setBundleCategoryFilter(category)}
+                  className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
+                    bundleCategoryFilter === category
+                      ? "bg-[#F53799] text-white border-[#F53799]"
+                      : "bg-white text-[#223047] border-[#FFD9EC] hover:border-[#F53799]"
+                  }`}
+                >
+                  {formatBundleCategoryKey(category)}
+                </button>
+              ))}
             </div>
 
             <div className="grid gap-3 md:gap-4">
               {bundlePredictions.length === 0 && (
                 <div className="p-4 md:p-6 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl text-sm text-[#223047] opacity-70">
-                  No bundle opportunities were detected for the selected hour and thresholds. Try lowering support or confidence to inspect weaker patterns.
+                  No bundle opportunities match the selected type and thresholds. Try another bundle type or use a broader pattern filter.
                 </div>
               )}
               {bundlePredictions.map((bundle, idx) => (
@@ -1545,6 +1635,11 @@ export function AISimulation() {
                       <Badge variant="outline" className="text-xs border-[#F53799] text-[#F53799]">
                         {bundle.sectorPair}
                       </Badge>
+                      {bundle.businessFitScore !== null && (
+                        <Badge variant="outline" className="text-xs border-emerald-500 text-emerald-700">
+                          Business Fit {Math.round((bundle.businessFitScore || 0) * 100)}%
+                        </Badge>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-6 text-xs md:text-sm mb-2">

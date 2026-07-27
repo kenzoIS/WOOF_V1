@@ -369,6 +369,123 @@ def is_cross_sector(antecedents, consequents, product_sectors):
     return bool(left and right and any(a != b for a in left for b in right))
 
 
+SECTOR_CATEGORY_ORDER = {
+    "cafe": 0,
+    "services": 1,
+    "retail": 2,
+    "unknown": 3,
+}
+
+
+SECTOR_PAIR_FIT = {
+    ("cafe", "services"): (
+        0.88,
+        "Cafe + Services is a practical wait-time bundle: customers can buy drinks while a pet service is being prepared or completed.",
+    ),
+    ("retail", "services"): (
+        0.92,
+        "Services + Retail is a practical care-continuation bundle: customers can take home products related to the service visit.",
+    ),
+    ("cafe", "retail"): (
+        0.78,
+        "Cafe + Retail can work as an add-on basket when pet owners browse treats or supplies during a cafe visit.",
+    ),
+    ("cafe", "cafe"): (
+        0.64,
+        "Cafe-only bundles can raise average order value when items fit the same eating or drinking occasion.",
+    ),
+    ("services", "services"): (
+        0.70,
+        "Service-only bundles can work when the services are naturally completed in the same appointment.",
+    ),
+    ("retail", "retail"): (
+        0.72,
+        "Retail-only bundles can work when the products fit the same pet-care need or shopping mission.",
+    ),
+}
+
+
+KEYWORD_AFFINITIES = [
+    (
+        ("groom", "bath", "spa", "trim", "wash", "shampoo"),
+        ("coffee", "latte", "cappuccino", "americano", "tea", "drink", "juice", "smoothie"),
+        1.0,
+        "Grooming + drink is realistic because the owner can purchase a beverage while waiting for the pet service.",
+    ),
+    (
+        ("hotel", "boarding", "daycare", "stay", "kennel"),
+        ("dental", "treat", "chew", "tooth", "oral"),
+        1.0,
+        "Pet hotel + dental treats is realistic because overnight or daycare visits can be paired with take-home care items.",
+    ),
+    (
+        ("dental", "clean", "teeth", "oral"),
+        ("dental", "treat", "chew", "tooth", "oral"),
+        0.96,
+        "Dental service + dental product is realistic because the retail item extends the care outcome after the appointment.",
+    ),
+    (
+        ("groom", "bath", "spa", "trim", "wash"),
+        ("shampoo", "conditioner", "brush", "comb", "cologne", "spray"),
+        0.94,
+        "Grooming + grooming-care product is realistic because the product helps maintain the service result at home.",
+    ),
+    (
+        ("training", "consult", "vet", "checkup", "clinic"),
+        ("treat", "food", "supplement", "vitamin", "toy"),
+        0.86,
+        "Advisory or care services pair well with take-home retail items that support the same pet-care goal.",
+    ),
+]
+
+
+def bundle_category_key(left_sectors, right_sectors):
+    sectors = [
+        normalize_sector((left_sectors or ["unknown"])[0]) or "unknown",
+        normalize_sector((right_sectors or ["unknown"])[0]) or "unknown",
+    ]
+    return "__".join(
+        sorted(
+            sectors,
+            key=lambda sector: (SECTOR_CATEGORY_ORDER.get(sector, 99), sector),
+        )
+    )
+
+
+def has_keyword(value, keywords):
+    item = str(value or "").lower()
+    return any(keyword in item for keyword in keywords)
+
+
+def keyword_affinity_score(item_a, item_b):
+    for left_keywords, right_keywords, score, reason in KEYWORD_AFFINITIES:
+        if (
+            has_keyword(item_a, left_keywords)
+            and has_keyword(item_b, right_keywords)
+        ) or (
+            has_keyword(item_b, left_keywords)
+            and has_keyword(item_a, right_keywords)
+        ):
+            return score, reason
+    return 0, ""
+
+
+def business_fit_for_pair(item_a, item_b, left_sectors, right_sectors):
+    category = bundle_category_key(left_sectors, right_sectors)
+    category_parts = tuple(category.split("__"))
+    sector_score, sector_reason = SECTOR_PAIR_FIT.get(
+        category_parts,
+        (
+            0.50,
+            "This pairing is kept only when transaction behavior suggests a useful bundle opportunity.",
+        ),
+    )
+    keyword_score, keyword_reason = keyword_affinity_score(item_a, item_b)
+    if keyword_score > sector_score:
+        return keyword_score, keyword_reason, category
+    return sector_score, sector_reason, category
+
+
 def build_pair_counts(dataset):
     pair_counts = defaultdict(int)
     for basket in dataset:
@@ -445,13 +562,22 @@ def build_low_association_bundles(
                 if min_confidence
                 else 0
             )
-            opportunity_score = (
+            base_opportunity_score = (
                 anchor_support
                 * (1 - bundle_support)
                 * (0.6 * lift_gap + 0.4 * confidence_gap)
             )
             anchor_sectors = sorted(sector_set_for_items([anchor], product_sectors))
             bundle_sectors = sorted(sector_set_for_items([bundle_item], product_sectors))
+            business_fit_score, bundle_fit_reason, bundle_category = business_fit_for_pair(
+                anchor,
+                bundle_item,
+                anchor_sectors,
+                bundle_sectors,
+            )
+            opportunity_score = base_opportunity_score * (
+                0.85 + (0.35 * business_fit_score)
+            )
 
             pricing_fields = build_pricing_fields(
                 item_prices,
@@ -473,8 +599,12 @@ def build_low_association_bundles(
                 "confidence": round(confidence, 4),
                 "lift": round(lift, 2),
                 "cooccurrences": cooccurrences,
+                "baseOpportunityScore": round(base_opportunity_score, 4),
                 "opportunityScore": round(opportunity_score, 4),
-                "reason": "Fast-moving item paired with a slower-moving item that is not already strongly associated.",
+                "businessFitScore": round(business_fit_score, 2),
+                "bundleCategory": bundle_category,
+                "bundleFitReason": bundle_fit_reason,
+                "reason": f"{bundle_fit_reason} Fast-moving anchor paired with a slower-moving offer that is not already strongly associated.",
                 "antecedentSectors": anchor_sectors,
                 "consequentSectors": bundle_sectors,
                 "crossSector": is_cross_sector([anchor], [bundle_item], product_sectors),

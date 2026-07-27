@@ -101,6 +101,11 @@ class CrossSellTests(unittest.TestCase):
             self.assertEqual(candidate["anchorVelocity"], "fast")
             self.assertEqual(candidate["bundleVelocity"], "slow")
             self.assertTrue(candidate["isLowAssociation"])
+            self.assertIn("businessFitScore", candidate)
+            self.assertIn("bundleCategory", candidate)
+            self.assertIn("bundleFitReason", candidate)
+            self.assertGreaterEqual(candidate["businessFitScore"], 0)
+            self.assertLessEqual(candidate["businessFitScore"], 1)
             self.assertLess(
                 candidate["confidence"],
                 result["thresholds"]["minConfidence"],

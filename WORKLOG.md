@@ -2,6 +2,50 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-28 - AI Simulation Bundle UX and Realistic Bundle Fit Scoring
+
+### Requested
+
+- Remove the three Raw Transaction Data Analysis KPI cards for Peak Transaction Hour, Avg. Items per Cart, and Cross-Category %.
+- Clearly label the number shown on Live Behavioral Web product nodes.
+- Make the Live Behavioral Web controls easier for users to understand.
+- Add more realistic bundle-creation logic while preserving the current FP-Growth and opportunity formulas.
+- Add an AI-Predicted Bundle Opportunities filter for bundle categories such as Cafe + Services and Services + Retail.
+
+### Backend Changes
+
+- Extended `backend/src/analytics/python/cross_sell.py` low-association bundle scoring with a business-fit layer:
+  - Keeps the existing fast-moving anchor + slow-moving offer opportunity formula.
+  - Adds sector-pair fit scoring for Cafe + Services, Services + Retail, Cafe + Retail, and same-sector bundles.
+  - Adds broad keyword affinity boosts for realistic pairings such as grooming + drinks, pet hotel + dental treats, dental service + dental products, and grooming + grooming-care products.
+  - Returns `baseOpportunityScore`, `businessFitScore`, `bundleCategory`, and `bundleFitReason` for candidate explanations and filtering.
+- Updated `backend/src/analytics/python/test_cross_sell.py` to verify the new low-association bundle fit metadata.
+
+### Frontend Changes
+
+- Removed the Raw Transaction Data Analysis summary card row containing Peak Transaction Hour, Avg. Items per Cart, and Cross-Category %.
+- Updated Live Behavioral Web node badges so the number is labeled as `% of baskets`, clarifying that it represents item appearance/support in uploaded baskets.
+- Renamed and simplified Live Behavioral Web controls:
+  - `Interactive AI Controls` became `Pattern Filters`.
+  - Added `Explore`, `Balanced`, and `Strict` presets.
+  - Renamed support to `Item Appearance Floor`.
+  - Renamed confidence to `Connection Strength Floor`.
+- Added an AI-Predicted Bundle Opportunities category filter built from the current data's sector-pair categories.
+- Added a `Business Fit` badge for low-association bundle candidates when backend fit scoring is available.
+
+### Files Changed
+
+- `backend/src/analytics/python/cross_sell.py`
+- `backend/src/analytics/python/test_cross_sell.py`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `AI_SIMULATION_BUNDLE_UX_HANDOFF.md`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `python backend/src/analytics/python/test_cross_sell.py`.
+- Passed: `npm run build` in `frontend` after rerunning outside the sandbox because Next.js worker spawning hit `spawn EPERM`.
+
 ## 2026-07-27 - Backend Refactoring for Supabase and Strict Staging
 
 ### Requested
