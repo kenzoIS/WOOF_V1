@@ -7,22 +7,19 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Transaction, TransactionDocument } from '../csv/schemas/transaction.schema';
-import { SmartReport, SmartReportDocument } from './schemas/smart-report.schema';
+
+
+import { SupabaseService } from '../common/supabase/supabase.service';
 
 @Injectable()
 export class SmartReportsService {
   private supabase: SupabaseClient;
 
   constructor(
-    @InjectModel(Transaction.name)
-    private transactionModel: Model<TransactionDocument>,
-    @InjectModel(SmartReport.name)
-    private smartReportModel: Model<SmartReportDocument>,
+    private supabaseService: SupabaseService,
     private configService: ConfigService,
   ) {
-    const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
-    const supabaseKey = this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY');
-    this.supabase = createClient(supabaseUrl, supabaseKey);
+    this.supabase = this.supabaseService.client;
   }
 
   private resolvePythonCommand(): string {
@@ -168,7 +165,7 @@ export class SmartReportsService {
     startDateStr: string,
     endDateStr: string,
     sectors: ('Cafe' | 'Retail' | 'Services')[],
-  ): Promise<SmartReport> {
+  ): Promise<any> {
     // 1. Map Sectors to PostgreSQL naming standard (Services -> Service)
     const pgSectors = sectors.map((s) => (s === 'Services' ? 'Service' : s));
 
@@ -338,38 +335,61 @@ export class SmartReportsService {
       dataCompleteness,
     );
 
-    // 9. Persist report to MongoDB
-    const newReport = new this.smartReportModel({
+    // 9. Persist report to Supabase
+    const payload = {
       title,
-      dateRange: { start: startDateStr, end: endDateStr },
+      date_range: { start: startDateStr, end: endDateStr },
       sectors,
-      aggregatedData: {
+      aggregated_data: {
         totalRevenue: Math.round(totalRevenue),
         totalGrossProfit: Math.round(totalGrossProfit),
         averageMargin,
         channelRevenue,
         categorySales,
       },
-      extrapolatedTrends: {
+      extrapolated_trends: {
         horizonDays: 30,
         dates: extrapolationResult.dates,
         projectedRevenue: extrapolationResult.projectedRevenue,
         projectedGrowthRate: extrapolationResult.projectedGrowthRate,
         trendDirection: extrapolationResult.trendDirection,
       },
-      dataCompleteness,
-      uatFeedback: {
+      data_completeness: dataCompleteness,
+      uat_feedback: {
         accuracyRating: null,
         usefulnessRating: null,
         ownerApproved: false,
         feedbackText: null,
         reviewedAt: null,
       },
-      nlgSummary,
-      generatedAt: new Date(),
-    });
+      nlg_summary: nlgSummary,
+    };
 
-    return await newReport.save();
+    const { data: newReport, error: saveErr } = await this.supabase
+      .from('smart_reports')
+      .insert(payload)
+      .select()
+      .single();
+
+    if (saveErr) {
+      throw new InternalServerErrorException(`Failed to save report: ${saveErr.message}`);
+    }
+
+    return this.mapToCamelCase(newReport);
+  }
+
+  private mapToCamelCase(report: any): any {
+    return {
+      ...report,
+      _id: report.id, // For frontend compatibility if it expects _id
+      dateRange: report.date_range,
+      aggregatedData: report.aggregated_data,
+      extrapolatedTrends: report.extrapolated_trends,
+      dataCompleteness: report.data_completeness,
+      uatFeedback: report.uat_feedback,
+      nlgSummary: report.nlg_summary,
+      generatedAt: new Date(report.generated_at),
+    };
   }
 
   private generateNlgText(
@@ -448,21 +468,37 @@ export class SmartReportsService {
     return `${p1}\n\n${p2}\n\n${p3}\n\n${p4}`;
   }
 
-  async getAllReports(): Promise<SmartReport[]> {
-    return await this.smartReportModel.find().sort({ generatedAt: -1 }).exec();
+  async getAllReports(): Promise<any[]> {
+    const { data, error } = await this.supabase
+      .from('smart_reports')
+      .select('*')
+      .order('generated_at', { ascending: false });
+
+    if (error) throw new InternalServerErrorException(error.message);
+    return (data || []).map(this.mapToCamelCase);
   }
 
-  async getReportById(id: string): Promise<SmartReport> {
-    const report = await this.smartReportModel.findById(id).exec();
-    if (!report) {
+  async getReportById(id: string): Promise<any> {
+    const { data, error } = await this.supabase
+      .from('smart_reports')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
       throw new NotFoundException(`Smart Report with ID "${id}" not found`);
     }
-    return report;
+    return this.mapToCamelCase(data);
   }
 
   async deleteReport(id: string): Promise<void> {
-    const result = await this.smartReportModel.deleteOne({ _id: id }).exec();
-    if (result.deletedCount === 0) {
+    const { count, error } = await this.supabase
+      .from('smart_reports')
+      .delete({ count: 'exact' })
+      .eq('id', id);
+
+    if (error) throw new InternalServerErrorException(error.message);
+    if (count === 0) {
       throw new NotFoundException(`Smart Report with ID "${id}" not found`);
     }
   }
@@ -475,20 +511,29 @@ export class SmartReportsService {
       ownerApproved: boolean;
       feedbackText?: string;
     },
-  ): Promise<SmartReport> {
-    const report = await this.smartReportModel.findById(id).exec();
-    if (!report) {
-      throw new NotFoundException(`Smart Report with ID "${id}" not found`);
-    }
+  ): Promise<any> {
+    const report = await this.getReportById(id);
 
-    report.uatFeedback = {
+    const updatedFeedback = {
+      ...report.uatFeedback,
       accuracyRating: dto.accuracyRating,
       usefulnessRating: dto.usefulnessRating,
       ownerApproved: dto.ownerApproved,
       feedbackText: dto.feedbackText || null,
-      reviewedAt: new Date(),
+      reviewedAt: new Date().toISOString(),
     };
 
-    return await report.save();
+    const { data, error } = await this.supabase
+      .from('smart_reports')
+      .update({ uat_feedback: updatedFeedback })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error || !data) {
+      throw new InternalServerErrorException(error?.message || 'Update failed');
+    }
+
+    return this.mapToCamelCase(data);
   }
 }

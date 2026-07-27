@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { CsvUpload, CsvUploadDocument } from './schemas/csv-upload.schema';
+import { SupabaseService } from '../common/supabase/supabase.service';
 import { Transaction, TransactionDocument } from './schemas/transaction.schema';
 import { EtlService } from './etl.service';
 import { DataValidationService } from './data-validation.service';
@@ -73,13 +73,13 @@ export class CsvService {
   private readonly logger = new Logger(CsvService.name);
 
   constructor(
-    @InjectModel(CsvUpload.name) private csvUploadModel: Model<CsvUploadDocument>,
+    private supabaseService: SupabaseService,
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
     private etlService: EtlService,
     private dataValidationService: DataValidationService,
   ) {}
 
-  async processUpload(file: Express.Multer.File, userChannel?: string): Promise<CsvUploadDocument> {
+  async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
     const channel = normalizeUploadChannel(
       userChannel || detectChannel(file.originalname),
     );
@@ -134,19 +134,27 @@ export class CsvService {
     const totalRevenue = transactions.reduce((sum, t) => sum + (t.netSales || t.totalAmount || 0), 0);
     const totalQuantity = transactions.reduce((sum, t) => sum + (t.quantity || 0), 0);
 
-    const upload = await this.csvUploadModel.create({
-      filename: file.originalname,
-      channel,
-      recordCount: transactions.length,
-      totalRevenue: Math.round(totalRevenue * 100) / 100,
-      totalQuantity,
-      totalTransactions: uniqueTransactionIds.size,
-      categories,
-      uploadedAt: new Date(),
-    } as any);
+    const { data: uploadRows, error: insertError } = await this.supabaseService.client
+      .from('csv_uploads')
+      .insert({
+        filename: file.originalname,
+        channel,
+        record_count: transactions.length,
+        total_revenue: Math.round(totalRevenue * 100) / 100,
+        total_quantity: totalQuantity,
+        total_transactions: uniqueTransactionIds.size,
+        categories,
+        uploaded_at: new Date().toISOString(),
+      })
+      .select();
+
+    if (insertError || !uploadRows || uploadRows.length === 0) {
+        throw new InternalServerErrorException('Failed to create upload record in Supabase: ' + insertError?.message);
+    }
+    const upload = uploadRows[0];
 
     // Add csvUploadId and channel to each transaction, then bulk insert
-    const uploadId = (upload as any)._id as Types.ObjectId;
+    const uploadId = upload.id;
     const transactionsWithUploadId = transactions.map(t => ({
       ...t,
       csvUploadId: uploadId,
@@ -160,15 +168,15 @@ export class CsvService {
 
       const cleanedCategories = [...new Set(cleanedTransactions.map(t => t.category).filter((c): c is string => Boolean(c)))];
 
-      await this.csvUploadModel.findByIdAndUpdate(uploadId, {
-        recordCount: cleanedTransactions.length,
+      await this.supabaseService.client.from('csv_uploads').update({
+        record_count: cleanedTransactions.length,
         categories: cleanedCategories,
-        $set: { etlReport: {
+        etl_report: {
           stage1_droppedCount: report.stage1_droppedCount,
           stage1_duplicateCount: report.stage1_duplicateCount,
           stage1_dropReasons: report.stage1_dropReasons,
-        }}
-      });
+        }
+      }).eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
       
@@ -231,22 +239,30 @@ export class CsvService {
       0,
     );
 
-    const upload = await this.csvUploadModel.create({
-      filename: file.originalname,
-      channel: 'POS',
-      purpose: 'historical-forecast',
-      module,
-      recordCount: parsed.transactions.length,
-      excludedRecordCount: parsed.excludedRecordCount,
-      repairedDateCount: parsed.repairedDateCount,
-      totalRevenue: Math.round(totalRevenue * 100) / 100,
-      totalQuantity,
-      totalTransactions: uniqueTransactionIds.size,
-      categories,
-      uploadedAt: new Date(),
-    } as any);
+    const { data: uploadRows, error: insertError } = await this.supabaseService.client
+      .from('csv_uploads')
+      .insert({
+        filename: file.originalname,
+        channel: 'POS',
+        purpose: 'historical-forecast',
+        module,
+        record_count: parsed.transactions.length,
+        excluded_record_count: parsed.excludedRecordCount,
+        repaired_date_count: parsed.repairedDateCount,
+        total_revenue: Math.round(totalRevenue * 100) / 100,
+        total_quantity: totalQuantity,
+        total_transactions: uniqueTransactionIds.size,
+        categories,
+        uploaded_at: new Date().toISOString(),
+      })
+      .select();
 
-    const uploadId = (upload as any)._id as Types.ObjectId;
+    if (insertError || !uploadRows || uploadRows.length === 0) {
+        throw new InternalServerErrorException('Failed to create upload record in Supabase: ' + insertError?.message);
+    }
+    const upload = uploadRows[0];
+
+    const uploadId = upload.id;
     const transactionsWithUploadId = parsed.transactions.map((transaction) => ({
         ...transaction,
         csvUploadId: uploadId,
@@ -260,15 +276,15 @@ export class CsvService {
 
       const cleanedCategories = [...new Set(cleanedTransactions.map(t => t.category).filter((c): c is string => Boolean(c)))];
 
-      await this.csvUploadModel.findByIdAndUpdate(uploadId, {
-        recordCount: cleanedTransactions.length,
+      await this.supabaseService.client.from('csv_uploads').update({
+        record_count: cleanedTransactions.length,
         categories: cleanedCategories,
-        $set: { etlReport: {
+        etl_report: {
           stage1_droppedCount: report.stage1_droppedCount,
           stage1_duplicateCount: report.stage1_duplicateCount,
           stage1_dropReasons: report.stage1_dropReasons,
-        }}
-      });
+        }
+      }).eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
       
@@ -973,8 +989,9 @@ export class CsvService {
     return 'Pet Supplies';
   }
 
-  async getUploads(): Promise<CsvUploadDocument[]> {
-    return this.csvUploadModel.find().sort({ uploadedAt: -1 }).exec();
+  async getUploads(): Promise<any[]> {
+    const { data } = await this.supabaseService.client.from('csv_uploads').select('*').order('uploaded_at', { ascending: false });
+    return data || [];
   }
 
   private async insertTransactionsInChunks(
@@ -1044,7 +1061,7 @@ export class CsvService {
     return Number.isFinite(numberValue) ? numberValue : fallback;
   }
 
-  private async rollbackUpload(uploadId: Types.ObjectId): Promise<void> {
+  private async rollbackUpload(uploadId: string): Promise<void> {
     const transactions = await this.transactionModel.find({ csvUploadId: uploadId }, { transactionId: 1 }).exec();
     const transactionIds = Array.from(new Set(transactions.map(t => t.transactionId)));
     
@@ -1053,27 +1070,25 @@ export class CsvService {
     }
 
     await this.transactionModel.deleteMany({ csvUploadId: uploadId }).exec();
-    await this.csvUploadModel.findByIdAndDelete(uploadId).exec();
+    await this.supabaseService.client.from('csv_uploads').delete().eq('id', uploadId);
   }
 
   async deleteUpload(id: string): Promise<{ deleted: boolean }> {
-    const objectId = new Types.ObjectId(id);
-
-    const transactions = await this.transactionModel.find({ csvUploadId: objectId }, { transactionId: 1 }).exec();
+    const transactions = await this.transactionModel.find({ csvUploadId: id }, { transactionId: 1 }).exec();
     const transactionIds = Array.from(new Set(transactions.map(t => t.transactionId)));
     
     if (transactionIds.length > 0) {
       await this.etlService.deleteTransactions(transactionIds);
     }
 
-    await this.transactionModel.deleteMany({ csvUploadId: objectId }).exec();
-    await this.csvUploadModel.findByIdAndDelete(objectId).exec();
+    await this.transactionModel.deleteMany({ csvUploadId: id }).exec();
+    await this.supabaseService.client.from('csv_uploads').delete().eq('id', id);
     return { deleted: true };
   }
 
   async getMetrics(): Promise<any> {
-    const [uploads, channelAgg, totalAgg] = await Promise.all([
-      this.csvUploadModel.find().exec(),
+    const { data: uploads } = await this.supabaseService.client.from('csv_uploads').select('id');
+    const [channelAgg, totalAgg] = await Promise.all([
       this.transactionModel.aggregate([
         { $group: { _id: '$channel', count: { $sum: 1 }, revenue: { $sum: '$netSales' } } },
       ]),
@@ -1102,7 +1117,7 @@ export class CsvService {
       totalQuantity: totals.totalQuantity,
       totalRevenue: Math.round(totals.totalRevenue * 100) / 100,
       channels,
-      uploadCount: uploads.length,
+      uploadCount: uploads ? uploads.length : 0,
     };
   }
 }

@@ -2,6 +2,40 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-27 - Backend Refactoring for Supabase and Strict Staging
+
+### Requested
+
+- Migrate backend persistence from MongoDB (Mongoose) to Supabase, ensuring application state lives remotely.
+- Enforce MongoDB as a strict staging area by deleting records immediately after successful ETL processing.
+- Clean up the codebase by removing obsolete `.schema.ts` files and their dependencies.
+
+### Backend Changes
+
+- Configured a global `SupabaseModule` and `SupabaseService` to safely instantiate the `@supabase/supabase-js` client synchronously during provider instantiation.
+- Refactored `AnalyticsService` to load and mutate `forecast_runs`, `cross_sell_caches`, and `campaign_drafts` directly from Supabase rather than MongoDB.
+- Refactored `CsvService` so that CSV upload lifecycles (metadata, row count, status, ETL reporting) save directly to the `csv_uploads` table in Supabase.
+- Refactored `SmartReportsService` to fetch, persist, and update feedback for natural language reports natively using the `smart_reports` Supabase table.
+- Upgraded `EtlService` to support **Strict Staging**: After inserting parsed chunks of `Transaction` records into Supabase dimension and fact tables, it immediately issues a `deleteMany()` to MongoDB, cleanly dropping the temporary staging rows and guaranteeing zero persistent data sprawl locally.
+- Wiped out legacy Mongoose models (`csv-upload.schema.ts`, `forecast-run.schema.ts`, `cross-sell-cache.schema.ts`, `campaign-draft.schema.ts`, `smart-report.schema.ts`) and removed their injection providers across `AnalyticsModule`, `CsvModule`, and `SmartReportsModule`. `Transaction` remains the sole MongoDB schema, used entirely for transient ETL staging.
+
+### Files Changed
+
+- `backend/src/common/supabase/supabase.service.ts`
+- `backend/src/common/supabase/supabase.module.ts`
+- `backend/src/csv/csv.service.ts`
+- `backend/src/csv/etl.service.ts`
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/smart-reports/smart-reports.service.ts`
+- `backend/src/smart-reports/smart-reports.controller.ts`
+- Multiple `.schema.ts` files deleted.
+
+### Verification
+
+- Passed: `npm run build` in `backend` with zero TypeScript compilation errors.
+- Verified: `npm run start:dev` background process correctly compiles and initializes the Supabase client without race conditions during dependency injection.
+
+
 ## 2026-07-23 - Cross-Selling Audit Fixes and Owner Approval Gate
 
 ### Requested

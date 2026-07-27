@@ -5,8 +5,8 @@ export type TransactionDocument = Transaction & Document;
 
 @Schema({ timestamps: true })
 export class Transaction {
-  @Prop({ type: Types.ObjectId, ref: 'CsvUpload', required: true })
-  csvUploadId: Types.ObjectId;
+  @Prop({ type: String, required: true })
+  csvUploadId: string;
 
   @Prop({ required: true })
   date: Date;

@@ -6,10 +6,6 @@ import {
   Transaction,
   TransactionDocument,
 } from '../csv/schemas/transaction.schema';
-import {
-  CsvUpload,
-  CsvUploadDocument,
-} from '../csv/schemas/csv-upload.schema';
 import { spawn } from 'child_process';
 import * as path from 'path';
 import { existsSync } from 'fs';
@@ -20,18 +16,8 @@ import {
   normalizeDailySeries,
 } from '../common/time-series';
 import { ExogenousDataService } from '../common/exogenous-data.service';
-import {
-  ForecastRun,
-  ForecastRunDocument,
-} from './schemas/forecast-run.schema';
-import {
-  CrossSellCache,
-  CrossSellCacheDocument,
-} from './schemas/cross-sell-cache.schema';
-import {
-  CampaignDraft,
-  CampaignDraftDocument,
-} from './schemas/campaign-draft.schema';
+import { SupabaseService } from '../common/supabase/supabase.service';
+
 
 /**
  * Forecasting limitations for the current capstone implementation:
@@ -120,14 +106,7 @@ export class AnalyticsService {
   constructor(
     @InjectModel(Transaction.name)
     private transactionModel: Model<TransactionDocument>,
-    @InjectModel(ForecastRun.name)
-    private forecastRunModel: Model<ForecastRunDocument>,
-    @InjectModel(CrossSellCache.name)
-    private crossSellCacheModel: Model<CrossSellCacheDocument>,
-    @InjectModel(CampaignDraft.name)
-    private campaignDraftModel: Model<CampaignDraftDocument>,
-    @InjectModel(CsvUpload.name)
-    private csvUploadModel: Model<CsvUploadDocument>,
+    private supabaseService: SupabaseService,
     private readonly configService: ConfigService,
     private readonly exogenousDataService: ExogenousDataService,
   ) {}
@@ -471,7 +450,7 @@ export class AnalyticsService {
 
   async getChannelStatus(): Promise<any> {
     const channels = ['POS', 'Shopee', 'TikTok Shop', 'PetHub'];
-    const [transactionRows, uploadRows] = await Promise.all([
+    const [transactionRows, { data: uploadRows }] = await Promise.all([
       this.transactionModel.aggregate([
         {
           $group: {
@@ -481,23 +460,34 @@ export class AnalyticsService {
           },
         },
       ]),
-      this.csvUploadModel
-        .aggregate([
-          {
-            $group: {
-              _id: '$channel',
-              uploadCount: { $sum: 1 },
-              latestUploadAt: { $max: '$uploadedAt' },
-            },
-          },
-        ])
-        .exec(),
+      this.supabaseService.client
+        .from('csv_uploads')
+        .select('channel, uploaded_at'),
     ]);
 
     const byTransactionChannel = new Map(
       transactionRows.map((row: any) => [row._id, row]),
     );
-    const byUploadChannel = new Map(uploadRows.map((row: any) => [row._id, row]));
+
+    const uploadStats: Record<string, any> = {};
+    if (uploadRows) {
+      for (const r of uploadRows) {
+        if (!uploadStats[r.channel]) uploadStats[r.channel] = { uploadCount: 0, latestUploadAt: null };
+        uploadStats[r.channel].uploadCount++;
+        const currentMax = uploadStats[r.channel].latestUploadAt;
+        if (!currentMax || new Date(r.uploaded_at) > new Date(currentMax)) {
+          uploadStats[r.channel].latestUploadAt = r.uploaded_at;
+        }
+      }
+    }
+    const mappedUploadRows = Object.keys(uploadStats).map(channel => ({
+      _id: channel,
+      ...uploadStats[channel]
+    }));
+
+    const byUploadChannel = new Map(
+      mappedUploadRows.map((row: any) => [row._id, row]),
+    );
 
     return {
       serverNow: new Date().toISOString(),
@@ -562,22 +552,33 @@ export class AnalyticsService {
     const reqSplit = reqMode === 'production' ? '80-20' : '80-10-10';
 
     // Caching check
-    const cachedForecast = await this.forecastRunModel
-      .findOne({ module })
-      .sort({ generatedAt: -1 })
-      .exec();
+    const { data: cachedForecast } = await this.supabaseService.client
+      .from('forecast_runs')
+      .select('*')
+      .eq('module', module)
+      .order('generated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const latestUpload = await this.csvUploadModel.findOne().sort({ uploadedAt: -1 }).exec();
-    const uploadCount = await this.csvUploadModel.countDocuments().exec();
+    const { data: latestUpload } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('*')
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const { count: uploadCount } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('*', { count: 'exact', head: true });
 
     if (cachedForecast) {
-      const metadata = cachedForecast.modelMetadata || {};
+      const metadata = cachedForecast.model_metadata || {};
       const cacheUploadCount = metadata.csvUploadCount;
       const cacheLatestUploadId = metadata.latestCsvUploadId;
       const cacheLatestUploadTime = metadata.latestCsvUploadTime;
 
-      const currentLatestUploadId = latestUpload ? latestUpload._id.toString() : null;
-      const currentLatestUploadTime = latestUpload ? latestUpload.uploadedAt.getTime() : null;
+      const currentLatestUploadId = latestUpload ? latestUpload.id : null;
+      const currentLatestUploadTime = latestUpload ? new Date(latestUpload.uploaded_at).getTime() : null;
 
       const isCsvStateMatch =
         cacheUploadCount === uploadCount &&
@@ -735,12 +736,12 @@ export class AnalyticsService {
     const volumeForecast = this.buildVolumeForecast(finalModel.forecast);
     const payload = {
       module,
-      modelName: finalModel.modelName,
+      model_name: finalModel.modelName,
       mase: finalModel.mase,
       smape: finalModel.smape,
       accuracy: finalModel.accuracy,
-      isFallback: useFallback,
-      rejectionReason: useFallback ? rejectionReason : undefined,
+      is_fallback: useFallback,
+      rejection_reason: useFallback ? rejectionReason : null,
       historical: this.buildAnchoredHistoricalPayload(
         completeHistorical,
         revenueByDate,
@@ -748,12 +749,12 @@ export class AnalyticsService {
         trainHistorical,
       ),
       forecast: calibratedForecast,
-      volumeForecast,
-      revenueForecast: calibratedForecast,
+      volume_forecast: volumeForecast,
+      revenue_forecast: calibratedForecast,
       kpis: dashboard.kpis,
-      topItems: dashboard.topItems,
-      itemHistory,
-      modelMetadata: {
+      top_items: dashboard.topItems,
+      item_history: itemHistory,
+      model_metadata: {
         ...finalModel.modelMetadata,
         additionalRegressionMetrics: {
           mae: finalModel.mae,
@@ -819,14 +820,29 @@ export class AnalyticsService {
         latestCsvUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
         daysRequested: forecastDays,
       },
-      generatedAt: new Date(),
+      generated_at: new Date().toISOString(),
     };
 
     // Wipe old caches for this module before saving the new one to prevent storage bloat
-    await this.forecastRunModel.deleteMany({ module });
+    await this.supabaseService.client.from('forecast_runs').delete().eq('module', module);
 
-    const savedRun = await this.forecastRunModel.create(payload);
-    return this.withForecastStartAnchor(savedRun.toObject());
+    const { data: savedRun } = await this.supabaseService.client.from('forecast_runs').insert(payload).select().single();
+    
+    // Map snake_case back to camelCase for the frontend (withForecastStartAnchor uses camelCase)
+    const normalizedRun = {
+      ...savedRun,
+      modelName: savedRun.model_name,
+      isFallback: savedRun.is_fallback,
+      rejectionReason: savedRun.rejection_reason,
+      volumeForecast: savedRun.volume_forecast,
+      revenueForecast: savedRun.revenue_forecast,
+      topItems: savedRun.top_items,
+      itemHistory: savedRun.item_history,
+      modelMetadata: savedRun.model_metadata,
+      generatedAt: new Date(savedRun.generated_at),
+    };
+
+    return this.withForecastStartAnchor(normalizedRun);
   }
 
   /**
@@ -846,22 +862,23 @@ export class AnalyticsService {
     const uploadState = await this.getCsvUploadState();
 
     if (!forceRefresh) {
-      const cached = await this.crossSellCacheModel
-        .findOne({
-          computedAt: { $gte: cacheCutoff },
-          'thresholds.minSupport': thresholds.minSupport,
-          'thresholds.minConfidence': thresholds.minConfidence,
-          'thresholds.minLift': thresholds.minLift,
-          'thresholds.maxBundleCandidates': thresholds.maxBundleCandidates,
-          'thresholds.hour': thresholds.hour,
-          'thresholds.sector': thresholds.sector,
-          'uploadState.uploadCount': uploadState.uploadCount,
-          'uploadState.latestUploadId': uploadState.latestUploadId,
-          'uploadState.latestUploadTime': uploadState.latestUploadTime,
-        })
-        .sort({ computedAt: -1 })
-        .lean()
-        .exec();
+      const { data: cachedList } = await this.supabaseService.client
+        .from('cross_sell_caches')
+        .select('*')
+        .gte('computed_at', cacheCutoff.toISOString())
+        .order('computed_at', { ascending: false });
+
+      const cached = cachedList?.find((c: any) => 
+        c.thresholds?.minSupport === thresholds.minSupport &&
+        c.thresholds?.minConfidence === thresholds.minConfidence &&
+        c.thresholds?.minLift === thresholds.minLift &&
+        c.thresholds?.maxBundleCandidates === thresholds.maxBundleCandidates &&
+        c.thresholds?.hour === thresholds.hour &&
+        c.thresholds?.sector === thresholds.sector &&
+        c.upload_state?.uploadCount === uploadState.uploadCount &&
+        c.upload_state?.latestUploadId === uploadState.latestUploadId &&
+        c.upload_state?.latestUploadTime === uploadState.latestUploadTime
+      );
 
       if (cached) {
         const cachedResult =
@@ -874,7 +891,7 @@ export class AnalyticsService {
           rules,
           thresholds,
           cached: true,
-          cacheAgeMs: Date.now() - new Date(cached.computedAt).getTime(),
+          cacheAgeMs: Date.now() - new Date(cached.computed_at).getTime(),
           sectorBreakdown:
             cachedResult.sectorBreakdown ||
             cached.sectorBreakdown ||
@@ -1103,20 +1120,20 @@ export class AnalyticsService {
         cached: false,
       };
 
-      await this.crossSellCacheModel.create({
-        computedAt: new Date(),
+      await this.supabaseService.client.from('cross_sell_caches').insert({
+        computed_at: new Date().toISOString(),
         result: payload,
         rules: payload.rules,
-        bundleCandidates: payload.bundleCandidates,
-        totalBaskets: payload.totalBaskets,
-        multiItemBaskets: payload.multiItemBaskets,
-        crossSectorRate: payload.crossSectorRate,
-        computationDurationMs: payload.computationDurationMs,
+        bundle_candidates: payload.bundleCandidates,
+        total_baskets: payload.totalBaskets,
+        multi_item_baskets: payload.multiItemBaskets,
+        cross_sector_rate: payload.crossSectorRate,
+        computation_duration_ms: payload.computationDurationMs,
         thresholds,
-        uploadState,
+        upload_state: uploadState,
         message: payload.message,
-        cleanedItems: payload.cleanedItems,
-        sectorBreakdown: payload.sectorBreakdown,
+        cleaned_items: payload.cleanedItems,
+        sector_breakdown: payload.sectorBreakdown,
       });
 
       return payload;
@@ -1145,28 +1162,29 @@ export class AnalyticsService {
 
   async getCrossSellConfig(options: CrossSellOptions = {}): Promise<any> {
     const thresholds = this.normalizeCrossSellThresholds(options);
-    const cached = await this.crossSellCacheModel
-      .findOne({
-        'thresholds.minSupport': thresholds.minSupport,
-        'thresholds.minConfidence': thresholds.minConfidence,
-        'thresholds.minLift': thresholds.minLift,
-        'thresholds.maxBundleCandidates': thresholds.maxBundleCandidates,
-        'thresholds.hour': thresholds.hour,
-        'thresholds.sector': thresholds.sector,
-      })
-      .sort({ computedAt: -1 })
-      .lean()
-      .exec();
+    const { data: cachedList } = await this.supabaseService.client
+      .from('cross_sell_caches')
+      .select('*')
+      .order('computed_at', { ascending: false });
+
+    const cached = cachedList?.find((c: any) => 
+      c.thresholds?.minSupport === thresholds.minSupport &&
+      c.thresholds?.minConfidence === thresholds.minConfidence &&
+      c.thresholds?.minLift === thresholds.minLift &&
+      c.thresholds?.maxBundleCandidates === thresholds.maxBundleCandidates &&
+      c.thresholds?.hour === thresholds.hour &&
+      c.thresholds?.sector === thresholds.sector
+    );
 
     return {
       thresholds,
       cache: cached
         ? {
             exists: true,
-            computedAt: cached.computedAt,
-            ageMs: Date.now() - new Date(cached.computedAt).getTime(),
+            computedAt: cached.computed_at,
+            ageMs: Date.now() - new Date(cached.computed_at).getTime(),
             isFresh:
-              Date.now() - new Date(cached.computedAt).getTime() <
+              Date.now() - new Date(cached.computed_at).getTime() <
               24 * 60 * 60 * 1000,
           }
         : {
@@ -1232,24 +1250,24 @@ export class AnalyticsService {
       proposedDiscountPercent,
     );
 
-    return this.campaignDraftModel.create({
-      bundleName,
-      itemA,
-      itemB,
-      regularPrice: this.nullableFiniteNumber(dto?.regularPrice),
-      proposedBundlePrice: this.nullableFiniteNumber(dto?.proposedBundlePrice),
-      regularCost: this.nullableFiniteNumber(dto?.regularCost),
-      suggestedDiscountPercent: this.nullableFiniteNumber(
+    const payload = {
+      bundle_name: bundleName,
+      item_a: itemA,
+      item_b: itemB,
+      regular_price: this.nullableFiniteNumber(dto?.regularPrice),
+      proposed_bundle_price: this.nullableFiniteNumber(dto?.proposedBundlePrice),
+      regular_cost: this.nullableFiniteNumber(dto?.regularCost),
+      suggested_discount_percent: this.nullableFiniteNumber(
         dto?.suggestedDiscountPercent,
       ),
-      selectedDiscountPercent,
-      proposedDiscountPercent,
-      projectedGrossProfit: this.nullableFiniteNumber(dto?.projectedGrossProfit),
-      projectedMarginPercent: this.nullableFiniteNumber(
+      selected_discount_percent: selectedDiscountPercent,
+      proposed_discount_percent: proposedDiscountPercent,
+      projected_gross_profit: this.nullableFiniteNumber(dto?.projectedGrossProfit),
+      projected_margin_percent: this.nullableFiniteNumber(
         dto?.projectedMarginPercent,
       ),
-      minimumMarginPercent: this.nullableFiniteNumber(dto?.minimumMarginPercent),
-      maxSafeDiscountPercent: this.nullableFiniteNumber(
+      minimum_margin_percent: this.nullableFiniteNumber(dto?.minimumMarginPercent),
+      max_safe_discount_percent: this.nullableFiniteNumber(
         dto?.maxSafeDiscountPercent,
       ),
       status: 'pending',
@@ -1258,7 +1276,34 @@ export class AnalyticsService {
         confidence: Number(dto?.confidence) || 0,
         lift: Number(dto?.lift) || 0,
       },
-    });
+    };
+
+    const { data: draft, error } = await this.supabaseService.client
+      .from('campaign_drafts')
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create campaign draft: ${error.message}`);
+    }
+
+    return {
+      ...draft,
+      bundleName: draft.bundle_name,
+      itemA: draft.item_a,
+      itemB: draft.item_b,
+      regularPrice: draft.regular_price,
+      proposedBundlePrice: draft.proposed_bundle_price,
+      regularCost: draft.regular_cost,
+      suggestedDiscountPercent: draft.suggested_discount_percent,
+      selectedDiscountPercent: draft.selected_discount_percent,
+      proposedDiscountPercent: draft.proposed_discount_percent,
+      projectedGrossProfit: draft.projected_gross_profit,
+      projectedMarginPercent: draft.projected_margin_percent,
+      minimumMarginPercent: draft.minimum_margin_percent,
+      maxSafeDiscountPercent: draft.max_safe_discount_percent,
+    };
   }
 
   /**
@@ -1321,11 +1366,14 @@ export class AnalyticsService {
 
   async getExogenousStatus(): Promise<any> {
     const cacheStatus = await this.exogenousDataService.getCacheStatus();
-    const lastServicesForecast = await this.forecastRunModel
-      .findOne({ module: 'Services' })
-      .sort({ generatedAt: -1 })
-      .lean();
-    const modelName = (lastServicesForecast as any)?.modelName || null;
+    const { data: lastServicesForecast } = await this.supabaseService.client
+      .from('forecast_runs')
+      .select('*')
+      .eq('module', 'Services')
+      .order('generated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const modelName = lastServicesForecast?.model_name || null;
 
     return {
       ...cacheStatus,
@@ -1336,15 +1384,12 @@ export class AnalyticsService {
               ? 'SARIMAX'
               : 'SARIMA',
             exogenousVariables:
-              (lastServicesForecast as any)?.modelMetadata
-                ?.exogenousVariables || [],
+              lastServicesForecast?.model_metadata?.exogenousVariables || [],
             weatherDataSource:
-              (lastServicesForecast as any)?.modelMetadata
-                ?.weatherDataSource || 'unknown',
+              lastServicesForecast?.model_metadata?.weatherDataSource || 'unknown',
             holidayDataSource:
-              (lastServicesForecast as any)?.modelMetadata
-                ?.holidayDataSource || 'unknown',
-            generatedAt: (lastServicesForecast as any)?.generatedAt,
+              lastServicesForecast?.model_metadata?.holidayDataSource || 'unknown',
+            generatedAt: lastServicesForecast?.generated_at,
           }
         : null,
     };
@@ -1747,15 +1792,21 @@ export class AnalyticsService {
     latestUploadId: string | null;
     latestUploadTime: number | null;
   }> {
-    const [latestUpload, uploadCount] = await Promise.all([
-      this.csvUploadModel.findOne().sort({ uploadedAt: -1 }).exec(),
-      this.csvUploadModel.countDocuments().exec(),
-    ]);
+    const { data: latestUpload } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('id, uploaded_at')
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const { count: uploadCount } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('*', { count: 'exact', head: true });
 
     return {
-      uploadCount,
-      latestUploadId: latestUpload ? latestUpload._id.toString() : null,
-      latestUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
+      uploadCount: uploadCount || 0,
+      latestUploadId: latestUpload ? latestUpload.id : null,
+      latestUploadTime: latestUpload ? new Date(latestUpload.uploaded_at).getTime() : null,
     };
   }
 

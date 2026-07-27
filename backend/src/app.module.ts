@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { CsvModule } from './csv/csv.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SmartReportsModule } from './smart-reports/smart-reports.module';
+import { SupabaseModule } from './common/supabase/supabase.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
@@ -50,6 +51,7 @@ import { ContextModule } from './context/context.module';
     AnalyticsModule,
     ContextModule,
     SmartReportsModule,
+    SupabaseModule,
   ],
 })
 export class AppModule {}
