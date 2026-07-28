@@ -7,6 +7,7 @@ import {
   generateActivationCampaign,
   getActivationCampaigns,
   getActivationRecommendations,
+  publishActivationCampaign,
   updateActivationCampaignStatus,
 } from "../lib/api";
 
@@ -39,6 +40,18 @@ interface Campaign {
     petHubBannerText: string;
     termsAndConditions: string[];
     pubmatPrompt: string;
+  };
+  pethubPayload?: {
+    category: string;
+    tag: string;
+    meta: Record<string, unknown>;
+    title: string;
+    description: string;
+    note: string;
+    highlight: string;
+    footer: string;
+    sort_order: number;
+    is_active: boolean;
   };
 }
 
@@ -129,6 +142,24 @@ export function CampaignActivationLayer() {
       });
     } catch (error: any) {
       toast.error("Approval failed", {
+        description: error.message,
+      });
+    }
+  };
+
+  const handlePublish = async (campaign: Campaign) => {
+    try {
+      const result = await publishActivationCampaign(campaign.campaignId);
+      const updated = result.campaign as Campaign;
+      setCampaigns((current) =>
+        current.map((item) => item.campaignId === updated.campaignId ? updated : item),
+      );
+      setSelectedCampaign(updated);
+      toast.success("Campaign sent to PetHub", {
+        description: "The announcement payload was published successfully.",
+      });
+    } catch (error: any) {
+      toast.error("PetHub publish failed", {
         description: error.message,
       });
     }
@@ -245,23 +276,48 @@ export function CampaignActivationLayer() {
                 <AssetBlock label="Pubmat Prompt" value={selectedCampaign.generatedAssets.pubmatPrompt} />
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2">
+              {selectedCampaign.pethubPayload && (
+                <div className="border border-[#FFD9EC] rounded-xl p-3 bg-white">
+                  <div className="text-xs font-semibold text-[#F53799] mb-2">PetHub Announcement Payload</div>
+                  <div className="grid gap-2 text-xs text-[#223047]">
+                    <PayloadRow label="category" value={selectedCampaign.pethubPayload.category} />
+                    <PayloadRow label="tag" value={selectedCampaign.pethubPayload.tag} />
+                    <PayloadRow label="title" value={selectedCampaign.pethubPayload.title} />
+                    <PayloadRow label="description" value={selectedCampaign.pethubPayload.description} />
+                    <PayloadRow label="note" value={selectedCampaign.pethubPayload.note} />
+                    <PayloadRow label="highlight" value={selectedCampaign.pethubPayload.highlight} />
+                    <PayloadRow label="footer" value={selectedCampaign.pethubPayload.footer} />
+                    <PayloadRow label="sort_order" value={String(selectedCampaign.pethubPayload.sort_order)} />
+                    <PayloadRow label="is_active" value={String(selectedCampaign.pethubPayload.is_active)} />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid sm:grid-cols-3 gap-2">
+                <Button
+                  variant="outline"
+                  className="border-[#FFD9EC]"
+                  onClick={() => handleApprove(selectedCampaign)}
+                  disabled={selectedCampaign.status !== "draft"}
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-2" />
+                  Approve
+                </Button>
                 <Button
                   className="bg-[#0D9488] hover:bg-[#0F766E] flex-1"
                   onClick={() => handleQueue(selectedCampaign)}
                   disabled={selectedCampaign.status === "queued" || selectedCampaign.status === "published"}
                 >
                   <Send className="w-4 h-4 mr-2" />
-                  Queue for PetHub
+                  Queue
                 </Button>
                 <Button
-                  variant="outline"
-                  className="border-[#FFD9EC] flex-1"
-                  onClick={() => handleApprove(selectedCampaign)}
-                  disabled={selectedCampaign.status !== "draft"}
+                  className="bg-[#F53799] hover:bg-[#D42A7D]"
+                  onClick={() => handlePublish(selectedCampaign)}
+                  disabled={selectedCampaign.status === "published"}
                 >
-                  <CheckCircle2 className="w-4 h-4 mr-2" />
-                  Approve Draft
+                  <Megaphone className="w-4 h-4 mr-2" />
+                  Publish
                 </Button>
               </div>
 
@@ -300,6 +356,15 @@ function AssetBlock({ label, value }: { label: string; value: string }) {
     <div className="border border-[#FFD9EC] rounded-xl p-3">
       <div className="text-xs font-semibold text-[#F53799] mb-1">{label}</div>
       <div className="text-sm text-[#223047]" style={{ lineHeight: "1.5" }}>{value}</div>
+    </div>
+  );
+}
+
+function PayloadRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid sm:grid-cols-[120px_1fr] gap-1 border-b border-[#FFF2FA] pb-2 last:border-b-0 last:pb-0">
+      <span className="font-semibold text-[#F53799]">{label}</span>
+      <span className="break-words">{value}</span>
     </div>
   );
 }

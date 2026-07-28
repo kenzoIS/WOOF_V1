@@ -27,4 +27,11 @@ export class ActivationController {
   ): Promise<any> {
     return this.activationService.updateCampaignStatus(campaignId, status);
   }
+
+  @Post('campaigns/:campaignId/publish')
+  async publishCampaignToPetHub(
+    @Param('campaignId') campaignId: string,
+  ): Promise<any> {
+    return this.activationService.publishCampaignToPetHub(campaignId);
+  }
 }

@@ -341,6 +341,12 @@ export async function updateActivationCampaignStatus(
   });
 }
 
+export async function publishActivationCampaign(campaignId: string) {
+  return fetchApi(`/activation/campaigns/${encodeURIComponent(campaignId)}/publish`, {
+    method: 'POST',
+  });
+}
+
 export interface SmartReport {
   _id: string;
   title: string;
@@ -412,4 +418,3 @@ export async function submitSmartReportFeedback(
     body: JSON.stringify(dto),
   });
 }
-

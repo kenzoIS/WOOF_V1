@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import axios from 'axios';
 import { Model } from 'mongoose';
 import { AnalyticsService } from '../analytics/analytics.service';
 import {
@@ -8,6 +9,30 @@ import {
 } from './schemas/campaign-activation.schema';
 
 type CampaignStatus = 'draft' | 'approved' | 'queued' | 'published';
+
+interface GeneratedCampaignAssets {
+  headline: string;
+  shortCaption: string;
+  longCaption: string;
+  callToAction: string;
+  pushNotification: string;
+  petHubBannerText: string;
+  termsAndConditions: string[];
+  pubmatPrompt: string;
+}
+
+interface PetHubAnnouncementPayload {
+  category: string;
+  tag: string;
+  meta: Record<string, unknown>;
+  title: string;
+  description: string;
+  note: string;
+  highlight: string;
+  footer: string;
+  sort_order: number;
+  is_active: boolean;
+}
 
 interface ActivationRecommendation {
   id: string;
@@ -73,7 +98,8 @@ export class ActivationService {
       .toString(36)
       .slice(2, 7)
       .toUpperCase()}`;
-    const generatedAssets = this.generateAssets(recommendation);
+    const generatedAssets =
+      await this.generateAssetsWithClaude(recommendation);
     const pethubPayload = this.buildPetHubPayload(
       campaignId,
       recommendation,
@@ -95,6 +121,44 @@ export class ActivationService {
     });
 
     return { campaign };
+  }
+
+  async publishCampaignToPetHub(campaignId: string) {
+    const endpoint = this.getPetHubAnnouncementsEndpoint();
+    if (!endpoint) {
+      throw new BadRequestException(
+        'PETHUB_ANNOUNCEMENTS_ENDPOINT or PETHUB_API_BASE_URL must be configured',
+      );
+    }
+
+    const campaign = await this.campaignModel.findOne({ campaignId }).lean().exec();
+    if (!campaign) {
+      throw new BadRequestException('Campaign not found');
+    }
+
+    const payload = {
+      ...(campaign.pethubPayload || {}),
+      is_active: true,
+    };
+
+    const token = process.env.PETHUB_API_TOKEN;
+    const response = await axios.post(endpoint, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      timeout: 15000,
+    });
+
+    const updated = await this.campaignModel
+      .findOneAndUpdate({ campaignId }, { status: 'published' }, { new: true })
+      .lean()
+      .exec();
+
+    return {
+      campaign: updated,
+      pethubResponse: response.data,
+    };
   }
 
   async updateCampaignStatus(campaignId: string, status: CampaignStatus) {
@@ -160,7 +224,54 @@ export class ActivationService {
     }));
   }
 
-  private generateAssets(recommendation: ActivationRecommendation) {
+  private async generateAssetsWithClaude(
+    recommendation: ActivationRecommendation,
+  ): Promise<GeneratedCampaignAssets> {
+    const fallback = this.generateFallbackAssets(recommendation);
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return fallback;
+    }
+
+    try {
+      const response = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model:
+            process.env.ANTHROPIC_MODEL ||
+            'claude-3-5-sonnet-latest',
+          max_tokens: 1200,
+          temperature: 0.7,
+          system:
+            'You generate concise, brand-safe Happy Tails / PetHub campaign materials. Return only valid JSON with no markdown.',
+          messages: [
+            {
+              role: 'user',
+              content: this.buildClaudePrompt(recommendation),
+            },
+          ],
+        },
+        {
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          timeout: 20000,
+        },
+      );
+
+      const text = this.extractAnthropicText(response.data);
+      const parsed = this.parseJsonObject(text);
+      return this.normalizeGeneratedAssets(parsed, fallback);
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  private generateFallbackAssets(
+    recommendation: ActivationRecommendation,
+  ): GeneratedCampaignAssets {
     const items = recommendation.featuredItems.filter(Boolean);
     const primary = items[0] || 'Happy Tails favorite';
     const pair = items.length > 1 ? items.join(' + ') : primary;
@@ -185,22 +296,127 @@ export class ActivationService {
     };
   }
 
+  private buildClaudePrompt(recommendation: ActivationRecommendation) {
+    return [
+      'Generate campaign materials for a PetHub announcement from this WOOF promo recommendation.',
+      'Use friendly Happy Tails wording for pet owners. Keep copy short, specific, and ready to publish.',
+      'Return exactly this JSON shape:',
+      JSON.stringify({
+        headline: 'string, max 80 chars',
+        shortCaption: 'string, max 140 chars',
+        longCaption: 'string, 1-2 short paragraphs',
+        callToAction: 'string, 2-4 words',
+        pushNotification: 'string, max 120 chars',
+        petHubBannerText: 'string, max 90 chars',
+        termsAndConditions: ['string', 'string'],
+        pubmatPrompt: 'string prompt for an image/pubmat generator',
+      }),
+      'WOOF recommendation:',
+      JSON.stringify(recommendation),
+    ].join('\n');
+  }
+
   private buildPetHubPayload(
     campaignId: string,
     recommendation: ActivationRecommendation,
-    generatedAssets: Record<string, unknown>,
-  ) {
+    generatedAssets: GeneratedCampaignAssets,
+  ): PetHubAnnouncementPayload {
     return {
-      externalCampaignId: campaignId,
-      title: recommendation.title,
-      type: 'woof_ai_campaign',
-      status: 'draft',
-      featuredItems: recommendation.featuredItems,
-      targetSegment: recommendation.targetSegment,
-      promoMechanic: recommendation.promoMechanic,
-      assets: generatedAssets,
-      analyticsSource: recommendation.source,
+      category: 'promotion',
+      tag: 'WOOF AI Campaign',
+      meta: {
+        externalCampaignId: campaignId,
+        sourceRecommendationId: recommendation.id,
+        source: recommendation.source,
+        featuredItems: recommendation.featuredItems,
+        targetSegment: recommendation.targetSegment,
+        promoMechanic: recommendation.promoMechanic,
+        expectedLift: recommendation.expectedLift,
+        confidence: recommendation.confidence,
+        analyticsContext: recommendation.analyticsContext,
+        generatedAssets,
+      },
+      title: generatedAssets.headline,
+      description: generatedAssets.longCaption,
+      note: generatedAssets.shortCaption,
+      highlight: generatedAssets.petHubBannerText,
+      footer: generatedAssets.termsAndConditions.join(' '),
+      sort_order: 0,
+      is_active: false,
     };
+  }
+
+  private extractAnthropicText(data: any): string {
+    const textBlocks = Array.isArray(data?.content)
+      ? data.content
+          .filter((block: any) => block?.type === 'text' && block?.text)
+          .map((block: any) => block.text)
+      : [];
+    return textBlocks.join('\n').trim();
+  }
+
+  private parseJsonObject(text: string): Record<string, unknown> {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return {};
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return {};
+      }
+    }
+  }
+
+  private normalizeGeneratedAssets(
+    value: Record<string, unknown>,
+    fallback: GeneratedCampaignAssets,
+  ): GeneratedCampaignAssets {
+    return {
+      headline: this.safeString(value.headline, fallback.headline),
+      shortCaption: this.safeString(value.shortCaption, fallback.shortCaption),
+      longCaption: this.safeString(value.longCaption, fallback.longCaption),
+      callToAction: this.safeString(value.callToAction, fallback.callToAction),
+      pushNotification: this.safeString(
+        value.pushNotification,
+        fallback.pushNotification,
+      ),
+      petHubBannerText: this.safeString(
+        value.petHubBannerText,
+        fallback.petHubBannerText,
+      ),
+      termsAndConditions: this.safeStringArray(
+        value.termsAndConditions,
+        fallback.termsAndConditions,
+      ),
+      pubmatPrompt: this.safeString(value.pubmatPrompt, fallback.pubmatPrompt),
+    };
+  }
+
+  private safeString(value: unknown, fallback: string): string {
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  }
+
+  private safeStringArray(value: unknown, fallback: string[]): string[] {
+    if (!Array.isArray(value)) return fallback;
+    const items = value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return items.length ? items.slice(0, 5) : fallback;
+  }
+
+  private getPetHubAnnouncementsEndpoint(): string | null {
+    const explicitEndpoint = process.env.PETHUB_ANNOUNCEMENTS_ENDPOINT?.trim();
+    if (explicitEndpoint) {
+      return explicitEndpoint;
+    }
+    const baseUrl = process.env.PETHUB_API_BASE_URL?.trim();
+    if (!baseUrl) {
+      return null;
+    }
+    return `${baseUrl.replace(/\/+$/, '')}/api/announcements`;
   }
 
   private normalizeRecommendation(body: Record<string, unknown>) {

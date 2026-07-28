@@ -45,7 +45,18 @@ export class CampaignActivation {
   };
 
   @Prop({ type: Object, default: {} })
-  pethubPayload: Record<string, unknown>;
+  pethubPayload: {
+    category: string;
+    tag: string;
+    meta: Record<string, unknown>;
+    title: string;
+    description: string;
+    note: string;
+    highlight: string;
+    footer: string;
+    sort_order: number;
+    is_active: boolean;
+  };
 }
 
 export const CampaignActivationSchema =
