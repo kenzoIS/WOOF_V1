@@ -44,14 +44,14 @@ interface Campaign {
   pethubPayload?: {
     category: string;
     tag: string;
-    meta: Record<string, unknown>;
+    meta: string;
     title: string;
     description: string;
     note: string;
     highlight: string;
     footer: string;
-    sort_order: number;
-    is_active: boolean;
+    sortOrder: number;
+    isActive: boolean;
   };
 }
 
@@ -282,13 +282,14 @@ export function CampaignActivationLayer() {
                   <div className="grid gap-2 text-xs text-[#223047]">
                     <PayloadRow label="category" value={selectedCampaign.pethubPayload.category} />
                     <PayloadRow label="tag" value={selectedCampaign.pethubPayload.tag} />
+                    <PayloadRow label="meta" value={selectedCampaign.pethubPayload.meta} />
                     <PayloadRow label="title" value={selectedCampaign.pethubPayload.title} />
                     <PayloadRow label="description" value={selectedCampaign.pethubPayload.description} />
                     <PayloadRow label="note" value={selectedCampaign.pethubPayload.note} />
                     <PayloadRow label="highlight" value={selectedCampaign.pethubPayload.highlight} />
                     <PayloadRow label="footer" value={selectedCampaign.pethubPayload.footer} />
-                    <PayloadRow label="sort_order" value={String(selectedCampaign.pethubPayload.sort_order)} />
-                    <PayloadRow label="is_active" value={String(selectedCampaign.pethubPayload.is_active)} />
+                    <PayloadRow label="sortOrder" value={String(selectedCampaign.pethubPayload.sortOrder)} />
+                    <PayloadRow label="isActive" value={String(selectedCampaign.pethubPayload.isActive)} />
                   </div>
                 </div>
               )}

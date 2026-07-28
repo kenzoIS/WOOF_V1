@@ -28,14 +28,14 @@ interface GeneratedCampaignAssets {
 interface PetHubAnnouncementPayload {
   category: string;
   tag: string;
-  meta: Record<string, unknown>;
+  meta: string;
   title: string;
   description: string;
   note: string;
   highlight: string;
   footer: string;
-  sort_order: number;
-  is_active: boolean;
+  sortOrder: number;
+  isActive: boolean;
 }
 
 interface ActivationRecommendation {
@@ -142,7 +142,7 @@ export class ActivationService {
 
     const payload = {
       ...(campaign.pethubPayload || {}),
-      is_active: true,
+      isActive: true,
     };
 
     const token = process.env.PETHUB_API_TOKEN;
@@ -321,27 +321,28 @@ export class ActivationService {
   ): PetHubAnnouncementPayload {
     return {
       category: 'promotion',
-      tag: 'WOOF AI Campaign',
-      meta: {
-        externalCampaignId: campaignId,
-        sourceRecommendationId: recommendation.id,
-        source: recommendation.source,
-        featuredItems: recommendation.featuredItems,
-        targetSegment: recommendation.targetSegment,
-        promoMechanic: recommendation.promoMechanic,
-        expectedLift: recommendation.expectedLift,
-        confidence: recommendation.confidence,
-        analyticsContext: recommendation.analyticsContext,
-        generatedAssets,
-      },
+      tag: 'WOOF',
+      meta: this.buildAnnouncementMeta(recommendation),
       title: generatedAssets.headline,
       description: generatedAssets.longCaption,
       note: generatedAssets.shortCaption,
       highlight: generatedAssets.petHubBannerText,
       footer: generatedAssets.termsAndConditions.join(' '),
-      sort_order: 0,
-      is_active: false,
+      sortOrder: 0,
+      isActive: false,
     };
+  }
+
+  private buildAnnouncementMeta(
+    recommendation: ActivationRecommendation,
+  ): string {
+    const sourceLabel = recommendation.source
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+    const confidence = recommendation.confidence
+      ? ` • ${recommendation.confidence} confidence`
+      : '';
+    return `${sourceLabel}${confidence}`;
   }
 
   private extractAnthropicText(data: any): string {

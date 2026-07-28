@@ -48,14 +48,14 @@ export class CampaignActivation {
   pethubPayload: {
     category: string;
     tag: string;
-    meta: Record<string, unknown>;
+    meta: string;
     title: string;
     description: string;
     note: string;
     highlight: string;
     footer: string;
-    sort_order: number;
-    is_active: boolean;
+    sortOrder: number;
+    isActive: boolean;
   };
 }
 
