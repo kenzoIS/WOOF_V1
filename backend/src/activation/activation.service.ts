@@ -486,7 +486,7 @@ export class ActivationService {
 
   private async postPetHubAnnouncement(
     endpoint: string,
-    payload: Record<string, unknown>,
+    payload: PetHubAnnouncementPayload,
     token?: string,
   ) {
     try {

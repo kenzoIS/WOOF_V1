@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { MessageCircle, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { askWoofChatbot } from "../lib/api";
 
 interface Message {
   id: string;
@@ -16,7 +17,7 @@ export function WOOFChatbot() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: "Hello! I'm WOOF, your Autonomous Revenue Intelligence assistant. How can I help you today?",
+      text: "Hi, I'm WOOF. Ask me about dashboard sales, orders, channels, sectors, top items, forecasts, or bundle recommendations.",
       sender: "woof",
       timestamp: new Date(),
     },
@@ -24,9 +25,9 @@ export function WOOFChatbot() {
   const [isThinking, setIsThinking] = useState(false);
 
   const quickPrompts = [
-    "Explain today's forecast",
-    "Why was this bundle suggested?",
-    "What's our quietest hour this week?",
+    "What are sales today?",
+    "What are the top 5 items this week?",
+    "Which channel has the highest revenue?",
   ];
 
   // Listen for open chatbot event
@@ -42,7 +43,7 @@ export function WOOFChatbot() {
     };
   }, []);
 
-  const handleSendMessage = (text: string) => {
+  const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     const userMessage: Message = {
@@ -56,17 +57,26 @@ export function WOOFChatbot() {
     setMessage("");
     setIsThinking(true);
 
-    // Simulate WOOF response
-    setTimeout(() => {
+    try {
+      const result = await askWoofChatbot(text);
       const woofMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: `Based on your query about "${text}", I've analyzed the current data. Your cafe sector is performing 12% above forecast today, primarily driven by strong afternoon sales. I recommend maintaining current inventory levels and consider extending happy hour to 4-6 PM to capitalize on this momentum.`,
+        text: result.answer || "I could not compute an answer from the dashboard data.",
         sender: "woof",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, woofMessage]);
+    } catch (error: any) {
+      const woofMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: error.message || "Chatbot is unavailable. Please try again later.",
+        sender: "woof",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, woofMessage]);
+    } finally {
       setIsThinking(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -170,7 +180,7 @@ export function WOOFChatbot() {
                     handleSendMessage(message);
                   }
                 }}
-                placeholder="Ask WOOF anything..."
+                placeholder="Ask about dashboard data..."
                 className="flex-1 border-gray-300 focus-visible:ring-[#F53799]"
               />
               <Button

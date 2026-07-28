@@ -6,6 +6,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { SmartReportsModule } from './smart-reports/smart-reports.module';
 import { SupabaseModule } from './common/supabase/supabase.module';
 import { ActivationModule } from './activation/activation.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
@@ -54,6 +55,7 @@ import { ContextModule } from './context/context.module';
     SmartReportsModule,
     SupabaseModule,
     ActivationModule,
+    ChatbotModule,
   ],
 })
 export class AppModule {}

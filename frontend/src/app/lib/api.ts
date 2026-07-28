@@ -347,6 +347,16 @@ export async function publishActivationCampaign(campaignId: string) {
   });
 }
 
+export async function askWoofChatbot(question: string) {
+  return fetchApi('/chatbot/ask', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ question }),
+  });
+}
+
 export interface SmartReport {
   _id: string;
   title: string;
