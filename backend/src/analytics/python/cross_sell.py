@@ -6,6 +6,7 @@ from collections import defaultdict
 import pandas as pd
 from mlxtend.frequent_patterns import fpgrowth, association_rules
 from mlxtend.preprocessing import TransactionEncoder
+from backtest import compute_attach_rate_metrics
 
 warnings.filterwarnings('ignore')
 
@@ -17,6 +18,18 @@ DEFAULT_MINIMUM_MARGIN = 0.30
 MAX_BUNDLE_CANDIDATES = 100
 MAX_DENSE_MATRIX_CELLS = 25_000_000
 MAX_BASKETS_WITHOUT_GUARD = 50_000
+
+
+def normalize_sector(sector_str):
+    """Standardizes sector strings to 'cafe', 'retail', or 'services'."""
+    sec = str(sector_str or '').strip().lower()
+    if 'cafe' in sec or 'coffee' in sec or 'beverage' in sec:
+        return 'cafe'
+    if 'retail' in sec or 'supply' in sec or 'goods' in sec:
+        return 'retail'
+    if 'service' in sec or 'groom' in sec or 'hotel' in sec:
+        return 'services'
+    return 'unknown'
 
 
 def parse_payload(payload):
@@ -438,6 +451,290 @@ KEYWORD_AFFINITIES = [
     ),
 ]
 
+# ---------------------------------------------------------
+# Exact 9-Category & High-Level Type Taxonomy
+# ---------------------------------------------------------
+COFFEE_KEYWORDS = (
+    "coffee", "latte", "cappuccino", "americano", "espresso", "macchiato", "mocha", "brew"
+)
+NON_CAFFEINE_KEYWORDS = (
+    "non-caffeine", "tea", "matcha", "frappe", "juice", "smoothie", "beverage", "drink", "chocolate", "iced tea"
+)
+PASTA_SNACK_KEYWORDS = (
+    "pasta", "snack", "sandwich", "waffle", "fries", "burger", "spaghetti", "carbonara", "bread", "toast", "pancake", "muffin"
+)
+RICE_MEAL_KEYWORDS = (
+    "rice", "meal", "pork", "chicken", "beef", "rice bowl", "cordon bleu"
+)
+GROOMING_KEYWORDS = (
+    "groom", "bath", "spa", "trim", "wash", "cut", "styling", "nail", "paw"
+)
+PET_HOTEL_KEYWORDS = (
+    "hotel", "boarding", "daycare", "stay", "kennel"
+)
+EVENTS_KEYWORDS = (
+    "event", "party", "barkday", "booking"
+)
+PET_BAKERY_KEYWORDS = (
+    "pupcake", "puppuccino", "woofle", "cat bento", "bento cake", "pet cake",
+    "pet bakery", "dog cake", "cat cake", "pup cake", "puppaccino", "donut", "doggie pizza", "pizza"
+)
+PET_SUPPLIES_KEYWORDS = (
+    "shampoo", "conditioner", "soap", "diaper", "toy", "chew", "brush", "comb",
+    "pet food", "kibble", "cologne", "spray", "treat", "dental", "litter", "leash", "harness", "wet food", "dry food"
+)
+
+DOG_KEYWORDS = ("dog", "pup", "woof", "canine", "canines", "pupp")
+CAT_KEYWORDS = ("cat", "kitten", "feline", "meow", "purr", "kitty")
+
+
+def detect_species(item_name):
+    """
+    Detects target species from item name string.
+    Returns: 'dog' | 'cat' | 'neutral'
+    """
+    name = str(item_name or "").lower()
+    is_dog = any(k in name for k in DOG_KEYWORDS)
+    is_cat = any(k in name for k in CAT_KEYWORDS)
+
+    if is_dog and not is_cat:
+        return "dog"
+    if is_cat and not is_dog:
+        return "cat"
+    return "neutral"
+
+
+def get_item_category(item_name, sectors=None):
+    """
+    Classifies item into one of 9 exact categories:
+    1. Coffee
+    2. Non-Caffeine
+    3. Pasta/Snacks
+    4. Rice Meals
+    5. Grooming
+    6. Pet Hotel
+    7. Events
+    8. Pet Bakery
+    9. Pet Supplies
+    """
+    name = str(item_name or "").lower()
+
+    if any(k in name for k in PET_BAKERY_KEYWORDS):
+        return "Pet Bakery"
+    if any(k in name for k in NON_CAFFEINE_KEYWORDS):
+        return "Non-Caffeine"
+    if any(k in name for k in COFFEE_KEYWORDS):
+        return "Coffee"
+    if any(k in name for k in RICE_MEAL_KEYWORDS):
+        return "Rice Meals"
+    if any(k in name for k in PASTA_SNACK_KEYWORDS):
+        return "Pasta/Snacks"
+    if any(k in name for k in GROOMING_KEYWORDS):
+        return "Grooming"
+    if any(k in name for k in PET_HOTEL_KEYWORDS):
+        return "Pet Hotel"
+    if any(k in name for k in EVENTS_KEYWORDS):
+        return "Events"
+    if any(k in name for k in PET_SUPPLIES_KEYWORDS):
+        return "Pet Supplies"
+
+    primary_sector = normalize_sector((sectors or ["unknown"])[0]) if sectors else "unknown"
+    if primary_sector == "cafe":
+        return "Coffee"
+    if primary_sector == "services":
+        return "Grooming"
+    if primary_sector == "retail":
+        return "Pet Supplies"
+
+    return "Pet Supplies"
+
+
+def get_high_level_type(category):
+    """
+    Maps 9 categories into 5 High-Level Types:
+    - 'Human Drink'
+    - 'Human Food'
+    - 'Pet Service'
+    - 'Pet Treat'
+    - 'Pet Care / Utility'
+    """
+    if category in ("Coffee", "Non-Caffeine"):
+        return "Human Drink"
+    if category in ("Pasta/Snacks", "Rice Meals"):
+        return "Human Food"
+    if category in ("Grooming", "Pet Hotel", "Events"):
+        return "Pet Service"
+    if category == "Pet Bakery":
+        return "Pet Treat"
+    if category == "Pet Supplies":
+        return "Pet Care / Utility"
+    return "Unknown"
+
+
+def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, offer_sectors=None):
+    """
+    Evaluates Strict Guardrails (3 Golden Banning Rules) & Archetype Mapping.
+    """
+    anchor_cat = get_item_category(anchor_name, anchor_sectors)
+    offer_cat = get_item_category(offer_name, offer_sectors)
+
+    anchor_type = get_high_level_type(anchor_cat)
+    offer_type = get_high_level_type(offer_cat)
+
+    anchor_sp = detect_species(anchor_name)
+    offer_sp = detect_species(offer_name)
+
+    # ---------------------------------------------------------
+    # ❌ 1. Same-Category / Substitute Exclusion Rule
+    # NO pairing within the same high-level type.
+    # ---------------------------------------------------------
+    if anchor_type == offer_type:
+        return {
+            "isValid": False,
+            "exclusionReason": f"Same-type pairing ({anchor_type} + {offer_type}) is strictly excluded.",
+            "categoryCompat": 0.0,
+            "speciesMatch": 1.0 if anchor_sp == offer_sp or anchor_sp == "neutral" or offer_sp == "neutral" else 0.0,
+            "bundleArchetype": "Excluded / Same Category",
+            "anchorCategory": anchor_cat,
+            "offerCategory": offer_cat,
+            "anchorType": anchor_type,
+            "offerType": offer_type,
+            "anchorSpecies": anchor_sp,
+            "offerSpecies": offer_sp,
+        }
+
+    # ---------------------------------------------------------
+    # ❌ 2. Human Beverage + Utility / Retail Restriction Rule
+    # Human Drink + Pet Supplies is BANNED.
+    # ---------------------------------------------------------
+    is_beverage_utility_pair = (
+        (anchor_type == "Human Drink" and offer_cat == "Pet Supplies")
+        or (offer_type == "Human Drink" and anchor_cat == "Pet Supplies")
+    )
+    if is_beverage_utility_pair:
+        return {
+            "isValid": False,
+            "exclusionReason": "Human Beverages cannot be bundled with Pet Supplies/Utilities.",
+            "categoryCompat": 0.0,
+            "speciesMatch": 1.0,
+            "bundleArchetype": "Excluded / Beverage + Utility",
+            "anchorCategory": anchor_cat,
+            "offerCategory": offer_cat,
+            "anchorType": anchor_type,
+            "offerType": offer_type,
+            "anchorSpecies": anchor_sp,
+            "offerSpecies": offer_sp,
+        }
+
+    # ---------------------------------------------------------
+    # ❌ 3. Species Mismatch Guardrail Rule
+    # Dog item + Cat item is BANNED.
+    # ---------------------------------------------------------
+    if anchor_sp != "neutral" and offer_sp != "neutral" and anchor_sp != offer_sp:
+        return {
+            "isValid": False,
+            "exclusionReason": f"Species mismatch detected ({anchor_sp.capitalize()} + {offer_sp.capitalize()}).",
+            "categoryCompat": 1.0,
+            "speciesMatch": 0.0,
+            "bundleArchetype": "Excluded / Species Mismatch",
+            "anchorCategory": anchor_cat,
+            "offerCategory": offer_cat,
+            "anchorType": anchor_type,
+            "offerType": offer_type,
+            "anchorSpecies": anchor_sp,
+            "offerSpecies": offer_sp,
+        }
+
+    # ---------------------------------------------------------
+    # 4. 4 Valid Bundle Archetypes (isValid = True)
+    # ---------------------------------------------------------
+    types = {anchor_type, offer_type}
+    cats = {anchor_cat, offer_cat}
+
+    archetype = None
+
+    # ☕ Type A: "Human Cafe Combo" (Human Drink + Human Food)
+    if types == {"Human Drink", "Human Food"}:
+        archetype = "Human Cafe Combo"
+
+    # 🐶 Type B: "Pamper Both" / Duo Experience (Human Drink or Food + Pet Bakery)
+    elif "Pet Treat" in types and ("Human Drink" in types or "Human Food" in types):
+        archetype = "Pamper Both / Duo Experience"
+
+    # ✂️ Type C: "Service + Aftercare / Reward" (Pet Service + Pet Supplies OR Pet Bakery)
+    elif "Pet Service" in types and ("Pet Care / Utility" in types or "Pet Treat" in types):
+        archetype = "Service + Aftercare / Reward"
+
+    # 🍖 Type D: "Pet Meal + Specialty Treat" (Pet Supplies + Pet Bakery)
+    elif cats == {"Pet Supplies", "Pet Bakery"} or types == {"Pet Care / Utility", "Pet Treat"}:
+        archetype = "Pet Meal + Specialty Treat"
+
+    else:
+        archetype = "Cross-Category Experience"
+
+    return {
+        "isValid": True,
+        "exclusionReason": None,
+        "categoryCompat": 1.0,
+        "speciesMatch": 1.0,
+        "bundleArchetype": archetype,
+        "anchorCategory": anchor_cat,
+        "offerCategory": offer_cat,
+        "anchorType": anchor_type,
+        "offerType": offer_type,
+        "anchorSpecies": anchor_sp,
+        "offerSpecies": offer_sp,
+    }
+
+
+def compute_synergy_score(
+    lift,
+    anchor_price,
+    offer_price,
+    guardrail_result,
+    max_lift_in_set=5.0,
+):
+    """
+    Computes normalized Synergy Score (0% to 100%):
+    S_synergy = (0.35 * Lift_norm + 0.35 * C_compat + 0.15 * S_match + 0.15 * P_affinity) * 100
+    """
+    if not guardrail_result["isValid"]:
+        return 0.0, {
+            "liftScore": 0.0,
+            "categoryCompat": guardrail_result["categoryCompat"],
+            "speciesMatch": guardrail_result["speciesMatch"],
+            "priceAffinity": 0.0,
+        }
+
+    raw_lift = float(lift or 1.0)
+    denom = max(1.0, float(max_lift_in_set or 5.0) - 1.0)
+    lift_norm = min(1.0, max(0.0, (raw_lift - 1.0) / denom))
+
+    c_compat = float(guardrail_result["categoryCompat"])
+    s_match = float(guardrail_result["speciesMatch"])
+
+    p_anchor = float(anchor_price or 0.0)
+    p_offer = float(offer_price or 0.0)
+
+    if p_anchor <= 0 or p_offer <= 0:
+        p_affinity = 1.0
+    elif p_offer <= 1.5 * p_anchor:
+        p_affinity = 1.0
+    else:
+        p_affinity = max(0.0, 1.0 - ((p_offer - (1.5 * p_anchor)) / (2.0 * p_anchor)))
+
+    synergy_score = round(
+        (0.35 * lift_norm + 0.35 * c_compat + 0.15 * s_match + 0.15 * p_affinity) * 100.0,
+        1
+    )
+
+    return synergy_score, {
+        "liftScore": round(lift_norm, 2),
+        "categoryCompat": round(c_compat, 2),
+        "speciesMatch": round(s_match, 2),
+        "priceAffinity": round(p_affinity, 2),
+    }
+
 
 def bundle_category_key(left_sectors, right_sectors):
     sectors = [
@@ -569,6 +866,11 @@ def build_low_association_bundles(
             )
             anchor_sectors = sorted(sector_set_for_items([anchor], product_sectors))
             bundle_sectors = sorted(sector_set_for_items([bundle_item], product_sectors))
+
+            guardrail_res = evaluate_bundle_guardrails(anchor, bundle_item, anchor_sectors, bundle_sectors)
+            if not guardrail_res["isValid"]:
+                continue
+
             business_fit_score, bundle_fit_reason, bundle_category = business_fit_for_pair(
                 anchor,
                 bundle_item,
@@ -586,6 +888,31 @@ def build_low_association_bundles(
                 bundle_item,
             )
 
+            synergy_score, synergy_breakdown = compute_synergy_score(
+                lift,
+                pricing_fields.get("itemAPrice", 0),
+                pricing_fields.get("itemBPrice", 0),
+                guardrail_res,
+                max_lift_in_set=5.0,
+            )
+
+            backtest_metrics = compute_attach_rate_metrics(
+                dataset,
+                anchor,
+                bundle_item,
+                confidence,
+                business_fit_score,
+            )
+
+            margin_percent = pricing_fields.get("projectedMarginPercent")
+            estimated_margin_impact = (
+                round(margin_percent - (DEFAULT_MINIMUM_MARGIN * 100), 2)
+                if margin_percent is not None
+                else 0.0
+            )
+
+            is_emerging_trend = bool(cooccurrences <= 3 and guardrail_res["isValid"] and synergy_score >= 70.0)
+
             candidates.append({
                 "anchorItem": anchor,
                 "bundleItem": bundle_item,
@@ -593,22 +920,30 @@ def build_low_association_bundles(
                 "itemB": bundle_item,
                 "anchorVelocity": "fast",
                 "bundleVelocity": "slow",
+                "offerVelocity": "slow",
                 "anchorSupport": round(anchor_support, 4),
                 "bundleSupport": round(bundle_support, 4),
                 "pairSupport": round(pair_support, 4),
                 "confidence": round(confidence, 4),
                 "lift": round(lift, 2),
                 "cooccurrences": cooccurrences,
+                "coOccurrenceCount": backtest_metrics["coOccurrenceCount"],
                 "baseOpportunityScore": round(base_opportunity_score, 4),
                 "opportunityScore": round(opportunity_score, 4),
+                "synergyScore": synergy_score,
+                "bundleArchetype": guardrail_res["bundleArchetype"],
+                "synergyBreakdown": synergy_breakdown,
+                "isEmergingTrend": is_emerging_trend,
                 "businessFitScore": round(business_fit_score, 2),
                 "bundleCategory": bundle_category,
                 "bundleFitReason": bundle_fit_reason,
-                "reason": f"{bundle_fit_reason} Fast-moving anchor paired with a slower-moving offer that is not already strongly associated.",
+                "reason": f"[{guardrail_res['bundleArchetype']}] {bundle_fit_reason} Fast-moving anchor paired with a slower-moving offer.",
                 "antecedentSectors": anchor_sectors,
                 "consequentSectors": bundle_sectors,
                 "crossSector": is_cross_sector([anchor], [bundle_item], product_sectors),
                 "isLowAssociation": True,
+                "estimatedMarginImpact": estimated_margin_impact,
+                **backtest_metrics,
                 **pricing_fields,
             })
 
@@ -812,6 +1147,11 @@ def run_cross_sell(baskets, config=None):
             is_multi_item = len(antecedents) > 1 or len(consequents) > 1
             item_a = " + ".join(antecedents) if antecedents else "Unknown"
             item_b = " + ".join(consequents) if consequents else "Unknown"
+
+            guardrail_res = evaluate_bundle_guardrails(item_a, item_b, antecedent_sectors, consequent_sectors)
+            if not guardrail_res["isValid"]:
+                continue
+
             pricing_fields = build_pricing_fields(
                 item_prices,
                 item_economics,
@@ -820,19 +1160,70 @@ def run_cross_sell(baskets, config=None):
                 is_multi_item,
             )
 
+            synergy_score, synergy_breakdown = compute_synergy_score(
+                float(row['lift']),
+                pricing_fields.get("itemAPrice", 0),
+                pricing_fields.get("itemBPrice", 0),
+                guardrail_res,
+                max_lift_in_set=5.0,
+            )
+
+            biz_fit_score, _, _ = business_fit_for_pair(
+                item_a, item_b, antecedent_sectors, consequent_sectors
+            )
+
+            backtest_metrics = compute_attach_rate_metrics(
+                dataset,
+                item_a,
+                item_b,
+                round(float(row['confidence']), 4),
+                biz_fit_score,
+            )
+
+            margin_percent = pricing_fields.get("projectedMarginPercent")
+            estimated_margin_impact = (
+                round(margin_percent - (DEFAULT_MINIMUM_MARGIN * 100), 2)
+                if margin_percent is not None
+                else 0.0
+            )
+
+            anchor_basket_count = backtest_metrics.get("anchorBasketCount", 0)
+            anchor_support = round(anchor_basket_count / len(dataset), 4) if dataset else round(float(row['support']), 4)
+            pair_support = round(float(row['support']), 4)
+            score = round(float(row['lift']) * 35, 2)
+
+            rule_cooccurrences = int(row['support'] * len(dataset))
+            is_emerging_trend = bool(rule_cooccurrences <= 3 and guardrail_res["isValid"] and synergy_score >= 70.0)
+
             rule_obj = {
                 "itemA": str(item_a),
                 "itemB": str(item_b),
+                "anchorItem": str(item_a),
+                "bundleItem": str(item_b),
                 "antecedents": antecedents,
                 "consequents": consequents,
                 "antecedentSectors": antecedent_sectors,
                 "consequentSectors": consequent_sectors,
-                "support": round(float(row['support']), 4),
+                "support": pair_support,
+                "pairSupport": pair_support,
+                "anchorSupport": anchor_support,
                 "confidence": round(float(row['confidence']), 4),
                 "lift": round(float(row['lift']), 2),
-                "cooccurrences": int(row['support'] * len(dataset)),
+                "cooccurrences": rule_cooccurrences,
+                "coOccurrenceCount": backtest_metrics["coOccurrenceCount"],
+                "opportunityScore": score,
+                "synergyScore": synergy_score,
+                "bundleArchetype": guardrail_res["bundleArchetype"],
+                "synergyBreakdown": synergy_breakdown,
+                "isEmergingTrend": is_emerging_trend,
+                "businessFitScore": round(float(biz_fit_score), 2),
                 "isMultiItem": is_multi_item,
                 "crossSector": is_cross_sector(antecedents, consequents, product_sectors),
+                "anchorVelocity": "fast",
+                "bundleVelocity": "fast",
+                "offerVelocity": "fast",
+                "estimatedMarginImpact": estimated_margin_impact,
+                **backtest_metrics,
                 **pricing_fields,
             }
 

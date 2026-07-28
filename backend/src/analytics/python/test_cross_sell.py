@@ -111,6 +111,59 @@ class CrossSellTests(unittest.TestCase):
                 result["thresholds"]["minConfidence"],
             )
 
+    def test_domain_guardrails_and_synergy_score(self):
+        from cross_sell import evaluate_bundle_guardrails, compute_synergy_score, get_item_category
+
+        # 1. 9 Category Classification
+        self.assertEqual(get_item_category("Iced Americano Coffee"), "Coffee")
+        self.assertEqual(get_item_category("Matcha Non-Caffeine Tea"), "Non-Caffeine")
+        self.assertEqual(get_item_category("Spaghetti Pasta"), "Pasta/Snacks")
+        self.assertEqual(get_item_category("Chicken Cordon Bleu Rice"), "Rice Meals")
+        self.assertEqual(get_item_category("Full Dog Grooming"), "Grooming")
+        self.assertEqual(get_item_category("Overnight Pet Hotel"), "Pet Hotel")
+        self.assertEqual(get_item_category("Barkday Event Booking"), "Events")
+        self.assertEqual(get_item_category("Dog Pupcake Bakery"), "Pet Bakery")
+        self.assertEqual(get_item_category("St Roche Dog Shampoo"), "Pet Supplies")
+
+        # 2. Rule 1: Same High-Level Type Exclusion (Coffee + Non-Caffeine, Grooming + Pet Hotel)
+        res_same_drink = evaluate_bundle_guardrails("Americano Coffee", "Iced Tea Non-Caffeine")
+        self.assertFalse(res_same_drink["isValid"])
+        self.assertEqual(res_same_drink["bundleArchetype"], "Excluded / Same Category")
+
+        res_same_service = evaluate_bundle_guardrails("Dog Grooming", "Pet Hotel Daycare")
+        self.assertFalse(res_same_service["isValid"])
+        self.assertEqual(res_same_service["bundleArchetype"], "Excluded / Same Category")
+
+        # 3. Rule 2: Beverage + Utility Restriction (Coffee + Shampoo)
+        res_bev_utility = evaluate_bundle_guardrails("Iced Latte", "Dog Shampoo Retail")
+        self.assertFalse(res_bev_utility["isValid"])
+        self.assertEqual(res_bev_utility["bundleArchetype"], "Excluded / Beverage + Utility")
+
+        # 4. Rule 3: Species Mismatch Guardrail (Dog Grooming + Cat Food)
+        res_mismatch = evaluate_bundle_guardrails("Dog Grooming Service", "Cat Kibble Wet Food")
+        self.assertFalse(res_mismatch["isValid"])
+        self.assertEqual(res_mismatch["bundleArchetype"], "Excluded / Species Mismatch")
+
+        # 5. Type A: Human Cafe Combo (Coffee + Rice Meal)
+        res_type_a = evaluate_bundle_guardrails("Iced Americano", "Chicken Rice Meal")
+        self.assertTrue(res_type_a["isValid"])
+        self.assertEqual(res_type_a["bundleArchetype"], "Human Cafe Combo")
+
+        # 6. Type B: Pamper Both / Duo Experience (Coffee + Pupcake)
+        res_type_b = evaluate_bundle_guardrails("Iced Americano", "Dog Pupcake Bakery")
+        self.assertTrue(res_type_b["isValid"])
+        self.assertEqual(res_type_b["bundleArchetype"], "Pamper Both / Duo Experience")
+
+        # 7. Type C: Service + Aftercare / Reward (Grooming + Shampoo)
+        res_type_c = evaluate_bundle_guardrails("Dog Grooming", "Dog Shampoo")
+        self.assertTrue(res_type_c["isValid"])
+        self.assertEqual(res_type_c["bundleArchetype"], "Service + Aftercare / Reward")
+
+        # 8. Type D: Pet Meal + Specialty Treat (Pet Food + Cat Bento Cake)
+        res_type_d = evaluate_bundle_guardrails("Cat Dry Pet Food", "Cat Bento Cake Bakery")
+        self.assertTrue(res_type_d["isValid"])
+        self.assertEqual(res_type_d["bundleArchetype"], "Pet Meal + Specialty Treat")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,10 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Transaction, TransactionDocument } from './schemas/transaction.schema';
+import { Transaction } from './schemas/transaction.schema';
 import { HolidayCache, HolidayCacheDocument } from '../context/schemas/holiday-cache.schema';
 import { WeatherLog, WeatherLogDocument } from '../context/schemas/weather-log.schema';
-import { SupabaseService } from '../common/supabase/supabase.service';
 import { ExogenousDataService } from '../common/exogenous-data.service';
 
 @Injectable()
@@ -19,11 +18,11 @@ export class EtlService {
     private configService: ConfigService,
     @InjectModel(HolidayCache.name) private holidayCacheModel: Model<HolidayCacheDocument>,
     @InjectModel(WeatherLog.name) private weatherLogModel: Model<WeatherLogDocument>,
-    @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
     private exogenousDataService: ExogenousDataService,
-    private supabaseService: SupabaseService,
   ) {
-    this.supabase = this.supabaseService.client;
+    const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
+    const supabaseKey = this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY');
+    this.supabase = createClient(supabaseUrl, supabaseKey);
   }
 
   // -----------------------------
@@ -88,7 +87,7 @@ export class EtlService {
       for (const t of transactions) {
         const orderDate = new Date(t.date);
         uniqueDateStrings.add(orderDate.toISOString().slice(0, 10));
-        
+
         const dateBefore = new Date(orderDate);
         dateBefore.setDate(dateBefore.getDate() - 1);
         uniqueDateStrings.add(dateBefore.toISOString().slice(0, 10));
@@ -127,7 +126,7 @@ export class EtlService {
       this.logger.log(`Aggregating dimensions in memory...`);
       for (let i = 0; i < transactions.length; i++) {
         const t = transactions[i];
-        
+
         // Channel
         const channel = this.normalizeChannel(t.channel);
         if (!channelsMap.has(channel.channel_id)) {
@@ -145,11 +144,11 @@ export class EtlService {
         const dateId = this.getDateId(orderDate);
         if (!datesMap.has(dateId)) {
           const dateString = orderDate.toISOString().slice(0, 10);
-          
+
           const dateBefore = new Date(orderDate);
           dateBefore.setDate(dateBefore.getDate() - 1);
           const dateBeforeString = dateBefore.toISOString().slice(0, 10);
-          
+
           const dateAfter = new Date(orderDate);
           dateAfter.setDate(dateAfter.getDate() + 1);
           const dateAfterString = dateAfter.toISOString().slice(0, 10);
@@ -275,11 +274,11 @@ export class EtlService {
           .from('product_dim')
           .select('*')
           .in('product_id', productIds);
-          
+
         if (fetchErr) {
           this.logger.error(`Failed to fetch existing products for SCD: ${fetchErr.message}`);
         }
-        
+
         const existingProductsMap = new Map<string, any[]>();
         if (existingProducts) {
           for (const ep of existingProducts) {
@@ -288,7 +287,7 @@ export class EtlService {
             existingProductsMap.set(ep.product_id, list);
           }
         }
-        
+
         for (const p of productsToIngest) {
           const versions = existingProductsMap.get(p.product_id);
           if (!versions || versions.length === 0) {
@@ -309,7 +308,7 @@ export class EtlService {
                   .update({ is_current: false, valid_to: new Date().toISOString() })
                   .eq('product_id', p.product_id)
                   .eq('valid_from', currentVersion.valid_from);
-                  
+
                 // 2. Insert new version
                 finalProductsToInsert.push({
                   ...p,
@@ -352,16 +351,7 @@ export class EtlService {
       await upsertTable('fact_cross_channel_transactions', factRows, 'transaction_line_id');
 
       this.logger.log(`ETL Process completed successfully for ${transactions.length} transactions.`);
-      
-      // Strict Staging Enforce
-      const processedTransactionIds = transactions.map(t => t.transactionId);
-      if (processedTransactionIds.length > 0) {
-        this.logger.log(`Enforcing Strict Staging: Deleting ${processedTransactionIds.length} transactions from MongoDB...`);
-        await this.transactionModel.deleteMany({
-          transactionId: { $in: processedTransactionIds }
-        }).exec();
-      }
-      
+
       if (uploadId) {
         await this.supabase.from('csv_uploads').update({
           etl_report: {
@@ -373,7 +363,7 @@ export class EtlService {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Critical ETL Failure: ${errMsg}`);
-      
+
       if (uploadId) {
         await this.supabase.from('csv_uploads').update({
           etl_report: {
@@ -395,10 +385,10 @@ export class EtlService {
 
     this.logger.log(`Deleting ${transactionIds.length} transactions from Supabase...`);
     const chunkSize = 1000;
-    
+
     for (let i = 0; i < transactionIds.length; i += chunkSize) {
       const chunk = transactionIds.slice(i, i + chunkSize);
-      
+
       try {
         const { error } = await this.supabase
           .from('fact_cross_channel_transactions')
@@ -412,7 +402,7 @@ export class EtlService {
         this.logger.error(`Exception during Supabase delete: ${err.message}`);
       }
     }
-    
+
     this.logger.log(`Finished deleting transactions from Supabase.`);
   }
 }

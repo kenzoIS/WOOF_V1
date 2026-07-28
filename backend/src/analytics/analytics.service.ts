@@ -855,6 +855,8 @@ export class AnalyticsService {
     const sector = this.normalizeCrossSellSector(options.sector);
     const transactionMatch = this.buildCrossSellMatch(hour, sector);
     const hasTransactionMatch = Object.keys(transactionMatch).length > 0;
+    const sectorMatch = this.buildCrossSellMatch(undefined, sector);
+    const hasSectorMatch = Object.keys(sectorMatch).length > 0;
     const currentPricingStart = new Date('2026-01-01T00:00:00.000+08:00');
     const forceRefresh =
       options.forceRefresh === true || options.forceRefresh === 'true';
@@ -944,7 +946,7 @@ export class AnalyticsService {
           },
         ]).allowDiskUse(true).exec(),
         this.transactionModel.aggregate([
-          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+          ...(hasSectorMatch ? [{ $match: sectorMatch }] : []),
           {
             $group: {
               _id: {

@@ -6,6 +6,7 @@ import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 import { createCampaignDraft, getCrossSell } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
+import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import aiMascot from "../../imports/no_bg_AI.png";
 import {
   BarChart,
@@ -263,6 +264,14 @@ export function AISimulation() {
   const [crossSellError, setCrossSellError] = useState<string | null>(null);
   const [bundleDiscountOverrides, setBundleDiscountOverrides] = useState<Record<string, number>>({});
   const [bundleCategoryFilter, setBundleCategoryFilter] = useState("all");
+  const [selectedCandidateForDrawer, setSelectedCandidateForDrawer] = useState<DrawerBundleCandidate | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  const handleOpenDrawer = (candidate: DrawerBundleCandidate) => {
+    setSelectedCandidateForDrawer(candidate);
+    setIsDrawerOpen(true);
+  };
+
   const debouncedSupportThreshold = useDebouncedValue(supportThreshold[0]);
   const debouncedConfidenceLevel = useDebouncedValue(confidenceLevel[0]);
   const debouncedDataTime = useDebouncedValue(dataTime[0]);
@@ -442,6 +451,43 @@ export function AISimulation() {
     return list;
   }, [rules]);
 
+  // Helper function to enforce 3 Golden Banning Rules on candidate pairs
+  const isExcludedPair = (itemA: string, itemB: string, archetype?: string) => {
+    if (archetype && archetype.startsWith("Excluded")) return true;
+    const a = (itemA || "").toLowerCase();
+    const b = (itemB || "").toLowerCase();
+
+    const drinks = ["coffee", "latte", "cappuccino", "americano", "espresso", "macchiato", "mocha", "frappe", "tea", "matcha", "beverage", "drink", "brew", "chocolate", "iced"];
+    const foods = ["pasta", "snack", "sandwich", "waffle", "fries", "burger", "spaghetti", "carbonara", "bread", "toast", "pancake", "muffin", "rice", "meal", "pork", "chicken", "beef", "cordon bleu"];
+    const utilities = ["shampoo", "conditioner", "soap", "diaper", "toy", "chew", "brush", "comb", "cologne", "spray", "litter", "leash", "harness"];
+
+    const isADrink = drinks.some((k) => a.includes(k));
+    const isBDrink = drinks.some((k) => b.includes(k));
+
+    const isAFood = foods.some((k) => a.includes(k));
+    const isBFood = foods.some((k) => b.includes(k));
+
+    const isAUtility = utilities.some((k) => a.includes(k));
+    const isBUtility = utilities.some((k) => b.includes(k));
+
+    // Rule 1: Same High-Level Type Exclusion (Drink+Drink, Food+Food)
+    if (isADrink && isBDrink) return true;
+    if (isAFood && isBFood) return true;
+
+    // Rule 2: Human Beverage + Utility Restriction (Drink+Utility)
+    if ((isADrink && isBUtility) || (isBDrink && isAUtility)) return true;
+
+    // Rule 3: Species Mismatch
+    const isADog = a.includes("dog") || a.includes("pup") || a.includes("woof");
+    const isBDog = b.includes("dog") || b.includes("pup") || b.includes("woof");
+    const isACat = a.includes("cat") || a.includes("kitten") || a.includes("feline") || a.includes("meow");
+    const isBCat = b.includes("cat") || b.includes("kitten") || b.includes("feline") || b.includes("meow");
+
+    if ((isADog && isBCat) || (isACat && isBDog)) return true;
+
+    return false;
+  };
+
   // Bundle predictions based on time analysis with real item prices
   const allBundlePredictions = useMemo(() => {
     const lowAssociation = bundleCandidates.map((candidate) => ({
@@ -451,7 +497,7 @@ export function AISimulation() {
       confidence: Math.round((candidate.confidence || 0) * 100),
       lift: candidate.lift || 0,
       support: candidate.pairSupport || 0,
-      score: Math.round((candidate.opportunityScore || 0) * 100),
+      score: (candidate as any).synergyScore !== undefined && (candidate as any).synergyScore !== null ? Math.round((candidate as any).synergyScore) : Math.round((candidate.opportunityScore || 0) * 100),
       businessFitScore: candidate.businessFitScore ?? null,
       bundleFitReason: candidate.bundleFitReason,
       frequency: candidate.cooccurrences || 0,
@@ -488,6 +534,16 @@ export function AISimulation() {
         candidate.reason ||
         candidate.bundleFitReason ||
         "Fast-moving item paired with a slower-moving item that is not already strongly associated.",
+      synergyScore: (candidate as any).synergyScore,
+      bundleArchetype: (candidate as any).bundleArchetype,
+      synergyBreakdown: (candidate as any).synergyBreakdown,
+      isEmergingTrend: (candidate as any).isEmergingTrend,
+      baselineAttachRate: (candidate as any).baselineAttachRate,
+      predictedAttachRate: (candidate as any).predictedAttachRate,
+      attachRateLift: (candidate as any).attachRateLift,
+      backtestValidationStatus: (candidate as any).backtestValidationStatus,
+      estimatedMarginImpact: (candidate as any).estimatedMarginImpact,
+      rawCandidate: candidate,
     }));
     const significantRules = rules.map((rule) => ({
       bundle: formatPair(rule.itemA, rule.itemB),
@@ -496,7 +552,7 @@ export function AISimulation() {
       confidence: Math.round((rule.confidence || 0) * 100),
       lift: rule.lift || 0,
       support: rule.support || 0,
-      score: Math.round(Math.min(99, (rule.lift || 0) * 35)),
+      score: (rule as any).synergyScore !== undefined && (rule as any).synergyScore !== null ? Math.round((rule as any).synergyScore) : Math.round(Math.min(95, (rule.lift || 0) * 20 + 20)),
       businessFitScore: null,
       bundleFitReason: undefined,
       frequency: rule.cooccurrences || 0,
@@ -528,6 +584,16 @@ export function AISimulation() {
         firstSector(rule.consequentSectors),
       ]),
       reason: `Co-purchased ${rule.cooccurrences || 0}x in transaction history with ${rule.lift.toFixed(2)}x sales lift multiplier. Pricing is recalculated from the selected owner-review discount.`,
+      synergyScore: (rule as any).synergyScore,
+      bundleArchetype: (rule as any).bundleArchetype,
+      synergyBreakdown: (rule as any).synergyBreakdown,
+      isEmergingTrend: (rule as any).isEmergingTrend,
+      baselineAttachRate: (rule as any).baselineAttachRate,
+      predictedAttachRate: (rule as any).predictedAttachRate,
+      attachRateLift: (rule as any).attachRateLift,
+      backtestValidationStatus: (rule as any).backtestValidationStatus,
+      estimatedMarginImpact: (rule as any).estimatedMarginImpact,
+      rawCandidate: rule as any,
     }));
 
     const seenKeys = new Set<string>();
@@ -593,7 +659,9 @@ export function AISimulation() {
   }, [allBundlePredictions, bundleCategoryFilter]);
 
   const proximityRecommendations = useMemo(() => {
-    return allBundlePredictions.slice(0, 6).map((bundle, index) => {
+    const valid = allBundlePredictions.filter((b) => !isExcludedPair(b.itemA, b.itemB, b.bundleArchetype));
+    const pool = valid.length > 0 ? valid : allBundlePredictions;
+    return pool.slice(0, 6).map((bundle, index) => {
       const color =
         sectorColors[bundle.sectors[0]] ||
         sectorColors[bundle.sectors[1]] ||
@@ -604,10 +672,14 @@ export function AISimulation() {
         ? `Place these ${bundle.sectorPair.toLowerCase()} offers in the same shelf, menu, or service zone to increase discovery inside an already active category.`
         : `Place ${bundle.bundle} near the transition between ${bundle.sectorPair} touchpoints so the stronger purchase intent can expose the slower-moving offer.`;
 
+      const synergyVal = bundle.synergyScore !== undefined && bundle.synergyScore !== null
+        ? Math.round(bundle.synergyScore)
+        : (bundle.score || 85);
+
       return {
         pairing: bundle.bundle,
         advice,
-        score: Math.max(1, Math.min(100, bundle.score || bundle.confidence || 0)),
+        score: synergyVal,
         color,
         sectorPair: bundle.sectorPair,
         rank: index + 1,
@@ -624,31 +696,31 @@ export function AISimulation() {
     const nodeSource: ItemMetric[] = itemMetrics.length
       ? itemMetrics
       : Array.from(
-          new globalThis.Map<string, ItemMetric>(
-            rules.flatMap((rule) => [
-              [
-                rule.itemA,
-                {
-                  item: rule.itemA,
-                  sector: firstSector(rule.antecedentSectors),
-                  support: rule.support || 0,
-                  basketCount: rule.cooccurrences || 0,
-                  velocity: "moderate" as const,
-                },
-              ],
-              [
-                rule.itemB,
-                {
-                  item: rule.itemB,
-                  sector: firstSector(rule.consequentSectors),
-                  support: rule.support || 0,
-                  basketCount: rule.cooccurrences || 0,
-                  velocity: "moderate" as const,
-                },
-              ],
-            ]),
-          ).values(),
-        );
+        new globalThis.Map<string, ItemMetric>(
+          rules.flatMap((rule) => [
+            [
+              rule.itemA,
+              {
+                item: rule.itemA,
+                sector: firstSector(rule.antecedentSectors),
+                support: rule.support || 0,
+                basketCount: rule.cooccurrences || 0,
+                velocity: "moderate" as const,
+              },
+            ],
+            [
+              rule.itemB,
+              {
+                item: rule.itemB,
+                sector: firstSector(rule.consequentSectors),
+                support: rule.support || 0,
+                basketCount: rule.cooccurrences || 0,
+                velocity: "moderate" as const,
+              },
+            ],
+          ]),
+        ).values(),
+      );
 
     return nodeSource
       .filter((node) => (node.support || 0) >= supportFilter)
@@ -702,39 +774,43 @@ export function AISimulation() {
       );
   }, [confidenceLevel, networkNodes, rules, supportThreshold]);
 
-  // Top AI Insights from network analysis - distinct categories
+  // Top AI Insights from network analysis - strictly filtered to exclude banned/excluded pairs
   const topInsights = useMemo(() => {
-    const sortedRules = rules.slice().sort((a, b) => (b.lift || 0) - (a.lift || 0));
-    const topLiftRule = sortedRules[0];
+    const valid = allBundlePredictions.filter((b) => !isExcludedPair(b.itemA, b.itemB, b.bundleArchetype));
+    const pool = valid.length > 0 ? valid : allBundlePredictions;
 
-    const sortedCandidates = bundleCandidates.slice().sort((a, b) => (b.opportunityScore || 0) - (a.opportunityScore || 0));
-    const topOpportunityCandidate = sortedCandidates[0];
+    const topLiftRule = rules.find((r) => !isExcludedPair(r.itemA, r.itemB, (r as any).bundleArchetype)) || rules[0];
+    const topLiftBundle = pool.slice().sort((a, b) => (b.lift || 0) - (a.lift || 0))[0];
 
-    const crossSectorMatch = rules.find((r) => r.crossSector) || bundleCandidates.find((c) => c.crossSector);
+    const emergingTrendCandidate =
+      pool.find((b) => b.isEmergingTrend) ||
+      pool.filter((b) => (b.frequency || 0) <= 3).sort((a, b) => (b.synergyScore || 0) - (a.synergyScore || 0))[0] ||
+      pool.slice().sort((a, b) => (b.synergyScore || 0) - (a.synergyScore || 0))[0];
+
+    const crossSectorMatch =
+      pool.find((b) => (b as any).crossSector || (b.sectors[0] !== "unknown" && b.sectors[0] !== b.sectors[1])) ||
+      rules.find((r) => r.crossSector && !isExcludedPair(r.itemA, r.itemB, (r as any).bundleArchetype));
+
+    const displayTopBundle = topLiftBundle ? topLiftBundle.bundle : (topLiftRule ? formatPair(topLiftRule.itemA, topLiftRule.itemB) : "No patterns detected");
+    const displayTopLift = topLiftBundle ? topLiftBundle.lift : (topLiftRule ? topLiftRule.lift || 0 : 0);
+    const displayTopConf = topLiftBundle ? topLiftBundle.confidence : (topLiftRule ? Math.round((topLiftRule.confidence || 0) * 100) : 0);
 
     return {
-      topBundle: topLiftRule
-        ? formatPair(topLiftRule.itemA, topLiftRule.itemB)
-        : "No patterns detected",
-      bundleConfidence: topLiftRule ? Math.round(topLiftRule.confidence * 100) : 0,
-      bundleLift: topLiftRule ? topLiftRule.lift : 0,
-      emergingTrend: topOpportunityCandidate
-        ? formatPair(topOpportunityCandidate.anchorItem, topOpportunityCandidate.bundleItem)
-        : "No bundle candidates",
-      trendGrowth: topOpportunityCandidate
-        ? `${Math.round((topOpportunityCandidate.opportunityScore || 0) * 100)}`
-        : "0",
+      topBundle: displayTopBundle,
+      bundleConfidence: displayTopConf,
+      bundleLift: displayTopLift,
+      emergingTrend: emergingTrendCandidate ? emergingTrendCandidate.bundle : "No emerging trend candidates",
+      trendGrowth: emergingTrendCandidate
+        ? emergingTrendCandidate.synergyScore !== undefined && emergingTrendCandidate.synergyScore !== null
+          ? `${Math.round(emergingTrendCandidate.synergyScore)}% Synergy`
+          : `Score: ${emergingTrendCandidate.score || 85}`
+        : "N/A",
       crossSell: crossSectorMatch
-        ? formatPair(
-            ("itemA" in crossSectorMatch ? crossSectorMatch.itemA : crossSectorMatch.anchorItem) || "",
-            ("itemB" in crossSectorMatch ? crossSectorMatch.itemB : crossSectorMatch.bundleItem) || ""
-          )
+        ? ("bundle" in crossSectorMatch ? crossSectorMatch.bundle : formatPair(crossSectorMatch.itemA, crossSectorMatch.itemB))
         : "No cross-sector pattern",
-      crossSellRate: crossSectorMatch
-        ? `${Math.round((crossSectorMatch.confidence || 0) * 100)}%`
-        : "0%",
+      crossSellRate: crossSectorMatch ? `${crossSectorMatch.confidence}%` : "0%",
     };
-  }, [bundleCandidates, rules]);
+  }, [allBundlePredictions, rules]);
 
   // Dynamic pricing data based on discount slider
   const pricingScenarios = useMemo(() => {
@@ -756,7 +832,7 @@ export function AISimulation() {
     const baseCount = selectedHour >= 12 && selectedHour <= 15 ? 20 : 15;
     const count = Math.floor(baseCount + Math.random() * 8);
     const cafeRatio = selectedHour >= 14 && selectedHour <= 16 ? 0.6 : 0.4;
-    
+
     return Array.from({ length: count }, (_, i) => ({
       id: i,
       x: Math.random() * 90 + 5,
@@ -792,7 +868,7 @@ export function AISimulation() {
   const calculateScenarioOutcome = () => {
     let baseRevenue = 45280;
     let baseOrders = 127;
-    
+
     if (weather === "sunny") {
       baseRevenue *= 1.15;
       baseOrders *= 1.12;
@@ -800,35 +876,35 @@ export function AISimulation() {
       baseRevenue *= 0.88;
       baseOrders *= 0.85;
     }
-    
+
     if (promoActive) {
       baseRevenue *= 1.18;
       baseOrders *= 1.15;
     }
-    
+
     if (dayOfWeek === "saturday" || dayOfWeek === "sunday") {
       baseRevenue *= 1.22;
       baseOrders *= 1.18;
     }
-    
+
     if (temperature[0] > 30) {
       baseRevenue *= 0.95;
       baseOrders *= 0.97;
     }
-    
+
     if (competitorEvent) {
       baseRevenue *= 0.92;
       baseOrders *= 0.95;
     }
-    
+
     if (paydayWeekend) {
       baseRevenue *= 1.26;
       baseOrders *= 1.20;
     }
-    
+
     const avgTransaction = baseRevenue / baseOrders;
     const cafeShare = 40.8 + (promoActive ? 2.4 : 0) + (weather === "sunny" ? 1.5 : 0);
-    
+
     return {
       revenue: Math.round(baseRevenue),
       orders: Math.round(baseOrders),
@@ -971,11 +1047,10 @@ export function AISimulation() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 min-w-[140px] flex items-center justify-center gap-1.5 md:gap-2 px-2 md:px-4 py-2 md:py-3 rounded-xl transition-all ${
-              activeTab === tab.id
+            className={`flex-1 min-w-[140px] flex items-center justify-center gap-1.5 md:gap-2 px-2 md:px-4 py-2 md:py-3 rounded-xl transition-all ${activeTab === tab.id
                 ? "bg-[#F53799] text-white shadow-lg"
                 : "bg-white text-[#223047] hover:bg-[#FFF2FA]"
-            }`}
+              }`}
           >
             <tab.icon className="w-3 h-3 md:w-4 md:h-4" />
             <span className="text-xs md:text-sm font-semibold">{tab.label}</span>
@@ -1024,7 +1099,7 @@ export function AISimulation() {
                 <div className="text-xs md:text-sm font-semibold text-[#223047]">TIME WINDOW SELECTION</div>
                 <div className="text-base md:text-lg font-bold text-[#F53799]">{formatHour(dataTime[0])}</div>
               </div>
-              
+
               <div className="relative">
                 <Slider
                   value={dataTime}
@@ -1147,10 +1222,10 @@ export function AISimulation() {
                     {/* Define gradient for glow effect */}
                     <defs>
                       <filter id="glow">
-                        <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                        <feGaussianBlur stdDeviation="3" result="coloredBlur" />
                         <feMerge>
-                          <feMergeNode in="coloredBlur"/>
-                          <feMergeNode in="SourceGraphic"/>
+                          <feMergeNode in="coloredBlur" />
+                          <feMergeNode in="SourceGraphic" />
                         </feMerge>
                       </filter>
                       <linearGradient key="lineGradient-gradient" id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -1356,11 +1431,10 @@ export function AISimulation() {
                             setSupportThreshold([preset.support]);
                             setConfidenceLevel([preset.confidence]);
                           }}
-                          className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition ${
-                            supportThreshold[0] === preset.support && confidenceLevel[0] === preset.confidence
+                          className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition ${supportThreshold[0] === preset.support && confidenceLevel[0] === preset.confidence
                               ? "bg-white text-[#D42A7D] border-white"
                               : "bg-white/10 text-white border-white/30 hover:bg-white/20"
-                          }`}
+                            }`}
                         >
                           {preset.label}
                         </button>
@@ -1508,8 +1582,8 @@ export function AISimulation() {
                   Highest-ranked model recommendation
                 </div>
                 <div className="mt-3 pt-3 border-t border-[#3AE4FA]/20">
-                  <div className="text-xs text-green-600 font-semibold">
-                    Model Score: {topInsights.trendGrowth}
+                  <div className="text-xs text-emerald-600 font-semibold">
+                    {topInsights.trendGrowth}
                   </div>
                 </div>
               </div>
@@ -1593,11 +1667,10 @@ export function AISimulation() {
               <button
                 type="button"
                 onClick={() => setBundleCategoryFilter("all")}
-                className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
-                  bundleCategoryFilter === "all"
+                className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${bundleCategoryFilter === "all"
                     ? "bg-[#F53799] text-white border-[#F53799]"
                     : "bg-white text-[#223047] border-[#FFD9EC] hover:border-[#F53799]"
-                }`}
+                  }`}
               >
                 All Bundle Types
               </button>
@@ -1606,11 +1679,10 @@ export function AISimulation() {
                   key={category}
                   type="button"
                   onClick={() => setBundleCategoryFilter(category)}
-                  className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
-                    bundleCategoryFilter === category
+                  className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${bundleCategoryFilter === category
                       ? "bg-[#F53799] text-white border-[#F53799]"
                       : "bg-white text-[#223047] border-[#FFD9EC] hover:border-[#F53799]"
-                  }`}
+                    }`}
                 >
                   {formatBundleCategoryKey(category)}
                 </button>
@@ -1631,6 +1703,46 @@ export function AISimulation() {
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
                       <h3 className="text-base md:text-lg font-bold text-[#223047]">{bundle.bundle}</h3>
+                      {bundle.bundleArchetype && (
+                        <Badge className="bg-[#F53799]/10 text-[#F53799] border border-[#F53799]/30 text-xs font-semibold">
+                          {bundle.bundleArchetype}
+                        </Badge>
+                      )}
+                      {bundle.isEmergingTrend && (
+                        <Badge className="bg-amber-500 text-white font-bold text-xs shadow-xs animate-pulse">
+                          🔥 Emerging Trend
+                        </Badge>
+                      )}
+                      {bundle.synergyScore !== undefined && bundle.synergyScore !== null && (
+                        <div className="relative group inline-block">
+                          <Badge className="bg-gradient-to-r from-[#F53799] to-[#3AE4FA] text-white border-0 text-xs font-mono font-bold cursor-help shadow-xs">
+                            {bundle.synergyScore.toFixed(0)}% Synergy
+                          </Badge>
+                          {bundle.synergyBreakdown && (
+                            <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-30 bg-[#223047] text-white text-[11px] p-3 rounded-xl shadow-xl w-60 space-y-1.5 border border-slate-700">
+                              <p className="font-bold border-b border-slate-700 pb-1 text-[#3AE4FA]">
+                                Synergy Formula Breakdown
+                              </p>
+                              <div className="flex justify-between">
+                                <span>Norm. Lift (35%):</span>
+                                <span className="font-mono text-emerald-400">{(bundle.synergyBreakdown.liftScore * 100).toFixed(0)}%</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Category Fit (35%):</span>
+                                <span className="font-mono text-amber-400">{(bundle.synergyBreakdown.categoryCompat * 100).toFixed(0)}%</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Species Match (15%):</span>
+                                <span className="font-mono text-purple-400">{(bundle.synergyBreakdown.speciesMatch * 100).toFixed(0)}%</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Price Affinity (15%):</span>
+                                <span className="font-mono text-teal-400">{(bundle.synergyBreakdown.priceAffinity * 100).toFixed(0)}%</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs">
                         {bundle.confidence}% Historical Confidence
                       </Badge>
@@ -1744,12 +1856,22 @@ export function AISimulation() {
                     </div>
                   </div>
 
-                  <Button
-                    onClick={() => handleSubmitBundleForReview(bundle)}
-                    className="bg-[#F53799] hover:bg-[#D42A7D] text-sm md:text-base w-full md:w-auto font-bold shadow-md"
-                  >
-                    Submit for Review
-                  </Button>
+                  <div className="flex flex-col sm:flex-row md:flex-col lg:flex-row gap-2 w-full md:w-auto shrink-0">
+                    <Button
+                      variant="outline"
+                      onClick={() => handleOpenDrawer((bundle as any).rawCandidate || (bundle as any))}
+                      className="border-[#F53799] text-[#F53799] hover:bg-[#FFF2FA] text-xs md:text-sm font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <HelpCircle className="w-4 h-4" />
+                      Why this bundle?
+                    </Button>
+                    <Button
+                      onClick={() => handleSubmitBundleForReview(bundle)}
+                      className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm font-bold shadow-md"
+                    >
+                      Submit for Review
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1788,7 +1910,7 @@ export function AISimulation() {
                   className="bg-gradient-to-br from-white to-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 hover:border-[#F53799] transition-all"
                 >
                   <div className="flex items-start gap-3">
-                    <div 
+                    <div
                       className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
                       style={{ backgroundColor: `${rec.color}20` }}
                     >
@@ -1802,34 +1924,11 @@ export function AISimulation() {
                         {rec.advice}
                       </p>
 
-                      {rec.regularPrice > 0 && (
-                        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold bg-[#FFF7FB] border border-[#FFD9EC] rounded-lg px-3 py-2 mt-3">
-                          <span className="text-[#223047] opacity-60">Bundle Price:</span>
-                          <span className="line-through text-gray-400">₱{rec.regularPrice.toFixed(2)}</span>
-                          <span className="text-[#F53799] font-bold">₱{rec.bundlePrice.toFixed(2)}</span>
-                          <Badge className="bg-emerald-500 text-white text-[10px] px-2 py-0.5 font-bold ml-auto">
-                            Save ₱{rec.savings.toFixed(2)}
-                          </Badge>
-                        </div>
-                      )}
+
                     </div>
                   </div>
 
-                  <div className="space-y-2 pt-3 border-t border-[#FFD9EC]">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-[#223047] opacity-60">SYNERGY SCORE</span>
-                      <span className="font-bold" style={{ color: rec.color }}>{rec.score}%</span>
-                    </div>
-                    <div className="h-2 bg-[#FFD9EC] rounded-full overflow-hidden">
-                      <div
-                        className="h-full transition-all"
-                        style={{
-                          width: `${rec.score}%`,
-                          background: `linear-gradient(to right, ${rec.color}, ${rec.color}cc)`,
-                        }}
-                      />
-                    </div>
-                  </div>
+
                 </div>
               ))}
             </div>
@@ -2332,13 +2431,12 @@ export function AISimulation() {
                       >
                         <span className="text-sm text-[#223047]">{item.factor}</span>
                         <span
-                          className={`text-sm font-semibold ${
-                            item.impact.startsWith("+")
+                          className={`text-sm font-semibold ${item.impact.startsWith("+")
                               ? "text-green-600"
                               : item.impact.startsWith("-")
-                              ? "text-red-600"
-                              : "text-gray-500"
-                          }`}
+                                ? "text-red-600"
+                                : "text-gray-500"
+                            }`}
                         >
                           {item.impact}
                         </span>
@@ -2353,8 +2451,8 @@ export function AISimulation() {
                     {parseFloat(scenarioOutcome.revenueChange) > 10
                       ? "Highly favorable conditions detected. Execute aggressive marketing and ensure full inventory."
                       : parseFloat(scenarioOutcome.revenueChange) < -5
-                      ? "Challenging conditions predicted. Consider defensive promotions and optimize staffing levels."
-                      : "Moderate conditions. Maintain standard operations with light promotional activity."}
+                        ? "Challenging conditions predicted. Consider defensive promotions and optimize staffing levels."
+                        : "Moderate conditions. Maintain standard operations with light promotional activity."}
                   </p>
                 </div>
               </div>
@@ -2366,6 +2464,13 @@ export function AISimulation() {
       {activeTab === "activation-layer" && (
         <CampaignActivationLayer />
       )}
+
+      {/* Bundle Explanation Side Drawer */}
+      <BundleExplanationDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        candidate={selectedCandidateForDrawer}
+      />
     </div>
   );
 }

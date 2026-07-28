@@ -383,7 +383,7 @@ export function Retail() {
             Retail Intelligence Center
           </h1>
           <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1 md:mt-2" style={{ lineHeight: "1.6" }}>
-            Inventory management, spoilage prevention, and omnichannel performance tracking
+            Inventory management and omnichannel performance tracking
           </p>
         </div>
         <Badge className="bg-[#D42A7D] text-white hover:bg-[#D42A7D] px-3 md:px-4 py-1 text-xs md:text-sm flex-shrink-0">
@@ -393,7 +393,7 @@ export function Retail() {
 
       {/* KPI ROW */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
           {/* Retail Revenue Today */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
@@ -427,20 +427,6 @@ export function Retail() {
               <div className="text-base md:text-xl font-bold text-[#223047]">5</div>
               <Button size="sm" className="bg-[#D42A7D] hover:bg-[#F53799] text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex">
                 Review
-              </Button>
-            </div>
-          </div>
-
-          {/* Spoilage Risk Items */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
-              <Target className="w-4 h-4 md:w-5 md:h-5 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Spoilage Risk</div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">3</div>
-              <Button size="sm" className="bg-[#D42A7D] hover:bg-[#F53799] text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex">
-                Take Action
               </Button>
             </div>
           </div>
@@ -728,87 +714,7 @@ export function Retail() {
           </Table>
           </div>
         </div>
-      {/* SPOILAGE RISK ENGINE */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              AI Spoilage Prevention Engine
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Predictive alerts and automated discount recommendations
-            </p>
-          </div>
-          <Badge className="bg-red-500 text-white hover:bg-red-500 text-xs md:text-sm flex-shrink-0">
-            {spoilageRiskItems.length} Items at Risk
-          </Badge>
-        </div>
 
-        <div className="grid gap-4 md:gap-6">
-          {spoilageRiskItems.map((item) => (
-            <div
-              key={item.name}
-              className="p-4 md:p-6 bg-[#FFF7FB] border-l-4 border-[#F53799] rounded-xl"
-            >
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6 items-start lg:items-center">
-                <div className="lg:col-span-2">
-                  <h3 className="text-sm md:text-base font-bold text-[#223047] mb-2">{item.name}</h3>
-                  <div className="space-y-1 text-xs md:text-sm">
-                    <div className="flex items-center gap-2 text-[#223047] opacity-70">
-                      <AlertCircle className="w-3 h-3 md:w-4 md:h-4" />
-                      <span>Expires in <strong className="text-red-600">{item.daysLeft} days</strong></span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[#223047] opacity-70">
-                      <Package className="w-3 h-3 md:w-4 md:h-4" />
-                      <span>{item.currentStock} units in stock</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[#223047] opacity-70">
-                      <TrendingUp className="w-3 h-3 md:w-4 md:h-4" />
-                      <span>{item.dailyVelocity} units/day velocity</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-center">
-                  <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Spoilage Risk</div>
-                  <div className={`text-2xl md:text-3xl font-extrabold ${getRiskColor(item.spoilageRisk)}`}>
-                    {item.spoilageRisk}%
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-xs text-[#223047] opacity-60">WOOF Suggested Discount</div>
-                  <div className="flex items-center gap-3">
-                    <Slider
-                      value={[item.recommendedDiscount]}
-                      max={50}
-                      min={5}
-                      step={5}
-                      className="flex-1"
-                    />
-                    <span className="text-base md:text-lg font-bold w-10 md:w-12 text-[#F53799]">{item.recommendedDiscount}%</span>
-                  </div>
-                  <p className="text-xs text-[#223047] opacity-60 hidden md:block">
-                    Expected to clear stock in {Math.ceil(item.currentStock / (item.dailyVelocity * (1 + item.recommendedDiscount / 100)))} days
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <Button
-                    onClick={() => handleActivateDiscount(item.name, item.recommendedDiscount)}
-                    className="bg-[#F53799] hover:bg-[#D42A7D] w-full text-xs md:text-sm"
-                  >
-                    Activate Sale
-                  </Button>
-                  <Button variant="outline" className="border-[#FFD9EC] w-full text-xs md:text-sm" size="sm">
-                    Adjust
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
 
       {/* OMNICHANNEL PERFORMANCE */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
