@@ -140,10 +140,7 @@ export class ActivationService {
       throw new BadRequestException('Campaign not found');
     }
 
-    const payload = {
-      ...(campaign.pethubPayload || {}),
-      isActive: true,
-    };
+    const payload = this.buildPublishPayload(campaign);
 
     const token = process.env.PETHUB_API_TOKEN;
     const response = await this.postPetHubAnnouncement(endpoint, payload, token);
@@ -279,12 +276,12 @@ export class ActivationService {
       : 'View Offer';
 
     return {
-      headline: `${pair}: A Smarter Happy Tails Pick`,
-      shortCaption: `${pair} is now easier to discover on PetHub. ${savings}`,
-      longCaption: `WOOF found a strong opportunity from ${recommendation.source.replace(/_/g, ' ')}. ${recommendation.reason} Activate this PetHub campaign to turn the insight into a customer-facing offer.`,
+      headline: this.customerHeadline(recommendation, primary),
+      shortCaption: `${primary} is featured on PetHub for a limited time. ${savings}`,
+      longCaption: `Discover a Happy Tails pick made for pet parents. Check this PetHub offer and enjoy an easier way to shop or book for your pet.`,
       callToAction: cta,
       pushNotification: `New Happy Tails offer: ${pair}. ${cta} today on PetHub.`,
-      petHubBannerText: `${pair} | ${recommendation.promoMechanic}`,
+      petHubBannerText: this.customerHighlight(recommendation, pair),
       termsAndConditions: [
         'Offer validity and redemption limits are configurable before publishing.',
         'Promo availability may depend on inventory, appointment slots, or service capacity.',
@@ -297,16 +294,18 @@ export class ActivationService {
   private buildClaudePrompt(recommendation: ActivationRecommendation) {
     return [
       'Generate campaign materials for a PetHub announcement from this WOOF promo recommendation.',
-      'Use friendly Happy Tails wording for pet owners. Keep copy short, specific, and ready to publish.',
+      'Use friendly customer-facing Happy Tails wording for pet owners.',
+      'Do not mention analytics, forecasts, inventory, staffing, operational action, KPIs, market basket analysis, or WOOF internals.',
+      'Use short copy that fits homepage announcement cards. Prefer simple retail/pet-care language.',
       'Return exactly this JSON shape:',
       JSON.stringify({
-        headline: 'string, max 80 chars',
-        shortCaption: 'string, max 140 chars',
-        longCaption: 'string, 1-2 short paragraphs',
+        headline: 'string, max 42 chars, 3-6 words',
+        shortCaption: 'string, max 100 chars',
+        longCaption: 'string, max 150 chars',
         callToAction: 'string, 2-4 words',
-        pushNotification: 'string, max 120 chars',
-        petHubBannerText: 'string, max 90 chars',
-        termsAndConditions: ['string', 'string'],
+        pushNotification: 'string, max 90 chars',
+        petHubBannerText: 'string, max 34 chars, button-like label',
+        termsAndConditions: ['string, max 80 chars', 'string, max 80 chars'],
         pubmatPrompt: 'string prompt for an image/pubmat generator',
       }),
       'WOOF recommendation:',
@@ -320,29 +319,54 @@ export class ActivationService {
     generatedAssets: GeneratedCampaignAssets,
   ): PetHubAnnouncementPayload {
     return {
-      category: 'promotion',
+      category: 'Promo',
       tag: 'WOOF',
-      meta: this.buildAnnouncementMeta(recommendation),
-      title: generatedAssets.headline,
-      description: generatedAssets.longCaption,
-      note: generatedAssets.shortCaption,
-      highlight: generatedAssets.petHubBannerText,
-      footer: generatedAssets.termsAndConditions.join(' '),
+      meta: 'Limited time',
+      title: this.limitText(generatedAssets.headline, 42),
+      description: this.limitText(generatedAssets.longCaption, 150),
+      note: this.limitText(generatedAssets.shortCaption, 100),
+      highlight: this.limitText(generatedAssets.petHubBannerText, 34),
+      footer: this.limitText(generatedAssets.termsAndConditions[0] || '', 80),
       sortOrder: 0,
       isActive: false,
     };
   }
 
-  private buildAnnouncementMeta(
-    recommendation: ActivationRecommendation,
-  ): string {
-    const sourceLabel = recommendation.source
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, (char) => char.toUpperCase());
-    const confidence = recommendation.confidence
-      ? ` • ${recommendation.confidence} confidence`
-      : '';
-    return `${sourceLabel}${confidence}`;
+  private buildPublishPayload(campaign: any): PetHubAnnouncementPayload {
+    const assets = campaign.generatedAssets || {};
+    const payload = campaign.pethubPayload || {};
+    return {
+      category: this.safeString(payload.category, 'Promo'),
+      tag: this.safeString(payload.tag, 'WOOF'),
+      meta: this.safeString(payload.meta, 'Limited time'),
+      title: this.limitText(
+        this.safeString(assets.headline, payload.title || campaign.title),
+        42,
+      ),
+      description: this.limitText(
+        this.safeString(assets.longCaption, payload.description || ''),
+        150,
+      ),
+      note: this.limitText(
+        this.safeString(assets.shortCaption, payload.note || ''),
+        100,
+      ),
+      highlight: this.limitText(
+        this.safeString(assets.petHubBannerText, payload.highlight || ''),
+        34,
+      ),
+      footer: this.limitText(
+        this.safeString(
+          Array.isArray(assets.termsAndConditions)
+            ? assets.termsAndConditions[0]
+            : payload.footer,
+          'Availability may vary by branch stock.',
+        ),
+        80,
+      ),
+      sortOrder: Number(payload.sortOrder ?? payload.sort_order ?? 0),
+      isActive: true,
+    };
   }
 
   private extractAnthropicText(data: any): string {
@@ -395,6 +419,40 @@ export class ActivationService {
 
   private safeString(value: unknown, fallback: string): string {
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  }
+
+  private limitText(value: string, maxLength: number): string {
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) return normalized;
+    const clipped = normalized.slice(0, Math.max(0, maxLength - 1)).trim();
+    const lastSpace = clipped.lastIndexOf(' ');
+    return `${(lastSpace > 20 ? clipped.slice(0, lastSpace) : clipped).trim()}…`;
+  }
+
+  private customerHeadline(
+    recommendation: ActivationRecommendation,
+    primary: string,
+  ): string {
+    if (recommendation.source === 'market_basket_analysis') {
+      return `${primary} Bundle Deal`;
+    }
+    const title = recommendation.title.toLowerCase();
+    if (title.includes('service')) return 'Book Pet Services';
+    if (title.includes('retail')) return 'Pet Shop Favorites';
+    if (title.includes('cafe')) return 'Cafe Treats Today';
+    return `${primary} Offer`;
+  }
+
+  private customerHighlight(
+    recommendation: ActivationRecommendation,
+    pair: string,
+  ): string {
+    if (recommendation.source === 'market_basket_analysis') {
+      return this.limitText(`Shop ${pair}`, 34);
+    }
+    const mechanic = recommendation.promoMechanic.toLowerCase();
+    if (mechanic.includes('%')) return this.limitText(recommendation.promoMechanic, 34);
+    return 'Featured PetHub Offer';
   }
 
   private safeStringArray(value: unknown, fallback: string[]): string[] {
