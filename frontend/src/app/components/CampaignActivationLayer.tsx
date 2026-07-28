@@ -284,20 +284,11 @@ export function CampaignActivationLayer() {
                   <div className="grid gap-2 text-xs text-[#223047]">
                     <PayloadRow label="category" value={selectedCampaign.pethubPayload.category} />
                     <PayloadRow label="tag" value={selectedCampaign.pethubPayload.tag} />
-                    <PayloadRow label="meta" value={formatPayloadValue(selectedCampaign.pethubPayload.meta)} />
                     <PayloadRow label="title" value={selectedCampaign.pethubPayload.title} />
                     <PayloadRow label="description" value={selectedCampaign.pethubPayload.description} />
                     <PayloadRow label="note" value={selectedCampaign.pethubPayload.note} />
                     <PayloadRow label="highlight" value={selectedCampaign.pethubPayload.highlight} />
                     <PayloadRow label="footer" value={selectedCampaign.pethubPayload.footer} />
-                    <PayloadRow
-                      label="sortOrder"
-                      value={String(selectedCampaign.pethubPayload.sortOrder ?? selectedCampaign.pethubPayload.sort_order ?? 0)}
-                    />
-                    <PayloadRow
-                      label="isActive"
-                      value={String(selectedCampaign.pethubPayload.isActive ?? selectedCampaign.pethubPayload.is_active ?? false)}
-                    />
                   </div>
                 </div>
               )}
@@ -376,15 +367,4 @@ function PayloadRow({ label, value }: { label: string; value: string }) {
       <span className="break-words">{value}</span>
     </div>
   );
-}
-
-function formatPayloadValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
 }

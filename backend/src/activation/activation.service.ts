@@ -409,13 +409,21 @@ export class ActivationService {
   private getPetHubAnnouncementsEndpoint(): string | null {
     const explicitEndpoint = process.env.PETHUB_ANNOUNCEMENTS_ENDPOINT?.trim();
     if (explicitEndpoint) {
-      return explicitEndpoint;
+      return this.normalizePetHubAnnouncementsEndpoint(explicitEndpoint);
     }
     const baseUrl = process.env.PETHUB_API_BASE_URL?.trim();
     if (!baseUrl) {
       return null;
     }
-    return `${baseUrl.replace(/\/+$/, '')}/api/announcements`;
+    return this.normalizePetHubAnnouncementsEndpoint(baseUrl);
+  }
+
+  private normalizePetHubAnnouncementsEndpoint(value: string): string {
+    const trimmed = value.replace(/\/+$/, '');
+    if (/\/api\/announcements$/i.test(trimmed)) {
+      return trimmed;
+    }
+    return `${trimmed}/api/announcements`;
   }
 
   private async postPetHubAnnouncement(
