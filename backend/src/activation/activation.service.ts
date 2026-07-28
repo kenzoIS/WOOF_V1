@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  BadGatewayException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import axios from 'axios';
 import { Model } from 'mongoose';
@@ -142,13 +146,7 @@ export class ActivationService {
     };
 
     const token = process.env.PETHUB_API_TOKEN;
-    const response = await axios.post(endpoint, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      timeout: 15000,
-    });
+    const response = await this.postPetHubAnnouncement(endpoint, payload, token);
 
     const updated = await this.campaignModel
       .findOneAndUpdate({ campaignId }, { status: 'published' }, { new: true })
@@ -417,6 +415,52 @@ export class ActivationService {
       return null;
     }
     return `${baseUrl.replace(/\/+$/, '')}/api/announcements`;
+  }
+
+  private async postPetHubAnnouncement(
+    endpoint: string,
+    payload: Record<string, unknown>,
+    token?: string,
+  ) {
+    try {
+      return await axios.post(endpoint, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        timeout: 15000,
+      });
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const responseMessage = this.extractRemoteErrorMessage(
+          error.response?.data,
+        );
+        const message = [
+          'PetHub announcement publish failed',
+          status ? `(${status})` : null,
+          responseMessage || error.message,
+          `Endpoint: ${endpoint}`,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        throw new BadGatewayException(message);
+      }
+      throw new BadGatewayException('PetHub announcement publish failed');
+    }
+  }
+
+  private extractRemoteErrorMessage(data: unknown): string | null {
+    if (!data) return null;
+    if (typeof data === 'string') return data;
+    if (typeof data !== 'object') return null;
+    const body = data as Record<string, unknown>;
+    if (typeof body.message === 'string') return body.message;
+    if (typeof body.error === 'string') return body.error;
+    if (Array.isArray(body.message)) {
+      return body.message.join(', ');
+    }
+    return JSON.stringify(body);
   }
 
   private normalizeRecommendation(body: Record<string, unknown>) {
