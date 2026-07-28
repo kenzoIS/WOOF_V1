@@ -120,7 +120,7 @@ export function CampaignActivationLayer() {
       );
       setSelectedCampaign(updated);
       toast.success("Campaign queued for PetHub", {
-        description: "Publishing can be wired once PetHub repository access is ready.",
+        description: "Queued in WOOF only. Click Publish to PetHub when you are ready to send it.",
       });
     } catch (error: any) {
       toast.error("Status update failed", {
@@ -317,7 +317,7 @@ export function CampaignActivationLayer() {
                   disabled={selectedCampaign.status === "published"}
                 >
                   <Megaphone className="w-4 h-4 mr-2" />
-                  Publish
+                  Publish to PetHub
                 </Button>
               </div>
 
