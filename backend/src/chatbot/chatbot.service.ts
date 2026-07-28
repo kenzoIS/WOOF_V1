@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import axios from 'axios';
 import { Model } from 'mongoose';
 import {
   Transaction,
@@ -29,6 +30,8 @@ interface QueryPlan {
   sector?: 'Cafe' | 'Retail' | 'Services';
   channel?: 'POS' | 'Shopee' | 'TikTok Shop' | 'PetHub';
   limit?: number;
+  generatedSql?: string;
+  classifier?: 'claude' | 'fallback';
 }
 
 const OUT_OF_SCOPE_MESSAGE =
@@ -47,7 +50,7 @@ export class ChatbotService {
       throw new BadRequestException('Question is required.');
     }
 
-    const plan = this.classifyQuestion(cleanedQuestion);
+    const plan = await this.planQuestion(cleanedQuestion);
     if (plan.intent === 'out_of_scope') {
       return {
         answer: OUT_OF_SCOPE_MESSAGE,
@@ -82,10 +85,121 @@ export class ChatbotService {
       queryPlan: {
         ...plan,
         nl2sql:
-          'Controlled query plan mapped to whitelisted MongoDB aggregations over dashboard transaction fields.',
+          'Claude-generated NL2SQL plan validated by backend allowlists, then executed through controlled dashboard aggregations.',
       },
       data: result,
       confidence: 'high',
+    };
+  }
+
+  private async planQuestion(question: string): Promise<QueryPlan> {
+    const fallback = this.classifyQuestion(question);
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return { ...fallback, classifier: 'fallback' };
+    }
+
+    try {
+      const response = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model:
+            process.env.ANTHROPIC_CHATBOT_MODEL ||
+            process.env.ANTHROPIC_MODEL ||
+            'claude-3-5-sonnet-latest',
+          max_tokens: 900,
+          temperature: 0,
+          system:
+            'You are the controlled NL2SQL planner for the WOOF dashboard chatbot. Return only valid JSON. Do not answer the user directly.',
+          messages: [
+            {
+              role: 'user',
+              content: this.buildPlannerPrompt(question),
+            },
+          ],
+        },
+        {
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          timeout: 15000,
+        },
+      );
+
+      const parsed = this.parseJsonObject(this.extractAnthropicText(response.data));
+      return this.validateClaudePlan(parsed, fallback);
+    } catch {
+      return { ...fallback, classifier: 'fallback' };
+    }
+  }
+
+  private buildPlannerPrompt(question: string): string {
+    return [
+      'Convert the user question into a controlled dashboard SQL query plan.',
+      'The chatbot is only allowed to answer WOOF dashboard questions about sales, revenue, orders, quantity sold, average order value, top items, sector breakdown, channel breakdown, forecasts, and bundle recommendations.',
+      'If the question is not dashboard-related, set intent to "out_of_scope".',
+      'Allowed intents: total_revenue, total_orders, total_quantity, average_order_value, top_items, sector_breakdown, channel_breakdown, best_sector, best_channel, forecast_overview, cross_sell_overview, out_of_scope.',
+      'Allowed dateRange values: today, yesterday, last_7_days, this_month, all.',
+      'Allowed sectors: Cafe, Retail, Services.',
+      'Allowed channels: POS, Shopee, TikTok Shop, PetHub.',
+      'Allowed metrics: netSales, orders, quantity, avgOrderValue.',
+      'Use this SQL-safe warehouse model for generatedSql only: fact_cross_channel_transactions(transaction_timestamp, transaction_id, product_id, service_id, channel_id, segment_id, quantity_sold, net_sales).',
+      'Do not use DELETE, UPDATE, INSERT, DROP, ALTER, CREATE, TRUNCATE, raw user text, joins, subqueries, comments, or unlisted tables.',
+      'Return exactly this JSON shape:',
+      JSON.stringify({
+        intent: 'total_revenue',
+        metric: 'netSales',
+        dateRange: 'today',
+        sector: null,
+        channel: null,
+        limit: 5,
+        generatedSql:
+          'SELECT SUM(net_sales) AS revenue FROM fact_cross_channel_transactions WHERE transaction_timestamp >= :start AND transaction_timestamp <= :end;',
+      }),
+      `User question: ${question}`,
+    ].join('\n');
+  }
+
+  private validateClaudePlan(
+    value: Record<string, unknown>,
+    fallback: QueryPlan,
+  ): QueryPlan {
+    const intent = this.allowedIntent(value.intent)
+      ? value.intent
+      : fallback.intent;
+    const dateRange = this.allowedRange(value.dateRange)
+      ? value.dateRange
+      : fallback.dateRange;
+    const metric = this.allowedMetric(value.metric)
+      ? value.metric
+      : fallback.metric;
+    const sector = this.allowedSector(value.sector)
+      ? value.sector
+      : fallback.sector;
+    const channel = this.allowedChannel(value.channel)
+      ? value.channel
+      : fallback.channel;
+    const limit =
+      typeof value.limit === 'number'
+        ? Math.min(Math.max(Math.round(value.limit), 1), 10)
+        : fallback.limit;
+    const generatedSql =
+      typeof value.generatedSql === 'string' &&
+      this.isSafeGeneratedSql(value.generatedSql)
+        ? value.generatedSql
+        : this.buildSqlPreview({ intent, metric, dateRange, sector, channel, limit });
+
+    return {
+      intent,
+      metric,
+      dateRange,
+      sector,
+      channel,
+      limit,
+      generatedSql,
+      classifier: 'claude',
     };
   }
 
@@ -195,6 +309,92 @@ export class ChatbotService {
       'month',
     ];
     return allowedTerms.some((term) => q.includes(term));
+  }
+
+  private allowedIntent(value: unknown): value is DashboardIntent {
+    return [
+      'total_revenue',
+      'total_orders',
+      'total_quantity',
+      'average_order_value',
+      'top_items',
+      'sector_breakdown',
+      'channel_breakdown',
+      'best_sector',
+      'best_channel',
+      'forecast_overview',
+      'cross_sell_overview',
+      'out_of_scope',
+    ].includes(String(value));
+  }
+
+  private allowedRange(value: unknown): value is RangeKey {
+    return ['today', 'yesterday', 'last_7_days', 'this_month', 'all'].includes(
+      String(value),
+    );
+  }
+
+  private allowedMetric(value: unknown): value is QueryPlan['metric'] {
+    return ['netSales', 'orders', 'quantity', 'avgOrderValue'].includes(
+      String(value),
+    );
+  }
+
+  private allowedSector(value: unknown): value is QueryPlan['sector'] {
+    return ['Cafe', 'Retail', 'Services'].includes(String(value));
+  }
+
+  private allowedChannel(value: unknown): value is QueryPlan['channel'] {
+    return ['POS', 'Shopee', 'TikTok Shop', 'PetHub'].includes(String(value));
+  }
+
+  private isSafeGeneratedSql(sql: string): boolean {
+    const normalized = sql.toLowerCase();
+    const forbidden = [
+      'delete',
+      'update',
+      'insert',
+      'drop',
+      'alter',
+      'create',
+      'truncate',
+      '--',
+      '/*',
+      '*/',
+      ';--',
+    ];
+    return (
+      normalized.startsWith('select') &&
+      normalized.includes('fact_cross_channel_transactions') &&
+      !forbidden.some((term) => normalized.includes(term))
+    );
+  }
+
+  private buildSqlPreview(plan: QueryPlan): string {
+    const where = [':date_range'];
+    if (plan.sector) where.push(`segment_id = '${plan.sector}'`);
+    if (plan.channel) where.push(`channel_id = '${plan.channel}'`);
+    const whereClause = `WHERE ${where.join(' AND ')}`;
+
+    if (plan.intent === 'top_items') {
+      return `SELECT product_id, service_id, SUM(net_sales) AS revenue, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause} GROUP BY product_id, service_id ORDER BY revenue DESC LIMIT ${plan.limit || 5};`;
+    }
+    if (plan.intent === 'sector_breakdown' || plan.intent === 'best_sector') {
+      return `SELECT segment_id, SUM(net_sales) AS revenue, COUNT(DISTINCT transaction_id) AS orders, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause} GROUP BY segment_id ORDER BY revenue DESC;`;
+    }
+    if (plan.intent === 'channel_breakdown' || plan.intent === 'best_channel') {
+      return `SELECT channel_id, SUM(net_sales) AS revenue, COUNT(DISTINCT transaction_id) AS orders, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause} GROUP BY channel_id ORDER BY revenue DESC;`;
+    }
+    if (plan.intent === 'total_orders') {
+      return `SELECT COUNT(DISTINCT transaction_id) AS orders FROM fact_cross_channel_transactions ${whereClause};`;
+    }
+    if (plan.intent === 'total_quantity') {
+      return `SELECT SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause};`;
+    }
+    if (plan.intent === 'average_order_value') {
+      return `SELECT SUM(net_sales) / NULLIF(COUNT(DISTINCT transaction_id), 0) AS avg_order_value FROM fact_cross_channel_transactions ${whereClause};`;
+    }
+    return `SELECT SUM(net_sales) AS revenue, COUNT(DISTINCT transaction_id) AS orders, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause};`;
   }
 
   private extractRange(q: string): RangeKey {
@@ -434,5 +634,28 @@ export class ChatbotService {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
+  }
+
+  private extractAnthropicText(data: any): string {
+    const textBlocks = Array.isArray(data?.content)
+      ? data.content
+          .filter((block: any) => block?.type === 'text' && block?.text)
+          .map((block: any) => block.text)
+      : [];
+    return textBlocks.join('\n').trim();
+  }
+
+  private parseJsonObject(text: string): Record<string, unknown> {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return {};
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return {};
+      }
+    }
   }
 }
