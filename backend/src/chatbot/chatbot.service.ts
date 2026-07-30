@@ -60,6 +60,21 @@ const MONTHS: Record<string, number> = {
   december: 11,
 };
 
+const MONTH_ALIASES: Record<string, string> = {
+  enero: 'january',
+  pebrero: 'february',
+  marso: 'march',
+  abril: 'april',
+  mayo: 'may',
+  hunyo: 'june',
+  hulyo: 'july',
+  agosto: 'august',
+  setyembre: 'september',
+  oktubre: 'october',
+  nobyembre: 'november',
+  disyembre: 'december',
+};
+
 @Injectable()
 export class ChatbotService {
   constructor(
@@ -253,7 +268,7 @@ export class ChatbotService {
   }
 
   private classifyQuestion(question: string): QueryPlan {
-    const q = question.toLowerCase();
+    const q = this.normalizeQuestion(question);
     if (!this.isDashboardQuestion(q)) {
       return { intent: 'out_of_scope', dateRange: 'all' };
     }
@@ -468,8 +483,32 @@ export class ChatbotService {
   private extractExplicitDateRange(
     question: string,
   ): Pick<QueryPlan, 'dateStart' | 'dateEnd'> | null {
-    const q = question.toLowerCase();
+    const q = this.normalizeQuestion(question);
     const monthNames = Object.keys(MONTHS).join('|');
+    const quarter = q.match(/\bq([1-4])\s+(20\d{2})\b/);
+    if (quarter) {
+      const quarterIndex = Number(quarter[1]) - 1;
+      const year = Number(quarter[2]);
+      const startMonth = quarterIndex * 3;
+      return {
+        dateStart: this.isoDate(new Date(year, startMonth, 1)),
+        dateEnd: this.isoDate(new Date(year, startMonth + 3, 0)),
+      };
+    }
+
+    const monthRange = q.match(
+      new RegExp(`\\b(${monthNames})\\s+(?:to|until|through|hanggang|-)\\s+(${monthNames})\\s+(20\\d{2})\\b`),
+    );
+    if (monthRange) {
+      const startMonth = MONTHS[monthRange[1]];
+      const endMonth = MONTHS[monthRange[2]];
+      const year = Number(monthRange[3]);
+      return {
+        dateStart: this.isoDate(new Date(year, startMonth, 1)),
+        dateEnd: this.isoDate(new Date(year, endMonth + 1, 0)),
+      };
+    }
+
     const monthYear = q.match(new RegExp(`\\b(${monthNames})\\s+(20\\d{2})\\b`));
     if (monthYear) {
       const month = MONTHS[monthYear[1]];
@@ -508,6 +547,25 @@ export class ChatbotService {
     }
 
     return null;
+  }
+
+  private normalizeQuestion(question: string): string {
+    let normalized = question.toLowerCase();
+    Object.entries(MONTH_ALIASES).forEach(([local, english]) => {
+      normalized = normalized.replace(new RegExp(`\\b${local}\\b`, 'g'), english);
+    });
+    return normalized
+      .replace(/\bbenta\b/g, 'sales')
+      .replace(/\bkita\b/g, 'revenue')
+      .replace(/\bkinita\b/g, 'revenue')
+      .replace(/\bkumita\b/g, 'revenue')
+      .replace(/\bmagkano\b/g, 'revenue')
+      .replace(/\bilan\b/g, 'count')
+      .replace(/\bngayon\b/g, 'today')
+      .replace(/\bkahapon\b/g, 'yesterday')
+      .replace(/\blinggo\b/g, 'week')
+      .replace(/\bbuwan\b/g, 'month')
+      .replace(/\btaon\b/g, 'year');
   }
 
   private safeIsoDate(value: unknown): string | undefined {
@@ -673,6 +731,9 @@ export class ChatbotService {
       const best = result[0];
       if (!best) return `No data found for ${rangeLabel}${filters}.`;
       return `The leading ${plan.intent === 'best_sector' ? 'sector' : 'channel'} for ${rangeLabel}${filters} is ${best.label}, with ${this.currency(best.revenue)} revenue, ${best.orderCount} orders, and ${best.quantity} units sold.`;
+    }
+    if (typeof result?.rows === 'number' && result.rows === 0) {
+      return `No matching dashboard records were found for ${rangeLabel}${filters}.`;
     }
     if (plan.intent === 'total_orders') {
       return `For ${rangeLabel}${filters}, there are ${result.orders} orders/transactions.`;
