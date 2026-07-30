@@ -7,7 +7,7 @@ import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
 import { ModelDiagnostics } from "../components/ModelDiagnostics";
-import { ForecastRun, getForecast } from "../lib/api";
+import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -213,6 +213,14 @@ export function Cafe() {
   const [humidityOverride, setHumidityOverride] = useState(60);
   const [forecastMode, setForecastMode] = useState<string>("production");
   const [isSimulating, setIsSimulating] = useState(false);
+  
+  const [quietPeriod, setQuietPeriod] = useState<any>(null);
+  const [pastHappyHours, setPastHappyHours] = useState<any[]>([]);
+
+  useEffect(() => {
+    getNextQuietPeriod().then(setQuietPeriod).catch(console.error);
+    getPastHappyHours().then(setPastHappyHours).catch(console.error);
+  }, []);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -772,6 +780,23 @@ export function Cafe() {
       void getForecast("cafe", params).then(setForecastRun);
       setSuccessModal({ isOpen: true, type: "data_sync_success" });
     }, 2000);
+  };
+
+  const handleActivateHappyHour = async () => {
+    if (!quietPeriod || quietPeriod.status !== 'success') return;
+    try {
+      await activateHappyHour({
+        discountPercent: discountValue[0],
+        targetDate: quietPeriod.targetDate,
+        targetHour: quietPeriod.targetHour,
+        probabilityScore: quietPeriod.probabilityScore,
+      });
+      toast.success("Happy Hour activated!");
+      // Refresh past happy hours
+      getPastHappyHours().then(setPastHappyHours).catch(console.error);
+    } catch (e: any) {
+      toast.error(`Failed to activate: ${e.message}`);
+    }
   };
 
   const getEquilibriumColor = (status: string) => {
@@ -1414,11 +1439,15 @@ export function Cafe() {
               </Badge>
             </div>
 
-            <div className="text-2xl md:text-3xl lg:text-4xl font-bold">Tomorrow 3:00 PM</div>
+            <div className="text-2xl md:text-3xl lg:text-4xl font-bold">
+              {quietPeriod && quietPeriod.status === 'success' ? `${formatChartDate(quietPeriod.targetDate)} ${quietPeriod.targetHour}:00` : "Calculating..."}
+            </div>
 
             <div className="flex items-center gap-2 text-xs md:text-sm">
               <span className="opacity-70">Predicted Traffic:</span>
-              <span className="font-semibold text-[#3AE4FA]">42% below avg</span>
+              <span className="font-semibold text-[#3AE4FA]">
+                {quietPeriod && quietPeriod.status === 'success' ? `${Math.round(quietPeriod.predictedTrafficDrop)}% below avg` : "..."}
+              </span>
             </div>
 
             <div className="space-y-3 pt-2 md:pt-4">
@@ -1438,7 +1467,7 @@ export function Cafe() {
               </div>
             </div>
 
-            <Button className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm">
+            <Button onClick={handleActivateHappyHour} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
               Activate Happy Hour
             </Button>
           </div>
@@ -1455,23 +1484,24 @@ export function Cafe() {
             </div>
 
             <div className="space-y-2">
-              {[
-                { date: "Apr 12", predicted: "+15%", actual: "+18%", result: "✓" },
-                { date: "Apr 10", predicted: "+12%", actual: "+14%", result: "✓" },
-                { date: "Apr 8", predicted: "+20%", actual: "+16%", result: "~" },
-                { date: "Apr 6", predicted: "+18%", actual: "+22%", result: "✓" },
-              ].map((item) => (
+              {pastHappyHours.length > 0 ? pastHappyHours.map((item) => (
                 <div
-                  key={item.date}
+                  key={item.id}
                   className="flex items-center justify-between p-2 rounded-lg bg-[#FFF2FA]"
                 >
-                  <span className="text-xs text-[#223047] opacity-60">{item.date}</span>
-                  <span className="text-xs font-medium text-[#223047]">
-                    {item.predicted} → {item.actual}
+                  <span className="text-xs text-[#223047] opacity-60">
+                    {formatChartDate(item.target_date.split('T')[0])}
                   </span>
-                  <span className="text-sm">{item.result}</span>
+                  <span className="text-xs font-medium text-[#223047]">
+                    Discount: {item.owner_approved_discount_percent}% 
+                  </span>
+                  <span className="text-sm font-bold text-green-600">
+                    {item.sales_uplift_percent ? `+${item.sales_uplift_percent}%` : "Pending..."}
+                  </span>
                 </div>
-              ))}
+              )) : (
+                <div className="p-2 rounded-lg bg-[#FFF2FA] text-xs opacity-60 text-center">No past happy hours found.</div>
+              )}
             </div>
 
             <div className="pt-3 md:pt-4 border-t border-[#FFD9EC]">

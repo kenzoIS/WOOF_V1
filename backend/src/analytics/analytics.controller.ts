@@ -156,4 +156,19 @@ export class AnalyticsController {
       forceRefresh,
     });
   }
+
+  @Get('promos/quiet-periods')
+  async getNextQuietPeriod() {
+    return this.analyticsService.getNextQuietPeriod();
+  }
+
+  @Get('promos/history')
+  async getPastHappyHours() {
+    return this.analyticsService.getPastHappyHours();
+  }
+
+  @Post('promos/draft')
+  async activateHappyHour(@Body() body: { discountPercent: number, targetDate: string, targetHour: number, probabilityScore: number }) {
+    return this.analyticsService.activateHappyHour(body.discountPercent, body.targetDate, body.targetHour, body.probabilityScore);
+  }
 }

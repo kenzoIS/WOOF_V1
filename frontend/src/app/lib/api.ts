@@ -428,3 +428,24 @@ export async function submitSmartReportFeedback(
     body: JSON.stringify(dto),
   });
 }
+
+export async function getNextQuietPeriod(): Promise<any> {
+  return fetchApi('/analytics/promos/quiet-periods');
+}
+
+export async function getPastHappyHours(): Promise<any[]> {
+  return fetchApi('/analytics/promos/history');
+}
+
+export async function activateHappyHour(dto: {
+  discountPercent: number;
+  targetDate: string;
+  targetHour: number;
+  probabilityScore: number;
+}): Promise<any> {
+  return fetchApi('/analytics/promos/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}

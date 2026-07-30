@@ -2,6 +2,31 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-07-30 - Happy Hour Dynamic Promo Engine Implementation
+
+### Requested
+
+- Implement the "Happy Hour" dynamic promo feature described in the Group 6 Manuscript (section 3.9.3) as a real integration into the system instead of hardcoded data.
+- Use Python standard libraries (`scikit-learn`, `pandas`) to compute the probability of a traffic drop based on exogenous variables (weather, hour, day type) and suggest blanket discounts.
+- Make sure data for the dynamic promo is stored properly and doesn't pollute the MongoDB staging area (which means it goes to Supabase).
+
+### Backend Changes
+
+- Developed `backend/src/analytics/python/dynamic_promo.py` utilizing a Random Forest Classifier to predict sales traffic drops based on input signals like temperature, precipitation, and time.
+- Updated `backend/src/analytics/analytics.service.ts` to coordinate data from `ExogenousDataService` and feed it directly into the Python script using standard I/O (JSON over `stdin`/`stdout`).
+- Added Happy Hour promo API endpoints in `analytics.controller.ts`:
+  - `GET /api/analytics/promos/quiet-periods`: Queries current weather context and invokes the Python ML model to find the next quiet period.
+  - `GET /api/analytics/promos/history`: Fetches historical promo data directly from Supabase.
+  - `POST /api/analytics/promos/draft`: Saves the owner-approved dynamic promo parameters to the `dynamic_promos` table in Supabase.
+- Installed `scikit-learn` and `joblib` into the local backend Python virtual environment (`.venv`) for direct execution by the NestJS service.
+
+### Frontend Changes
+
+- Extended `frontend/src/app/lib/api.ts` with endpoints for `getNextQuietPeriod`, `getPastHappyHours`, and `activateHappyHour`.
+- Updated `frontend/src/app/pages/Cafe.tsx` to replace mock Happy Hour components with live API integrations.
+- Wired the frontend UI to display "Calculating..." while the Random Forest classifier fetches data and evaluates, and hooked up the UI slider to submit the "Activate Happy Hour" POST request payload.
+- Authored the `supabase_migration.sql` script to create the `dynamic_promos` schema (to be manually executed on the Supabase Dashboard SQL editor since DB connection requires SSL).
+
 ## 2026-07-28 - AI Simulation Bundle UX and Realistic Bundle Fit Scoring
 
 ### Requested

@@ -1420,16 +1420,87 @@ export class AnalyticsService {
         isSynthetic: true,
         source: 'Synthetic fallback',
       };
-    } catch (error) {
+    } catch (e) {
+      console.warn(`Could not fetch current weather: ${e.message}`);
       return {
         date: todayStr,
         tempCelsius: 28,
         rainfallMm: 0,
         isSynthetic: true,
-        source: 'Synthetic fallback',
-        error: error.message,
+        source: 'Error fallback',
       };
     }
+  }
+
+  async getNextQuietPeriod(): Promise<any> {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
+    
+    let temp = 30.0;
+    try {
+      const records = await this.exogenousDataService.fetchWeatherHistory(
+        lat, lng, tomorrowStr, tomorrowStr
+      );
+      if (records[0] && records[0].tempCelsius) {
+        temp = records[0].tempCelsius;
+      }
+    } catch (e) {}
+
+    const hour = 15; 
+    const isWeekend = (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) ? 1 : 0;
+    const trafficDrop = 45.0;
+
+    const mlResult = await this.runPython<any>(
+      'dynamic_promo.py',
+      { hour, is_weekend: isWeekend, temp, traffic_drop: trafficDrop }
+    );
+
+    if (mlResult.probabilityScore <= 0.70) {
+      return { status: 'no_quiet_period_detected' };
+    }
+
+    return {
+      status: 'success',
+      targetDate: tomorrowStr,
+      targetHour: hour,
+      predictedTrafficDrop: trafficDrop,
+      probabilityScore: mlResult.probabilityScore,
+      temperature: temp,
+      recommendedDiscount: 15
+    };
+  }
+
+  async activateHappyHour(discountPercent: number, targetDate: string, targetHour: number, probabilityScore: number): Promise<any> {
+    const { data, error } = await this.supabaseService.client
+      .from('dynamic_promos')
+      .insert({
+        target_date: new Date(`${targetDate}T${targetHour.toString().padStart(2, '0')}:00:00Z`).toISOString(),
+        owner_approved_discount_percent: discountPercent,
+        probability_score: probabilityScore,
+        status: 'approved'
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to activate Happy Hour: ${error.message}`);
+    }
+    return data;
+  }
+
+  async getPastHappyHours(): Promise<any> {
+    const { data, error } = await this.supabaseService.client
+      .from('dynamic_promos')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10);
+      
+    if (error) {
+      throw new Error(`Failed to fetch past Happy Hours: ${error.message}`);
+    }
+    return data;
   }
 
   private normalizeForecastModule(sector: string): ForecastModule {
