@@ -58,7 +58,11 @@ export function WOOFChatbot() {
     setIsThinking(true);
 
     try {
-      const result = await askWoofChatbot(text);
+      const history = messages.map((msg) => ({
+        sender: msg.sender,
+        text: msg.text,
+      }));
+      const result = await askWoofChatbot(text, history);
       const woofMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: result.answer || "I could not compute an answer from the dashboard data.",

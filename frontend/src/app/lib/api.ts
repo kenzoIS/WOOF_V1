@@ -347,13 +347,16 @@ export async function publishActivationCampaign(campaignId: string) {
   });
 }
 
-export async function askWoofChatbot(question: string) {
+export async function askWoofChatbot(
+  question: string,
+  history: Array<{ sender: 'user' | 'woof'; text: string }> = [],
+) {
   return fetchApi('/chatbot/ask', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, history }),
   });
 }
 
