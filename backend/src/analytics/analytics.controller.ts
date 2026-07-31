@@ -79,6 +79,8 @@ export class AnalyticsController {
     @Query('hour') hour?: string,
     @Query('sector') sector?: string,
     @Query('forceRefresh') forceRefresh?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
   ) {
     return this.analyticsService.getCrossSell({
       minSupport,
@@ -88,12 +90,27 @@ export class AnalyticsController {
       hour,
       sector,
       forceRefresh,
+      dateStart,
+      dateEnd,
     });
   }
 
   @Post('cross-sell/campaign-drafts')
   async createCrossSellCampaignDraft(@Body() dto: any) {
     return this.analyticsService.createCrossSellCampaignDraft(dto);
+  }
+
+  @Get('pricing-catalog')
+  async getPricingCatalog(
+    @Query('sector') sector?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
+  ) {
+    return this.analyticsService.getPricingCatalog({
+      sector,
+      dateStart,
+      dateEnd,
+    });
   }
 
   @Get('cross-sell/config')
@@ -104,6 +121,8 @@ export class AnalyticsController {
     @Query('maxBundleCandidates') maxBundleCandidates?: string,
     @Query('hour') hour?: string,
     @Query('sector') sector?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
   ) {
     return this.analyticsService.getCrossSellConfig({
       minSupport,
@@ -112,6 +131,8 @@ export class AnalyticsController {
       maxBundleCandidates,
       hour,
       sector,
+      dateStart,
+      dateEnd,
     });
   }
 
@@ -124,6 +145,8 @@ export class AnalyticsController {
     @Query('hour') hour?: string,
     @Query('sector') sector?: string,
     @Query('forceRefresh') forceRefresh?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
   ) {
     return this.analyticsService.getCrossSellBySector({
       minSupport,
@@ -133,6 +156,8 @@ export class AnalyticsController {
       hour,
       sector,
       forceRefresh,
+      dateStart,
+      dateEnd,
     });
   }
 
@@ -145,6 +170,8 @@ export class AnalyticsController {
     @Query('hour') hour?: string,
     @Query('sector') sector?: string,
     @Query('forceRefresh') forceRefresh?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
   ) {
     return this.analyticsService.getCrossSellBundles({
       minSupport,
@@ -154,6 +181,8 @@ export class AnalyticsController {
       hour,
       sector,
       forceRefresh,
+      dateStart,
+      dateEnd,
     });
   }
 

@@ -107,6 +107,14 @@ def safe_int(value, fallback, min_value=1, max_value=MAX_BUNDLE_CANDIDATES):
     return max(min_value, min(parsed, max_value))
 
 
+def safe_float(value):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
 def get_price(item_prices, item_name):
     try:
         price = float(item_prices.get(item_name, 0))
@@ -959,7 +967,9 @@ def build_low_association_bundles(
     )[:max_candidates]
 
 
-def build_item_metrics(dataset, product_sectors):
+def build_item_metrics(dataset, product_sectors, item_prices=None, item_economics=None):
+    item_prices = item_prices or {}
+    item_economics = item_economics or {}
     total_baskets = len(dataset)
     item_counts = defaultdict(int)
     for basket in dataset:
@@ -974,19 +984,36 @@ def build_item_metrics(dataset, product_sectors):
         sectors = sorted(sector_set_for_items([item], product_sectors))
         support = count / total_baskets if total_baskets else 0
         velocity = support_level(rank, len(ranked_items))
+        price, cost, has_price, has_cost = get_item_economics(
+            item_prices,
+            item_economics,
+            item,
+        )
+        economics = item_economics.get(item, {}) if isinstance(item_economics, dict) else {}
+        unit_gross_profit = safe_float(economics.get("unitGrossProfit")) if isinstance(economics, dict) else None
+        margin = safe_float(economics.get("margin")) if isinstance(economics, dict) else None
         item_stats[item] = {
             "support": support,
             "basketCount": count,
             "velocity": velocity,
         }
-        item_metrics.append({
+        metric = {
             "item": item,
             "sector": sectors[0] if sectors else "unknown",
             "sectors": sectors,
             "support": round(support, 4),
             "basketCount": count,
             "velocity": velocity,
-        })
+        }
+        if has_price:
+            metric["price"] = round(price, 2)
+        if has_cost:
+            metric["unitCost"] = round(cost, 2)
+        if unit_gross_profit is not None:
+            metric["unitGrossProfit"] = round(unit_gross_profit, 2)
+        if margin is not None:
+            metric["margin"] = round(margin, 4)
+        item_metrics.append(metric)
 
     return item_stats, item_metrics
 
@@ -1044,7 +1071,12 @@ def run_cross_sell(baskets, config=None):
                  "Not enough multi-item baskets",
              )
 
-        item_stats, item_metrics = build_item_metrics(dataset, product_sectors)
+        item_stats, item_metrics = build_item_metrics(
+            dataset,
+            product_sectors,
+            item_prices,
+            item_economics,
+        )
         bundle_candidates = build_low_association_bundles(
             dataset,
             product_sectors,

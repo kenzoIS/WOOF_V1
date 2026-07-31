@@ -61,6 +61,8 @@ interface CrossSellOptions {
   hour?: number | string;
   sector?: string;
   forceRefresh?: boolean | string;
+  dateStart?: string;
+  dateEnd?: string;
 }
 
 type HomeRange = 'today' | 'week' | 'month' | 'custom';
@@ -853,11 +855,15 @@ export class AnalyticsService {
     const thresholds = this.normalizeCrossSellThresholds(options);
     const hour = this.parseHour(options.hour);
     const sector = this.normalizeCrossSellSector(options.sector);
-    const transactionMatch = this.buildCrossSellMatch(hour, sector);
+    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const transactionMatch = this.buildCrossSellMatch(hour, sector, dateWindow);
     const hasTransactionMatch = Object.keys(transactionMatch).length > 0;
-    const sectorMatch = this.buildCrossSellMatch(undefined, sector);
+    const sectorMatch = this.buildCrossSellMatch(undefined, sector, dateWindow);
     const hasSectorMatch = Object.keys(sectorMatch).length > 0;
     const currentPricingStart = new Date('2026-01-01T00:00:00.000+08:00');
+    const pricingDateFilter = dateWindow
+      ? { $gte: dateWindow.start, $lte: dateWindow.end }
+      : { $gte: currentPricingStart };
     const forceRefresh =
       options.forceRefresh === true || options.forceRefresh === 'true';
     const cacheCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -877,6 +883,8 @@ export class AnalyticsService {
         c.thresholds?.maxBundleCandidates === thresholds.maxBundleCandidates &&
         c.thresholds?.hour === thresholds.hour &&
         c.thresholds?.sector === thresholds.sector &&
+        c.thresholds?.dateStart === thresholds.dateStart &&
+        c.thresholds?.dateEnd === thresholds.dateEnd &&
         c.upload_state?.uploadCount === uploadState.uploadCount &&
         c.upload_state?.latestUploadId === uploadState.latestUploadId &&
         c.upload_state?.latestUploadTime === uploadState.latestUploadTime
@@ -991,7 +999,7 @@ export class AnalyticsService {
           {
             $match: {
               ...(sector === 'all' ? {} : { sector: this.normalizeSector(sector) }),
-              date: { $gte: currentPricingStart },
+              date: pricingDateFilter,
               unitPrice: { $gt: 0 },
             },
           },
@@ -1160,6 +1168,157 @@ export class AnalyticsService {
         uploadState,
       };
     }
+  }
+
+  async getPricingCatalog(options: Pick<CrossSellOptions, 'sector' | 'dateStart' | 'dateEnd'> = {}): Promise<any> {
+    const sector = this.normalizeCrossSellSector(options.sector);
+    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const match: Record<string, unknown> = {
+      productName: { $nin: [null, ''] },
+    };
+
+    if (sector !== 'all') {
+      match.sector = this.normalizeSector(sector);
+    }
+    if (dateWindow) {
+      match.date = { $gte: dateWindow.start, $lte: dateWindow.end };
+    }
+
+    const [summaryRows, itemRows] = await Promise.all([
+      this.transactionModel.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            transactions: { $addToSet: '$transactionId' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalTransactions: { $size: '$transactions' },
+          },
+        },
+      ]).allowDiskUse(true).exec(),
+      this.transactionModel.aggregate([
+        { $match: match },
+        {
+          $project: {
+            productName: 1,
+            sector: 1,
+            transactionId: 1,
+            quantity: { $ifNull: ['$quantity', 0] },
+            unitPrice: { $ifNull: ['$unitPrice', 0] },
+            unitCost: {
+              $cond: [
+                { $gt: ['$quantity', 0] },
+                { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
+                { $ifNull: ['$costOfGoods', 0] },
+              ],
+            },
+            unitGrossProfit: {
+              $cond: [
+                { $gt: ['$quantity', 0] },
+                { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
+                { $ifNull: ['$grossProfit', 0] },
+              ],
+            },
+            margin: { $ifNull: ['$margin', null] },
+          },
+        },
+        {
+          $group: {
+            _id: '$productName',
+            sectors: { $addToSet: '$sector' },
+            transactions: { $addToSet: '$transactionId' },
+            lineItems: { $sum: 1 },
+            totalQuantity: { $sum: '$quantity' },
+            avgPrice: {
+              $avg: {
+                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+              },
+            },
+            avgUnitCost: {
+              $avg: {
+                $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
+              },
+            },
+            avgUnitGrossProfit: {
+              $avg: {
+                $cond: [{ $ne: ['$unitGrossProfit', null] }, '$unitGrossProfit', null],
+              },
+            },
+            avgMargin: { $avg: '$margin' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            item: '$_id',
+            sectors: 1,
+            lineItems: 1,
+            totalQuantity: 1,
+            transactionCount: { $size: '$transactions' },
+            avgPrice: 1,
+            avgUnitCost: 1,
+            avgUnitGrossProfit: 1,
+            avgMargin: 1,
+          },
+        },
+        { $sort: { transactionCount: -1, item: 1 } },
+      ]).allowDiskUse(true).exec(),
+    ]);
+
+    const totalTransactions = Number(summaryRows?.[0]?.totalTransactions || 0);
+    const totalItems = itemRows.length;
+    const itemMetrics = itemRows.map((row: any, index: number) => {
+      const sectors = Array.from(
+        new Set(
+          (Array.isArray(row.sectors) ? row.sectors : [])
+            .filter(Boolean)
+            .map((value: string) => {
+              const normalized = this.normalizeCrossSellSector(value);
+              return normalized === 'all' ? 'unknown' : normalized;
+            }),
+        ),
+      ).sort();
+      const transactionCount = Number(row.transactionCount || 0);
+      const support = totalTransactions > 0 ? transactionCount / totalTransactions : 0;
+      const velocity =
+        index < totalItems / 3
+          ? 'fast'
+          : index < (totalItems * 2) / 3
+            ? 'moderate'
+            : 'slow';
+      const price = this.nullableFiniteNumber(row.avgPrice);
+      const unitCost = this.nullableFiniteNumber(row.avgUnitCost);
+      const unitGrossProfit = this.nullableFiniteNumber(row.avgUnitGrossProfit);
+      const margin = this.nullableFiniteNumber(row.avgMargin);
+
+      return {
+        item: String(row.item),
+        sector: sectors[0] || 'unknown',
+        sectors: sectors.length ? sectors : ['unknown'],
+        support: Math.round(support * 10000) / 10000,
+        basketCount: transactionCount,
+        lineItems: Number(row.lineItems || 0),
+        totalQuantity: this.round(Number(row.totalQuantity || 0)),
+        velocity,
+        ...(price !== null ? { price } : {}),
+        ...(unitCost !== null ? { unitCost } : {}),
+        ...(unitGrossProfit !== null ? { unitGrossProfit } : {}),
+        ...(margin !== null ? { margin } : {}),
+      };
+    });
+
+    return {
+      itemMetrics,
+      totalItems: itemMetrics.length,
+      totalTransactions,
+      source: dateWindow ? 'header_filter' : 'all_history',
+      dateStart: dateWindow?.dateStart,
+      dateEnd: dateWindow?.dateEnd,
+    };
   }
 
   async getCrossSellConfig(options: CrossSellOptions = {}): Promise<any> {
@@ -1729,7 +1888,10 @@ export class AnalyticsService {
     maxBundleCandidates: number;
     hour?: number;
     sector: string;
+    dateStart?: string;
+    dateEnd?: string;
   } {
+    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
     return {
       minSupport: Math.max(this.parseThreshold(options.minSupport, 0.05), 0.05),
       minConfidence: Math.max(
@@ -1747,6 +1909,12 @@ export class AnalyticsService {
         ? { hour: this.parseHour(options.hour) }
         : {}),
       sector: this.normalizeCrossSellSector(options.sector),
+      ...(dateWindow
+        ? {
+            dateStart: dateWindow.dateStart,
+            dateEnd: dateWindow.dateEnd,
+          }
+        : {}),
     };
   }
 
@@ -1786,10 +1954,14 @@ export class AnalyticsService {
   private buildCrossSellMatch(
     hour: number | undefined,
     sector: string,
+    dateWindow?: { start: Date; end: Date; dateStart: string; dateEnd: string } | null,
   ): Record<string, unknown> {
     const match: Record<string, unknown> = {};
     if (sector !== 'all') {
       match.sector = this.normalizeSector(sector);
+    }
+    if (dateWindow) {
+      match.date = { $gte: dateWindow.start, $lte: dateWindow.end };
     }
     if (hour !== undefined) {
       match.$expr = {
@@ -1805,6 +1977,27 @@ export class AnalyticsService {
       };
     }
     return match;
+  }
+
+  private parseCrossSellDateWindow(
+    dateStart?: string,
+    dateEnd?: string,
+  ): { start: Date; end: Date; dateStart: string; dateEnd: string } | null {
+    if (!dateStart || !dateEnd) {
+      return null;
+    }
+
+    const start = new Date(`${dateStart}T00:00:00.000+08:00`);
+    const end = new Date(`${dateEnd}T23:59:59.999+08:00`);
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      end < start
+    ) {
+      return null;
+    }
+
+    return { start, end, dateStart, dateEnd };
   }
 
   private normalizeCrossSellSector(value?: string): string {

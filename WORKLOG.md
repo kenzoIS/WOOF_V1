@@ -2,6 +2,137 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-08-01 - Scenario Builder Forecast Integration
+
+### Requested
+
+- Make the Scenario Builder tab fully functional.
+- Use available formulas, models, and APIs so the whole Scenario Builder works as a real what-if tool instead of static demo math.
+
+### Frontend Changes
+
+- Replaced the hardcoded Scenario Builder baseline revenue/orders with live forecast API inputs.
+- Connected Scenario Builder to:
+  - `getForecast("Cafe")`
+  - `getForecast("Services")`
+  - `getForecast("Retail")`
+  - `getNextQuietPeriod()` for dynamic promo model context.
+- Added scenario forecast recalculation using weather, temperature, and payday inputs.
+- Added business-factor adjustments for weekend timing, active promo, competitor event, and payday weekend.
+- Added loading, manual refresh, model confidence, source label, baseline revenue, baseline orders, and API error display.
+- Replaced static impact labels with calculated impact percentages and business-readable descriptions.
+- Cleaned Scenario Builder control text so it explains model-driven behavior rather than fixed lifts.
+
+### Files Changed
+
+- `frontend/src/app/pages/AISimulation.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm run build` in `frontend` after integrating Scenario Builder with forecast and promo APIs.
+
+## 2026-08-01 - Pricing Laboratory Item Simulator
+
+### Requested
+
+- Make the Pricing Laboratory tab functional and business-friendly.
+- Add a compact carousel/section above the Dynamic Pricing Simulator where users can choose a product, item, or service from the ingested item list.
+- Limit visible item choices to five while allowing search.
+- Replace confusing simulator terms with practical business outcomes that non-technical clients can understand.
+- Keep the interface neat, compact, and easy to handle.
+
+### Backend/Data Changes
+
+- Extended cross-sell item metrics to include available item economics from the ingested data:
+  - Current price.
+  - Unit cost.
+  - Unit gross profit.
+  - Margin.
+- Preserved the existing FP-Growth and bundle simulator behavior while making the same item metrics usable by Pricing Laboratory.
+
+### Frontend Changes
+
+- Added a searchable item/service picker above the Dynamic Pricing Simulator in `frontend/src/app/pages/AISimulation.tsx`.
+- Capped the visible picker results to five items and made the choices horizontally scrollable for compact browsing.
+- Added Cafe, Services, and Retail filter chips so users can narrow the picker by business category.
+- Added numbered picker pages so the full matched item list remains reachable while still showing only five choices at a time.
+- Added a Pricing Lab catalog endpoint so item selection can use all transaction line items, including single-item orders, instead of only FP-Growth/multi-item baskets.
+- Added a `Full Catalog` toggle in Choose Item To Price:
+  - Off: the picker follows the Header Filter date range.
+  - On: the picker shows the full ingested pricing catalog across all available history.
+- Rebuilt the pricing simulation around the selected item instead of static/random sample data.
+- Added business-facing outputs:
+  - New selling price.
+  - Expected sales.
+  - Projected gross profit.
+  - Margin after discount.
+  - Safe discount ceiling when cost data is available.
+- Replaced technical elasticity/scatter terminology with owner-friendly discount, revenue, profit, and margin language.
+- Added a WOOF Pricing Recommendation panel that explains the suggested discount and warns when the chosen discount may fall below the target margin.
+- Connected the Dynamic Pricing Simulator chart more visibly to the discount slider by adding a selected-discount marker, highlighted selected dots, chart legend, axis labels, compact value labels, and live revenue/profit cards for the selected discount.
+- Moved the pricing chart legend out of the graph and into a compact strip between the simulator graph/results area and the WOOF Pricing Recommendation panel.
+- Simplified the pricing chart legend strip by removing the `Graph Legend` title and `Selected Discount` legend item.
+
+### Files Changed
+
+- `backend/src/analytics/python/cross_sell.py`
+- `backend/src/analytics/analytics.controller.ts`
+- `backend/src/analytics/analytics.service.ts`
+- `frontend/src/app/lib/api.ts`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `python backend\src\analytics\python\test_cross_sell.py`.
+- Passed: `npm run build` in `frontend` after rerunning outside the sandbox because Next.js worker spawning hit `spawn EPERM`.
+- Passed: `npm run build` in `frontend` after adding category filters and numbered picker pages.
+- Passed: `npm run build` in `backend` after adding the pricing catalog endpoint.
+- Passed: `npm run build` in `frontend` after adding the Full Catalog toggle and catalog API helper.
+- Passed: `npm run build` in `frontend` after connecting and labeling the Dynamic Pricing Simulator chart.
+- Passed: `npm run build` in `frontend` after moving the pricing chart legend below the graph.
+- Passed: `npm run build` in `frontend` after simplifying the pricing chart legend strip.
+
+## 2026-08-01 - Bundle Simulator Header Date Filter Integration
+
+### Requested
+
+- Make the entire AI Simulation Bundle Simulator respond to the global Header Filter date range.
+- Example: when the Header Filter is set to Last 7 Days, Bundle Simulator should only display the last 7 days of report data.
+
+### Backend Changes
+
+- Extended cross-sell query handling with optional `dateStart` and `dateEnd` parameters.
+- Applied the selected date window to cross-sell basket building, raw analysis, hourly volume, sector summary, and item price/economics aggregation.
+- Added `dateStart` and `dateEnd` to cross-sell cache identity so cached results cannot leak across different Header Filter ranges.
+- Preserved existing hour, sector, threshold, FP-Growth, bundle candidate, and campaign draft behavior.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/lib/api.ts` so cross-sell requests can send `dateStart` and `dateEnd`.
+- Updated `frontend/src/app/pages/AISimulation.tsx` to:
+  - Read the Header Filter from `globalDateRange`.
+  - Listen for `globalDateRangeChanged` events from the Header.
+  - Resolve the selected range against the ingested data bounds.
+  - Send the resolved date range to `getCrossSell()`.
+  - Show the active range in the AI Simulation header using the `Range Source:` indicator and Bundle Simulator section descriptions.
+  - Added a tooltip explaining that the Bundle Simulator range is anchored to the latest ingested transaction date, not today's calendar date.
+  - Reset the bundle category filter to `All Bundle Types` if a new date range no longer contains the previously selected category.
+
+### Files Changed
+
+- `backend/src/analytics/analytics.controller.ts`
+- `backend/src/analytics/analytics.service.ts`
+- `frontend/src/app/lib/api.ts`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after rerunning outside the sandbox because Next.js worker spawning hit `spawn EPERM`.
+
 ## 2026-07-30 - Happy Hour Dynamic Promo Engine Implementation
 
 ### Requested

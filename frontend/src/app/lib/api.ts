@@ -147,6 +147,14 @@ export interface CrossSellQuery {
   hour?: string;
   sector?: 'all' | 'cafe' | 'retail' | 'services';
   forceRefresh?: string;
+  dateStart?: string;
+  dateEnd?: string;
+}
+
+export interface PricingCatalogQuery {
+  sector?: 'all' | 'cafe' | 'retail' | 'services';
+  dateStart?: string;
+  dateEnd?: string;
 }
 
 async function fetchApi(path: string, options?: RequestInit) {
@@ -256,6 +264,11 @@ export async function getChannelStatus(): Promise<ChannelStatus> {
 export async function getCrossSell(params?: CrossSellQuery) {
   const query = toQueryString(params);
   return fetchApi(`/analytics/cross-sell${query}`);
+}
+
+export async function getPricingCatalog(params?: PricingCatalogQuery) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/pricing-catalog${query}`);
 }
 
 export async function getCrossSellConfig(params?: CrossSellQuery) {

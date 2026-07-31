@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone } from "lucide-react";
+import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { createCampaignDraft, getCrossSell } from "../lib/api";
+import { createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
+import {
+  HISTORY_START_DATE,
+  INGESTED_HISTORY_END_DATE,
+  parseGlobalRange,
+} from "../lib/dateRanges";
 import aiMascot from "../../imports/no_bg_AI.png";
 import {
   BarChart,
   Bar,
   LineChart,
   Line,
-  ScatterChart,
-  Scatter,
   AreaChart,
   Area,
   XAxis,
@@ -22,7 +25,8 @@ import {
   CartesianGrid,
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
-  ZAxis,
+  ReferenceLine,
+  LabelList,
   Cell,
 } from "recharts";
 import { toast } from "sonner";
@@ -104,6 +108,10 @@ interface ItemMetric {
   support: number;
   basketCount: number;
   velocity: "fast" | "moderate" | "slow";
+  price?: number;
+  unitCost?: number;
+  unitGrossProfit?: number;
+  margin?: number;
 }
 
 interface HourlyTransactionVolume {
@@ -141,6 +149,27 @@ interface CrossSellResponse {
   error?: string;
 }
 
+interface PricingCatalogResponse {
+  itemMetrics?: ItemMetric[];
+  totalItems?: number;
+  totalTransactions?: number;
+  source?: "header_filter" | "all_history";
+  dateStart?: string;
+  dateEnd?: string;
+}
+
+interface ScenarioForecastSet {
+  cafe?: ForecastRun | null;
+  services?: ForecastRun | null;
+  retail?: any;
+}
+
+interface ScenarioFactor {
+  factor: string;
+  impact: number;
+  description: string;
+}
+
 const sectorColors: Record<string, string> = {
   cafe: "#D2B48C",
   retail: "#F59E0B",
@@ -159,6 +188,14 @@ const formatCurrency = (value?: number | null) =>
   value !== undefined && value !== null && Number.isFinite(value)
     ? `₱${value.toFixed(2)}`
     : "Unavailable";
+
+const formatCompactCurrency = (value?: number | null) => {
+  if (value === undefined || value === null || !Number.isFinite(value)) return "";
+  const absValue = Math.abs(value);
+  if (absValue >= 1_000_000) return `₱${(value / 1_000_000).toFixed(1)}M`;
+  if (absValue >= 1_000) return `₱${(value / 1_000).toFixed(1)}K`;
+  return `₱${Math.round(value)}`;
+};
 
 const formatPair = (left: string, right: string) => `${left} + ${right}`;
 
@@ -266,6 +303,16 @@ export function AISimulation() {
   const [bundleCategoryFilter, setBundleCategoryFilter] = useState("all");
   const [selectedCandidateForDrawer, setSelectedCandidateForDrawer] = useState<DrawerBundleCandidate | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+  const [dataRangeInfo, setDataRangeInfo] = useState<ApiDataRange | null>(null);
+  const [pricingSearch, setPricingSearch] = useState("");
+  const [pricingCategoryFilter, setPricingCategoryFilter] = useState("all");
+  const [pricingPage, setPricingPage] = useState(1);
+  const [pricingUsesFullCatalog, setPricingUsesFullCatalog] = useState(false);
+  const [pricingCatalogData, setPricingCatalogData] = useState<PricingCatalogResponse | null>(null);
+  const [pricingCatalogLoading, setPricingCatalogLoading] = useState(false);
+  const [pricingCatalogError, setPricingCatalogError] = useState<string | null>(null);
+  const [selectedPricingItemName, setSelectedPricingItemName] = useState<string | null>(null);
 
   const handleOpenDrawer = (candidate: DrawerBundleCandidate) => {
     setSelectedCandidateForDrawer(candidate);
@@ -275,6 +322,20 @@ export function AISimulation() {
   const debouncedSupportThreshold = useDebouncedValue(supportThreshold[0]);
   const debouncedConfidenceLevel = useDebouncedValue(confidenceLevel[0]);
   const debouncedDataTime = useDebouncedValue(dataTime[0]);
+  const latestHistoryDate = dataRangeInfo?.historyEndDate || INGESTED_HISTORY_END_DATE;
+  const historyStartDate = dataRangeInfo?.historyStartDate || HISTORY_START_DATE;
+  const selectedHeaderRange = useMemo(
+    () =>
+      parseGlobalRange(globalDateRange, latestHistoryDate, {
+        min: historyStartDate,
+        max: latestHistoryDate,
+      }),
+    [globalDateRange, historyStartDate, latestHistoryDate],
+  );
+  const selectedHeaderRangeLabel = `${selectedHeaderRange.start} to ${selectedHeaderRange.end}`;
+  const pricingCatalogRangeLabel = pricingUsesFullCatalog
+    ? "All ingested history"
+    : selectedHeaderRangeLabel;
 
   // Scenario Builder states
   const [scenarioName, setScenarioName] = useState("Weekend Promo Campaign");
@@ -284,11 +345,18 @@ export function AISimulation() {
   const [temperature, setTemperature] = useState([28]);
   const [competitorEvent, setCompetitorEvent] = useState(false);
   const [paydayWeekend, setPaydayWeekend] = useState(false);
+  const [scenarioForecasts, setScenarioForecasts] = useState<ScenarioForecastSet>({});
+  const [scenarioBaselineForecasts, setScenarioBaselineForecasts] = useState<ScenarioForecastSet>({});
+  const [scenarioPromoModel, setScenarioPromoModel] = useState<any>(null);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [scenarioRefreshKey, setScenarioRefreshKey] = useState(0);
+  const debouncedScenarioTemperature = useDebouncedValue(temperature[0], 500);
 
   const tabs = [
     { id: "bundle-simulator", label: "Bundle Simulator", icon: Sparkles },
     { id: "pricing-lab", label: "Pricing Laboratory", icon: TrendingUp },
-    { id: "traffic-optimizer", label: "Traffic Optimizer", icon: Map },
+    { id: "traffic-optimizer", label: "Traffic Optimizer", icon: MapIcon },
     { id: "scenario-builder", label: "Scenario Builder", icon: FlaskConical },
     { id: "activation-layer", label: "Activation Layer", icon: Megaphone },
   ];
@@ -345,6 +413,38 @@ export function AISimulation() {
   };
 
   useEffect(() => {
+    const savedRange = window.localStorage.getItem("globalDateRange");
+    if (savedRange) {
+      setGlobalDateRange(savedRange);
+    }
+
+    const handleRangeChange = (event: Event) => {
+      const nextRange = (event as CustomEvent<string>).detail;
+      if (nextRange) {
+        setGlobalDateRange(nextRange);
+      }
+    };
+
+    window.addEventListener("globalDateRangeChanged", handleRangeChange);
+    return () => window.removeEventListener("globalDateRangeChanged", handleRangeChange);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDataRange()
+      .then((range) => {
+        if (!cancelled) {
+          setDataRangeInfo(range);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setCrossSellLoading(true);
     setCrossSellError(null);
@@ -356,6 +456,8 @@ export function AISimulation() {
       maxBundleCandidates: "20",
       hour: String(debouncedDataTime),
       sector: "all",
+      dateStart: selectedHeaderRange.start,
+      dateEnd: selectedHeaderRange.end,
     })
       .then((result: CrossSellResponse) => {
         if (!cancelled) {
@@ -380,17 +482,55 @@ export function AISimulation() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedSupportThreshold, debouncedConfidenceLevel, debouncedDataTime]);
+  }, [
+    debouncedSupportThreshold,
+    debouncedConfidenceLevel,
+    debouncedDataTime,
+    selectedHeaderRange.end,
+    selectedHeaderRange.start,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPricingCatalogLoading(true);
+    setPricingCatalogError(null);
+
+    getPricingCatalog({
+      sector: "all",
+      ...(pricingUsesFullCatalog
+        ? {}
+        : {
+            dateStart: selectedHeaderRange.start,
+            dateEnd: selectedHeaderRange.end,
+          }),
+    })
+      .then((result: PricingCatalogResponse) => {
+        if (!cancelled) {
+          setPricingCatalogData(result);
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setPricingCatalogError(error.message);
+          setPricingCatalogData(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPricingCatalogLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pricingUsesFullCatalog, selectedHeaderRange.end, selectedHeaderRange.start]);
 
   const handleRunSimulation = () => {
-    toast.info("Running simulation...", {
-      description: "Calculating optimal pricing and demand scenarios...",
+    setScenarioRefreshKey((key) => key + 1);
+    toast.info("Updating scenario predictions...", {
+      description: "Pulling forecasts and recalculating the what-if outcome.",
     });
-    setTimeout(() => {
-      toast.success("Simulation complete!", {
-        description: "Results updated with latest parameters.",
-      });
-    }, 2000);
   };
 
   // Format hour for display (7 AM - 7 PM)
@@ -403,6 +543,9 @@ export function AISimulation() {
   const rules = crossSellData?.rules || [];
   const bundleCandidates = crossSellData?.bundleCandidates || [];
   const itemMetrics = crossSellData?.itemMetrics || [];
+  const pricingCatalogMetrics = pricingCatalogData?.itemMetrics?.length
+    ? pricingCatalogData.itemMetrics
+    : itemMetrics;
   const rawAnalysis = crossSellData?.rawAnalysis;
   const avgRuleLift =
     rules.length > 0
@@ -658,6 +801,15 @@ export function AISimulation() {
     return filtered.slice(0, 8);
   }, [allBundlePredictions, bundleCategoryFilter]);
 
+  useEffect(() => {
+    if (
+      bundleCategoryFilter !== "all" &&
+      !bundleCategoryOptions.includes(bundleCategoryFilter)
+    ) {
+      setBundleCategoryFilter("all");
+    }
+  }, [bundleCategoryFilter, bundleCategoryOptions]);
+
   const proximityRecommendations = useMemo(() => {
     const valid = allBundlePredictions.filter((b) => !isExcludedPair(b.itemA, b.itemB, b.bundleArchetype));
     const pool = valid.length > 0 ? valid : allBundlePredictions;
@@ -812,19 +964,251 @@ export function AISimulation() {
     };
   }, [allBundlePredictions, rules]);
 
-  // Dynamic pricing data based on discount slider
+  const pricingItemCatalog = useMemo(() => {
+    type PricingItem = {
+      name: string;
+      sector: string;
+      sectors: string[];
+      support: number;
+      basketCount: number;
+      velocity: "fast" | "moderate" | "slow";
+      price: number | null;
+      unitCost: number | null;
+      unitGrossProfit: number | null;
+      margin: number | null;
+    };
+
+    const items = new Map<string, PricingItem>();
+    const upsert = (input: Partial<PricingItem> & { name: string }) => {
+      const existing = items.get(input.name);
+      const next: PricingItem = {
+        name: input.name,
+        sector: input.sector || existing?.sector || "unknown",
+        sectors: input.sectors || existing?.sectors || [input.sector || existing?.sector || "unknown"],
+        support: input.support ?? existing?.support ?? 0,
+        basketCount: input.basketCount ?? existing?.basketCount ?? 0,
+        velocity: input.velocity || existing?.velocity || "moderate",
+        price: input.price ?? existing?.price ?? null,
+        unitCost: input.unitCost ?? existing?.unitCost ?? null,
+        unitGrossProfit: input.unitGrossProfit ?? existing?.unitGrossProfit ?? null,
+        margin: input.margin ?? existing?.margin ?? null,
+      };
+      items.set(input.name, next);
+    };
+
+    pricingCatalogMetrics.forEach((metric) => {
+      upsert({
+        name: metric.item,
+        sector: metric.sector,
+        sectors: metric.sectors || [metric.sector],
+        support: metric.support || 0,
+        basketCount: metric.basketCount || 0,
+        velocity: metric.velocity,
+        price: metric.price ?? null,
+        unitCost: metric.unitCost ?? null,
+        unitGrossProfit: metric.unitGrossProfit ?? null,
+        margin: metric.margin ?? null,
+      });
+    });
+
+    [...bundleCandidates, ...rules].forEach((entry: any) => {
+      if (entry.itemA || entry.anchorItem) {
+        upsert({
+          name: entry.itemA || entry.anchorItem,
+          sector: firstSector(entry.antecedentSectors),
+          sectors: entry.antecedentSectors || [firstSector(entry.antecedentSectors)],
+          price: entry.itemAPrice ?? null,
+          unitCost: entry.itemACost ?? null,
+        });
+      }
+      if (entry.itemB || entry.bundleItem) {
+        upsert({
+          name: entry.itemB || entry.bundleItem,
+          sector: firstSector(entry.consequentSectors),
+          sectors: entry.consequentSectors || [firstSector(entry.consequentSectors)],
+          price: entry.itemBPrice ?? null,
+          unitCost: entry.itemBCost ?? null,
+        });
+      }
+    });
+
+    return Array.from(items.values()).sort(
+      (a, b) => b.basketCount - a.basketCount || a.name.localeCompare(b.name),
+    );
+  }, [bundleCandidates, pricingCatalogMetrics, rules]);
+
+  const pricingCategoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: pricingItemCatalog.length,
+      cafe: 0,
+      services: 0,
+      retail: 0,
+    };
+
+    pricingItemCatalog.forEach((item) => {
+      const sectors = new Set(
+        (item.sectors?.length ? item.sectors : [item.sector]).map(normalizeSectorForCategory),
+      );
+      sectors.forEach((sector) => {
+        if (sector in counts && sector !== "all") {
+          counts[sector] += 1;
+        }
+      });
+    });
+
+    return counts;
+  }, [pricingItemCatalog]);
+  const pricingCategoryOptions = [
+    { id: "all", label: "All Items" },
+    { id: "cafe", label: "Cafe" },
+    { id: "services", label: "Services" },
+    { id: "retail", label: "Retail" },
+  ];
+
+  const filteredPricingItems = useMemo(() => {
+    const query = pricingSearch.trim().toLowerCase();
+    return pricingItemCatalog
+      .filter((item) => {
+        const sectors = (item.sectors?.length ? item.sectors : [item.sector]).map(normalizeSectorForCategory);
+        const matchesCategory =
+          pricingCategoryFilter === "all" || sectors.includes(pricingCategoryFilter);
+        const matchesSearch =
+          !query ||
+          item.name.toLowerCase().includes(query) ||
+          sectors.some((sector) => formatSector(sector).toLowerCase().includes(query));
+
+        return matchesCategory && matchesSearch;
+      });
+  }, [pricingCategoryFilter, pricingItemCatalog, pricingSearch]);
+  const pricingPageCount = Math.max(1, Math.ceil(filteredPricingItems.length / 5));
+  const visiblePricingItems = useMemo(() => {
+    const pageStart = (pricingPage - 1) * 5;
+    return filteredPricingItems.slice(pageStart, pageStart + 5);
+  }, [filteredPricingItems, pricingPage]);
+
+  useEffect(() => {
+    setPricingPage(1);
+  }, [pricingCategoryFilter, pricingSearch]);
+
+  useEffect(() => {
+    if (pricingPage > pricingPageCount) {
+      setPricingPage(pricingPageCount);
+    }
+  }, [pricingPage, pricingPageCount]);
+
+  useEffect(() => {
+    if (
+      filteredPricingItems.length > 0 &&
+      (!selectedPricingItemName ||
+        !filteredPricingItems.some((item) => item.name === selectedPricingItemName))
+    ) {
+      setSelectedPricingItemName(filteredPricingItems[0].name);
+    } else if (filteredPricingItems.length === 0 && selectedPricingItemName !== null) {
+      setSelectedPricingItemName(null);
+    }
+  }, [filteredPricingItems, selectedPricingItemName]);
+
+  const selectedPricingItem =
+    filteredPricingItems.find((item) => item.name === selectedPricingItemName) ||
+    null;
+
   const pricingScenarios = useMemo(() => {
-    return Array.from({ length: 20 }, (_, i) => {
-      const discount = i * 2.5;
-      const demandMultiplier = 1 + (discount / 100) * 1.8;
+    if (!selectedPricingItem?.price || selectedPricingItem.price <= 0) return [];
+
+    const price = selectedPricingItem.price;
+    const unitCost = selectedPricingItem.unitCost ?? null;
+    const baseDemand = Math.max(1, selectedPricingItem.basketCount || 1);
+    const sectorSensitivity =
+      selectedPricingItem.sector === "retail"
+        ? 1.2
+        : selectedPricingItem.sector === "cafe"
+          ? 1.05
+          : selectedPricingItem.sector === "services"
+            ? 0.8
+            : 1;
+    const velocitySensitivity =
+      selectedPricingItem.velocity === "slow"
+        ? 1.35
+        : selectedPricingItem.velocity === "fast"
+          ? 0.75
+          : 1;
+    const responseRate = sectorSensitivity * velocitySensitivity;
+
+    return Array.from({ length: 11 }, (_, index) => {
+      const discount = index * 5;
+      const customerLift = Math.min(1.4, (discount / 100) * responseRate);
+      const expectedSales = Math.max(1, Math.round(baseDemand * (1 + customerLift)));
+      const sellingPrice = Math.round(price * (1 - discount / 100) * 100) / 100;
+      const projectedRevenue = Math.round(sellingPrice * expectedSales * 100) / 100;
+      const projectedProfit =
+        unitCost !== null
+          ? Math.round((sellingPrice - unitCost) * expectedSales * 100) / 100
+          : null;
+      const projectedMargin =
+        projectedProfit !== null && projectedRevenue > 0
+          ? Math.round((projectedProfit / projectedRevenue) * 1000) / 10
+          : null;
+
       return {
-        discount: discount,
-        demand: 100 * demandMultiplier + Math.random() * 20,
-        revenue: (100 * demandMultiplier) * (100 - discount) * 0.28,
-        margin: 70 - discount * 1.2,
+        discount,
+        discountLabel: `${discount}%`,
+        sellingPrice,
+        expectedSales,
+        customerLiftPercent: Math.round(customerLift * 100),
+        projectedRevenue,
+        projectedProfit,
+        projectedMargin,
       };
     });
-  }, []);
+  }, [selectedPricingItem]);
+
+  const currentPricingScenario =
+    pricingScenarios.find((scenario) => scenario.discount === discountValue[0]) ||
+    pricingScenarios[0] ||
+    null;
+  const baselinePricingScenario = pricingScenarios[0] || null;
+  const minimumPricingMargin = 30;
+  const profitablePricingScenarios = pricingScenarios.filter(
+    (scenario) =>
+      scenario.projectedProfit !== null &&
+      (scenario.projectedMargin ?? 0) >= minimumPricingMargin,
+  );
+  const recommendedPricingScenario =
+    (profitablePricingScenarios.length ? profitablePricingScenarios : pricingScenarios)
+      .slice()
+      .sort(
+        (a, b) =>
+          (b.projectedProfit ?? b.projectedRevenue) -
+          (a.projectedProfit ?? a.projectedRevenue),
+      )[0] || null;
+  const maxSafeItemDiscount =
+    selectedPricingItem?.price &&
+    selectedPricingItem.unitCost !== null &&
+    selectedPricingItem.unitCost !== undefined
+      ? Math.max(
+          0,
+          Math.min(
+            50,
+            Math.floor(
+              (1 -
+                selectedPricingItem.unitCost /
+                  (selectedPricingItem.price * (1 - minimumPricingMargin / 100))) *
+                100,
+            ),
+          ),
+        )
+      : null;
+  const selectedProfitChange =
+    currentPricingScenario &&
+    baselinePricingScenario &&
+    currentPricingScenario.projectedProfit !== null &&
+    baselinePricingScenario.projectedProfit !== null
+      ? Math.round(
+          (currentPricingScenario.projectedProfit -
+            baselinePricingScenario.projectedProfit) *
+            100,
+        ) / 100
+      : null;
 
   // Generate predicted customers for floorplan based on time
   const predictedCustomers = useMemo(() => {
@@ -864,67 +1248,185 @@ export function AISimulation() {
     { date: "Apr 6", time: "3-4 PM", predicted: "+18%", actual: "+22%", result: "✓", lift: 22 },
   ];
 
-  // Calculate scenario outcomes dynamically
-  const calculateScenarioOutcome = () => {
-    let baseRevenue = 45280;
-    let baseOrders = 127;
+  const extractForecastTotals = (run?: ForecastRun | any | null) => {
+    const forecastRows = Array.isArray(run?.forecast) ? run.forecast.slice(0, 7) : [];
+    const historicalRows = Array.isArray(run?.historical) ? run.historical.slice(-7) : [];
+    const unitPrice = Number(run?.modelMetadata?.priceCalibration?.unitPrice || run?.kpis?.avgOrderValue || 0);
+    const avgOrderValue = Number(run?.kpis?.avgOrderValue || 0) || 350;
+    const rows = forecastRows.length ? forecastRows : historicalRows;
+    const revenue = rows.reduce((sum: number, point: any) => {
+      const projected = Number(point.projectedNetSales ?? point.revenue ?? point.actual);
+      const quantity = Number(point.forecastQuantity ?? point.forecast ?? point.orders ?? 0);
+      return sum + (Number.isFinite(projected) && projected > 0 ? projected : quantity * unitPrice);
+    }, 0);
+    const orders = rows.reduce((sum: number, point: any) => {
+      const quantity = Number(point.forecastQuantity ?? point.forecast ?? point.orders);
+      if (Number.isFinite(quantity) && quantity > 0) return sum + quantity;
+      const projected = Number(point.projectedNetSales ?? point.revenue ?? point.actual);
+      return sum + (Number.isFinite(projected) && projected > 0 ? projected / avgOrderValue : 0);
+    }, 0);
 
-    if (weather === "sunny") {
-      baseRevenue *= 1.15;
-      baseOrders *= 1.12;
-    } else if (weather === "rainy") {
-      baseRevenue *= 0.88;
-      baseOrders *= 0.85;
-    }
+    return { revenue, orders };
+  };
 
-    if (promoActive) {
-      baseRevenue *= 1.18;
-      baseOrders *= 1.15;
-    }
-
-    if (dayOfWeek === "saturday" || dayOfWeek === "sunday") {
-      baseRevenue *= 1.22;
-      baseOrders *= 1.18;
-    }
-
-    if (temperature[0] > 30) {
-      baseRevenue *= 0.95;
-      baseOrders *= 0.97;
-    }
-
-    if (competitorEvent) {
-      baseRevenue *= 0.92;
-      baseOrders *= 0.95;
-    }
-
-    if (paydayWeekend) {
-      baseRevenue *= 1.26;
-      baseOrders *= 1.20;
-    }
-
-    const avgTransaction = baseRevenue / baseOrders;
-    const cafeShare = 40.8 + (promoActive ? 2.4 : 0) + (weather === "sunny" ? 1.5 : 0);
-
+  const combineForecastTotals = (set: ScenarioForecastSet) => {
+    const cafe = extractForecastTotals(set.cafe);
+    const services = extractForecastTotals(set.services);
+    const retail = extractForecastTotals(set.retail);
     return {
-      revenue: Math.round(baseRevenue),
-      orders: Math.round(baseOrders),
-      avgTransaction: Math.round(avgTransaction),
-      cafeShare: cafeShare.toFixed(1),
-      revenueChange: ((baseRevenue - 45280) / 45280 * 100).toFixed(1),
-      ordersChange: ((baseOrders - 127) / 127 * 100).toFixed(1),
-      avgTransactionChange: ((avgTransaction - 356) / 356 * 100).toFixed(1),
-      cafeShareChange: (cafeShare - 40.8).toFixed(1),
+      revenue: cafe.revenue + services.revenue + retail.revenue,
+      orders: cafe.orders + services.orders + retail.orders,
+      cafeRevenue: cafe.revenue,
+      servicesRevenue: services.revenue,
+      retailRevenue: retail.revenue,
     };
   };
 
-  const scenarioOutcome = useMemo(calculateScenarioOutcome, [
-    weather,
-    promoActive,
-    dayOfWeek,
-    temperature,
+  useEffect(() => {
+    let cancelled = false;
+    setScenarioLoading(true);
+    setScenarioError(null);
+
+    const scenarioParams = {
+      days: "7",
+      temp: String(debouncedScenarioTemperature),
+      rain: weather === "rainy" ? "1" : "0",
+      holiday: paydayWeekend ? "1" : "0",
+    };
+
+    Promise.all([
+      getForecast("Cafe", { days: "7" }),
+      getForecast("Services", { days: "7" }),
+      getForecast("Retail", { days: "7" }),
+      getForecast("Cafe", scenarioParams),
+      getForecast("Services", scenarioParams),
+      getForecast("Retail", { days: "7" }),
+      getNextQuietPeriod().catch(() => null),
+    ])
+      .then(([baselineCafe, baselineServices, baselineRetail, scenarioCafe, scenarioServices, scenarioRetail, quietPeriod]) => {
+        if (!cancelled) {
+          setScenarioBaselineForecasts({ cafe: baselineCafe, services: baselineServices, retail: baselineRetail });
+          setScenarioForecasts({ cafe: scenarioCafe, services: scenarioServices, retail: scenarioRetail });
+          setScenarioPromoModel(quietPeriod);
+          if (scenarioRefreshKey > 0) {
+            toast.success("Scenario predictions updated.", {
+              description: "Forecast and promo model outputs are reflected in Scenario Builder.",
+            });
+          }
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setScenarioError(error.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setScenarioLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedScenarioTemperature, paydayWeekend, scenarioRefreshKey, weather]);
+
+  const scenarioFactorBreakdown = useMemo<ScenarioFactor[]>(() => {
+    const isWeekend = dayOfWeek === "saturday" || dayOfWeek === "sunday";
+    const promoProbability =
+      scenarioPromoModel?.status === "success"
+        ? Number(scenarioPromoModel.probabilityScore || 0)
+        : 0.55;
+    const promoImpact = promoActive ? 0.08 + Math.min(0.12, promoProbability * 0.12) : 0;
+
+    return [
+      {
+        factor: "Forecast Model",
+        impact: 0,
+        description: "Cafe, Services, and Retail forecasts provide the baseline demand and revenue.",
+      },
+      {
+        factor: "Weather",
+        impact: weather === "rainy" ? -0.06 : weather === "sunny" ? 0.04 : 0,
+        description: weather === "rainy" ? "Rain usually softens walk-in demand." : weather === "sunny" ? "Clear weather can improve walk-ins." : "Cloudy weather is treated as neutral.",
+      },
+      {
+        factor: "Day of Week",
+        impact: isWeekend ? 0.12 : 0,
+        description: isWeekend ? "Weekend scenarios usually support more visits." : "Weekday demand is kept near forecast baseline.",
+      },
+      {
+        factor: "Active Promo",
+        impact: promoImpact,
+        description: promoActive ? "Promo lift uses the dynamic promo model probability when available." : "No promotion lift is applied.",
+      },
+      {
+        factor: "Temperature",
+        impact: debouncedScenarioTemperature > 32 ? -0.04 : debouncedScenarioTemperature < 24 ? -0.02 : 0.02,
+        description: "Comfortable weather gets a small lift; very hot or cool days reduce visits slightly.",
+      },
+      {
+        factor: "Competitor Event",
+        impact: competitorEvent ? -0.08 : 0,
+        description: competitorEvent ? "Nearby events may pull attention away from WOOF." : "No competitor drag is applied.",
+      },
+      {
+        factor: "Payday Weekend",
+        impact: paydayWeekend ? 0.16 : 0,
+        description: paydayWeekend ? "Payday timing increases expected spend and orders." : "No payday lift is applied.",
+      },
+    ];
+  }, [
     competitorEvent,
+    dayOfWeek,
+    debouncedScenarioTemperature,
     paydayWeekend,
+    promoActive,
+    scenarioPromoModel,
+    weather,
   ]);
+
+  const scenarioOutcome = useMemo(() => {
+    const baseline = combineForecastTotals(scenarioBaselineForecasts);
+    const scenarioBase = combineForecastTotals(scenarioForecasts);
+    const baselineRevenue = baseline.revenue || rawAnalysis?.totalRevenue || 1;
+    const baselineOrders = baseline.orders || rawAnalysis?.totalTransactions || 1;
+    const totalImpact = scenarioFactorBreakdown.reduce((sum, factor) => sum + factor.impact, 0);
+    const cappedImpact = Math.max(-0.35, Math.min(0.55, totalImpact));
+    const modelRevenue = scenarioBase.revenue || baselineRevenue;
+    const modelOrders = scenarioBase.orders || baselineOrders;
+    const projectedRevenue = Math.max(0, modelRevenue * (1 + cappedImpact));
+    const projectedOrders = Math.max(0, modelOrders * (1 + cappedImpact * 0.8));
+    const baselineAvgTransaction = baselineRevenue / Math.max(1, baselineOrders);
+    const avgTransaction = projectedRevenue / Math.max(1, projectedOrders);
+    const cafeShare = projectedRevenue > 0 ? (scenarioBase.cafeRevenue / projectedRevenue) * 100 : 0;
+    const baselineCafeShare = baselineRevenue > 0 ? (baseline.cafeRevenue / baselineRevenue) * 100 : 0;
+    const accuracyValues = [
+      scenarioForecasts.cafe?.accuracy,
+      scenarioForecasts.services?.accuracy,
+      scenarioForecasts.retail?.modelInfo?.accuracy,
+    ]
+      .map(Number)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const confidence = accuracyValues.length
+      ? Math.round(accuracyValues.reduce((sum, value) => sum + value, 0) / accuracyValues.length)
+      : 0;
+
+    return {
+      revenue: Math.round(projectedRevenue),
+      orders: Math.round(projectedOrders),
+      avgTransaction: Math.round(avgTransaction),
+      cafeShare: Number.isFinite(cafeShare) ? cafeShare.toFixed(1) : "0.0",
+      revenueChange: (((projectedRevenue - baselineRevenue) / baselineRevenue) * 100).toFixed(1),
+      ordersChange: (((projectedOrders - baselineOrders) / baselineOrders) * 100).toFixed(1),
+      avgTransactionChange: (((avgTransaction - baselineAvgTransaction) / baselineAvgTransaction) * 100).toFixed(1),
+      cafeShareChange: (cafeShare - baselineCafeShare).toFixed(1),
+      baselineRevenue: Math.round(baselineRevenue),
+      baselineOrders: Math.round(baselineOrders),
+      confidence,
+      sourceLabel: baseline.revenue > 0 ? "Forecast APIs" : "Current filtered transaction summary",
+    };
+  }, [rawAnalysis, scenarioBaselineForecasts, scenarioFactorBreakdown, scenarioForecasts]);
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
@@ -939,6 +1441,18 @@ export function AISimulation() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 md:gap-3">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="border-[#FFD9EC] text-[#223047] px-3 md:px-4 py-1 text-xs md:text-sm cursor-help">
+                  Range Source: {selectedHeaderRangeLabel}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[260px]">
+                Bundle Simulator reports are scoped to the Header Filter and anchored on the latest ingested transaction date, not today's calendar date.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Badge className="bg-[#5CE1E6] text-white hover:bg-[#5CE1E6] px-3 md:px-4 py-1 text-xs md:text-sm">
             AI Laboratory
           </Badge>
@@ -1085,7 +1599,7 @@ export function AISimulation() {
                   Raw Transaction Data Analysis
                 </h2>
                 <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Live transaction stream feeding AI pattern detection models
+                  Live transaction stream feeding AI pattern detection models for {selectedHeaderRangeLabel}
                 </p>
               </div>
               <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs md:text-sm">
@@ -1195,7 +1709,7 @@ export function AISimulation() {
                     Live Behavioral Web <span className="hidden md:inline">(FP-Growth Pattern Detection Engine)</span>
                   </h2>
                   <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                    Real-time association rule mining with dynamic pattern visualization
+                    Association rule mining and pattern visualization for {selectedHeaderRangeLabel}
                   </p>
                 </div>
               </div>
@@ -1655,7 +2169,7 @@ export function AISimulation() {
                   AI-Predicted Bundle Opportunities
                 </h2>
                 <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Generated from FP-Growth analysis of {formatHour(dataTime[0])} transaction patterns
+                  Generated from FP-Growth analysis of {formatHour(dataTime[0])} transaction patterns for {selectedHeaderRangeLabel}
                 </p>
               </div>
               <Badge className="bg-[#5CE1E6] text-white hover:bg-[#5CE1E6] text-xs md:text-sm">
@@ -1901,7 +2415,7 @@ export function AISimulation() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
               {proximityRecommendations.length === 0 && (
                 <div className="lg:col-span-2 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 text-sm text-[#223047] opacity-70">
-                  No proximity recommendations are available for the selected hour. The placement advice will appear once FP-Growth rules or bundle candidates are detected from the ingested baskets.
+                  No proximity recommendations are available for the selected hour and Header Filter range. The placement advice will appear once FP-Growth rules or bundle candidates are detected from the ingested baskets.
                 </div>
               )}
               {proximityRecommendations.map((rec, idx) => (
@@ -1959,74 +2473,372 @@ export function AISimulation() {
       )}
 
       {activeTab === "pricing-lab" && (
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-          <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Dynamic Pricing Simulator
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Test discount scenarios and predict demand elasticity
-            </p>
+        <div className="space-y-4 md:space-y-6">
+          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+              <div className="flex-1">
+                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                  Choose Item To Price
+                </h2>
+                <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+                  Search {pricingCatalogRangeLabel} and choose one product, item, or service to test.
+                </p>
+              </div>
+              <div className="w-full lg:w-[360px] space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#223047] opacity-40" />
+                  <input
+                    value={pricingSearch}
+                    onChange={(event) => setPricingSearch(event.target.value)}
+                    placeholder="Search item or service"
+                    className="w-full h-10 rounded-lg border border-[#FFD9EC] pl-9 pr-3 text-sm text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+                  />
+                </div>
+                <label className="flex items-center justify-between gap-3 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] px-3 py-2 text-xs text-[#223047]">
+                  <span className="font-semibold">Full Catalog</span>
+                  <input
+                    type="checkbox"
+                    checked={pricingUsesFullCatalog}
+                    onChange={(event) => setPricingUsesFullCatalog(event.target.checked)}
+                    className="h-4 w-4 accent-[#F53799]"
+                    aria-label="Show full pricing catalog"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex flex-wrap gap-2">
+                {pricingCategoryOptions.map((option) => {
+                  const isActive = pricingCategoryFilter === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setPricingCategoryFilter(option.id)}
+                      className={`h-9 rounded-lg border px-3 text-xs font-semibold transition ${
+                        isActive
+                          ? "border-[#F53799] bg-[#F53799] text-white"
+                          : "border-[#FFD9EC] bg-white text-[#223047] hover:border-[#F53799]"
+                      }`}
+                    >
+                      {option.label} ({pricingCategoryCounts[option.id] || 0})
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-xs text-[#223047] opacity-60">
+                {pricingCatalogLoading
+                  ? "Loading catalog..."
+                  : `Showing ${visiblePricingItems.length ? (pricingPage - 1) * 5 + 1 : 0}-${Math.min(pricingPage * 5, filteredPricingItems.length)} of ${filteredPricingItems.length}`}
+              </div>
+            </div>
+
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {visiblePricingItems.length === 0 && (
+                <div className="min-w-full rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
+                  {pricingCatalogError || `No matching items were found for ${pricingCatalogRangeLabel}.`}
+                </div>
+              )}
+              {visiblePricingItems.map((item) => {
+                const isSelected = item.name === selectedPricingItem?.name;
+                return (
+                  <button
+                    key={item.name}
+                    type="button"
+                    onClick={() => setSelectedPricingItemName(item.name)}
+                    className={`min-w-[220px] max-w-[240px] rounded-xl border p-3 text-left transition ${
+                      isSelected
+                        ? "border-[#F53799] bg-[#FFF2FA] shadow-sm"
+                        : "border-[#FFD9EC] bg-white hover:border-[#F53799]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold text-[#223047]">{item.name}</div>
+                        <div className="mt-1 text-[11px] text-[#223047] opacity-60">
+                          {formatSector(item.sector)} | {item.velocity} mover
+                        </div>
+                      </div>
+                      <ShoppingBag className="w-4 h-4 text-[#F53799] flex-shrink-0" />
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-[#223047]">
+                      <div>
+                        <div className="opacity-60">Current Price</div>
+                        <div className="font-bold">{formatCurrency(item.price)}</div>
+                      </div>
+                      <div>
+                        <div className="opacity-60">Sold In Baskets</div>
+                        <div className="font-bold">{item.basketCount}</div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredPricingItems.length > 5 && (
+              <div className="flex items-center gap-2 overflow-x-auto pt-1">
+                {Array.from({ length: pricingPageCount }, (_, index) => index + 1).map((page) => {
+                  const isActive = pricingPage === page;
+                  return (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => setPricingPage(page)}
+                      className={`h-8 min-w-8 rounded-lg border px-2 text-xs font-bold transition ${
+                        isActive
+                          ? "border-[#223047] bg-[#223047] text-white"
+                          : "border-[#FFD9EC] bg-white text-[#223047] hover:border-[#F53799]"
+                      }`}
+                      aria-label={`Show pricing items page ${page}`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="space-y-3 md:space-y-4">
-            <div>
-              <label className="text-xs md:text-sm font-semibold text-[#223047] mb-2 block">
-                Discount Percentage: {discountValue[0]}%
-              </label>
-              <Slider
-                value={discountValue}
-                onValueChange={setDiscountValue}
-                max={50}
-                min={0}
-                step={5}
-              />
+          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+              <div>
+                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                  Dynamic Pricing Simulator
+                </h2>
+                <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+                  Estimate sales, revenue, profit, and margin for {selectedPricingItem?.name || "a selected item"}.
+                </p>
+              </div>
+              <Badge variant="outline" className="border-[#FFD9EC] text-[#223047] text-xs">
+                {selectedHeaderRangeLabel}
+              </Badge>
             </div>
-          </div>
 
-          <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
-            <ScatterChart>
-              <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" />
-              <XAxis
-                dataKey="discount"
-                name="Discount %"
-                stroke="#223047"
-                style={{ fontSize: "12px" }}
-              />
-              <YAxis
-                dataKey="revenue"
-                name="Revenue"
-                stroke="#223047"
-                style={{ fontSize: "12px" }}
-              />
-              <ZAxis dataKey="demand" range={[50, 400]} />
-              <RechartsTooltip
-                cursor={{ strokeDasharray: "3 3" }}
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #FFD9EC",
-                  borderRadius: "12px",
-                }}
-              />
-              <Scatter data={pricingScenarios} fill="#F53799" />
-            </ScatterChart>
-          </ResponsiveContainer>
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-4 md:gap-6">
+              <div className="space-y-4">
+                <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                    <label className="text-xs md:text-sm font-semibold text-[#223047]">
+                      Customer Discount: {discountValue[0]}%
+                    </label>
+                    <div className="text-xs text-[#223047] opacity-70">
+                      Suggested: {recommendedPricingScenario ? `${recommendedPricingScenario.discount}%` : "Unavailable"}
+                    </div>
+                  </div>
+                  <Slider
+                    value={discountValue}
+                    onValueChange={setDiscountValue}
+                    max={50}
+                    min={0}
+                    step={5}
+                    className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
+                  />
+                  <div className="flex justify-between text-[10px] text-[#223047] opacity-60 mt-2">
+                    <span>No discount</span>
+                    <span>25%</span>
+                    <span>50%</span>
+                  </div>
+                </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
-            <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl text-center">
-              <div className="text-xs text-[#223047] opacity-60 mb-2">Optimal Discount</div>
-              <div className="text-2xl md:text-3xl font-bold text-[#F53799]">20%</div>
-              <div className="text-xs text-green-600 mt-1">Max revenue point</div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="rounded-lg border border-[#FFD9EC] bg-white p-3">
+                    <div className="text-[11px] text-[#223047] opacity-60">Selected Discount</div>
+                    <div className="text-lg font-bold text-[#223047]">{discountValue[0]}%</div>
+                  </div>
+                  <div className="rounded-lg border border-[#FFD9EC] bg-white p-3">
+                    <div className="text-[11px] text-[#223047] opacity-60">Revenue At Selection</div>
+                    <div className="text-lg font-bold text-[#3AA7B5]">
+                      {formatCurrency(currentPricingScenario?.projectedRevenue)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-[#FFD9EC] bg-white p-3">
+                    <div className="text-[11px] text-[#223047] opacity-60">Profit At Selection</div>
+                    <div className="text-lg font-bold text-[#F53799]">
+                      {formatCurrency(currentPricingScenario?.projectedProfit)}
+                    </div>
+                  </div>
+                </div>
+
+                <ResponsiveContainer width="100%" height={300} className="md:!h-[360px]">
+                  <LineChart data={pricingScenarios} margin={{ top: 30, right: 18, left: 8, bottom: 16 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
+                    <XAxis
+                      dataKey="discountLabel"
+                      stroke="#223047"
+                      style={{ fontSize: "12px" }}
+                      label={{ value: "Customer discount", position: "insideBottom", offset: -10, fill: "#223047", fontSize: 11 }}
+                    />
+                    <YAxis
+                      stroke="#223047"
+                      style={{ fontSize: "12px" }}
+                      tickFormatter={(value) => formatCompactCurrency(Number(value))}
+                      label={{ value: "Projected pesos", angle: -90, position: "insideLeft", fill: "#223047", fontSize: 11 }}
+                    />
+                    <RechartsTooltip
+                      labelFormatter={(label) => `Discount: ${label}`}
+                      formatter={(value: any, name: any) => [
+                        typeof value === "number" ? formatCurrency(value) : value,
+                        String(name),
+                      ]}
+                      contentStyle={{
+                        backgroundColor: "white",
+                        border: "1px solid #FFD9EC",
+                        borderRadius: "12px",
+                      }}
+                    />
+                    {currentPricingScenario && (
+                      <ReferenceLine
+                        x={currentPricingScenario.discountLabel}
+                        stroke="#223047"
+                        strokeDasharray="4 4"
+                        label={{
+                          value: `Selected ${currentPricingScenario.discountLabel}`,
+                          position: "top",
+                          fill: "#223047",
+                          fontSize: 11,
+                        }}
+                      />
+                    )}
+                    <Line
+                      type="monotone"
+                      dataKey="projectedRevenue"
+                      name="Projected Revenue"
+                      stroke="#3AE4FA"
+                      strokeWidth={2.5}
+                      dot={(props: any) => {
+                        const isSelected = props.payload?.discount === discountValue[0];
+                        if (props.cy === null || props.cy === undefined) {
+                          return <circle cx={props.cx || 0} cy={0} r={0} />;
+                        }
+                        return (
+                          <circle
+                            cx={props.cx}
+                            cy={props.cy}
+                            r={isSelected ? 5 : 3}
+                            fill={isSelected ? "white" : "#3AE4FA"}
+                            stroke={isSelected ? "#223047" : "#3AE4FA"}
+                            strokeWidth={isSelected ? 2 : 1}
+                          />
+                        );
+                      }}
+                    >
+                      <LabelList
+                        dataKey="projectedRevenue"
+                        position="top"
+                        formatter={(value: any) => formatCompactCurrency(typeof value === "number" ? value : null)}
+                        fill="#3AA7B5"
+                        fontSize={10}
+                      />
+                    </Line>
+                    <Line
+                      type="monotone"
+                      dataKey="projectedProfit"
+                      name="Projected Gross Profit"
+                      stroke="#F53799"
+                      strokeWidth={2.5}
+                      dot={(props: any) => {
+                        const isSelected = props.payload?.discount === discountValue[0];
+                        if (props.cy === null || props.cy === undefined) {
+                          return <circle cx={props.cx || 0} cy={0} r={0} />;
+                        }
+                        return (
+                          <circle
+                            cx={props.cx}
+                            cy={props.cy}
+                            r={isSelected ? 5 : 3}
+                            fill={isSelected ? "white" : "#F53799"}
+                            stroke={isSelected ? "#223047" : "#F53799"}
+                            strokeWidth={isSelected ? 2 : 1}
+                          />
+                        );
+                      }}
+                    >
+                      <LabelList
+                        dataKey="projectedProfit"
+                        position="bottom"
+                        formatter={(value: any) => formatCompactCurrency(typeof value === "number" ? value : null)}
+                        fill="#F53799"
+                        fontSize={10}
+                      />
+                    </Line>
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-xl bg-[#FFF2FA] border border-[#FFD9EC] p-4">
+                  <div className="text-xs text-[#223047] opacity-60">New Selling Price</div>
+                  <div className="text-2xl font-bold text-[#F53799]">
+                    {formatCurrency(currentPricingScenario?.sellingPrice)}
+                  </div>
+                  <div className="text-[11px] text-[#223047] opacity-70 mt-1">
+                    Current price: {formatCurrency(selectedPricingItem?.price)}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                  <div className="text-xs text-[#223047] opacity-60">Expected Sales</div>
+                  <div className="text-2xl font-bold text-[#223047]">
+                    {currentPricingScenario?.expectedSales ?? 0}
+                  </div>
+                  <div className="text-[11px] text-[#223047] opacity-70 mt-1">
+                    {currentPricingScenario?.customerLiftPercent ?? 0}% more than current basket count
+                  </div>
+                </div>
+                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                  <div className="text-xs text-[#223047] opacity-60">Projected Gross Profit</div>
+                  <div className={`text-2xl font-bold ${selectedProfitChange !== null && selectedProfitChange < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                    {formatCurrency(currentPricingScenario?.projectedProfit)}
+                  </div>
+                  <div className="text-[11px] text-[#223047] opacity-70 mt-1">
+                    Change vs no discount: {selectedProfitChange !== null ? formatCurrency(selectedProfitChange) : "Unavailable"}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                  <div className="text-xs text-[#223047] opacity-60">Margin After Discount</div>
+                  <div className={`text-2xl font-bold ${
+                    currentPricingScenario?.projectedMargin !== null &&
+                    currentPricingScenario?.projectedMargin !== undefined &&
+                    currentPricingScenario.projectedMargin < minimumPricingMargin
+                      ? "text-red-600"
+                      : "text-[#223047]"
+                  }`}>
+                    {currentPricingScenario?.projectedMargin !== null &&
+                    currentPricingScenario?.projectedMargin !== undefined
+                      ? `${currentPricingScenario.projectedMargin}%`
+                      : "Unavailable"}
+                  </div>
+                  <div className="text-[11px] text-[#223047] opacity-70 mt-1">
+                    Safe ceiling: {maxSafeItemDiscount !== null ? `${maxSafeItemDiscount}%` : "Cost data unavailable"}
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl text-center">
-              <div className="text-xs text-[#223047] opacity-60 mb-2">Price Elasticity</div>
-              <div className="text-2xl md:text-3xl font-bold text-[#223047]">-1.42</div>
-              <div className="text-xs text-[#223047] opacity-50 mt-1">Elastic demand</div>
+
+            <div className="flex flex-wrap items-center gap-4 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] px-4 py-3 text-xs text-[#223047]">
+              <span className="flex items-center gap-2">
+                <span className="h-0.5 w-8 rounded-full bg-[#3AE4FA]" />
+                Projected Revenue
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-0.5 w-8 rounded-full bg-[#F53799]" />
+                Projected Gross Profit
+              </span>
             </div>
-            <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl text-center">
-              <div className="text-xs text-[#223047] opacity-60 mb-2">Break-even Point</div>
-              <div className="text-2xl md:text-3xl font-bold text-[#223047]">35%</div>
-              <div className="text-xs text-orange-600 mt-1">Critical threshold</div>
+
+            <div className="rounded-xl border border-[#FFD9EC] bg-[#223047] p-4 text-white">
+              <div className="text-xs font-bold tracking-wide mb-2">WOOF Pricing Recommendation</div>
+              <p className="text-sm opacity-90" style={{ lineHeight: "1.6" }}>
+                {selectedPricingItem?.price
+                  ? recommendedPricingScenario
+                    ? `For ${selectedPricingItem.name}, WOOF recommends testing around ${recommendedPricingScenario.discount}% because it produces the strongest projected gross profit while keeping the result understandable for owner review.`
+                    : `For ${selectedPricingItem.name}, WOOF needs more pricing history before recommending a discount.`
+                  : "Select an item with price data to simulate a business-ready pricing recommendation."}
+                {maxSafeItemDiscount !== null && discountValue[0] > maxSafeItemDiscount
+                  ? ` The selected ${discountValue[0]}% discount is above the safe ceiling, so profit margin may fall below the ${minimumPricingMargin}% target.`
+                : ""}
+              </p>
             </div>
           </div>
         </div>
@@ -2250,7 +3062,7 @@ export function AISimulation() {
                 Business Scenario Builder & What-If Analysis
               </h2>
               <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Configure scenario parameters and see real-time predicted outcomes
+                Test operational scenarios using forecast APIs, weather inputs, and the promo response model.
               </p>
             </div>
 
@@ -2278,9 +3090,9 @@ export function AISimulation() {
                     onChange={(e) => setWeather(e.target.value)}
                     className="w-full px-3 md:px-4 py-2 border border-[#FFD9EC] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F53799] text-sm md:text-base"
                   >
-                    <option value="sunny">☀️ Sunny</option>
-                    <option value="rainy">🌧️ Rainy</option>
-                    <option value="cloudy">☁️ Cloudy</option>
+                    <option value="sunny">Sunny</option>
+                    <option value="rainy">Rainy</option>
+                    <option value="cloudy">Cloudy</option>
                   </select>
                 </div>
 
@@ -2305,7 +3117,7 @@ export function AISimulation() {
 
                 <div>
                   <label className="text-xs md:text-sm font-semibold text-[#223047] mb-2 block">
-                    Temperature: {temperature[0]}°C
+                    Temperature: {temperature[0]}C
                   </label>
                   <Slider
                     value={temperature}
@@ -2327,7 +3139,7 @@ export function AISimulation() {
                       />
                       <div>
                         <div className="text-xs md:text-sm font-semibold text-[#223047]">Promo Active</div>
-                        <div className="text-xs text-[#223047] opacity-60">+18% lift</div>
+                        <div className="text-xs text-[#223047] opacity-60">Uses promo response model</div>
                       </div>
                     </label>
                   </div>
@@ -2342,7 +3154,7 @@ export function AISimulation() {
                       />
                       <div>
                         <div className="text-xs md:text-sm font-semibold text-[#223047]">Payday Weekend</div>
-                        <div className="text-xs text-[#223047] opacity-60">+26% lift</div>
+                        <div className="text-xs text-[#223047] opacity-60">Adds spend timing lift</div>
                       </div>
                     </label>
                   </div>
@@ -2357,7 +3169,7 @@ export function AISimulation() {
                       />
                       <div>
                         <div className="text-xs md:text-sm font-semibold text-[#223047]">Competitor Event Nearby</div>
-                        <div className="text-xs text-[#223047] opacity-60">-8% impact</div>
+                        <div className="text-xs text-[#223047] opacity-60">Models possible demand loss</div>
                       </div>
                     </label>
                   </div>
@@ -2365,21 +3177,35 @@ export function AISimulation() {
 
                 <Button
                   onClick={handleRunSimulation}
+                  disabled={scenarioLoading}
                   className="w-full bg-[#F53799] hover:bg-[#D42A7D]"
                 >
-                  Update Predictions
+                  {scenarioLoading ? "Updating Predictions..." : "Update Predictions"}
                 </Button>
               </div>
 
               {/* Right: Outcomes */}
               <div className="space-y-4 md:space-y-6">
                 <div className="p-4 md:p-6 bg-gradient-to-br from-[#F53799] to-[#D42A7D] rounded-xl md:rounded-2xl text-white">
-                  <h3 className="text-base md:text-lg font-bold mb-3 md:mb-4">Predicted Outcomes</h3>
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-3 md:mb-4">
+                    <div>
+                      <h3 className="text-base md:text-lg font-bold">Predicted Outcomes</h3>
+                      <div className="text-xs opacity-75 mt-1">Source: {scenarioOutcome.sourceLabel}</div>
+                    </div>
+                    <div className="text-xs bg-white/15 rounded-lg px-3 py-2">
+                      Model confidence: {scenarioOutcome.confidence ? `${scenarioOutcome.confidence}%` : "Calibrating"}
+                    </div>
+                  </div>
+                  {scenarioError && (
+                    <div className="mb-3 rounded-lg bg-white/15 p-3 text-xs">
+                      {scenarioError}
+                    </div>
+                  )}
                   <div className="space-y-3">
                     {[
                       {
                         metric: "Revenue",
-                        value: `₱${scenarioOutcome.revenue.toLocaleString()}`,
+                        value: formatCurrency(scenarioOutcome.revenue),
                         change: `${parseFloat(scenarioOutcome.revenueChange) > 0 ? "+" : ""}${scenarioOutcome.revenueChange}%`,
                       },
                       {
@@ -2389,7 +3215,7 @@ export function AISimulation() {
                       },
                       {
                         metric: "Avg Transaction",
-                        value: `₱${scenarioOutcome.avgTransaction}`,
+                        value: formatCurrency(scenarioOutcome.avgTransaction),
                         change: `${parseFloat(scenarioOutcome.avgTransactionChange) > 0 ? "+" : ""}${scenarioOutcome.avgTransactionChange}%`,
                       },
                       {
@@ -2412,36 +3238,44 @@ export function AISimulation() {
                       </div>
                     ))}
                   </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                    <div className="rounded-lg bg-white/10 p-3">
+                      <div className="opacity-70">Baseline Revenue</div>
+                      <div className="font-bold">{formatCurrency(scenarioOutcome.baselineRevenue)}</div>
+                    </div>
+                    <div className="rounded-lg bg-white/10 p-3">
+                      <div className="opacity-70">Baseline Orders</div>
+                      <div className="font-bold">{scenarioOutcome.baselineOrders}</div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-3 md:space-y-4">
                   <h3 className="text-sm md:text-base font-bold text-[#223047]">Impact Breakdown</h3>
                   <div className="space-y-2">
-                    {[
-                      { factor: "Weather", impact: weather === "sunny" ? "+15%" : weather === "rainy" ? "-12%" : "0%" },
-                      { factor: "Day of Week", impact: dayOfWeek.includes("sat") || dayOfWeek.includes("sun") ? "+22%" : "0%" },
-                      { factor: "Active Promo", impact: promoActive ? "+18%" : "0%" },
-                      { factor: "Temperature", impact: temperature[0] > 30 ? "-5%" : "0%" },
-                      { factor: "Competitor Event", impact: competitorEvent ? "-8%" : "0%" },
-                      { factor: "Payday Weekend", impact: paydayWeekend ? "+26%" : "0%" },
-                    ].map((item) => (
+                    {scenarioFactorBreakdown.map((item) => {
+                      const impactLabel = `${item.impact > 0 ? "+" : ""}${Math.round(item.impact * 100)}%`;
+                      return (
                       <div
                         key={item.factor}
-                        className="flex items-center justify-between p-3 bg-white rounded-lg"
+                        className="flex items-start justify-between gap-3 p-3 bg-white rounded-lg"
                       >
-                        <span className="text-sm text-[#223047]">{item.factor}</span>
+                        <div>
+                          <div className="text-sm font-semibold text-[#223047]">{item.factor}</div>
+                          <div className="text-xs text-[#223047] opacity-60 mt-1">{item.description}</div>
+                        </div>
                         <span
-                          className={`text-sm font-semibold ${item.impact.startsWith("+")
+                          className={`text-sm font-semibold flex-shrink-0 ${impactLabel.startsWith("+")
                               ? "text-green-600"
-                              : item.impact.startsWith("-")
+                              : impactLabel.startsWith("-")
                                 ? "text-red-600"
                                 : "text-gray-500"
                             }`}
                         >
-                          {item.impact}
+                          {impactLabel}
                         </span>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 </div>
 
