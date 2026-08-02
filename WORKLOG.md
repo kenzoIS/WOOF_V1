@@ -2,6 +2,344 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-08-03 - AI Simulation Work Session Handoff
+
+### Requested
+
+- Create a handoff markdown file summarizing the AI Simulation module changes completed during the conversation.
+- Include enough context for teammates or another AI agent to continue the work.
+
+### Documentation Changes
+
+- Added `AI_SIMULATION_WORK_SESSION_HANDOFF.md`.
+- Captured final-state notes for Traffic Optimizer, Scenario Builder, Pricing Laboratory, Dynamic Promo, Activation Layer, verification status, known caveats, and suggested next tasks.
+- Clarified that the Activation Layer PetHub publish path was restored by user request after the technical sweep.
+
+### Verification
+
+- Documentation-only update; no code validation required.
+
+## 2026-08-03 - Activation Layer Full-Width Section Layout
+
+### Requested
+
+- Separate Promo Inputs and Campaign Drafts in the AI Simulation Activation Layer tab.
+- Make Promo Inputs appear first as its own full-width section.
+- Make Campaign Drafts appear below as its own full-width section.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/components/CampaignActivationLayer.tsx`.
+- Replaced the side-by-side two-column layout with stacked full-width sections.
+- Kept Promo Inputs first and Campaign Drafts below.
+- Adjusted Promo Inputs cards and Campaign Draft asset/list areas to use responsive grids inside each full-width section.
+
+### Verification
+
+- Passed: `npx tsc --noEmit` in `frontend`.
+
+## 2026-08-02 - Activation Layer PetHub Publish Restored
+
+### Requested
+
+- Revert the removal of external PetHub publishing.
+- Restore the Activation Layer capacity/feature set from before the local-only activation change.
+
+### Backend Changes
+
+- Restored Activation Layer statuses to:
+  - `draft`
+  - `approved`
+  - `queued`
+  - `published`
+- Restored `POST /api/activation/campaigns/:campaignId/publish`.
+- Restored `publishCampaignToPetHub()` so it builds the PetHub announcement payload and calls the configured PetHub announcements endpoint with `axios.post()`.
+- Restored the publish status update to `published` after successful PetHub response.
+- Removed the activation audit-log model registration and deleted the added audit-log schema file.
+
+### Frontend Changes
+
+- Restored Activation Layer controls:
+  - Approve.
+  - Queue.
+  - Publish to PetHub.
+- Restored `publishActivationCampaign()` to call `/activation/campaigns/:campaignId/publish`.
+- Restored campaign statuses in the component to `draft | approved | queued | published`.
+
+### Verification
+
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit` in `frontend`.
+- Runtime checks:
+  - `http://localhost:3001/api/analytics/data-range` returned HTTP 200.
+  - `http://localhost:3000/ai-simulation` returned HTTP 200.
+- Note: `npm run build` in `frontend` repeatedly timed out in Next.js worker processes in this environment after the earlier `spawn EPERM` issue, but TypeScript verification passed and the dev server is responding.
+
+## 2026-08-02 - AI Simulation Technical Sweep and Human-in-the-Loop Hardening
+
+### Requested
+
+- Run a senior full-stack and ML systems audit of the full AI Simulation module.
+- Validate the five tabs: Bundle Simulator, Pricing Laboratory, Traffic Optimizer, Scenario Builder, and Activation Layer.
+- Identify technical/modeling gaps and provide concrete fixes.
+- Enforce non-negotiable paper requirements around owner approval, no autonomous deployment, and auditability.
+
+### Backend Changes
+
+- Reworked Activation Layer campaign status flow:
+  - `pending` -> `approved`
+  - `pending` -> `rejected`
+  - `approved` -> `activated`
+- Removed the external PetHub publish behavior from activation. Activation now marks the campaign active locally in WOOF and returns `externalPublish: false`.
+- Added `CampaignActivationAuditLog` schema with append-only mutation blockers.
+- Registered activation audit logs in `ActivationModule`.
+- Added audit log entries for campaign generation, approval, rejection, and activation.
+- Strengthened Claude campaign generation prompt to prohibit invented prices, customer names, competitor names, medical claims, guaranteed outcomes, and unverifiable claims.
+- Added bundle campaign draft metadata to `campaign_drafts.metrics`:
+  - `sourceType`
+  - `bundleItems`
+  - item sector metadata.
+- Added Dynamic Promo model training cache signature support so the Random Forest can reuse a temp cached model when transaction history has not changed.
+
+### Frontend Changes
+
+- Updated Activation Layer UI to match paper-safe workflow:
+  - Pending Review, Approved, Activated, Rejected groups.
+  - Approve/Reject only available for pending campaigns.
+  - Activate only available for approved campaigns.
+  - Confirmation prompts before approval, rejection, and activation.
+  - Copy states that no external platform API is called.
+- Updated activation API helper to call `/activation/campaigns/:campaignId/activate`.
+- Added bundle draft metadata to `createCampaignDraft()` payload.
+- Added Pricing Laboratory disclaimer that expected sales use assumed elasticity and are decision support, not guaranteed ML forecasts.
+- Revised Pricing Recommendation wording from deterministic "recommends" to assumption-aware "estimates".
+- Revised Traffic Optimizer wording to "Sector Demand Estimate" and "Rule-based" labels.
+- Documented Traffic Optimizer demand thresholds directly in the heatmap description.
+
+### Documentation Changes
+
+- Added `AI_SIMULATION_TECHNICAL_SWEEP.md`.
+- The sweep report includes severity findings, corrected code snippets, per-tab verdicts, human-in-the-loop assessment, defense guidance, and prioritized fixes.
+
+### Files Changed
+
+- `AI_SIMULATION_TECHNICAL_SWEEP.md`
+- `backend/src/activation/activation.controller.ts`
+- `backend/src/activation/activation.module.ts`
+- `backend/src/activation/activation.service.ts`
+- `backend/src/activation/schemas/campaign-activation.schema.ts`
+- `backend/src/activation/schemas/campaign-activation-audit-log.schema.ts`
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/analytics/python/dynamic_promo.py`
+- `frontend/src/app/components/CampaignActivationLayer.tsx`
+- `frontend/src/app/lib/api.ts`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `python -m py_compile backend\src\analytics\python\dynamic_promo.py`.
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after rerunning outside the sandbox because Next.js worker spawning hit `spawn EPERM`.
+
+## 2026-08-02 - Dynamic Promo Real Discount History Training
+
+### Requested
+
+- Replace the Dynamic Promo Random Forest's synthetic-only training with real historical discounted transaction data.
+- Use discounted periods as promo examples and compare them against non-discounted baseline periods.
+
+### Backend Changes
+
+- Replaced `backend/src/analytics/python/dynamic_promo.py` with a real-history training pipeline:
+  - Accepts transaction history rows from the backend payload.
+  - Builds discounted-period examples from rows with `discount_amount` or `discount_depth`.
+  - Compares discounted item/channel/hour/weekend periods against non-discounted baselines.
+  - Labels promo success using quantity lift plus gross-profit or net-sales retention.
+  - Trains a Random Forest on real discount history when enough labeled examples exist.
+  - Uses a clearly labeled synthetic fallback only when real discount history is too sparse or one-class.
+  - Returns feature importance and validation metrics.
+- Updated `backend/src/analytics/analytics.service.ts` so `getNextQuietPeriod()` loads up to 15,000 recent rows from `fact_cross_channel_transactions` and passes them into the promo model.
+- Included promo model metrics and feature importance in the quiet-period API response.
+- Changed the promo model script to train in memory rather than rewriting the tracked `rf_promo_model.joblib` artifact on each run.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/Cafe.tsx` to show whether the quiet-period promo model used real discount history or fallback assumptions.
+- Updated `frontend/src/app/pages/AISimulation.tsx` Scenario Builder Active Promo explanation to disclose whether promo lift is based on real discount-history examples.
+
+### Files Changed
+
+- `backend/src/analytics/python/dynamic_promo.py`
+- `backend/src/analytics/analytics.service.ts`
+- `frontend/src/app/pages/Cafe.tsx`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `python -m py_compile backend\src\analytics\python\dynamic_promo.py`.
+- Passed: direct Python smoke test of `dynamic_promo.py` with sample discounted/non-discounted rows.
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after rerunning outside the sandbox because Next.js worker spawning hit `spawn EPERM`.
+- Note: the smoke test touched the tracked `backend/src/analytics/python/rf_promo_model.joblib` artifact from the old persistence behavior; the new script no longer rewrites that artifact.
+
+## 2026-08-02 - Scenario Retail Consistency and Activation Approval Gate Hardening
+
+### Requested
+
+- Answer modeling gaps raised before validation/testing.
+- Fix the Activation Layer publish backdoor so campaigns cannot skip the approval flow.
+- Strengthen Scenario Builder consistency for Retail scenario forecasts.
+
+### Backend Changes
+
+- Updated `backend/src/activation/activation.service.ts` to enforce campaign status transitions:
+  - `draft` -> `approved`
+  - `approved` -> `queued`
+  - `queued` -> `published`
+- Added a backend guard preventing PetHub publishing unless the campaign is already `queued`.
+- Updated Retail forecast handling in `backend/src/analytics/analytics.service.ts`:
+  - Retail still uses the legacy retail forecast path.
+  - Scenario weather/payday/temperature multipliers are now applied to Retail projected net sales.
+  - Retail forecast rows now expose `revenue` and `projectedNetSales` fields for clearer Scenario Builder aggregation.
+  - Added metadata describing the Retail scenario adjustment.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx` so Scenario Builder sends the same scenario params to Retail as Cafe and Services.
+- Updated `frontend/src/app/components/CampaignActivationLayer.tsx` so:
+  - Queue is enabled only for `approved` campaigns.
+  - Publish is enabled only for `queued` campaigns.
+  - The UI explains the required approval flow.
+
+### Files Changed
+
+- `backend/src/activation/activation.service.ts`
+- `backend/src/analytics/analytics.service.ts`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `frontend/src/app/components/CampaignActivationLayer.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm run build` in `backend`.
+- Passed: `npm run build` in `frontend` after rerunning outside the sandbox because Next.js worker spawning hit `spawn EPERM`.
+
+## 2026-08-02 - AI Simulation Module Handoff File
+
+### Requested
+
+- Provide a handoff file covering the whole AI Simulation module and everything completed so far so it can be given to another AI for context.
+
+### Documentation Changes
+
+- Added `AI_SIMULATION_MODULE_HANDOFF.md`.
+- Documented the current AI Simulation tabs:
+  - Bundle Simulator.
+  - Pricing Laboratory.
+  - Traffic Optimizer.
+  - Scenario Builder.
+  - Activation Layer.
+- Summarized API dependencies, recent implementation work, current placeholders, caveats, and recommended next steps.
+- Included verification commands and the known Windows/Next.js `spawn EPERM` build note.
+
+### Files Changed
+
+- `AI_SIMULATION_MODULE_HANDOFF.md`
+- `WORKLOG.md`
+
+### Verification
+
+- Documentation-only change; no build required.
+
+## 2026-08-02 - Scenario Builder Impact Breakdown Layout Update
+
+### Requested
+
+- Revise the Scenario Builder tab's Impact Breakdown section.
+- Remove Competitor Event from the scenario controls and impact factors.
+- Make Impact Breakdown span the page horizontally with two columns and three rows.
+- Make WOOF Recommendation span horizontally as its own row.
+
+### Frontend Changes
+
+- Removed the Competitor Event checkbox and corresponding negative impact calculation from `frontend/src/app/pages/AISimulation.tsx`.
+- Moved Impact Breakdown below the main Scenario Builder controls/outcomes grid as a full-width section.
+- Changed Impact Breakdown cards to a responsive two-column grid, producing three rows for the six remaining impact factors.
+- Moved WOOF Recommendation below Impact Breakdown as its own full-width section.
+
+### Files Changed
+
+- `frontend/src/app/pages/AISimulation.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm run build` in `frontend`.
+- Note: the first sandboxed build attempt failed with Windows `spawn EPERM`; rerunning the same command with approval completed successfully.
+
+## 2026-08-02 - Traffic Optimizer Sector Forecasting Update
+
+### Requested
+
+- Replace the Traffic Optimizer tab's floorplan simulation approach with a sector-based traffic optimizer.
+- Keep the change scoped only to the Traffic Optimizer tab inside the AI Simulation page.
+- Use placeholder staffing counts for now because real staff schedules will be provided later.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx` Traffic Optimizer tab to focus on sector demand forecasting instead of physical floorplan visualization.
+- Replaced randomized floorplan customer dots with deterministic sector forecasts for Grooming, Cafe, Retail, and Reception.
+- Added a 7-day sector demand heatmap using Low, Medium, and High demand levels.
+- Added staffing recommendation cards comparing predicted required staff against placeholder scheduled staff counts.
+- Added a clear placeholder-data badge and a panel listing the future inputs needed for accurate staffing recommendations:
+  - Staff roster.
+  - Shift schedule.
+  - Service capacity.
+  - Cost rules.
+- Preserved the existing Traffic Optimizer time slider and next-7-days traffic chart, now driven by sector forecast totals.
+
+### Files Changed
+
+- `frontend/src/app/pages/AISimulation.tsx`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npm run build` in `frontend`.
+- Note: the first sandboxed build attempt failed with Windows `spawn EPERM`; rerunning the same command with approval completed successfully.
+
+### Follow-up UI Refinement
+
+- Updated Traffic Optimizer heatmap tiles to emphasize visit counts and remove repeated Low/Medium/High text inside each tile.
+- Separated Staffing Recommendation, Optimization Inputs Needed Later, and WOOF Traffic Recommendation into their own full-width rows under Sector Traffic Forecasting.
+- Passed: `npm run build` in `frontend`.
+
+## 2026-08-01 - Recent AI Simulation Handoff
+
+### Requested
+
+- Create a handoff markdown file covering everything recently accomplished, starting with the Bundle Simulator responsiveness to the Header Filter.
+
+### Documentation Changes
+
+- Added `AI_SIMULATION_RECENT_HANDOFF.md`.
+- Covered recent work in order:
+  - Bundle Simulator Header Filter responsiveness.
+  - Pricing Laboratory item picker, full catalog toggle, business pricing outputs, and graph improvements.
+  - Scenario Builder forecast and promo API integration.
+- Included affected files, verification commands, current behavior, and notes for the next developer.
+
+### Files Changed
+
+- `AI_SIMULATION_RECENT_HANDOFF.md`
+- `WORKLOG.md`
+
+### Verification
+
+- Documentation-only change; no build required.
+
 ## 2026-08-01 - Scenario Builder Forecast Integration
 
 ### Requested

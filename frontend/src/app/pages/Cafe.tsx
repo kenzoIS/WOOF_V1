@@ -1450,6 +1450,22 @@ export function Cafe() {
               </span>
             </div>
 
+            {quietPeriod && quietPeriod.status === 'success' && quietPeriod.modelMetrics && (
+              <div className="rounded-xl bg-white/10 p-3 text-xs">
+                <div className="opacity-70">Promo model source</div>
+                <div className="font-semibold text-[#3AE4FA]">
+                  {quietPeriod.modelMetrics.trainingSource === "real_discount_history"
+                    ? `Real discount history (${quietPeriod.modelMetrics.trainingRows} examples)`
+                    : "Fallback model; not enough historical discount examples yet"}
+                </div>
+                {quietPeriod.modelMetrics.accuracy !== null && quietPeriod.modelMetrics.accuracy !== undefined && (
+                  <div className="mt-1 opacity-70">
+                    Validation accuracy: {Math.round(quietPeriod.modelMetrics.accuracy * 100)}%
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3 pt-2 md:pt-4">
               <div>
                 <label className="text-xs opacity-70 mb-2 block">Discount %</label>

@@ -522,7 +522,7 @@ export class AnalyticsService {
     overrides?: ForecastOverrides,
   ): Promise<any> {
     if (this.normalizeSector(sector) === 'Retail') {
-      return this.getLegacyRetailForecast(overrides?.days);
+      return this.getLegacyRetailForecast(overrides);
     }
     const module = this.normalizeForecastModule(sector);
 
@@ -1433,6 +1433,10 @@ export class AnalyticsService {
       ),
       status: 'pending',
       metrics: {
+        sourceType: dto?.sourceType || 'bundle_recommendation',
+        bundleItems: Array.isArray(dto?.bundleItems) ? dto.bundleItems : [itemA, itemB],
+        itemASector: dto?.itemASector || null,
+        itemBSector: dto?.itemBSector || null,
         support: Number(dto?.support) || 0,
         confidence: Number(dto?.confidence) || 0,
         lift: Number(dto?.lift) || 0,
@@ -1610,10 +1614,29 @@ export class AnalyticsService {
     const hour = 15; 
     const isWeekend = (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) ? 1 : 0;
     const trafficDrop = 45.0;
+    const proposedDiscountDepth = 0.15;
+    const promoTrainingRows = await this.getPromoModelTrainingRows();
+    const discountedRows = promoTrainingRows.filter(
+      (row) => Number(row.discountAmount || 0) > 0 || Number(row.discountDepth || 0) > 0,
+    ).length;
+    const promoTrainingSignature = [
+      promoTrainingRows.length,
+      discountedRows,
+      promoTrainingRows[0]?.transactionTimestamp || 'none',
+      promoTrainingRows[promoTrainingRows.length - 1]?.transactionTimestamp || 'none',
+    ].join(':');
 
     const mlResult = await this.runPython<any>(
       'dynamic_promo.py',
-      { hour, is_weekend: isWeekend, temp, traffic_drop: trafficDrop }
+      {
+        hour,
+        is_weekend: isWeekend,
+        temp,
+        traffic_drop: trafficDrop,
+        discount_depth: proposedDiscountDepth,
+        trainingSignature: promoTrainingSignature,
+        trainingRows: promoTrainingRows,
+      }
     );
 
     if (mlResult.probabilityScore <= 0.70) {
@@ -1626,9 +1649,54 @@ export class AnalyticsService {
       targetHour: hour,
       predictedTrafficDrop: trafficDrop,
       probabilityScore: mlResult.probabilityScore,
+      modelMetrics: mlResult.modelMetrics,
+      featureImportance: mlResult.featureImportance,
       temperature: temp,
       recommendedDiscount: 15
     };
+  }
+
+  private async getPromoModelTrainingRows(): Promise<any[]> {
+    const { data, error } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select(
+        [
+          'transaction_timestamp',
+          'product_id',
+          'service_id',
+          'channel_id',
+          'segment_id',
+          'quantity_sold',
+          'gross_sales',
+          'discount_amount',
+          'discount_depth',
+          'net_sales',
+          'gross_profit',
+        ].join(','),
+      )
+      .gt('gross_sales', 0)
+      .order('transaction_timestamp', { ascending: false })
+      .limit(15000);
+
+    if (error || !Array.isArray(data)) {
+      if (error) {
+        console.warn(`Could not load promo model training rows: ${error.message}`);
+      }
+      return [];
+    }
+
+    return data.map((row: any) => ({
+      transactionTimestamp: row.transaction_timestamp,
+      itemKey: row.product_id || row.service_id || 'unknown',
+      channelKey: row.channel_id || 'unknown',
+      segmentKey: row.segment_id || 'unknown',
+      quantitySold: Number(row.quantity_sold || 0),
+      grossSales: Number(row.gross_sales || 0),
+      discountAmount: Number(row.discount_amount || 0),
+      discountDepth: Number(row.discount_depth || 0),
+      netSales: Number(row.net_sales || 0),
+      grossProfit: Number(row.gross_profit || 0),
+    }));
   }
 
   async activateHappyHour(discountPercent: number, targetDate: string, targetHour: number, probabilityScore: number): Promise<any> {
@@ -3627,7 +3695,7 @@ export class AnalyticsService {
     };
   }
 
-  private async getLegacyRetailForecast(daysRequested?: string): Promise<any> {
+  private async getLegacyRetailForecast(overrides?: ForecastOverrides): Promise<any> {
     const dailyData = await this.transactionModel.aggregate([
       { $match: { sector: 'Retail' } },
       {
@@ -3657,11 +3725,12 @@ export class AnalyticsService {
         modelInfo: { model: 'Insufficient data', accuracy: 0 },
       };
     }
-    const forecastDays = this.normalizeForecastDays(daysRequested || DEFAULT_FORECAST_DAYS);
+    const forecastDays = this.normalizeForecastDays(overrides?.days || DEFAULT_FORECAST_DAYS);
     const result = await this.runPython<any>('forecast.py', {
       data: inputData,
       forecastDays,
     });
+    const scenarioAdjustment = this.getRetailScenarioAdjustment(overrides);
     return {
       ...result,
       historical: (result.historical || []).map((point: any, index: number) => ({
@@ -3672,6 +3741,49 @@ export class AnalyticsService {
           ? result.fittedValues[index] 
           : undefined,
       })),
+      forecast: (result.forecast || []).map((point: any) => {
+        const baseForecast = Number(point.forecast ?? point.revenue ?? 0);
+        const adjustedForecast = this.round(Math.max(0, baseForecast * scenarioAdjustment.multiplier));
+        return {
+          ...point,
+          forecast: adjustedForecast,
+          revenue: adjustedForecast,
+          projectedNetSales: adjustedForecast,
+          confidenceLow:
+            point.confidenceLow !== undefined
+              ? this.round(Math.max(0, Number(point.confidenceLow) * scenarioAdjustment.multiplier))
+              : point.confidenceLow,
+          confidenceHigh:
+            point.confidenceHigh !== undefined
+              ? this.round(Math.max(0, Number(point.confidenceHigh) * scenarioAdjustment.multiplier))
+              : point.confidenceHigh,
+        };
+      }),
+      modelMetadata: {
+        ...(result.modelMetadata || {}),
+        scenarioAdjustment,
+      },
+    };
+  }
+
+  private getRetailScenarioAdjustment(overrides?: ForecastOverrides) {
+    const temp = overrides?.temp !== undefined && overrides.temp !== '' ? Number(overrides.temp) : undefined;
+    const rain = overrides?.rain !== undefined && overrides.rain !== '' ? overrides.rain === '1' : false;
+    const holiday = overrides?.holiday !== undefined && overrides.holiday !== '' ? overrides.holiday === '1' : false;
+    let impact = 0;
+
+    if (rain) impact -= 0.03;
+    if (holiday) impact += 0.08;
+    if (temp !== undefined && Number.isFinite(temp)) {
+      if (temp > 32) impact -= 0.02;
+      else if (temp >= 24 && temp <= 30) impact += 0.02;
+    }
+
+    return {
+      multiplier: this.round(1 + Math.max(-0.2, Math.min(0.25, impact))),
+      impact: this.round(impact),
+      source: 'retail_legacy_forecast_scenario_adjustment',
+      note: 'Retail uses the legacy forecast model with scenario multipliers applied to projected net sales.',
     };
   }
 

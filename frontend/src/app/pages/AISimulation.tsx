@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search } from "lucide-react";
+import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search, Users, CalendarDays, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
@@ -289,7 +289,7 @@ function useDebouncedValue<T>(value: T, delayMs = 400): T {
 export function AISimulation() {
   const [activeTab, setActiveTab] = useState("bundle-simulator");
   const [discountValue, setDiscountValue] = useState([15]);
-  const [floorplanTime, setFloorplanTime] = useState([14]); // 2 PM (14 in 24h format)
+  const [trafficOptimizerTime, setTrafficOptimizerTime] = useState([14]); // 2 PM (14 in 24h format)
   const [dataTime, setDataTime] = useState([13]); // 1 PM for Bundle Simulator
 
   // Live Behavioral Web states
@@ -343,7 +343,6 @@ export function AISimulation() {
   const [promoActive, setPromoActive] = useState(true);
   const [dayOfWeek, setDayOfWeek] = useState("saturday");
   const [temperature, setTemperature] = useState([28]);
-  const [competitorEvent, setCompetitorEvent] = useState(false);
   const [paydayWeekend, setPaydayWeekend] = useState(false);
   const [scenarioForecasts, setScenarioForecasts] = useState<ScenarioForecastSet>({});
   const [scenarioBaselineForecasts, setScenarioBaselineForecasts] = useState<ScenarioForecastSet>({});
@@ -382,9 +381,16 @@ export function AISimulation() {
     confidence: number;
     lift: number;
     support?: number;
+    antecedentSectors?: string[];
+    consequentSectors?: string[];
   }) => {
     try {
       await createCampaignDraft({
+        sourceType: "bundle_recommendation",
+        bundleItems: [bundle.itemA, bundle.itemB],
+        itemASector: bundle.antecedentSectors?.[0] || null,
+        itemBSector: bundle.consequentSectors?.[0] || null,
+        status: "pending",
         bundleName: bundle.bundle,
         itemA: bundle.itemA,
         itemB: bundle.itemB,
@@ -1210,35 +1216,109 @@ export function AISimulation() {
         ) / 100
       : null;
 
-  // Generate predicted customers for floorplan based on time
-  const predictedCustomers = useMemo(() => {
-    const selectedHour = floorplanTime[0];
-    const baseCount = selectedHour >= 12 && selectedHour <= 15 ? 20 : 15;
-    const count = Math.floor(baseCount + Math.random() * 8);
-    const cafeRatio = selectedHour >= 14 && selectedHour <= 16 ? 0.6 : 0.4;
+  const trafficSectors = [
+    { name: "Grooming", color: "#3AE4FA", placeholderStaff: 2 },
+    { name: "Cafe", color: "#F53799", placeholderStaff: 2 },
+    { name: "Retail", color: "#F59E0B", placeholderStaff: 1 },
+    { name: "Reception", color: "#0D9488", placeholderStaff: 1 },
+  ];
 
-    return Array.from({ length: count }, (_, i) => ({
-      id: i,
-      x: Math.random() * 90 + 5,
-      y: Math.random() * 90 + 5,
-      type: Math.random() > cafeRatio ? "cafe" : "grooming",
-    }));
-  }, [floorplanTime]);
+  const demandStyles: Record<string, { bg: string; text: string; label: string }> = {
+    Low: { bg: "bg-green-50", text: "text-green-700", label: "Low" },
+    Medium: { bg: "bg-yellow-50", text: "text-yellow-700", label: "Medium" },
+    High: { bg: "bg-red-50", text: "text-red-700", label: "High" },
+  };
 
-  const capacity = (predictedCustomers.filter((c) => c.type === "grooming").length / 15) * 100;
+  const getDemandLevel = (value: number) => {
+    if (value >= 42) return "High";
+    if (value >= 28) return "Medium";
+    return "Low";
+  };
+
+  const getRequiredStaff = (sector: string, level: string) => {
+    if (sector === "Grooming") {
+      if (level === "High") return 4;
+      if (level === "Medium") return 2;
+      return 1;
+    }
+    if (sector === "Cafe") {
+      if (level === "High") return 3;
+      if (level === "Medium") return 2;
+      return 1;
+    }
+    if (level === "High") return 2;
+    return 1;
+  };
+
+  const sectorTrafficForecast = useMemo(() => {
+    const selectedHour = trafficOptimizerTime[0];
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    return trafficSectors.map((sector, sectorIndex) => {
+      const dayForecasts = days.map((day, dayIndex) => {
+        const weekendLift = dayIndex >= 5 ? 12 : 0;
+        const hourLift =
+          sector.name === "Grooming"
+            ? (selectedHour >= 9 && selectedHour <= 12 ? 22 : 0) + (selectedHour >= 13 && selectedHour <= 15 ? 10 : 0)
+            : sector.name === "Cafe"
+              ? (selectedHour >= 12 && selectedHour <= 14 ? 12 : 0) + (selectedHour >= 15 && selectedHour <= 18 ? 22 : 0)
+              : sector.name === "Retail"
+                ? (selectedHour >= 16 && selectedHour <= 19 ? 16 : 0)
+                : (selectedHour >= 9 && selectedHour <= 11 ? 10 : 0) + (selectedHour >= 17 && selectedHour <= 19 ? 10 : 0);
+        const base =
+          sector.name === "Grooming" ? 16 :
+          sector.name === "Cafe" ? 15 :
+          sector.name === "Retail" ? 12 :
+          9;
+        const patternLift = (selectedHour * (dayIndex + 2) + sectorIndex * 7) % 9;
+        const predicted = Math.round(base + hourLift + weekendLift + patternLift);
+        const level = getDemandLevel(predicted);
+        const requiredStaff = getRequiredStaff(sector.name, level);
+        const scheduledStaff = sector.placeholderStaff;
+        const staffDelta = requiredStaff - scheduledStaff;
+
+        return {
+          day,
+          predicted,
+          actual: dayIndex < 4 ? Math.max(0, predicted + ((dayIndex + sectorIndex) % 5) - 2) : null,
+          level,
+          requiredStaff,
+          scheduledStaff,
+          staffDelta,
+        };
+      });
+
+      return {
+        ...sector,
+        forecasts: dayForecasts,
+      };
+    });
+  }, [trafficOptimizerTime]);
+
+  const selectedTimeStaffPlan = sectorTrafficForecast.map((sector) => ({
+    sector: sector.name,
+    color: sector.color,
+    ...sector.forecasts[0],
+  }));
+
+  const totalPredictedTraffic = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.predicted, 0);
+  const highDemandSectors = selectedTimeStaffPlan.filter((sector) => sector.level === "High").length;
+  const totalScheduledPlaceholderStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.scheduledStaff, 0);
+  const totalRecommendedStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.requiredStaff, 0);
 
   // Next 7 Days Traffic Prediction based on time slot
   const trafficPrediction = useMemo(() => {
-    const selectedHour = floorplanTime[0];
-    return Array.from({ length: 7 }, (_, i) => {
-      const baseTraffic = selectedHour >= 14 && selectedHour <= 16 ? 35 : 25;
+    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, dayIndex) => {
+      const sectorTotals = sectorTrafficForecast.map((sector) => sector.forecasts[dayIndex]);
       return {
-        day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i],
-        predicted: baseTraffic + Math.random() * 10 + (i >= 5 ? 15 : 0),
-        actual: i < 4 ? baseTraffic - 2 + Math.random() * 12 + (i >= 5 ? 15 : 0) : null,
+        day,
+        predicted: sectorTotals.reduce((sum, item) => sum + item.predicted, 0),
+        actual: dayIndex < 4
+          ? sectorTotals.reduce((sum, item) => sum + (item.actual || 0), 0)
+          : null,
       };
     });
-  }, [floorplanTime]);
+  }, [sectorTrafficForecast]);
 
   // Past Happy Hour Performance
   const happyHourHistory = [
@@ -1300,7 +1380,7 @@ export function AISimulation() {
       getForecast("Retail", { days: "7" }),
       getForecast("Cafe", scenarioParams),
       getForecast("Services", scenarioParams),
-      getForecast("Retail", { days: "7" }),
+      getForecast("Retail", scenarioParams),
       getNextQuietPeriod().catch(() => null),
     ])
       .then(([baselineCafe, baselineServices, baselineRetail, scenarioCafe, scenarioServices, scenarioRetail, quietPeriod]) => {
@@ -1358,17 +1438,16 @@ export function AISimulation() {
       {
         factor: "Active Promo",
         impact: promoImpact,
-        description: promoActive ? "Promo lift uses the dynamic promo model probability when available." : "No promotion lift is applied.",
+        description: promoActive
+          ? scenarioPromoModel?.modelMetrics?.trainingSource === "real_discount_history"
+            ? `Promo lift uses the dynamic promo model trained from ${scenarioPromoModel.modelMetrics.trainingRows} historical discount examples.`
+            : "Promo lift uses the dynamic promo model; fallback assumptions apply until enough historical discount examples are available."
+          : "No promotion lift is applied.",
       },
       {
         factor: "Temperature",
         impact: debouncedScenarioTemperature > 32 ? -0.04 : debouncedScenarioTemperature < 24 ? -0.02 : 0.02,
         description: "Comfortable weather gets a small lift; very hot or cool days reduce visits slightly.",
-      },
-      {
-        factor: "Competitor Event",
-        impact: competitorEvent ? -0.08 : 0,
-        description: competitorEvent ? "Nearby events may pull attention away from WOOF." : "No competitor drag is applied.",
       },
       {
         factor: "Payday Weekend",
@@ -1377,7 +1456,6 @@ export function AISimulation() {
       },
     ];
   }, [
-    competitorEvent,
     dayOfWeek,
     debouncedScenarioTemperature,
     paydayWeekend,
@@ -2608,7 +2686,7 @@ export function AISimulation() {
                   Dynamic Pricing Simulator
                 </h2>
                 <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Estimate sales, revenue, profit, and margin for {selectedPricingItem?.name || "a selected item"}.
+                  Estimate sales, revenue, profit, and margin for {selectedPricingItem?.name || "a selected item"} using documented pricing assumptions.
                 </p>
               </div>
               <Badge variant="outline" className="border-[#FFD9EC] text-[#223047] text-xs">
@@ -2639,6 +2717,9 @@ export function AISimulation() {
                     <span>No discount</span>
                     <span>25%</span>
                     <span>50%</span>
+                  </div>
+                  <div className="mt-3 rounded-lg bg-white border border-[#FFD9EC] px-3 py-2 text-xs text-[#223047] opacity-75" style={{ lineHeight: "1.5" }}>
+                    Simulation note: expected sales use an assumed elasticity based on sector and item velocity. This is decision support, not a guaranteed ML price forecast.
                   </div>
                 </div>
 
@@ -2832,7 +2913,7 @@ export function AISimulation() {
               <p className="text-sm opacity-90" style={{ lineHeight: "1.6" }}>
                 {selectedPricingItem?.price
                   ? recommendedPricingScenario
-                    ? `For ${selectedPricingItem.name}, WOOF recommends testing around ${recommendedPricingScenario.discount}% because it produces the strongest projected gross profit while keeping the result understandable for owner review.`
+                    ? `For ${selectedPricingItem.name}, WOOF estimates that testing around ${recommendedPricingScenario.discount}% is sustainable because it produces the strongest projected gross profit under the current margin and elasticity assumptions.`
                     : `For ${selectedPricingItem.name}, WOOF needs more pricing history before recommending a discount.`
                   : "Select an item with price data to simulate a business-ready pricing recommendation."}
                 {maxSafeItemDiscount !== null && discountValue[0] > maxSafeItemDiscount
@@ -2850,16 +2931,16 @@ export function AISimulation() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex-1">
                 <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  Predictive Floorplan Simulator
+                  Sector Demand Estimate
                 </h2>
                 <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  AI-powered customer distribution forecast for capacity planning
+                  Rule-based demand estimates by business sector, compared against placeholder staffing coverage
                 </p>
               </div>
 
               <div className="text-left md:text-right">
                 <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-1">Selected Time</div>
-                <div className="text-base md:text-lg font-bold text-[#F53799]">{formatHour(floorplanTime[0])}</div>
+                <div className="text-base md:text-lg font-bold text-[#F53799]">{formatHour(trafficOptimizerTime[0])}</div>
               </div>
             </div>
 
@@ -2868,8 +2949,8 @@ export function AISimulation() {
               <div className="text-xs md:text-sm font-semibold text-[#223047]">TIME SELECTION</div>
               <div className="relative">
                 <Slider
-                  value={floorplanTime}
-                  onValueChange={setFloorplanTime}
+                  value={trafficOptimizerTime}
+                  onValueChange={setTrafficOptimizerTime}
                   max={19}
                   min={7}
                   step={1}
@@ -2885,57 +2966,162 @@ export function AISimulation() {
               </div>
             </div>
 
-            {/* Floorplan Visualization */}
-            <div className="relative h-[400px] md:h-[500px] bg-gradient-to-br from-[#FFF7FB] to-[#FFF2FA] rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden">
-              {/* Cafe Area */}
-              <div className="absolute top-10 left-10 w-2/5 h-3/5 border-2 border-dashed border-[#F53799] rounded-xl bg-[#F53799]/5 flex items-center justify-center">
-                <span className="text-sm font-semibold text-[#F53799] opacity-60">Cafe Area</span>
-              </div>
-
-              {/* Grooming Area */}
-              <div className="absolute top-10 right-10 w-2/5 h-3/5 border-2 border-dashed border-[#3AE4FA] rounded-xl bg-[#3AE4FA]/5 flex items-center justify-center">
-                <span className="text-sm font-semibold text-[#3AE4FA] opacity-60">Grooming Area</span>
-              </div>
-
-              {/* Predicted Customers */}
-              {predictedCustomers.map((customer) => (
-                <div
-                  key={customer.id}
-                  className="absolute w-3 h-3 rounded-full animate-pulse"
-                  style={{
-                    left: `${customer.x}%`,
-                    top: `${customer.y}%`,
-                    backgroundColor: customer.type === "cafe" ? "#F53799" : "#3AE4FA",
-                  }}
-                  title={customer.type === "cafe" ? "Cafe customer" : "Grooming customer"}
-                />
-              ))}
-            </div>
-
             {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Predicted Customers</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{predictedCustomers.length}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Estimated Visits</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalPredictedTraffic}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Cafe Traffic</div>
-                <div className="text-xl md:text-2xl font-bold text-[#F53799]">
-                  {predictedCustomers.filter((c) => c.type === "cafe").length}
-                </div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">High Demand Sectors</div>
+                <div className="text-xl md:text-2xl font-bold text-[#F53799]">{highDemandSectors}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Grooming Traffic</div>
-                <div className="text-xl md:text-2xl font-bold text-[#3AE4FA]">
-                  {predictedCustomers.filter((c) => c.type === "grooming").length}
-                </div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Placeholder Staff</div>
+                <div className="text-xl md:text-2xl font-bold text-[#3AE4FA]">{totalScheduledPlaceholderStaff}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Capacity Usage</div>
-                <div className={`text-xl md:text-2xl font-bold ${capacity > 80 ? "text-red-600" : "text-green-600"}`}>
-                  {capacity.toFixed(0)}%
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Recommended Staff</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalRecommendedStaff}</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
+                <div>
+                  <div className="text-sm font-bold text-[#223047]">7-Day Sector Demand Heatmap</div>
+                  <div className="text-xs text-[#223047] opacity-60 mt-1">
+                    Demand levels use fixed rule-based thresholds for {formatHour(trafficOptimizerTime[0])}; Low &lt; 28 visits, Medium 28-41, High 42+
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-[#223047]">
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-100 border border-green-200" /> Low</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-100 border border-yellow-200" /> Medium</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-100 border border-red-200" /> High</span>
                 </div>
               </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead>
+                    <tr className="border-t border-[#FFD9EC] bg-white text-left text-xs uppercase tracking-wide text-[#223047] opacity-70">
+                      <th className="px-4 py-3 font-semibold">Sector</th>
+                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
+                        <th key={day} className="px-3 py-3 font-semibold text-center">{day}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sectorTrafficForecast.map((sector) => (
+                      <tr key={sector.name} className="border-t border-[#FFD9EC]">
+                        <td className="px-4 py-3 font-semibold text-[#223047]">
+                          <span className="inline-flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: sector.color }} />
+                            {sector.name}
+                          </span>
+                        </td>
+                        {sector.forecasts.map((forecast) => (
+                          <td key={`${sector.name}-${forecast.day}`} className="px-3 py-3">
+                            <div
+                              className={`mx-auto flex min-h-[54px] w-full max-w-[92px] items-center justify-center rounded-lg px-2 py-2 text-center ${demandStyles[forecast.level].bg}`}
+                              title={`${forecast.level} demand`}
+                            >
+                              <div className={`text-sm font-bold ${demandStyles[forecast.level].text}`}>
+                                {forecast.predicted}
+                                <span className="block text-[10px] font-semibold text-[#223047] opacity-65">visits</span>
+                              </div>
+                            </div>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base md:text-lg font-bold text-[#223047]">Staffing Recommendation</h3>
+                  <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
+                    Current schedule counts are placeholders until staff-sector schedules are added
+                  </p>
+                </div>
+                <Badge className="bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC]">Placeholder Data</Badge>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {selectedTimeStaffPlan.map((sector) => {
+                  const needsMoreStaff = sector.staffDelta > 0;
+                  const canReduceStaff = sector.staffDelta < 0;
+                  return (
+                    <div key={sector.sector} className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 text-sm font-bold text-[#223047]">
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: sector.color }} />
+                            {sector.sector}
+                          </div>
+                          <div className="mt-1 text-xs text-[#223047] opacity-65">
+                            {sector.level} demand at {formatHour(trafficOptimizerTime[0])}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-3 py-2">
+                            <div className="text-[#223047] opacity-60">Scheduled</div>
+                            <div className="font-bold text-[#223047]">{sector.scheduledStaff}</div>
+                          </div>
+                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-3 py-2">
+                            <div className="text-[#223047] opacity-60">Needed</div>
+                            <div className="font-bold text-[#223047]">{sector.requiredStaff}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold ${
+                        needsMoreStaff ? "bg-red-50 text-red-700" :
+                        canReduceStaff ? "bg-yellow-50 text-yellow-700" :
+                        "bg-green-50 text-green-700"
+                      }`}>
+                        {needsMoreStaff ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                        {needsMoreStaff
+                          ? `Add ${sector.staffDelta} staff for this sector.`
+                          : canReduceStaff
+                            ? `Possible to reassign ${Math.abs(sector.staffDelta)} staff if service quality remains stable.`
+                            : "Keep current placeholder coverage."}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
+              <h3 className="text-base md:text-lg font-bold text-[#223047]">Optimization Inputs Needed Later</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                {[
+                  { icon: Users, title: "Staff roster", detail: "Name, role, sector, and service capability" },
+                  { icon: CalendarDays, title: "Shift schedule", detail: "Start time, end time, day, and assigned sector" },
+                  { icon: Target, title: "Service capacity", detail: "How many visits each staff member can handle" },
+                  { icon: Zap, title: "Cost rules", detail: "Hourly rate or salary estimate for cost efficiency" },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.title} className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                      <Icon className="h-5 w-5 text-[#F53799] mb-3" />
+                      <div className="text-sm font-bold text-[#223047]">{item.title}</div>
+                      <div className="text-xs text-[#223047] opacity-65 mt-1" style={{ lineHeight: "1.5" }}>{item.detail}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl md:rounded-2xl bg-[#223047] p-4 md:p-5 text-white">
+              <div className="text-xs font-bold tracking-wide mb-2">WOOF Traffic Recommendation</div>
+              <p className="text-sm opacity-90" style={{ lineHeight: "1.6" }}>
+                At {formatHour(trafficOptimizerTime[0])}, WOOF estimates {totalPredictedTraffic} visits across key sectors. Replace the placeholder staff counts with real schedules to turn these recommendations into accurate shift adjustments and salary-cost insights.
+              </p>
             </div>
           </div>
 
@@ -2943,10 +3129,10 @@ export function AISimulation() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div>
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Next 7 Days Traffic Prediction
+                Next 7 Days Rule-Based Traffic Estimate
               </h2>
               <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Forecasted customer volume for selected time slot: {formatHour(floorplanTime[0])}
+                Estimated customer volume for selected time slot: {formatHour(trafficOptimizerTime[0])}
               </p>
             </div>
 
@@ -2990,7 +3176,7 @@ export function AISimulation() {
             <div className="flex justify-center gap-8 pt-4">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
-                <span className="text-sm text-[#223047]">Predicted Traffic</span>
+                <span className="text-sm text-[#223047]">Estimated Traffic</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-[#223047] rounded-full" />
@@ -3158,21 +3344,6 @@ export function AISimulation() {
                       </div>
                     </label>
                   </div>
-
-                  <div className="p-3 md:p-4 bg-[#FFF7FB] rounded-lg md:rounded-xl sm:col-span-2">
-                    <label className="flex items-center gap-2 md:gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={competitorEvent}
-                        onChange={(e) => setCompetitorEvent(e.target.checked)}
-                        className="w-4 h-4 text-[#F53799] rounded"
-                      />
-                      <div>
-                        <div className="text-xs md:text-sm font-semibold text-[#223047]">Competitor Event Nearby</div>
-                        <div className="text-xs text-[#223047] opacity-60">Models possible demand loss</div>
-                      </div>
-                    </label>
-                  </div>
                 </div>
 
                 <Button
@@ -3249,47 +3420,48 @@ export function AISimulation() {
                     </div>
                   </div>
                 </div>
-
-                <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-3 md:space-y-4">
-                  <h3 className="text-sm md:text-base font-bold text-[#223047]">Impact Breakdown</h3>
-                  <div className="space-y-2">
-                    {scenarioFactorBreakdown.map((item) => {
-                      const impactLabel = `${item.impact > 0 ? "+" : ""}${Math.round(item.impact * 100)}%`;
-                      return (
-                      <div
-                        key={item.factor}
-                        className="flex items-start justify-between gap-3 p-3 bg-white rounded-lg"
-                      >
-                        <div>
-                          <div className="text-sm font-semibold text-[#223047]">{item.factor}</div>
-                          <div className="text-xs text-[#223047] opacity-60 mt-1">{item.description}</div>
-                        </div>
-                        <span
-                          className={`text-sm font-semibold flex-shrink-0 ${impactLabel.startsWith("+")
-                              ? "text-green-600"
-                              : impactLabel.startsWith("-")
-                                ? "text-red-600"
-                                : "text-gray-500"
-                            }`}
-                        >
-                          {impactLabel}
-                        </span>
-                      </div>
-                    )})}
-                  </div>
-                </div>
-
-                <div className="p-4 md:p-6 bg-[#223047] rounded-xl md:rounded-2xl text-white">
-                  <h3 className="text-xs md:text-sm font-semibold mb-2">WOOF Recommendation</h3>
-                  <p className="text-xs md:text-sm opacity-90" style={{ lineHeight: "1.6" }}>
-                    {parseFloat(scenarioOutcome.revenueChange) > 10
-                      ? "Highly favorable conditions detected. Execute aggressive marketing and ensure full inventory."
-                      : parseFloat(scenarioOutcome.revenueChange) < -5
-                        ? "Challenging conditions predicted. Consider defensive promotions and optimize staffing levels."
-                        : "Moderate conditions. Maintain standard operations with light promotional activity."}
-                  </p>
-                </div>
               </div>
+            </div>
+
+            <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-3 md:space-y-4">
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">Impact Breakdown</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {scenarioFactorBreakdown.map((item) => {
+                  const impactLabel = `${item.impact > 0 ? "+" : ""}${Math.round(item.impact * 100)}%`;
+                  return (
+                    <div
+                      key={item.factor}
+                      className="flex min-h-[96px] items-start justify-between gap-3 p-4 bg-white rounded-lg"
+                    >
+                      <div>
+                        <div className="text-sm font-semibold text-[#223047]">{item.factor}</div>
+                        <div className="text-xs text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.5" }}>{item.description}</div>
+                      </div>
+                      <span
+                        className={`text-sm font-semibold flex-shrink-0 ${impactLabel.startsWith("+")
+                            ? "text-green-600"
+                            : impactLabel.startsWith("-")
+                              ? "text-red-600"
+                              : "text-gray-500"
+                          }`}
+                      >
+                        {impactLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="p-4 md:p-6 bg-[#223047] rounded-xl md:rounded-2xl text-white">
+              <h3 className="text-xs md:text-sm font-semibold mb-2">WOOF Recommendation</h3>
+              <p className="text-xs md:text-sm opacity-90" style={{ lineHeight: "1.6" }}>
+                {parseFloat(scenarioOutcome.revenueChange) > 10
+                  ? "Highly favorable conditions detected. Execute aggressive marketing and ensure full inventory."
+                  : parseFloat(scenarioOutcome.revenueChange) < -5
+                    ? "Challenging conditions predicted. Consider defensive promotions and optimize staffing levels."
+                    : "Moderate conditions. Maintain standard operations with light promotional activity."}
+              </p>
             </div>
           </div>
         </div>

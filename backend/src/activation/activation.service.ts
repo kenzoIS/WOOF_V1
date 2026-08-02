@@ -139,9 +139,13 @@ export class ActivationService {
     if (!campaign) {
       throw new BadRequestException('Campaign not found');
     }
+    if (campaign.status !== 'queued') {
+      throw new BadRequestException(
+        'Campaign must be approved and queued before publishing',
+      );
+    }
 
     const payload = this.buildPublishPayload(campaign);
-
     const token = process.env.PETHUB_API_TOKEN;
     const response = await this.postPetHubAnnouncement(endpoint, payload, token);
 
@@ -160,6 +164,12 @@ export class ActivationService {
     if (!['draft', 'approved', 'queued', 'published'].includes(status)) {
       throw new BadRequestException('Invalid campaign status');
     }
+    const current = await this.campaignModel.findOne({ campaignId }).lean().exec();
+    if (!current) {
+      throw new BadRequestException('Campaign not found');
+    }
+    this.assertValidStatusTransition(current.status, status);
+
     const campaign = await this.campaignModel
       .findOneAndUpdate({ campaignId }, { status }, { new: true })
       .lean()
@@ -168,6 +178,28 @@ export class ActivationService {
       throw new BadRequestException('Campaign not found');
     }
     return { campaign };
+  }
+
+  private assertValidStatusTransition(
+    currentStatus: CampaignStatus,
+    nextStatus: CampaignStatus,
+  ) {
+    if (currentStatus === nextStatus) {
+      return;
+    }
+
+    const allowedTransitions: Record<CampaignStatus, CampaignStatus[]> = {
+      draft: ['approved'],
+      approved: ['queued'],
+      queued: ['published'],
+      published: [],
+    };
+
+    if (!allowedTransitions[currentStatus]?.includes(nextStatus)) {
+      throw new BadRequestException(
+        `Invalid campaign transition from ${currentStatus} to ${nextStatus}`,
+      );
+    }
   }
 
   private mapBundleRecommendations(items: any[]): ActivationRecommendation[] {
@@ -237,8 +269,8 @@ export class ActivationService {
             'claude-3-5-sonnet-latest',
           max_tokens: 1200,
           temperature: 0.7,
-          system:
-            'You generate concise, brand-safe Happy Tails / PetHub campaign materials. Return only valid JSON with no markdown.',
+      system:
+            'You generate concise, brand-safe Happy Tails / PetHub campaign materials. Return only valid JSON with no markdown. Do not invent prices, customer names, competitor names, medical claims, guaranteed outcomes, or unverifiable claims.',
           messages: [
             {
               role: 'user',
@@ -296,6 +328,7 @@ export class ActivationService {
       'Generate campaign materials for a PetHub announcement from this WOOF promo recommendation.',
       'Use friendly customer-facing Happy Tails wording for pet owners.',
       'Do not mention analytics, forecasts, inventory, staffing, operational action, KPIs, market basket analysis, or WOOF internals.',
+      'Do not invent prices, customer names, competitor names, medical claims, guaranteed outcomes, or unverifiable claims.',
       'Use short copy that fits homepage announcement cards. Prefer simple retail/pet-care language.',
       'Return exactly this JSON shape:',
       JSON.stringify({

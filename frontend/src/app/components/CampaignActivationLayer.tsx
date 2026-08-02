@@ -191,7 +191,7 @@ export function CampaignActivationLayer() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-[1.05fr_0.95fr] gap-5">
+      <div className="space-y-5">
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-base md:text-lg font-bold text-[#223047]">Promo Inputs</h3>
@@ -204,7 +204,7 @@ export function CampaignActivationLayer() {
             </div>
           )}
 
-          <div className="space-y-3 max-h-[620px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[620px] overflow-y-auto pr-1">
             {recommendations.map((recommendation) => (
               <div key={recommendation.id} className="border border-[#FFD9EC] bg-[#FFF7FB] rounded-xl p-4 space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -271,7 +271,7 @@ export function CampaignActivationLayer() {
                 </p>
               </div>
 
-              <div className="grid gap-3">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <AssetBlock label="PetHub Banner" value={selectedCampaign.generatedAssets.petHubBannerText} />
                 <AssetBlock label="Short Caption" value={selectedCampaign.generatedAssets.shortCaption} />
                 <AssetBlock label="Push Notification" value={selectedCampaign.generatedAssets.pushNotification} />
@@ -306,7 +306,7 @@ export function CampaignActivationLayer() {
                 <Button
                   className="bg-[#0D9488] hover:bg-[#0F766E] flex-1"
                   onClick={() => handleQueue(selectedCampaign)}
-                  disabled={selectedCampaign.status === "queued" || selectedCampaign.status === "published"}
+                  disabled={selectedCampaign.status !== "approved"}
                 >
                   <Send className="w-4 h-4 mr-2" />
                   Queue
@@ -314,15 +314,18 @@ export function CampaignActivationLayer() {
                 <Button
                   className="bg-[#F53799] hover:bg-[#D42A7D]"
                   onClick={() => handlePublish(selectedCampaign)}
-                  disabled={selectedCampaign.status === "published"}
+                  disabled={selectedCampaign.status !== "queued"}
                 >
                   <Megaphone className="w-4 h-4 mr-2" />
                   Publish to PetHub
                 </Button>
               </div>
+              <p className="text-[11px] text-[#223047] opacity-60">
+                Approval flow: draft campaigns must be approved, queued, then published.
+              </p>
 
               {campaigns.length > 1 && (
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                   {campaigns.slice(0, 6).map((campaign) => (
                     <button
                       key={campaign.campaignId}

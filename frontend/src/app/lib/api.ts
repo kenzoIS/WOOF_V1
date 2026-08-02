@@ -287,6 +287,11 @@ export async function getCrossSellBundles(params?: CrossSellQuery) {
 }
 
 export async function createCampaignDraft(dto: {
+  sourceType?: 'bundle_recommendation';
+  bundleItems?: string[];
+  itemASector?: string | null;
+  itemBSector?: string | null;
+  status?: 'pending';
   bundleName: string;
   itemA: string;
   itemB: string;
