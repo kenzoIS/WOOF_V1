@@ -40,6 +40,15 @@ const CHANNEL_OPTIONS = [
   { value: "PetHub", label: "PetHub", description: "Cafe, Services & Retail", color: "#3AE4FA" },
 ];
 
+const toNumber = (value: unknown, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+const formatNumber = (value: unknown) => toNumber(value).toLocaleString();
+
+const formatCurrency = (value: unknown) => `₱${formatNumber(value)}`;
+
 export function DataIngestion() {
   const [uploads, setUploads] = useState<CsvUploadRecord[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
@@ -141,10 +150,10 @@ export function DataIngestion() {
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          { label: "All Records", value: metrics?.totalRecords?.toLocaleString() || "0", icon: Database, color: "#F53799" },
-          { label: "All Transactions", value: metrics?.totalTransactions?.toLocaleString() || "0", icon: Hash, color: "#3AE4FA" },
-          { label: "All Quantity Sold", value: metrics?.totalQuantity?.toLocaleString() || "0", icon: ShoppingCart, color: "#0EA5E9" },
-          { label: "All Revenue", value: `₱${(metrics?.totalRevenue || 0).toLocaleString()}`, icon: DollarSign, color: "#F53799" },
+          { label: "All Records", value: formatNumber(metrics?.totalRecords), icon: Database, color: "#F53799" },
+          { label: "All Transactions", value: formatNumber(metrics?.totalTransactions), icon: Hash, color: "#3AE4FA" },
+          { label: "All Quantity Sold", value: formatNumber(metrics?.totalQuantity), icon: ShoppingCart, color: "#0EA5E9" },
+          { label: "All Revenue", value: formatCurrency(metrics?.totalRevenue), icon: DollarSign, color: "#F53799" },
           { label: "Channels", value: Object.keys(metrics?.channels || {}).length.toString(), icon: Radio, color: "#7C3AED" },
         ].map((card) => (
           <div key={card.label} className="flex items-center gap-2 bg-[#FFF2FA] border border-[#FFD9EC] rounded-xl px-3 py-2.5">
@@ -165,7 +174,7 @@ export function DataIngestion() {
         <div className="flex flex-wrap gap-2">
           {Object.entries(metrics.channels).map(([ch, data]) => (
             <Badge key={ch} className="text-xs px-3 py-1" style={{ backgroundColor: channelColor[ch] || "#666", color: "#fff" }}>
-              {ch}: {data.count} records • ₱{data.revenue.toLocaleString()}
+              {ch}: {formatNumber(data?.count)} records • {formatCurrency(data?.revenue)}
             </Badge>
           ))}
         </div>
@@ -268,7 +277,7 @@ export function DataIngestion() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-[#223047] truncate">{upload.filename}</div>
                     <div className="text-xs text-[#223047] opacity-50">
-                      {upload.recordCount} records • ₱{upload.totalRevenue.toLocaleString()} • {upload.channel}
+                      {formatNumber(upload.recordCount)} records • {formatCurrency(upload.totalRevenue)} • {upload.channel}
                       {" • "}{new Date(upload.uploadedAt).toLocaleDateString()}
                     </div>
                     {upload.etlReport && (
