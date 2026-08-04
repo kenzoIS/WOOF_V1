@@ -72,7 +72,7 @@ interface WarehouseRow {
 }
 
 const OUT_OF_SCOPE_MESSAGE =
-  'I can help with WOOF dashboard questions only, like sales, orders, quantity sold, channels, sectors, top items, forecasts, and bundle recommendations. Ask me something from the dashboard and I will compute it for you.';
+  'I am built for WOOF dashboard analytics, so I cannot help with that one. I can still help you check sales, orders, quantity sold, channels, sectors, top items, forecasts, and bundle recommendations.';
 
 const MONTHS: Record<string, number> = {
   january: 0,
@@ -126,6 +126,25 @@ export class ChatbotService {
     }
 
     const conversationContext = this.buildConversationContext(history);
+    const conversationalAnswer = this.getConversationalAnswer(
+      cleanedQuestion,
+      conversationContext,
+    );
+    if (conversationalAnswer) {
+      return {
+        answer: conversationalAnswer,
+        scope: 'dashboard_conversation',
+        queryPlan: {
+          intent: 'out_of_scope',
+          dateRange: 'all',
+          answerMode: 'unsupported',
+          classifier: 'fallback',
+          analysisSteps: ['Handled as conversational WOOF assistant turn'],
+        },
+        confidence: 'high',
+      };
+    }
+
     const questionForPlanning = this.resolveFollowUpQuestion(
       cleanedQuestion,
       conversationContext,
@@ -1220,6 +1239,65 @@ export class ChatbotService {
         sender: item.sender,
         text: String(item.text).trim().slice(0, 500),
       }));
+  }
+
+  private getConversationalAnswer(
+    question: string,
+    history: ChatHistoryItem[],
+  ): string | undefined {
+    const q = this.normalizeQuestion(question)
+      .replace(/[!?.,]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const hasPriorDashboardContext = history.some(
+      (item) =>
+        item.sender === 'user' &&
+        item.text &&
+        this.isDashboardQuestion(this.normalizeQuestion(item.text)),
+    );
+
+    if (
+      /^(hi|hello|hey|yo|good morning|good afternoon|good evening|kumusta|kamusta|hii+|helloo+)$/.test(
+        q,
+      )
+    ) {
+      return hasPriorDashboardContext
+        ? 'Hi! I am still here. Want me to check another WOOF metric or continue from the last dashboard result?'
+        : 'Hi! I am WOOF. You can ask me things like today\'s sales, orders for a specific date, top items, channel performance, sector breakdowns, forecasts, or bundle recommendations.';
+    }
+
+    if (
+      /^(thanks|thank you|ty|salamat|thank u|thx|okay thanks|ok thanks|sige thanks)$/.test(
+        q,
+      )
+    ) {
+      return 'You got it. I can keep checking the dashboard whenever you need another number.';
+    }
+
+    if (/^(ok|okay|sige|copy|noted|got it|gets|ge)$/.test(q)) {
+      return 'Got it. Send me the next dashboard question when you are ready.';
+    }
+
+    if (/^(bye|goodbye|later|see you|exit|close)$/.test(q)) {
+      return 'Alright, I will be here when you need another WOOF dashboard check.';
+    }
+
+    if (
+      /\b(what can you do|help|guide|sample question|examples?|how do i use you|ano kaya mo|ano pwede itanong|paano gamitin)\b/.test(
+        q,
+      )
+    ) {
+      return [
+        'You can ask me about the WOOF dashboard in normal language.',
+        'For example: "What were the sales on November 11, 2022?", "Which channel performed best this month?", "Top 5 items last week", or "How about Retail?".',
+      ].join(' ');
+    }
+
+    if (/^(are you there|nandyan ka|online ka|can you hear me|test)$/.test(q)) {
+      return 'Yes, I am here. Ask me any WOOF dashboard question and I will check the warehouse data for you.';
+    }
+
+    return undefined;
   }
 
   private resolveFollowUpQuestion(
