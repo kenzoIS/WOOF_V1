@@ -1096,15 +1096,43 @@ export class ChatbotService {
     history: ChatHistoryItem[],
   ): string {
     const normalized = this.normalizeQuestion(question);
-    const hasExplicitRange = Boolean(this.extractExplicitDateRange(question));
-    const likelyCorrection =
-      hasExplicitRange &&
-      !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|units|top|best|sector|channel|forecast|bundle|item|items|product|products)\b/.test(
+    const previousUserQuestion = this.findPreviousDashboardQuestion(history);
+    if (!previousUserQuestion) return question;
+
+    const asksToVerifyPrevious =
+      /\b(is this accurate|is that accurate|accurate ba|tama ba|correct ba|sure ka|are you sure|verify|check that|check this)\b/.test(
         normalized,
       );
-    if (!likelyCorrection) return question;
+    if (asksToVerifyPrevious) {
+      return `Recompute and verify this previous WOOF dashboard question: ${previousUserQuestion}`;
+    }
 
-    const previousUserQuestion = [...history]
+    const hasExplicitRange = Boolean(this.extractExplicitDateRange(question));
+    const hasDashboardMetric =
+      /\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+        normalized,
+      );
+    const looksLikeFollowUp =
+      /^(how about|what about|and|then|next|same for|paano naman|eh yung|yung|for)\b/.test(
+        normalized,
+      ) ||
+      hasExplicitRange ||
+      Boolean(this.extractSector(normalized)) ||
+      Boolean(this.extractChannel(normalized));
+
+    if (!looksLikeFollowUp || hasDashboardMetric) return question;
+
+    return [
+      question,
+      `Use the same WOOF dashboard metric and filters as this previous question: ${previousUserQuestion}`,
+      'If the new message includes a date, sector, channel, or range, replace only that part with the new value.',
+    ].join('\n');
+  }
+
+  private findPreviousDashboardQuestion(
+    history: ChatHistoryItem[],
+  ): string | undefined {
+    return [...history]
       .reverse()
       .find(
         (item) =>
@@ -1112,9 +1140,6 @@ export class ChatbotService {
           item.text &&
           this.isDashboardQuestion(this.normalizeQuestion(item.text)),
       )?.text;
-
-    if (!previousUserQuestion) return question;
-    return `${previousUserQuestion}. Correct the date/range to: ${question}`;
   }
 
   private async humanizeAnswer(input: {
