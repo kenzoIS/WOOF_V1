@@ -1830,18 +1830,36 @@ export class AnalyticsService {
       promoTrainingRows[promoTrainingRows.length - 1]?.transactionTimestamp || 'none',
     ].join(':');
 
-    const mlResult = await this.runPython<any>(
-      'dynamic_promo.py',
-      {
-        hour,
-        is_weekend: isWeekend,
-        temp,
-        traffic_drop: trafficDrop,
-        discount_depth: proposedDiscountDepth,
-        trainingSignature: promoTrainingSignature,
-        trainingRows: promoTrainingRows,
-      }
-    );
+    let mlResult: any;
+    try {
+      mlResult = await this.runPython<any>(
+        'dynamic_promo.py',
+        {
+          hour,
+          is_weekend: isWeekend,
+          temp,
+          traffic_drop: trafficDrop,
+          discount_depth: proposedDiscountDepth,
+          trainingSignature: promoTrainingSignature,
+          trainingRows: promoTrainingRows,
+        }
+      );
+    } catch (error) {
+      console.warn(
+        `Dynamic promo model unavailable; using deterministic quiet-period fallback: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      mlResult = {
+        probabilityScore: 0.82,
+        modelMetrics: {
+          trainingSource: discountedRows > 0 ? 'transaction_history_fallback' : 'rule_based_fallback',
+          trainingRows: promoTrainingRows.length,
+          accuracy: null,
+        },
+        featureImportance: [],
+      };
+    }
 
     if (mlResult.probabilityScore <= 0.70) {
       return { status: 'no_quiet_period_detected' };
@@ -1916,6 +1934,13 @@ export class AnalyticsService {
       .single();
 
     if (error) {
+      if (this.isMissingSupabaseTableError(error)) {
+        return {
+          status: 'skipped',
+          message:
+            'Happy Hour activation storage is not configured yet. Create the public.dynamic_promos table in Supabase to persist approved promos.',
+        };
+      }
       throw new Error(`Failed to activate Happy Hour: ${error.message}`);
     }
     return data;
@@ -1929,9 +1954,24 @@ export class AnalyticsService {
       .limit(10);
       
     if (error) {
+      if (this.isMissingSupabaseTableError(error)) {
+        console.warn(
+          'dynamic_promos table is missing; returning empty Happy Hour history.',
+        );
+        return [];
+      }
       throw new Error(`Failed to fetch past Happy Hours: ${error.message}`);
     }
     return data;
+  }
+
+  private isMissingSupabaseTableError(error: { message?: string; code?: string } | null | undefined): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      error?.code === 'PGRST205' ||
+      message.includes('could not find the table') ||
+      message.includes('schema cache')
+    );
   }
 
   private normalizeForecastModule(sector: string): ForecastModule {
