@@ -1283,7 +1283,8 @@ export class ChatbotService {
     history: ChatHistoryItem[];
   }): Promise<string> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return input.factualAnswer;
+    const styleDirective = this.getResponseStyleDirective(input);
+    if (!apiKey) return this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
 
     try {
       const response = await axios.post(
@@ -1298,9 +1299,15 @@ export class ChatbotService {
           system: [
             'You are WOOF, a friendly AI revenue assistant inside the Happy Tails dashboard.',
             'Reply conversationally, but only using the validated dashboard facts provided by the backend.',
-            'Do not add new calculations, estimates, advice, or facts that are not in the factual answer.',
+            'Never change, round differently, infer, estimate, or add numbers beyond the validated backend answer.',
+            'Do not add new calculations, advice, causes, trends, or facts that are not in the factual answer.',
+            'Answer the user intent, not just the metric. If they ask for confirmation, confirm that WOOF rechecked the warehouse result.',
+            'If the latest message is a follow-up or correction, acknowledge the change naturally and answer the newly resolved query.',
+            'For normal metric answers, avoid robotic phrasing when possible; lead with the answer and keep the exact date/range visible.',
+            'For top item or breakdown answers, keep list formatting readable and compact.',
             'If the factual answer says no records were found, acknowledge it clearly and suggest checking another date or range.',
-            'Keep the answer concise: 1 to 3 short sentences. No markdown tables.',
+            'If the user asks something outside dashboard scope, do not answer generally; keep the response scoped to WOOF.',
+            'Keep the answer concise: 1 to 3 short sentences, or a compact numbered list for ranked results. No markdown tables.',
           ].join(' '),
           messages: [
             {
@@ -1315,6 +1322,7 @@ export class ChatbotService {
                 `Validated backend answer: ${input.factualAnswer}`,
                 `Validated intent: ${input.plan.intent}`,
                 `Validated date range: ${this.rangeLabel(input.plan, input.latestDate)}`,
+                `Response style instruction: ${styleDirective}`,
                 'Write the final user-facing answer now.',
               ].join('\n'),
             },
@@ -1330,10 +1338,84 @@ export class ChatbotService {
         },
       );
       const text = this.extractAnthropicText(response.data);
-      return text || input.factualAnswer;
+      return text || this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
     } catch {
-      return input.factualAnswer;
+      return this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
     }
+  }
+
+  private getResponseStyleDirective(input: {
+    question: string;
+    factualAnswer: string;
+    plan: QueryPlan;
+    result: any;
+  }): string {
+    const q = this.normalizeQuestion(input.question);
+    const isVerification =
+      /\b(is this accurate|is that accurate|accurate ba|tama ba|correct ba|sure ka|are you sure|verify|check that|check this)\b/.test(
+        q,
+      );
+    if (isVerification) {
+      return 'Verification: say that WOOF rechecked the Supabase warehouse result, then restate the exact validated answer. Do not sound uncertain.';
+    }
+
+    const isFollowUp =
+      /^(how about|what about|and|then|next|same for|paano naman|eh yung|yung|for)\b/.test(
+        q,
+      ) ||
+      (Boolean(this.extractExplicitDateRange(input.question)) &&
+        !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+          q,
+        )) ||
+      (Boolean(this.extractSector(q)) &&
+        !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+          q,
+        )) ||
+      (Boolean(this.extractChannel(q)) &&
+        !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+          q,
+        ));
+    if (isFollowUp) {
+      return 'Follow-up: briefly acknowledge the requested new date/range/filter, then answer with the exact validated backend result.';
+    }
+
+    if (typeof input.result?.rows === 'number' && input.result.rows === 0) {
+      return 'No-data: clearly say no matching warehouse records were found for the requested scope and suggest trying another date, range, sector, or channel.';
+    }
+
+    if (input.plan.intent === 'top_items') {
+      return 'Ranked result: introduce the scope in one short phrase, then keep the ranked item list compact and readable.';
+    }
+
+    if (
+      input.plan.intent === 'sector_breakdown' ||
+      input.plan.intent === 'channel_breakdown'
+    ) {
+      return 'Breakdown: summarize that this is a warehouse breakdown, then present each row compactly without inventing percentages.';
+    }
+
+    if (input.plan.intent === 'best_sector' || input.plan.intent === 'best_channel') {
+      return 'Best performer: answer directly with the leading sector/channel and the exact supporting revenue, orders, and units.';
+    }
+
+    if (
+      input.plan.intent === 'forecast_overview' ||
+      input.plan.intent === 'cross_sell_overview'
+    ) {
+      return 'Unsupported dashboard detail: be friendly but explain the current dashboard limitation briefly.';
+    }
+
+    return 'Metric answer: answer naturally and directly using the exact validated metric, date/range, orders, and units when present.';
+  }
+
+  private fallbackStyledAnswer(
+    factualAnswer: string,
+    styleDirective: string,
+  ): string {
+    if (styleDirective.startsWith('Verification:')) {
+      return `Yes, I rechecked the Supabase warehouse result. ${factualAnswer}`;
+    }
+    return factualAnswer;
   }
 
   private extractAnthropicText(data: any): string {
