@@ -115,7 +115,7 @@ export function Header({ onMenuClick }: HeaderProps) {
       .catch(() => {});
   }, []);
 
-  const userEmail = localStorage.getItem("userEmail") || "user@happytails.com";
+  const userEmail = typeof window !== "undefined" ? (localStorage.getItem("userEmail") || "user@happytails.com") : "user@happytails.com";
   const userInitials = userEmail
     .split("@")[0]
     .split(/[._-]+/)
