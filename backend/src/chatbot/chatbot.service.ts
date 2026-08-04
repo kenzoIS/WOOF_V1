@@ -1,11 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import axios from 'axios';
-import { Model } from 'mongoose';
 import {
-  Transaction,
-  TransactionDocument,
-} from '../csv/schemas/transaction.schema';
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import axios from 'axios';
+import { SupabaseService } from '../common/supabase/supabase.service';
 
 type DashboardIntent =
   | 'total_revenue'
@@ -54,6 +53,24 @@ interface ChatHistoryItem {
   text?: string;
 }
 
+interface WarehouseFilters {
+  dateStart?: string;
+  dateEnd?: string;
+  sector?: QueryPlan['sector'];
+  channel?: QueryPlan['channel'];
+}
+
+interface WarehouseRow {
+  net_sales?: number | string | null;
+  quantity_sold?: number | string | null;
+  transaction_id?: string | null;
+  product_id?: string | null;
+  service_id?: string | null;
+  channel_dim?: { channel_name?: string | null } | null;
+  date_dim?: { full_date?: string | null } | null;
+  business_segment_dim?: { segment_name?: string | null } | null;
+}
+
 const OUT_OF_SCOPE_MESSAGE =
   'I can help with WOOF dashboard questions only, like sales, orders, quantity sold, channels, sectors, top items, forecasts, and bundle recommendations. Ask me something from the dashboard and I will compute it for you.';
 
@@ -100,10 +117,7 @@ const MONTH_ALIASES: Record<string, string> = {
 
 @Injectable()
 export class ChatbotService {
-  constructor(
-    @InjectModel(Transaction.name)
-    private readonly transactionModel: Model<TransactionDocument>,
-  ) {}
+  constructor(private readonly supabaseService: SupabaseService) {}
 
   async answer(question: string, history: ChatHistoryItem[] = []): Promise<any> {
     const cleanedQuestion = String(question || '').trim();
@@ -176,12 +190,7 @@ export class ChatbotService {
       };
     }
 
-    const dateMatch = this.buildDateMatch(plan, latestDate);
-    const baseMatch = {
-      ...dateMatch,
-      ...(plan.sector ? { sector: plan.sector } : {}),
-      ...(plan.channel ? { channel: plan.channel } : {}),
-    };
+    const baseMatch = this.buildWarehouseFilters(plan, latestDate);
 
     const result = await this.executePlan(plan, baseMatch);
     const factualAnswer = this.renderAnswer(plan, result, latestDate);
@@ -866,15 +875,15 @@ export class ChatbotService {
     return steps.slice(0, 4);
   }
 
-  private async executePlan(plan: QueryPlan, match: Record<string, unknown>) {
+  private async executePlan(plan: QueryPlan, match: WarehouseFilters) {
     if (plan.intent === 'top_items') {
       return this.getTopItems(match, plan.limit || 5);
     }
     if (plan.intent === 'sector_breakdown' || plan.intent === 'best_sector') {
-      return this.getBreakdown(match, '$sector');
+      return this.getBreakdown(match, 'sector');
     }
     if (plan.intent === 'channel_breakdown' || plan.intent === 'best_channel') {
-      return this.getBreakdown(match, '$channel');
+      return this.getBreakdown(match, 'channel');
     }
     if (plan.intent === 'forecast_overview') {
       return {
@@ -891,79 +900,94 @@ export class ChatbotService {
     return this.getTotals(match);
   }
 
-  private async getTotals(match: Record<string, unknown>) {
-    const [row] = await this.transactionModel.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: null,
-          revenue: { $sum: '$netSales' },
-          orders: { $addToSet: '$transactionId' },
-          quantity: { $sum: '$quantity' },
-          rows: { $sum: 1 },
-        },
-      },
-    ]);
-    const orderCount = Array.isArray(row?.orders) ? row.orders.length : 0;
-    const revenue = this.money(row?.revenue || 0);
+  private async getTotals(match: WarehouseFilters) {
+    const rows = await this.getWarehouseRows(match);
+    const orders = new Set<string>();
+    let revenue = 0;
+    let quantity = 0;
+
+    rows.forEach((row) => {
+      revenue += Number(row.net_sales) || 0;
+      quantity += Number(row.quantity_sold) || 0;
+      if (row.transaction_id) orders.add(row.transaction_id);
+    });
+
+    revenue = this.money(revenue);
+    const orderCount = orders.size;
     return {
       revenue,
       orders: orderCount,
-      quantity: Number(row?.quantity) || 0,
-      rows: Number(row?.rows) || 0,
+      quantity: this.money(quantity),
+      rows: rows.length,
       avgOrderValue: orderCount ? this.money(revenue / orderCount) : 0,
     };
   }
 
-  private async getTopItems(match: Record<string, unknown>, limit: number) {
-    return this.transactionModel.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: '$productName',
-          revenue: { $sum: '$netSales' },
-          quantity: { $sum: '$quantity' },
-          orders: { $addToSet: '$transactionId' },
-        },
-      },
-      { $addFields: { orderCount: { $size: '$orders' } } },
-      { $sort: { revenue: -1 } },
-      { $limit: limit },
-      {
-        $project: {
-          _id: 0,
-          name: '$_id',
-          revenue: { $round: ['$revenue', 2] },
-          quantity: 1,
-          orderCount: 1,
-        },
-      },
-    ]);
+  private async getTopItems(match: WarehouseFilters, limit: number) {
+    const rows = await this.getWarehouseRows(match);
+    const itemNames = await this.getItemNameMap();
+    const grouped = new Map<
+      string,
+      { name: string; revenue: number; quantity: number; orders: Set<string> }
+    >();
+
+    rows.forEach((row) => {
+      const itemId = row.product_id || row.service_id || 'unknown';
+      const current =
+        grouped.get(itemId) ||
+        {
+          name: itemNames.get(itemId) || itemId || 'Unknown item',
+          revenue: 0,
+          quantity: 0,
+          orders: new Set<string>(),
+        };
+      current.revenue += Number(row.net_sales) || 0;
+      current.quantity += Number(row.quantity_sold) || 0;
+      if (row.transaction_id) current.orders.add(row.transaction_id);
+      grouped.set(itemId, current);
+    });
+
+    return Array.from(grouped.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, limit)
+      .map((item) => ({
+        name: item.name,
+        revenue: this.money(item.revenue),
+        quantity: this.money(item.quantity),
+        orderCount: item.orders.size,
+      }));
   }
 
-  private async getBreakdown(match: Record<string, unknown>, groupBy: string) {
-    return this.transactionModel.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: groupBy,
-          revenue: { $sum: '$netSales' },
-          orders: { $addToSet: '$transactionId' },
-          quantity: { $sum: '$quantity' },
-        },
-      },
-      { $addFields: { orderCount: { $size: '$orders' } } },
-      { $sort: { revenue: -1 } },
-      {
-        $project: {
-          _id: 0,
-          label: '$_id',
-          revenue: { $round: ['$revenue', 2] },
-          orderCount: 1,
-          quantity: 1,
-        },
-      },
-    ]);
+  private async getBreakdown(match: WarehouseFilters, groupBy: 'sector' | 'channel') {
+    const rows = await this.getWarehouseRows(match);
+    const grouped = new Map<
+      string,
+      { label: string; revenue: number; quantity: number; orders: Set<string> }
+    >();
+
+    rows.forEach((row) => {
+      const rawLabel =
+        groupBy === 'sector'
+          ? row.business_segment_dim?.segment_name
+          : row.channel_dim?.channel_name;
+      const label = this.toDisplaySector(rawLabel || 'Unknown');
+      const current =
+        grouped.get(label) ||
+        { label, revenue: 0, quantity: 0, orders: new Set<string>() };
+      current.revenue += Number(row.net_sales) || 0;
+      current.quantity += Number(row.quantity_sold) || 0;
+      if (row.transaction_id) current.orders.add(row.transaction_id);
+      grouped.set(label, current);
+    });
+
+    return Array.from(grouped.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .map((row) => ({
+        label: row.label,
+        revenue: this.money(row.revenue),
+        orderCount: row.orders.size,
+        quantity: this.money(row.quantity),
+      }));
   }
 
   private renderAnswer(plan: QueryPlan, result: any, latestDate: Date): string {
@@ -1013,54 +1037,144 @@ export class ChatbotService {
   }
 
   private async getLatestTransactionDate(): Promise<Date | null> {
-    const [row] = await this.transactionModel.aggregate([
-      { $group: { _id: null, latestDate: { $max: '$date' } } },
-    ]);
-    return row?.latestDate ? new Date(row.latestDate) : null;
+    const { data, error } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select('date_id, date_dim:date_id!inner(full_date)')
+      .order('date_id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `Failed to read latest warehouse transaction date: ${error.message}`,
+      );
+    }
+
+    const fullDate = (data as any)?.date_dim?.full_date;
+    return fullDate ? new Date(`${fullDate}T00:00:00.000Z`) : null;
   }
 
-  private buildDateMatch(plan: QueryPlan, latestDate: Date) {
+  private buildWarehouseFilters(
+    plan: QueryPlan,
+    latestDate: Date,
+  ): WarehouseFilters {
     const range = plan.dateRange;
-    if (range === 'all') return {};
+    const filters: WarehouseFilters = {
+      ...(plan.sector ? { sector: plan.sector } : {}),
+      ...(plan.channel ? { channel: plan.channel } : {}),
+    };
+    if (range === 'all') return filters;
     if (range === 'custom' && plan.dateStart && plan.dateEnd) {
       return {
-        date: {
-          $gte: this.startOfDay(new Date(plan.dateStart)),
-          $lte: this.endOfDay(new Date(plan.dateEnd)),
-        },
+        ...filters,
+        dateStart: plan.dateStart,
+        dateEnd: plan.dateEnd,
       };
     }
-    const end = this.endOfDay(latestDate);
+    const end = this.isoDate(latestDate);
     if (range === 'today') {
-      return { date: { $gte: this.startOfDay(latestDate), $lte: end } };
+      return { ...filters, dateStart: end, dateEnd: end };
     }
     if (range === 'yesterday') {
       const yesterday = new Date(latestDate);
       yesterday.setDate(yesterday.getDate() - 1);
-      return {
-        date: { $gte: this.startOfDay(yesterday), $lte: this.endOfDay(yesterday) },
-      };
+      const date = this.isoDate(yesterday);
+      return { ...filters, dateStart: date, dateEnd: date };
     }
     if (range === 'this_month') {
       const start = new Date(latestDate);
       start.setDate(1);
-      return { date: { $gte: this.startOfDay(start), $lte: end } };
+      return { ...filters, dateStart: this.isoDate(start), dateEnd: end };
     }
     const start = new Date(latestDate);
     start.setDate(start.getDate() - 6);
-    return { date: { $gte: this.startOfDay(start), $lte: end } };
+    return { ...filters, dateStart: this.isoDate(start), dateEnd: end };
   }
 
-  private startOfDay(date: Date): Date {
-    const value = new Date(date);
-    value.setHours(0, 0, 0, 0);
-    return value;
+  private async getWarehouseRows(filters: WarehouseFilters): Promise<WarehouseRow[]> {
+    const pageSize = 1000;
+    const rows: WarehouseRow[] = [];
+    let from = 0;
+
+    while (true) {
+      let query = this.supabaseService.client
+        .from('fact_cross_channel_transactions')
+        .select(`
+          net_sales,
+          quantity_sold,
+          transaction_id,
+          product_id,
+          service_id,
+          channel_dim:channel_id!inner(channel_name),
+          date_dim:date_id!inner(full_date),
+          business_segment_dim:segment_id!inner(segment_name)
+        `)
+        .range(from, from + pageSize - 1);
+
+      if (filters.dateStart) {
+        query = query.gte('date_dim.full_date', filters.dateStart);
+      }
+      if (filters.dateEnd) {
+        query = query.lte('date_dim.full_date', filters.dateEnd);
+      }
+      if (filters.sector) {
+        query = query.eq(
+          'business_segment_dim.segment_name',
+          this.toWarehouseSector(filters.sector),
+        );
+      }
+      if (filters.channel) {
+        query = query.eq('channel_dim.channel_name', filters.channel);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        throw new InternalServerErrorException(
+          `Failed to read warehouse transactions: ${error.message}`,
+        );
+      }
+
+      const batch = (data || []) as WarehouseRow[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return rows;
   }
 
-  private endOfDay(date: Date): Date {
-    const value = new Date(date);
-    value.setHours(23, 59, 59, 999);
-    return value;
+  private async getItemNameMap(): Promise<Map<string, string>> {
+    const [productsResult, servicesResult] = await Promise.all([
+      this.supabaseService.client
+        .from('product_dim')
+        .select('product_id, product_name, category'),
+      this.supabaseService.client
+        .from('service_dim')
+        .select('service_id, service_name, service_type'),
+    ]);
+
+    const map = new Map<string, string>();
+    (productsResult.data || []).forEach((product: any) => {
+      map.set(
+        product.product_id,
+        product.product_name || product.category || product.product_id,
+      );
+    });
+    (servicesResult.data || []).forEach((service: any) => {
+      map.set(
+        service.service_id,
+        service.service_name || service.service_type || service.service_id,
+      );
+    });
+    return map;
+  }
+
+  private toWarehouseSector(sector: QueryPlan['sector']): string {
+    return sector === 'Services' ? 'Service' : String(sector || '');
+  }
+
+  private toDisplaySector(sector: string): string {
+    return sector === 'Service' ? 'Services' : sector;
   }
 
   private rangeLabel(plan: QueryPlan, latestDate: Date): string {

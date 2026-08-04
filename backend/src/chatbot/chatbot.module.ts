@@ -1,15 +1,10 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
-import { Transaction, TransactionSchema } from '../csv/schemas/transaction.schema';
+import { SupabaseModule } from '../common/supabase/supabase.module';
 import { ChatbotController } from './chatbot.controller';
 import { ChatbotService } from './chatbot.service';
 
 @Module({
-  imports: [
-    MongooseModule.forFeature([
-      { name: Transaction.name, schema: TransactionSchema },
-    ]),
-  ],
+  imports: [SupabaseModule],
   controllers: [ChatbotController],
   providers: [ChatbotService],
 })
