@@ -580,14 +580,16 @@ export class AnalyticsService {
       .from('csv_uploads')
       .select('*', { count: 'exact', head: true });
 
+    const latestUploadStamp = this.getUploadStamp(latestUpload);
+
     if (cachedForecast) {
       const metadata = cachedForecast.model_metadata || {};
       const cacheUploadCount = metadata.csvUploadCount;
       const cacheLatestUploadId = metadata.latestCsvUploadId;
       const cacheLatestUploadTime = metadata.latestCsvUploadTime;
 
-      const currentLatestUploadId = latestUpload ? latestUpload.id : null;
-      const currentLatestUploadTime = latestUpload ? new Date(latestUpload.uploaded_at).getTime() : null;
+      const currentLatestUploadId = latestUploadStamp.latestUploadId;
+      const currentLatestUploadTime = latestUploadStamp.latestUploadTime;
 
       const isCsvStateMatch =
         cacheUploadCount === uploadCount &&
@@ -825,12 +827,8 @@ export class AnalyticsService {
         holidayOverride: reqHoliday,
         ...exogenousMetadata,
         csvUploadCount: uploadCount,
-        latestCsvUploadId: latestUpload
-          ? String(latestUpload.id || latestUpload._id || '')
-          : null,
-        latestCsvUploadTime: latestUpload
-          ? new Date(latestUpload.uploaded_at || latestUpload.uploadedAt).getTime()
-          : null,
+        latestCsvUploadId: latestUploadStamp.latestUploadId,
+        latestCsvUploadTime: latestUploadStamp.latestUploadTime,
         daysRequested: forecastDays,
       },
       generated_at: new Date().toISOString(),
@@ -2426,6 +2424,28 @@ export class AnalyticsService {
     return Math.min(Math.max(Math.trunc(parsed), 1), MAX_FORECAST_DAYS);
   }
 
+  private getUploadStamp(upload: any): {
+    latestUploadId: string | null;
+    latestUploadTime: number | null;
+  } {
+    if (!upload) {
+      return {
+        latestUploadId: null,
+        latestUploadTime: null,
+      };
+    }
+
+    const rawId = upload.id ?? upload._id ?? upload.upload_id ?? null;
+    const rawTime =
+      upload.uploaded_at ?? upload.uploadedAt ?? upload.created_at ?? upload.createdAt ?? null;
+    const parsedTime = rawTime ? new Date(rawTime).getTime() : null;
+
+    return {
+      latestUploadId: rawId === null || rawId === undefined ? null : String(rawId),
+      latestUploadTime: Number.isFinite(parsedTime) ? parsedTime : null,
+    };
+  }
+
   private async getCsvUploadState(): Promise<{
     uploadCount: number;
     latestUploadId: string | null;
@@ -2441,11 +2461,12 @@ export class AnalyticsService {
     const { count: uploadCount } = await this.supabaseService.client
       .from('csv_uploads')
       .select('*', { count: 'exact', head: true });
+    const latestUploadStamp = this.getUploadStamp(latestUpload);
 
     return {
       uploadCount: uploadCount || 0,
-      latestUploadId: latestUpload ? latestUpload.id : null,
-      latestUploadTime: latestUpload ? new Date(latestUpload.uploaded_at).getTime() : null,
+      latestUploadId: latestUploadStamp.latestUploadId,
+      latestUploadTime: latestUploadStamp.latestUploadTime,
     };
   }
 
