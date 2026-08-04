@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog } from "../lib/api";
+import { createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getTrafficOptimizer, TrafficOptimizerResponse } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import {
@@ -170,6 +170,8 @@ interface ScenarioFactor {
   description: string;
 }
 
+type DemandLevel = "Low" | "Medium" | "High";
+
 const sectorColors: Record<string, string> = {
   cafe: "#D2B48C",
   retail: "#F59E0B",
@@ -313,6 +315,9 @@ export function AISimulation() {
   const [pricingCatalogLoading, setPricingCatalogLoading] = useState(false);
   const [pricingCatalogError, setPricingCatalogError] = useState<string | null>(null);
   const [selectedPricingItemName, setSelectedPricingItemName] = useState<string | null>(null);
+  const [trafficOptimizerData, setTrafficOptimizerData] = useState<TrafficOptimizerResponse | null>(null);
+  const [trafficOptimizerLoading, setTrafficOptimizerLoading] = useState(false);
+  const [trafficOptimizerError, setTrafficOptimizerError] = useState<string | null>(null);
 
   const handleOpenDrawer = (candidate: DrawerBundleCandidate) => {
     setSelectedCandidateForDrawer(candidate);
@@ -322,6 +327,7 @@ export function AISimulation() {
   const debouncedSupportThreshold = useDebouncedValue(supportThreshold[0]);
   const debouncedConfidenceLevel = useDebouncedValue(confidenceLevel[0]);
   const debouncedDataTime = useDebouncedValue(dataTime[0]);
+  const debouncedTrafficOptimizerTime = useDebouncedValue(trafficOptimizerTime[0]);
   const latestHistoryDate = dataRangeInfo?.historyEndDate || INGESTED_HISTORY_END_DATE;
   const historyStartDate = dataRangeInfo?.historyStartDate || HISTORY_START_DATE;
   const selectedHeaderRange = useMemo(
@@ -531,6 +537,42 @@ export function AISimulation() {
       cancelled = true;
     };
   }, [pricingUsesFullCatalog, selectedHeaderRange.end, selectedHeaderRange.start]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTrafficOptimizerLoading(true);
+    setTrafficOptimizerError(null);
+
+    getTrafficOptimizer({
+      hour: String(debouncedTrafficOptimizerTime),
+      dateStart: selectedHeaderRange.start,
+      dateEnd: selectedHeaderRange.end,
+    })
+      .then((result) => {
+        if (!cancelled) {
+          setTrafficOptimizerData(result);
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setTrafficOptimizerError(error.message);
+          setTrafficOptimizerData(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTrafficOptimizerLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    debouncedTrafficOptimizerTime,
+    selectedHeaderRange.end,
+    selectedHeaderRange.start,
+  ]);
 
   const handleRunSimulation = () => {
     setScenarioRefreshKey((key) => key + 1);
@@ -1217,26 +1259,32 @@ export function AISimulation() {
       : null;
 
   const trafficSectors = [
-    { name: "Grooming", color: "#3AE4FA", placeholderStaff: 2 },
+    { name: "Services", color: "#3AE4FA", placeholderStaff: 2 },
     { name: "Cafe", color: "#F53799", placeholderStaff: 2 },
     { name: "Retail", color: "#F59E0B", placeholderStaff: 1 },
-    { name: "Reception", color: "#0D9488", placeholderStaff: 1 },
   ];
+  const trafficColumns = useMemo(
+    () => trafficOptimizerData?.columns || [],
+    [trafficOptimizerData],
+  );
+  const trafficDisplayMode = trafficOptimizerData?.displayMode || "daily";
+  const trafficVisitDefinition = trafficOptimizerData?.visitDefinition ||
+    "Unique transaction IDs from ingested physical-channel rows.";
 
-  const demandStyles: Record<string, { bg: string; text: string; label: string }> = {
+  const demandStyles: Record<DemandLevel, { bg: string; text: string; label: string }> = {
     Low: { bg: "bg-green-50", text: "text-green-700", label: "Low" },
     Medium: { bg: "bg-yellow-50", text: "text-yellow-700", label: "Medium" },
     High: { bg: "bg-red-50", text: "text-red-700", label: "High" },
   };
 
-  const getDemandLevel = (value: number) => {
+  const getDemandLevel = (value: number): DemandLevel => {
     if (value >= 42) return "High";
     if (value >= 28) return "Medium";
     return "Low";
   };
 
   const getRequiredStaff = (sector: string, level: string) => {
-    if (sector === "Grooming") {
+    if (sector === "Services") {
       if (level === "High") return 4;
       if (level === "Medium") return 2;
       return 1;
@@ -1251,36 +1299,30 @@ export function AISimulation() {
   };
 
   const sectorTrafficForecast = useMemo(() => {
-    const selectedHour = trafficOptimizerTime[0];
-    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const trafficRowsBySector = new Map(
+      (trafficOptimizerData?.sectors || []).map((sector) => [sector.sector, sector]),
+    );
 
-    return trafficSectors.map((sector, sectorIndex) => {
-      const dayForecasts = days.map((day, dayIndex) => {
-        const weekendLift = dayIndex >= 5 ? 12 : 0;
-        const hourLift =
-          sector.name === "Grooming"
-            ? (selectedHour >= 9 && selectedHour <= 12 ? 22 : 0) + (selectedHour >= 13 && selectedHour <= 15 ? 10 : 0)
-            : sector.name === "Cafe"
-              ? (selectedHour >= 12 && selectedHour <= 14 ? 12 : 0) + (selectedHour >= 15 && selectedHour <= 18 ? 22 : 0)
-              : sector.name === "Retail"
-                ? (selectedHour >= 16 && selectedHour <= 19 ? 16 : 0)
-                : (selectedHour >= 9 && selectedHour <= 11 ? 10 : 0) + (selectedHour >= 17 && selectedHour <= 19 ? 10 : 0);
-        const base =
-          sector.name === "Grooming" ? 16 :
-          sector.name === "Cafe" ? 15 :
-          sector.name === "Retail" ? 12 :
-          9;
-        const patternLift = (selectedHour * (dayIndex + 2) + sectorIndex * 7) % 9;
-        const predicted = Math.round(base + hourLift + weekendLift + patternLift);
-        const level = getDemandLevel(predicted);
+    return trafficSectors.map((sector) => {
+      const trafficRow = trafficRowsBySector.get(sector.name as "Services" | "Cafe" | "Retail");
+      const valuesByKey = new Map(
+        (trafficRow?.values || []).map((value) => [value.key, value]),
+      );
+      const dayForecasts = trafficColumns.map((column) => {
+        const trafficValue = valuesByKey.get(column.key);
+        const visits = Number(trafficValue?.visits || 0);
+        const level = getDemandLevel(visits);
         const requiredStaff = getRequiredStaff(sector.name, level);
         const scheduledStaff = sector.placeholderStaff;
         const staffDelta = requiredStaff - scheduledStaff;
 
         return {
-          day,
-          predicted,
-          actual: dayIndex < 4 ? Math.max(0, predicted + ((dayIndex + sectorIndex) % 5) - 2) : null,
+          day: column.dayLabel,
+          label: column.label,
+          key: column.key,
+          date: column.date,
+          predicted: visits,
+          actual: visits,
           level,
           requiredStaff,
           scheduledStaff,
@@ -1291,34 +1333,55 @@ export function AISimulation() {
       return {
         ...sector,
         forecasts: dayForecasts,
+        totalVisits: trafficRow?.totalVisits || 0,
+        peakVisits: trafficRow?.peakVisits || 0,
+        averageVisits: trafficRow?.averageVisits || 0,
       };
     });
-  }, [trafficOptimizerTime]);
+  }, [trafficOptimizerData, trafficColumns]);
 
-  const selectedTimeStaffPlan = sectorTrafficForecast.map((sector) => ({
-    sector: sector.name,
-    color: sector.color,
-    ...sector.forecasts[0],
-  }));
+  const selectedTimeStaffPlan = sectorTrafficForecast.map((sector) => {
+    const peakForecast = sector.forecasts.reduce(
+      (peak, forecast) => (forecast.predicted > peak.predicted ? forecast : peak),
+      sector.forecasts[0] || {
+        day: "",
+        label: "No matching transactions",
+        key: "empty",
+        predicted: 0,
+        actual: 0,
+        level: "Low",
+        requiredStaff: getRequiredStaff(sector.name, "Low"),
+        scheduledStaff: sector.placeholderStaff,
+        staffDelta: getRequiredStaff(sector.name, "Low") - sector.placeholderStaff,
+      },
+    );
 
-  const totalPredictedTraffic = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.predicted, 0);
+    return {
+      sector: sector.name,
+      color: sector.color,
+      ...peakForecast,
+    };
+  });
+
+  const totalPredictedTraffic = trafficOptimizerData?.totalVisits ||
+    sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0);
   const highDemandSectors = selectedTimeStaffPlan.filter((sector) => sector.level === "High").length;
   const totalScheduledPlaceholderStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.scheduledStaff, 0);
   const totalRecommendedStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.requiredStaff, 0);
 
-  // Next 7 Days Traffic Prediction based on time slot
+  const formatTrafficVisitValue = (value: number) =>
+    Number.isInteger(value) ? String(value) : value.toFixed(1);
+
+  // Traffic volume based on the Header Filter and selected time slot
   const trafficPrediction = useMemo(() => {
-    return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, dayIndex) => {
-      const sectorTotals = sectorTrafficForecast.map((sector) => sector.forecasts[dayIndex]);
+    return trafficColumns.map((column, columnIndex) => {
+      const sectorTotals = sectorTrafficForecast.map((sector) => sector.forecasts[columnIndex]);
       return {
-        day,
-        predicted: sectorTotals.reduce((sum, item) => sum + item.predicted, 0),
-        actual: dayIndex < 4
-          ? sectorTotals.reduce((sum, item) => sum + (item.actual || 0), 0)
-          : null,
+        day: column.label,
+        visits: sectorTotals.reduce((sum, item) => sum + (item?.predicted || 0), 0),
       };
     });
-  }, [sectorTrafficForecast]);
+  }, [sectorTrafficForecast, trafficColumns]);
 
   // Past Happy Hour Performance
   const happyHourHistory = [
@@ -2931,10 +2994,10 @@ export function AISimulation() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex-1">
                 <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  Sector Demand Estimate
+                  Sector Traffic From Transactions
                 </h2>
                 <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Rule-based demand estimates by business sector, compared against placeholder staffing coverage
+                  Observed transaction-visits for Services, Cafe, and Retail within {selectedHeaderRangeLabel}
                 </p>
               </div>
 
@@ -2969,7 +3032,7 @@ export function AISimulation() {
             {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Estimated Visits</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Observed Visits</div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalPredictedTraffic}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
@@ -2989,9 +3052,9 @@ export function AISimulation() {
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
                 <div>
-                  <div className="text-sm font-bold text-[#223047]">7-Day Sector Demand Heatmap</div>
+                  <div className="text-sm font-bold text-[#223047]">Header Filter Sector Traffic Heatmap</div>
                   <div className="text-xs text-[#223047] opacity-60 mt-1">
-                    Demand levels use fixed rule-based thresholds for {formatHour(trafficOptimizerTime[0])}; Low &lt; 28 visits, Medium 28-41, High 42+
+                    {trafficVisitDefinition} {trafficDisplayMode === "weekday_average" ? "Values are weekday averages because the selected range is longer than 14 days." : "Values are daily counts for the selected range."}
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
@@ -3006,13 +3069,27 @@ export function AISimulation() {
                   <thead>
                     <tr className="border-t border-[#FFD9EC] bg-white text-left text-xs uppercase tracking-wide text-[#223047] opacity-70">
                       <th className="px-4 py-3 font-semibold">Sector</th>
-                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
-                        <th key={day} className="px-3 py-3 font-semibold text-center">{day}</th>
+                      {trafficColumns.map((column) => (
+                        <th key={column.key} className="px-3 py-3 font-semibold text-center">{column.label}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {sectorTrafficForecast.map((sector) => (
+                    {trafficOptimizerLoading && (
+                      <tr className="border-t border-[#FFD9EC]">
+                        <td colSpan={Math.max(trafficColumns.length + 1, 2)} className="px-4 py-8 text-center text-sm text-[#223047] opacity-60">
+                          Loading transaction traffic for the selected Header Filter range...
+                        </td>
+                      </tr>
+                    )}
+                    {!trafficOptimizerLoading && trafficOptimizerError && (
+                      <tr className="border-t border-[#FFD9EC]">
+                        <td colSpan={Math.max(trafficColumns.length + 1, 2)} className="px-4 py-8 text-center text-sm text-red-600">
+                          Unable to load transaction traffic: {trafficOptimizerError}
+                        </td>
+                      </tr>
+                    )}
+                    {!trafficOptimizerLoading && !trafficOptimizerError && sectorTrafficForecast.map((sector) => (
                       <tr key={sector.name} className="border-t border-[#FFD9EC]">
                         <td className="px-4 py-3 font-semibold text-[#223047]">
                           <span className="inline-flex items-center gap-2">
@@ -3024,10 +3101,10 @@ export function AISimulation() {
                           <td key={`${sector.name}-${forecast.day}`} className="px-3 py-3">
                             <div
                               className={`mx-auto flex min-h-[54px] w-full max-w-[92px] items-center justify-center rounded-lg px-2 py-2 text-center ${demandStyles[forecast.level].bg}`}
-                              title={`${forecast.level} demand`}
+                              title={`${forecast.level} demand from ingested transactions`}
                             >
                               <div className={`text-sm font-bold ${demandStyles[forecast.level].text}`}>
-                                {forecast.predicted}
+                                {formatTrafficVisitValue(forecast.predicted)}
                                 <span className="block text-[10px] font-semibold text-[#223047] opacity-65">visits</span>
                               </div>
                             </div>
@@ -3045,7 +3122,7 @@ export function AISimulation() {
                 <div>
                   <h3 className="text-base md:text-lg font-bold text-[#223047]">Staffing Recommendation</h3>
                   <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
-                    Current schedule counts are placeholders until staff-sector schedules are added
+                    Based on the busiest matching period in the selected Header Filter range; staff counts are placeholders until staff-sector schedules are added
                   </p>
                 </div>
                 <Badge className="bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC]">Placeholder Data</Badge>
@@ -3064,7 +3141,7 @@ export function AISimulation() {
                             {sector.sector}
                           </div>
                           <div className="mt-1 text-xs text-[#223047] opacity-65">
-                            {sector.level} demand at {formatHour(trafficOptimizerTime[0])}
+                            {sector.level} demand at {formatHour(trafficOptimizerTime[0])}{sector.label ? `, ${sector.label}` : ""}
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-2 text-center text-xs">
@@ -3120,19 +3197,19 @@ export function AISimulation() {
             <div className="rounded-xl md:rounded-2xl bg-[#223047] p-4 md:p-5 text-white">
               <div className="text-xs font-bold tracking-wide mb-2">WOOF Traffic Recommendation</div>
               <p className="text-sm opacity-90" style={{ lineHeight: "1.6" }}>
-                At {formatHour(trafficOptimizerTime[0])}, WOOF estimates {totalPredictedTraffic} visits across key sectors. Replace the placeholder staff counts with real schedules to turn these recommendations into accurate shift adjustments and salary-cost insights.
+                At {formatHour(trafficOptimizerTime[0])}, WOOF found {formatTrafficVisitValue(totalPredictedTraffic)} transaction-visits across Services, Cafe, and Retail for {selectedHeaderRangeLabel}. Replace the placeholder staff counts with real schedules to turn these recommendations into accurate shift adjustments and salary-cost insights.
               </p>
             </div>
           </div>
 
-          {/* Next 7 Days Traffic Prediction */}
+          {/* Header Filter Traffic Trend */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div>
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Next 7 Days Rule-Based Traffic Estimate
+                Header Filter Traffic Trend
               </h2>
               <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Estimated customer volume for selected time slot: {formatHour(trafficOptimizerTime[0])}
+                Transaction-visit volume for {formatHour(trafficOptimizerTime[0])} within {selectedHeaderRangeLabel}
               </p>
             </div>
 
@@ -3156,18 +3233,10 @@ export function AISimulation() {
                 />
                 <Area
                   type="monotone"
-                  dataKey="predicted"
+                  dataKey="visits"
                   stroke="#3AE4FA"
                   strokeWidth={2.5}
                   fill="url(#trafficGradient)"
-                  animationDuration={800}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="actual"
-                  stroke="#223047"
-                  strokeWidth={2}
-                  dot={{ r: 4 }}
                   animationDuration={800}
                 />
               </AreaChart>
@@ -3176,11 +3245,7 @@ export function AISimulation() {
             <div className="flex justify-center gap-8 pt-4">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
-                <span className="text-sm text-[#223047]">Estimated Traffic</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-[#223047] rounded-full" />
-                <span className="text-sm text-[#223047]">Actual Traffic</span>
+                <span className="text-sm text-[#223047]">Observed Transaction Visits</span>
               </div>
             </div>
           </div>

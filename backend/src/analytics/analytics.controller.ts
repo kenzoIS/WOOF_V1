@@ -113,6 +113,19 @@ export class AnalyticsController {
     });
   }
 
+  @Get('traffic-optimizer')
+  async getTrafficOptimizer(
+    @Query('hour') hour?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
+  ) {
+    return this.analyticsService.getTrafficOptimizer({
+      hour,
+      dateStart,
+      dateEnd,
+    });
+  }
+
   @Get('cross-sell/config')
   async getCrossSellConfig(
     @Query('minSupport') minSupport?: string,

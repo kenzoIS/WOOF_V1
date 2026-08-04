@@ -157,6 +157,41 @@ export interface PricingCatalogQuery {
   dateEnd?: string;
 }
 
+export interface TrafficOptimizerQuery {
+  hour?: string;
+  dateStart?: string;
+  dateEnd?: string;
+}
+
+export interface TrafficOptimizerResponse {
+  source: 'transaction_history';
+  visitDefinition: string;
+  displayMode: 'daily' | 'weekday_average';
+  hour: number | null;
+  dateStart: string | null;
+  dateEnd: string | null;
+  totalVisits: number;
+  columns: Array<{
+    key: string;
+    label: string;
+    dayLabel: string;
+    date?: string;
+    sampleDays?: number;
+  }>;
+  sectors: Array<{
+    sector: 'Services' | 'Cafe' | 'Retail';
+    totalVisits: number;
+    peakVisits: number;
+    averageVisits: number;
+    values: Array<{
+      key: string;
+      visits: number;
+      date?: string;
+      sampleDays?: number;
+    }>;
+  }>;
+}
+
 async function fetchApi(path: string, options?: RequestInit) {
   const res = await request(path, {
     ...options,
@@ -269,6 +304,11 @@ export async function getCrossSell(params?: CrossSellQuery) {
 export async function getPricingCatalog(params?: PricingCatalogQuery) {
   const query = toQueryString(params);
   return fetchApi(`/analytics/pricing-catalog${query}`);
+}
+
+export async function getTrafficOptimizer(params?: TrafficOptimizerQuery): Promise<TrafficOptimizerResponse> {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/traffic-optimizer${query}`);
 }
 
 export async function getCrossSellConfig(params?: CrossSellQuery) {

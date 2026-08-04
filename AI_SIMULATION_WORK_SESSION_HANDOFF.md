@@ -55,13 +55,18 @@ Implemented direction:
 
 - Reworked the Traffic Optimizer tab into sector-based traffic forecasting and staffing decision support.
 - The tab now focuses on operational sectors instead of a physical map:
-  - Grooming
+  - Services
   - Cafe
   - Retail
-  - Reception
-- Added deterministic rule-based traffic estimates by hour/day/sector.
+- Removed Reception because it is not an official client sector.
+- Renamed Grooming to Services because grooming belongs under the Services sector.
+- Added a backend `GET /api/analytics/traffic-optimizer` endpoint.
+- Traffic values now come from ingested transaction history for the selected Header Filter range and selected hour.
+- Visit counts use unique transaction IDs as the available proxy for visits.
+- Marketplace-only rows, such as Shopee and TikTok Shop, are excluded so online orders do not inflate physical store traffic.
 - Added placeholder staff counts so the UI remains usable until real staff schedule data is available.
-- Added 7-day sector heatmap tiles using visit counts as the visible tile label.
+- Added Header Filter-bound sector heatmap tiles using visit counts as the visible tile label.
+- Short ranges show daily counts; ranges longer than 14 days show weekday averages to keep the heatmap readable.
 - Removed Low/Medium/High text labels from the tiles because the colors already communicate demand intensity.
 - Added separate full-width rows below Sector Traffic Forecasting:
   - Staffing Recommendation
@@ -71,7 +76,8 @@ Implemented direction:
 Current limitation:
 
 - Traffic Optimizer is not yet a true M/M/c queueing model.
-- It uses placeholder staff counts and rule-based demand tiers.
+- It still uses placeholder staff counts and rule-based demand tiers.
+- Traffic counts are actual transaction-derived counts, but not true footfall sensor counts. Customers who enter without a transaction are not counted.
 - This is acceptable for the prototype as long as it is labeled as a decision-support estimate.
 
 Next needed data for real staffing optimization:

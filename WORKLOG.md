@@ -2,6 +2,47 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-08-04 - Traffic Optimizer Header Filter Transaction Data
+
+### Requested
+
+- Remove Reception from Traffic Optimizer because the business only has Cafe, Services, and Retail sectors.
+- Rename Grooming to Services.
+- Clarify whether Traffic Optimizer visit counts are hardcoded or data-driven.
+- Make Traffic Optimizer results follow the Header Filter date range.
+
+### Backend Changes
+
+- Added `GET /api/analytics/traffic-optimizer`.
+- Aggregates ingested transactions by selected hour, selected Header Filter date range, sector, and day.
+- Uses unique `transactionId` counts as the available proxy for visits.
+- Tracks only Services, Cafe, and Retail as output sectors.
+- Excludes Shopee and TikTok Shop marketplace orders from the physical-traffic count so online orders do not inflate in-store traffic.
+- Returns daily counts for short ranges and weekday averages for ranges longer than 14 days.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Removed Reception from Traffic Optimizer.
+- Replaced Grooming with Services.
+- Added Traffic Optimizer API loading/error state.
+- Wired the selected Header Filter range and selected hour into the Traffic Optimizer API call.
+- Updated heatmap, stats, chart, and recommendation copy from rule-based estimates to observed transaction-visits.
+
+### Files Changed
+
+- `backend/src/analytics/analytics.controller.ts`
+- `backend/src/analytics/analytics.service.ts`
+- `frontend/src/app/lib/api.ts`
+- `frontend/src/app/pages/AISimulation.tsx`
+- `AI_SIMULATION_WORK_SESSION_HANDOFF.md`
+- `WORKLOG.md`
+
+### Verification
+
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm run build` in `backend`.
+
 ## 2026-08-03 - AI Simulation Work Session Handoff
 
 ### Requested
@@ -290,7 +331,7 @@ This file records requested revisions, implementation details, verification, and
 ### Frontend Changes
 
 - Updated `frontend/src/app/pages/AISimulation.tsx` Traffic Optimizer tab to focus on sector demand forecasting instead of physical floorplan visualization.
-- Replaced randomized floorplan customer dots with deterministic sector forecasts for Grooming, Cafe, Retail, and Reception.
+- Replaced randomized floorplan customer dots with deterministic sector forecasts for Grooming, Cafe, Retail, and Reception. Superseded on 2026-08-04: Traffic Optimizer now uses Services, Cafe, and Retail only.
 - Added a 7-day sector demand heatmap using Low, Medium, and High demand levels.
 - Added staffing recommendation cards comparing predicted required staff against placeholder scheduled staff counts.
 - Added a clear placeholder-data badge and a panel listing the future inputs needed for accurate staffing recommendations:

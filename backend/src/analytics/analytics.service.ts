@@ -94,6 +94,13 @@ interface ForecastEvaluationPlan {
   testEndDate: string | null;
   backtestMetricSource: string;
 }
+interface TrafficColumn {
+  key: string;
+  label: string;
+  dayLabel: string;
+  weekday: number;
+  date?: string;
+}
 const FORECAST_REVENUE_PAYLOAD_VERSION = 6;
 const DEFAULT_FORECAST_DAYS = 30;
 const MAX_FORECAST_DAYS = 90;
@@ -1321,6 +1328,203 @@ export class AnalyticsService {
     };
   }
 
+  async getTrafficOptimizer(
+    options: Pick<CrossSellOptions, 'hour' | 'dateStart' | 'dateEnd'> = {},
+  ): Promise<any> {
+    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const hour = this.parseHour(options.hour) ?? 14;
+    const trackedSectors = ['Services', 'Cafe', 'Retail'];
+
+    if (!dateWindow) {
+      return {
+        source: 'transaction_history',
+        visitDefinition:
+          'Unique transaction IDs from ingested physical-channel rows. Marketplace-only orders are excluded because they do not represent in-store traffic.',
+        displayMode: 'daily',
+        hour,
+        dateStart: null,
+        dateEnd: null,
+        totalVisits: 0,
+        columns: [],
+        sectors: trackedSectors.map((sector) => ({
+          sector,
+          totalVisits: 0,
+          peakVisits: 0,
+          averageVisits: 0,
+          values: [],
+        })),
+      };
+    }
+
+    const dailyColumns = this.buildTrafficDateColumns(
+      dateWindow.dateStart,
+      dateWindow.dateEnd,
+    );
+    const displayMode = dailyColumns.length > 14 ? 'weekday_average' : 'daily';
+    const columns: TrafficColumn[] =
+      displayMode === 'daily'
+        ? dailyColumns
+        : this.buildTrafficWeekdayColumns(dailyColumns);
+    const weekdaySampleDays = new Map<number, number>();
+    dailyColumns.forEach((column) => {
+      weekdaySampleDays.set(
+        column.weekday,
+        (weekdaySampleDays.get(column.weekday) || 0) + 1,
+      );
+    });
+
+    const rows = await this.transactionModel
+      .aggregate([
+        {
+          $match: {
+            date: { $gte: dateWindow.start, $lte: dateWindow.end },
+            // Legacy uploads may label Services rows as Grooming; output still normalizes to Services.
+            sector: { $in: ['Services', 'Grooming', 'Cafe', 'Retail'] },
+            channel: { $nin: ['Shopee', 'TikTok Shop'] },
+            $expr: {
+              $eq: [
+                {
+                  $hour: {
+                    date: '$date',
+                    timezone: 'Asia/Manila',
+                  },
+                },
+                hour,
+              ],
+            },
+          },
+        },
+        {
+          $project: {
+            sector: 1,
+            transactionKey: {
+              $ifNull: ['$transactionId', { $toString: '$_id' }],
+            },
+            dateKey: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+            mongoWeekday: {
+              $dayOfWeek: {
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              sector: '$sector',
+              dateKey: '$dateKey',
+              mongoWeekday: '$mongoWeekday',
+            },
+            transactions: { $addToSet: '$transactionKey' },
+          },
+        },
+        {
+          $project: {
+            _id: 1,
+            visits: { $size: '$transactions' },
+          },
+        },
+      ])
+      .allowDiskUse(true)
+      .exec();
+
+    const dailyVisits = new Map<string, number>();
+    const weekdayVisits = new Map<string, number>();
+    let totalVisits = 0;
+
+    rows.forEach((row: any) => {
+      const sector = this.normalizeSector(String(row._id?.sector || ''));
+      if (!trackedSectors.includes(sector)) {
+        return;
+      }
+
+      const visits = Number(row.visits || 0);
+      totalVisits += visits;
+      const dateKey = String(row._id?.dateKey || '');
+      const weekday = Math.max(0, Number(row._id?.mongoWeekday || 1) - 1);
+      const dailyKey = `${sector}:${dateKey}`;
+      const weekdayKey = `${sector}:${weekday}`;
+      dailyVisits.set(dailyKey, (dailyVisits.get(dailyKey) || 0) + visits);
+      weekdayVisits.set(
+        weekdayKey,
+        (weekdayVisits.get(weekdayKey) || 0) + visits,
+      );
+    });
+
+    const sectors = trackedSectors.map((sector) => {
+      const values = columns.map((column) => {
+        const rawVisits =
+          displayMode === 'daily'
+            ? dailyVisits.get(`${sector}:${column.key}`) || 0
+            : weekdayVisits.get(`${sector}:${column.weekday}`) || 0;
+        const sampleDays =
+          displayMode === 'weekday_average'
+            ? weekdaySampleDays.get(column.weekday) || 1
+            : undefined;
+        const visits =
+          displayMode === 'weekday_average'
+            ? this.round(rawVisits / (sampleDays || 1))
+            : rawVisits;
+
+        return {
+          key: column.key,
+          visits,
+          ...(column.date ? { date: column.date } : {}),
+          ...(sampleDays ? { sampleDays } : {}),
+        };
+      });
+      const totalSectorVisits = Array.from(dailyVisits.entries())
+        .filter(([key]) => key.startsWith(`${sector}:`))
+        .reduce((sum, [, visits]) => sum + visits, 0);
+      const peakVisits = values.reduce(
+        (max, value) => Math.max(max, Number(value.visits || 0)),
+        0,
+      );
+      const averageVisits = values.length
+        ? this.round(
+            values.reduce((sum, value) => sum + Number(value.visits || 0), 0) /
+              values.length,
+          )
+        : 0;
+
+      return {
+        sector,
+        totalVisits: totalSectorVisits,
+        peakVisits,
+        averageVisits,
+        values,
+      };
+    });
+
+    return {
+      source: 'transaction_history',
+      visitDefinition:
+        'Unique transaction IDs from ingested physical-channel rows. Marketplace-only orders are excluded because they do not represent in-store traffic.',
+      displayMode,
+      hour,
+      dateStart: dateWindow.dateStart,
+      dateEnd: dateWindow.dateEnd,
+      totalVisits,
+      columns: columns.map((column) => ({
+        key: column.key,
+        label: column.label,
+        dayLabel: column.dayLabel,
+        ...(column.date ? { date: column.date } : {}),
+        ...(displayMode === 'weekday_average'
+          ? { sampleDays: weekdaySampleDays.get(column.weekday) || 0 }
+          : {}),
+      })),
+      sectors,
+    };
+  }
+
   async getCrossSellConfig(options: CrossSellOptions = {}): Promise<any> {
     const thresholds = this.normalizeCrossSellThresholds(options);
     const { data: cachedList } = await this.supabaseService.client
@@ -2045,6 +2249,63 @@ export class AnalyticsService {
       };
     }
     return match;
+  }
+
+  private buildTrafficDateColumns(dateStart: string, dateEnd: string): TrafficColumn[] {
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthLabels = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    const columns: TrafficColumn[] = [];
+    const cursor = new Date(`${dateStart}T00:00:00.000Z`);
+    const end = new Date(`${dateEnd}T00:00:00.000Z`);
+
+    while (
+      !Number.isNaN(cursor.getTime()) &&
+      !Number.isNaN(end.getTime()) &&
+      cursor <= end
+    ) {
+      const key = cursor.toISOString().slice(0, 10);
+      const weekday = cursor.getUTCDay();
+      columns.push({
+        key,
+        label: `${dayLabels[weekday]} ${monthLabels[cursor.getUTCMonth()]} ${cursor.getUTCDate()}`,
+        dayLabel: dayLabels[weekday],
+        date: key,
+        weekday,
+      });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return columns;
+  }
+
+  private buildTrafficWeekdayColumns(
+    dailyColumns: TrafficColumn[],
+  ): TrafficColumn[] {
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weekdaysInRange = new Set(dailyColumns.map((column) => column.weekday));
+    const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
+
+    return weekdayOrder
+      .filter((weekday) => weekdaysInRange.has(weekday))
+      .map((weekday) => ({
+        key: `weekday-${weekday}`,
+        label: `${dayLabels[weekday]} avg`,
+        dayLabel: dayLabels[weekday],
+        weekday,
+      }));
   }
 
   private parseCrossSellDateWindow(
