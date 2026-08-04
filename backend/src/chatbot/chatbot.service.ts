@@ -116,7 +116,7 @@ export class ChatbotService {
       cleanedQuestion,
       conversationContext,
     );
-    let plan = await this.planQuestion(questionForPlanning);
+    let plan = await this.planQuestion(questionForPlanning, conversationContext);
     const fallbackClarification = this.getClarificationQuestion(
       questionForPlanning,
       plan,
@@ -206,7 +206,10 @@ export class ChatbotService {
     };
   }
 
-  private async planQuestion(question: string): Promise<QueryPlan> {
+  private async planQuestion(
+    question: string,
+    history: ChatHistoryItem[] = [],
+  ): Promise<QueryPlan> {
     const fallback = this.classifyQuestion(question);
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -228,7 +231,7 @@ export class ChatbotService {
           messages: [
             {
               role: 'user',
-              content: this.buildPlannerPrompt(question),
+              content: this.buildPlannerPrompt(question, history),
             },
           ],
         },
@@ -249,15 +252,27 @@ export class ChatbotService {
     }
   }
 
-  private buildPlannerPrompt(question: string): string {
+  private buildPlannerPrompt(
+    question: string,
+    history: ChatHistoryItem[] = [],
+  ): string {
+    const recentContext = history.length
+      ? history
+          .map((item) => `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`)
+          .join('\n')
+      : 'None';
     return [
       'Think through the user question as a controlled WOOF dashboard analyst, then convert it into a safe query plan.',
       'Do not reveal private chain-of-thought. Return only the required JSON with short public analysisSteps.',
       'The chatbot is only allowed to answer WOOF dashboard questions about sales, revenue, orders, quantity sold, average order value, top items, sector breakdown, channel breakdown, forecasts, and bundle recommendations.',
-      'If the question is not dashboard-related, set intent to "out_of_scope".',
+      'Classify by meaning, not keywords. Do not require trigger words such as "sales" when the user clearly continues a previous dashboard question.',
+      'Use the recent chat context to resolve follow-ups, corrections, confirmations, pronouns, and elliptical prompts.',
+      'If the user asks whether the previous answer is accurate, recompute the same dashboard query plan instead of marking it out_of_scope.',
+      'If the user gives only a new date, sector, channel, or range, inherit the previous dashboard metric and filters, then replace only the newly mentioned part.',
+      'Set intent to "out_of_scope" only when the latest message cannot be mapped to a WOOF dashboard metric even after using recent context.',
       'Before selecting SQL, decide whether the question is answerable, ambiguous, unsupported, or needs a clarification question.',
       'Use answerMode "compute" only when the metric, dashboard domain, and date/range are clear enough to compute.',
-      'Use answerMode "clarify" when the user mentions a month without year, asks "best" without enough context, asks a correction without prior context, or provides a vague metric like "performance" without saying sales/orders/quantity/channel/sector.',
+      'Use answerMode "clarify" when the user mentions a month without year, asks "best" without enough context, asks a correction/follow-up without usable prior context, or asks for a vague metric that cannot be mapped to the allowed dashboard metrics.',
       'Use answerMode "unsupported" when the topic is WOOF-related but not computable from the current dashboard aggregations.',
       'Allowed intents: total_revenue, total_orders, total_quantity, average_order_value, top_items, sector_breakdown, channel_breakdown, best_sector, best_channel, forecast_overview, cross_sell_overview, out_of_scope.',
       'Allowed dateRange values: today, yesterday, last_7_days, this_month, custom, all.',
@@ -291,6 +306,8 @@ export class ChatbotService {
         generatedSql:
           'SELECT SUM(net_sales) AS revenue FROM fact_cross_channel_transactions WHERE transaction_timestamp >= :start AND transaction_timestamp <= :end;',
       }),
+      'Recent chat context:',
+      recentContext,
       `User question: ${question}`,
     ].join('\n');
   }
