@@ -138,11 +138,12 @@ export function normalizeDailySeries(
   values: DailyValue[],
   module: ForecastModule,
 ): NormalizedDailyValue[] {
-  if (values.length === 0) return [];
+  const validValues = values.filter((value) => isDateKey(value?.date));
+  if (validValues.length === 0) return [];
 
   const alpha = module === 'Cafe' ? 0.3 : 0.4;
   const byDate = new Map(
-    values.map((value) => [
+    validValues.map((value) => [
       value.date,
       {
         actual: Number.isFinite(value.actual) ? value.actual : 0,
@@ -296,6 +297,14 @@ function toDateKey(value: Date | string | null | undefined): string | null {
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
   return date.toISOString().slice(0, 10);
+}
+
+function isDateKey(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime());
 }
 
 function safeNumber(value: unknown, fallback: number): number {

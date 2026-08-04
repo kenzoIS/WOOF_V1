@@ -2659,7 +2659,7 @@ export class AnalyticsService {
     const revenue = Number(point?.revenue) || 0;
     const grossProfit = Number(point?.grossProfit) || 0;
     return {
-      date: String(point?._id || ''),
+      date: this.toDateKey(point?._id),
       actual: module === 'Services' ? orders : quantity,
       orders,
       revenue: this.round(revenue),
@@ -2672,6 +2672,22 @@ export class AnalyticsService {
       avgOrderValue: this.round(Number(point?.avgOrderValue) || 0),
       averageUnitPrice: this.round(Number(point?.averageUnitPrice) || 0),
     };
+  }
+
+  private toDateKey(value: unknown): string {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+    if (value instanceof Date && Number.isFinite(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    if (value !== null && value !== undefined) {
+      const parsed = new Date(String(value));
+      if (Number.isFinite(parsed.getTime())) {
+        return parsed.toISOString().slice(0, 10);
+      }
+    }
+    return '';
   }
 
   private async buildServicesExogenousPayload(
