@@ -825,8 +825,12 @@ export class AnalyticsService {
         holidayOverride: reqHoliday,
         ...exogenousMetadata,
         csvUploadCount: uploadCount,
-        latestCsvUploadId: latestUpload ? latestUpload._id.toString() : null,
-        latestCsvUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
+        latestCsvUploadId: latestUpload
+          ? String(latestUpload.id || latestUpload._id || '')
+          : null,
+        latestCsvUploadTime: latestUpload
+          ? new Date(latestUpload.uploaded_at || latestUpload.uploadedAt).getTime()
+          : null,
         daysRequested: forecastDays,
       },
       generated_at: new Date().toISOString(),
