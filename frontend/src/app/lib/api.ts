@@ -167,7 +167,14 @@ export interface TrafficOptimizerResponse {
   source: 'transaction_history';
   visitDefinition: string;
   displayMode: 'daily' | 'weekday_average';
+  requestedHour?: number | null;
   hour: number | null;
+  fallbackFromEmptyHour?: boolean;
+  hourlyTotals?: Array<{
+    hour: number;
+    label: string;
+    visits: number;
+  }>;
   dateStart: string | null;
   dateEnd: string | null;
   totalVisits: number;
@@ -309,6 +316,11 @@ export async function getPricingCatalog(params?: PricingCatalogQuery) {
 export async function getTrafficOptimizer(params?: TrafficOptimizerQuery): Promise<TrafficOptimizerResponse> {
   const query = toQueryString(params);
   return fetchApi(`/analytics/traffic-optimizer${query}`);
+}
+
+export async function getQueueRecommendation(params: { arrivalRate: number; serviceTime: number; targetWait?: number }) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/queue/recommend${query}`);
 }
 
 export async function getCrossSellConfig(params?: CrossSellQuery) {

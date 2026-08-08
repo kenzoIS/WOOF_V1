@@ -60,14 +60,27 @@ export class ActivationService {
   ) {}
 
   async getActivationRecommendations() {
+    const dateWindow = await this.resolveLatestActivationWindow();
     const [crossSell, home] = await Promise.all([
-      this.analyticsService.getCrossSellBundles({
-        minSupport: '0.05',
-        minConfidence: '0.4',
-        minLift: '1.1',
-        maxBundleCandidates: '8',
-      }),
-      this.analyticsService.getHomeOverview('week'),
+      this.withTimeout(
+        this.analyticsService.getCrossSellBundles({
+          minSupport: '0.05',
+          minConfidence: '0.4',
+          minLift: '1.1',
+          maxBundleCandidates: '8',
+          ...(dateWindow || {}),
+        }),
+        5_000,
+        {
+          bundleCandidates: [],
+          warning: 'Cross-sell recommendations timed out; showing forecast/KPI recommendations only.',
+        },
+      ),
+      this.withTimeout(
+        this.analyticsService.getHomeOverview('week'),
+        5_000,
+        { suggestions: [] },
+      ),
     ]);
 
     const bundleRecommendations = this.mapBundleRecommendations(
@@ -84,6 +97,52 @@ export class ActivationService {
       ),
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  private async resolveLatestActivationWindow(): Promise<
+    { dateStart: string; dateEnd: string } | null
+  > {
+    try {
+      const range = await this.analyticsService.getDataRange();
+      const end = String(range?.historyEndDate || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+        return null;
+      }
+
+      const startDate = new Date(`${end}T00:00:00.000Z`);
+      startDate.setUTCDate(startDate.getUTCDate() - 6);
+      const start = startDate.toISOString().slice(0, 10);
+      const min = String(range?.historyStartDate || '').slice(0, 10);
+
+      return {
+        dateStart: min && start < min ? min : start,
+        dateEnd: end,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    fallback: T,
+  ): Promise<T> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+          timeout = setTimeout(() => resolve(fallback), timeoutMs);
+        }),
+      ]);
+    } catch {
+      return fallback;
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
   }
 
   async getCampaigns() {

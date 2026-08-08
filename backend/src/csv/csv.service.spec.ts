@@ -2,15 +2,34 @@ import { CsvService } from './csv.service';
 import * as XLSX from 'xlsx';
 
 describe('CsvService flexible uploads', () => {
-  const create = jest.fn(async (value) => ({ _id: 'upload-id', ...value }));
-  const findByIdAndUpdate = jest.fn(async () => undefined);
   const insertMany = jest.fn(async (values) => values);
   const find = jest.fn(() => ({ exec: jest.fn(async () => []) }));
   const deleteMany = jest.fn(() => ({ exec: jest.fn(async () => undefined) }));
-  const findByIdAndDelete = jest.fn(() => ({
-    exec: jest.fn(async () => undefined),
-  }));
   const processTransactions = jest.fn(() => Promise.resolve());
+  const deleteTransactions = jest.fn(() => Promise.resolve());
+  const updateUploadMetadata = jest.fn(async () => ({ error: null }));
+  const deleteUploadMetadata = jest.fn(async () => ({ error: null }));
+  const insertUploadMetadata = jest.fn((value) => ({
+    select: jest.fn(async () => ({
+      data: [
+        {
+          id: 'upload-id',
+          ...value,
+          recordCount: value.record_count,
+          totalRevenue: value.total_revenue,
+          totalQuantity: value.total_quantity,
+          totalTransactions: value.total_transactions,
+          uploadedAt: value.uploaded_at,
+        },
+      ],
+      error: null,
+    })),
+  }));
+  const supabaseFrom = jest.fn(() => ({
+    insert: insertUploadMetadata,
+    update: jest.fn(() => ({ eq: updateUploadMetadata })),
+    delete: jest.fn(() => ({ eq: deleteUploadMetadata })),
+  }));
   const validateBatch = jest.fn((rows) => ({
     cleanedTransactions: rows,
     report: {
@@ -20,14 +39,32 @@ describe('CsvService flexible uploads', () => {
     },
   }));
   const service = new CsvService(
-    { create, findByIdAndDelete, findByIdAndUpdate, updateOne: jest.fn() } as any,
+    { client: { from: supabaseFrom } } as any,
     { insertMany, find, deleteMany } as any,
-    { processTransactions } as any,
+    { processTransactions, deleteTransactions } as any,
     { validateBatch } as any,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('preserves slash-format transaction times as Manila local time', () => {
+    const parsed = (service as any).parseDate('3/1/2021 9:38');
+
+    expect(parsed).toBeInstanceOf(Date);
+    expect(parsed.toISOString()).toBe('2021-03-01T01:38:00.000Z');
+  });
+
+  it('preserves Excel serial transaction times from spreadsheet uploads', () => {
+    const excelSerialForMarchFirstNineThirtyEight =
+      44256 + (9 * 60 + 38) / (24 * 60);
+    const parsed = (service as any).parseDate(
+      String(excelSerialForMarchFirstNineThirtyEight),
+    );
+
+    expect(parsed).toBeInstanceOf(Date);
+    expect(parsed.toISOString()).toBe('2021-03-01T01:38:00.000Z');
   });
 
   it('accepts a CSV with arbitrary common headers', async () => {
@@ -143,7 +180,7 @@ describe('CsvService flexible uploads', () => {
     ).rejects.toThrow('Failed to persist uploaded transactions');
 
     expect(deleteMany).toHaveBeenCalledWith({ csvUploadId: 'upload-id' });
-    expect(findByIdAndDelete).toHaveBeenCalledWith('upload-id');
+    expect(deleteUploadMetadata).toHaveBeenCalledWith('id', 'upload-id');
   });
 
   it('accepts the manual TikTok channel label and stores it as TikTok Shop retail data', async () => {

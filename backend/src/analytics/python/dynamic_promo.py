@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, cross_validate
 
 
 FEATURE_COLUMNS = [
@@ -208,22 +208,18 @@ def train_model(examples, source, signature):
     }
 
     if len(examples) >= 20 and y.nunique() > 1:
-        stratify = y if y.value_counts().min() >= 2 else None
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=0.25,
-            random_state=42,
-            stratify=stratify,
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        cv_results = cross_validate(
+            rf, X, y, cv=cv, scoring=("accuracy", "precision", "recall")
         )
-        rf.fit(X_train, y_train)
-        y_pred = rf.predict(X_test)
+        rf.fit(X, y)
         metrics.update(
             {
-                "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
-                "precision": round(float(precision_score(y_test, y_pred, zero_division=0)), 4),
-                "recall": round(float(recall_score(y_test, y_pred, zero_division=0)), 4),
-                "validationRows": int(len(y_test)),
+                "accuracy": round(float(np.mean(cv_results["test_accuracy"])), 4),
+                "precision": round(float(np.mean(cv_results["test_precision"])), 4),
+                "recall": round(float(np.mean(cv_results["test_recall"])), 4),
+                "validationRows": int(len(X)),
+                "kFold": 5,
             }
         )
     else:

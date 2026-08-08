@@ -814,8 +814,18 @@ export class CsvService {
   private parseDate(value: string): Date | null {
     if (!value) return null;
     const cleanValue = value.replace(/\t/g, '').trim();
+    const excelSerialDate = this.parseExcelSerialDate(cleanValue);
+    if (excelSerialDate) {
+      return excelSerialDate;
+    }
+
+    const slashDate = this.parseSlashDateTime(cleanValue);
+    if (slashDate) {
+      return slashDate;
+    }
+
     const hasTimezone = /[Zz]|[+-]\d{2}:?\d{2}$/.test(cleanValue);
-    
+
     let dateStr = cleanValue;
     if (!hasTimezone) {
       if (cleanValue.includes(' ')) {
@@ -826,13 +836,73 @@ export class CsvService {
         dateStr = `${cleanValue} +08:00`;
       }
     }
-    
+
     const parsedDate = new Date(dateStr);
     if (Number.isNaN(parsedDate.getTime())) {
       const fallback = new Date(cleanValue);
       return Number.isNaN(fallback.getTime()) ? null : fallback;
     }
     return parsedDate;
+  }
+
+  private parseSlashDateTime(value: string): Date | null {
+    const match = value.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i,
+    );
+    if (!match) return null;
+
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    const rawYear = Number(match[3]);
+    let hour = match[4] !== undefined ? Number(match[4]) : 0;
+    const minute = match[5] !== undefined ? Number(match[5]) : 0;
+    const second = match[6] !== undefined ? Number(match[6]) : 0;
+    const meridiem = match[7]?.toUpperCase();
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+
+    if (
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31 ||
+      hour < 0 ||
+      hour > 23 ||
+      minute < 0 ||
+      minute > 59 ||
+      second < 0 ||
+      second > 59
+    ) {
+      return null;
+    }
+
+    if (meridiem === 'PM' && hour < 12) hour += 12;
+    if (meridiem === 'AM' && hour === 12) hour = 0;
+
+    const dateOnlyCheck = new Date(Date.UTC(year, month - 1, day));
+    if (
+      dateOnlyCheck.getUTCFullYear() !== year ||
+      dateOnlyCheck.getUTCMonth() !== month - 1 ||
+      dateOnlyCheck.getUTCDate() !== day
+    ) {
+      return null;
+    }
+    return new Date(Date.UTC(year, month - 1, day, hour - 8, minute, second, 0));
+  }
+
+  private parseExcelSerialDate(value: string): Date | null {
+    if (!/^\d+(\.\d+)?$/.test(value)) return null;
+    const serial = Number(value);
+    if (!Number.isFinite(serial) || serial < 1 || serial > 60000) {
+      return null;
+    }
+
+    const wholeDays = Math.floor(serial);
+    const fraction = serial - wholeDays;
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    const millis = Math.round(fraction * 24 * 60 * 60 * 1000);
+    return new Date(
+      excelEpoch + wholeDays * 24 * 60 * 60 * 1000 + millis - 8 * 60 * 60 * 1000,
+    );
   }
 
   private cleanCell(value: unknown): string {
@@ -991,7 +1061,18 @@ export class CsvService {
 
   async getUploads(): Promise<any[]> {
     const { data } = await this.supabaseService.client.from('csv_uploads').select('*').order('uploaded_at', { ascending: false });
-    return data || [];
+    return (data || []).map((upload: any) => ({
+      ...upload,
+      _id: upload._id || upload.id,
+      filename: upload.filename || upload.file_name || 'Uploaded file',
+      channel: upload.channel || 'Unknown',
+      recordCount: Number(upload.record_count ?? upload.recordCount ?? 0),
+      totalRevenue: Number(upload.total_revenue ?? upload.totalRevenue ?? 0),
+      totalQuantity: Number(upload.total_quantity ?? upload.totalQuantity ?? 0),
+      totalTransactions: Number(upload.total_transactions ?? upload.totalTransactions ?? 0),
+      uploadedAt: upload.uploaded_at || upload.uploadedAt || upload.created_at,
+      etlReport: upload.etl_report || upload.etlReport || null,
+    }));
   }
 
   private async insertTransactionsInChunks(

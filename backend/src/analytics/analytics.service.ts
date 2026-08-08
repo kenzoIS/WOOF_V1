@@ -72,7 +72,10 @@ interface ForecastOverrides {
   rain?: string;
   humidity?: string;
   holiday?: string;
+  isPayday?: string;
+  promoActive?: string;
   days?: string;
+  compact?: string;
   forceRefresh?: string;
   forecastMode?: string;
   holdoutDays?: string;
@@ -926,6 +929,7 @@ export class AnalyticsService {
           {
             $group: {
               _id: '$transactionId',
+              date: { $min: '$date' },
               items: { $addToSet: '$productName' },
               sectors: { $addToSet: '$sector' },
               itemSectors: {
@@ -1092,6 +1096,7 @@ export class AnalyticsService {
 
     const inputData = baskets.map((b) => ({
       transactionId: b._id,
+      date: b.date ? new Date(b.date).toISOString() : null,
       items: b.items,
       sectors: b.sectors,
       itemSectors: b.itemSectors,
@@ -1120,6 +1125,10 @@ export class AnalyticsService {
         totalBaskets > 0
           ? Math.round((crossSectorBaskets / totalBaskets) * 10000) / 10000
           : 0;
+      const totalTransactionsRaw = rawSummaryRows[0]?.totalTransactions || totalBaskets || 1;
+      const totalLineItemsRaw = rawSummaryRows[0]?.totalLineItems || 0;
+      const totalRevenueRaw = rawSummaryRows[0]?.totalRevenue || 0;
+
       const payload = {
         ...result,
         rules,
@@ -1130,6 +1139,8 @@ export class AnalyticsService {
         multiItemBaskets: result.multiItemBaskets ?? baskets.length,
         crossSectorBaskets,
         crossSectorRate,
+        averageBasketSize: totalTransactionsRaw > 0 ? this.round(totalLineItemsRaw / totalTransactionsRaw) : 0,
+        revenuePerTransaction: totalTransactionsRaw > 0 ? this.round(totalRevenueRaw / totalTransactionsRaw) : 0,
         sectorBreakdown: this.groupRulesBySector(rules),
         thresholds,
         uploadState,
@@ -1179,16 +1190,24 @@ export class AnalyticsService {
 
   async getPricingCatalog(options: Pick<CrossSellOptions, 'sector' | 'dateStart' | 'dateEnd'> = {}): Promise<any> {
     const sector = this.normalizeCrossSellSector(options.sector);
-    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    let dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    
+    if (!dateWindow) {
+      // Find the latest transaction to anchor the 90-day window
+      const latestTx = await this.transactionModel.findOne().sort({ date: -1 }).select('date').exec();
+      const end = latestTx?.date ? new Date(latestTx.date) : new Date();
+      const start = new Date(end);
+      start.setDate(start.getDate() - 90); // 90 days minimum
+      dateWindow = { start, end, dateStart: start.toISOString(), dateEnd: end.toISOString() };
+    }
+
     const match: Record<string, unknown> = {
       productName: { $nin: [null, ''] },
+      date: { $gte: dateWindow.start, $lte: dateWindow.end },
     };
 
     if (sector !== 'all') {
       match.sector = this.normalizeSector(sector);
-    }
-    if (dateWindow) {
-      match.date = { $gte: dateWindow.start, $lte: dateWindow.end };
     }
 
     const [summaryRows, itemRows] = await Promise.all([
@@ -1523,6 +1542,15 @@ export class AnalyticsService {
       })),
       sectors,
     };
+  }
+
+  async getQueueRecommendation(options: { arrivalRate: number; serviceTime: number; targetWait?: number }) {
+    const result = await this.runPython<any>('queue_math.py', {
+      arrival_rate_per_hour: options.arrivalRate,
+      service_time_minutes: options.serviceTime,
+      target_wait_time_minutes: options.targetWait || 5.0,
+    });
+    return result;
   }
 
   async getCrossSellConfig(options: CrossSellOptions = {}): Promise<any> {
@@ -2165,7 +2193,7 @@ export class AnalyticsService {
   } {
     const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
     return {
-      minSupport: Math.max(this.parseThreshold(options.minSupport, 0.05), 0.05),
+      minSupport: Math.max(this.parseThreshold(options.minSupport, 0.01), 0.01),
       minConfidence: Math.max(
         this.parseThreshold(options.minConfidence, 0.6),
         0.6,
@@ -4031,20 +4059,29 @@ export class AnalyticsService {
     const temp = overrides?.temp !== undefined && overrides.temp !== '' ? Number(overrides.temp) : undefined;
     const rain = overrides?.rain !== undefined && overrides.rain !== '' ? overrides.rain === '1' : false;
     const holiday = overrides?.holiday !== undefined && overrides.holiday !== '' ? overrides.holiday === '1' : false;
-    let impact = 0;
+    const isPayday = overrides?.isPayday !== undefined && overrides.isPayday !== '' ? overrides.isPayday === '1' : false;
+    const promoActive = overrides?.promoActive !== undefined && overrides.promoActive !== '' ? overrides.promoActive === '1' : false;
+    
+    let multiplier = 1.0;
 
-    if (rain) impact -= 0.03;
-    if (holiday) impact += 0.08;
+    // Calibrated business assumptions for Retail
+    if (rain) multiplier *= 0.88; // 12% reduction on rainy days
+    if (holiday) multiplier *= 1.15; // 15% uplift on holidays
+    if (isPayday) multiplier *= 1.10; // 10% uplift on payday weekends
+    if (promoActive) multiplier *= 1.08; // 8% uplift with active promo
+    
     if (temp !== undefined && Number.isFinite(temp)) {
-      if (temp > 32) impact -= 0.02;
-      else if (temp >= 24 && temp <= 30) impact += 0.02;
+      if (temp > 32) multiplier *= 0.98;
+      else if (temp >= 24 && temp <= 30) multiplier *= 1.02;
     }
 
+    const impact = multiplier - 1.0;
+
     return {
-      multiplier: this.round(1 + Math.max(-0.2, Math.min(0.25, impact))),
+      multiplier: this.round(multiplier),
       impact: this.round(impact),
       source: 'retail_legacy_forecast_scenario_adjustment',
-      note: 'Retail uses the legacy forecast model with scenario multipliers applied to projected net sales.',
+      note: 'Retail uses calibrated business assumptions with scenario multipliers applied to projected net sales.',
     };
   }
 

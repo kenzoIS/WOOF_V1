@@ -147,7 +147,7 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
                 Section 1: FP-Growth Behavioral Basis
               </h3>
               <span className="text-xs font-mono font-bold text-[#F53799] bg-[#F53799]/10 px-2.5 py-1 rounded-lg border border-[#F53799]/20">
-                Model Score: {candidate.opportunityScore ?? (candidate as any).score ?? (candidate.lift ? Math.round(candidate.lift * 35) : "N/A")}
+                Model Score: {candidate.opportunityScore !== undefined && candidate.opportunityScore !== null ? Math.min(100, Math.round(candidate.opportunityScore <= 1 ? candidate.opportunityScore * 100 : candidate.opportunityScore)) : ((candidate as any).score ?? (candidate.lift ? Math.min(100, Math.round(candidate.lift * 35)) : "N/A"))}
               </span>
             </div>
 

@@ -4,6 +4,7 @@ import warnings
 import math
 from collections import defaultdict
 import pandas as pd
+import numpy as np
 from mlxtend.frequent_patterns import fpgrowth, association_rules
 from mlxtend.preprocessing import TransactionEncoder
 from backtest import compute_attach_rate_metrics
@@ -1057,8 +1058,18 @@ def run_cross_sell(baskets, config=None):
                 "Not enough data",
             )
             
-        dataset = [b['items'] for b in baskets if len(b['items']) > 1]
-        if len(dataset) < 5:
+        multi_item_baskets = [b for b in baskets if len(b['items']) > 1]
+        multi_item_baskets.sort(key=lambda x: x.get("date") or "1970-01-01T00:00:00.000Z")
+        
+        split_idx = int(len(multi_item_baskets) * 0.8)
+        train_baskets = multi_item_baskets[:split_idx]
+        test_baskets = multi_item_baskets[split_idx:]
+        
+        dataset = [b['items'] for b in multi_item_baskets]
+        train_dataset = [b['items'] for b in train_baskets]
+        test_dataset_sets = [set(b['items']) for b in test_baskets]
+
+        if len(train_dataset) < 5:
              return base_result(
                  [],
                  [],
@@ -1068,7 +1079,7 @@ def run_cross_sell(baskets, config=None):
                  cleaned_items,
                  thresholds,
                  baskets,
-                 "Not enough multi-item baskets",
+                 "Not enough multi-item baskets for training",
              )
 
         item_stats, item_metrics = build_item_metrics(
@@ -1111,7 +1122,7 @@ def run_cross_sell(baskets, config=None):
             )
              
         te = TransactionEncoder()
-        te_ary = te.fit(dataset).transform(dataset)
+        te_ary = te.fit(train_dataset).transform(train_dataset)
         df = pd.DataFrame(te_ary, columns=te.columns_)
         
         # FP-Growth
@@ -1131,7 +1142,7 @@ def run_cross_sell(baskets, config=None):
             )
             
         try:
-            rules = association_rules(frequent_itemsets, metric="lift", min_threshold=min_lift)
+            rules = association_rules(frequent_itemsets, metric="lift", min_threshold=min_lift, num_itemsets=len(train_dataset))
         except Exception as e:
             rules = pd.DataFrame()
             
@@ -1224,8 +1235,18 @@ def run_cross_sell(baskets, config=None):
             pair_support = round(float(row['support']), 4)
             score = round(float(row['lift']) * 35, 2)
 
-            rule_cooccurrences = int(row['support'] * len(dataset))
+            rule_cooccurrences = int(row['support'] * len(train_dataset))
             is_emerging_trend = bool(rule_cooccurrences <= 3 and guardrail_res["isValid"] and synergy_score >= 70.0)
+
+            recurrence_count = sum(1 for b in test_dataset_sets if all(item in b for item in antecedents + consequents))
+            recurrence_rate = recurrence_count / len(test_dataset_sets) if test_dataset_sets else 0
+            validated_by_holdout = recurrence_rate >= pair_support * 0.5
+
+            is_significant = (
+                pair_support >= 0.05
+                and round(float(row['confidence']), 4) >= 0.60
+                and round(float(row['lift']), 2) >= 1.20
+            )
 
             rule_obj = {
                 "itemA": str(item_a),
@@ -1244,6 +1265,9 @@ def run_cross_sell(baskets, config=None):
                 "cooccurrences": rule_cooccurrences,
                 "coOccurrenceCount": backtest_metrics["coOccurrenceCount"],
                 "opportunityScore": score,
+                "testRecurrenceRate": round(float(recurrence_rate), 4),
+                "validatedByHoldout": bool(validated_by_holdout),
+                "isSignificant": bool(is_significant),
                 "synergyScore": synergy_score,
                 "bundleArchetype": guardrail_res["bundleArchetype"],
                 "synergyBreakdown": synergy_breakdown,
@@ -1289,13 +1313,23 @@ def run_cross_sell(baskets, config=None):
     except Exception as e:
         return {"error": str(e)}
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
+
 if __name__ == "__main__":
     input_data = sys.stdin.read()
     try:
         payload = json.loads(input_data)
         data, config = parse_payload(payload)
         result = run_cross_sell(data, config)
-        print(json.dumps(result))
+        print(json.dumps(result, cls=NpEncoder))
     except Exception as e:
         print(json.dumps({"error": "Invalid JSON input or script error: " + str(e)}))
 

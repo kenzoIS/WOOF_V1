@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getTrafficOptimizer, TrafficOptimizerResponse } from "../lib/api";
+import { createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import {
@@ -295,7 +295,7 @@ export function AISimulation() {
   const [dataTime, setDataTime] = useState([13]); // 1 PM for Bundle Simulator
 
   // Live Behavioral Web states
-  const [supportThreshold, setSupportThreshold] = useState([5]);
+  const [supportThreshold, setSupportThreshold] = useState([1]);
   const [confidenceLevel, setConfidenceLevel] = useState([60]);
   const [fpGrowthTime, setFpGrowthTime] = useState([13]); // Time slider for FP-Growth
   const [crossSellData, setCrossSellData] = useState<CrossSellResponse | null>(null);
@@ -303,6 +303,7 @@ export function AISimulation() {
   const [crossSellError, setCrossSellError] = useState<string | null>(null);
   const [bundleDiscountOverrides, setBundleDiscountOverrides] = useState<Record<string, number>>({});
   const [bundleCategoryFilter, setBundleCategoryFilter] = useState("all");
+  const [onlySignificant, setOnlySignificant] = useState(false);
   const [selectedCandidateForDrawer, setSelectedCandidateForDrawer] = useState<DrawerBundleCandidate | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
@@ -318,6 +319,7 @@ export function AISimulation() {
   const [trafficOptimizerData, setTrafficOptimizerData] = useState<TrafficOptimizerResponse | null>(null);
   const [trafficOptimizerLoading, setTrafficOptimizerLoading] = useState(false);
   const [trafficOptimizerError, setTrafficOptimizerError] = useState<string | null>(null);
+  const [erlangStaffing, setErlangStaffing] = useState<Record<string, number>>({});
 
   const handleOpenDrawer = (candidate: DrawerBundleCandidate) => {
     setSelectedCandidateForDrawer(candidate);
@@ -573,6 +575,73 @@ export function AISimulation() {
     selectedHeaderRange.end,
     selectedHeaderRange.start,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchErlang = async () => {
+      const getDemandLevel = (value: number) => {
+        if (value >= 42) return "High";
+        if (value >= 28) return "Medium";
+        return "Low";
+      };
+
+      const getFallbackStaff = (sector: string, level: string) => {
+        if (sector === "Services") {
+          if (level === "High") return 4;
+          if (level === "Medium") return 2;
+          return 1;
+        }
+        if (sector === "Cafe") {
+          if (level === "High") return 3;
+          if (level === "Medium") return 2;
+          return 1;
+        }
+        if (level === "High") return 2;
+        return 1;
+      };
+
+      const recommendations: Record<string, number> = {};
+      const trafficSectors = [
+        { name: "Services", serviceTime: 45 },
+        { name: "Cafe", serviceTime: 15 },
+        { name: "Retail", serviceTime: 10 },
+      ];
+
+      await Promise.all(
+        trafficSectors.map(async (sector) => {
+          const trafficRow = trafficOptimizerData?.sectors?.find((s: any) => s.sector === sector.name);
+          const peakVisits = trafficRow?.peakVisits || 0;
+          const arrivalRate = peakVisits;
+
+          if (arrivalRate > 0) {
+            try {
+              const res = await getQueueRecommendation({ 
+                arrivalRate, 
+                serviceTime: sector.serviceTime, 
+                targetWait: 5 
+              });
+              recommendations[sector.name] = res.recommendedStaff || getFallbackStaff(sector.name, getDemandLevel(peakVisits));
+            } catch (err) {
+              recommendations[sector.name] = getFallbackStaff(sector.name, getDemandLevel(peakVisits));
+            }
+          } else {
+            recommendations[sector.name] = 1;
+          }
+        })
+      );
+      if (!cancelled) {
+        setErlangStaffing(recommendations);
+      }
+    };
+
+    if (trafficOptimizerData) {
+      fetchErlang();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [trafficOptimizerData]);
 
   const handleRunSimulation = () => {
     setScenarioRefreshKey((key) => key + 1);
@@ -841,13 +910,20 @@ export function AISimulation() {
       .sort((a, b) => a.localeCompare(b));
   }, [allBundlePredictions]);
 
+  const filteredBundlePredictions = useMemo(() => {
+    let filtered = allBundlePredictions;
+    if (bundleCategoryFilter !== "all") {
+      filtered = filtered.filter((bundle) => bundle.bundleCategory === bundleCategoryFilter);
+    }
+    if (onlySignificant) {
+      filtered = filtered.filter((bundle) => bundle.isSignificant);
+    }
+    return filtered;
+  }, [allBundlePredictions, bundleCategoryFilter, onlySignificant]);
+
   const bundlePredictions = useMemo(() => {
-    const filtered =
-      bundleCategoryFilter === "all"
-        ? allBundlePredictions
-        : allBundlePredictions.filter((bundle) => bundle.bundleCategory === bundleCategoryFilter);
-    return filtered.slice(0, 8);
-  }, [allBundlePredictions, bundleCategoryFilter]);
+    return filteredBundlePredictions.slice(0, 8);
+  }, [filteredBundlePredictions]);
 
   useEffect(() => {
     if (
@@ -1230,9 +1306,8 @@ export function AISimulation() {
           (a.projectedProfit ?? a.projectedRevenue),
       )[0] || null;
   const maxSafeItemDiscount =
-    selectedPricingItem?.price &&
-    selectedPricingItem.unitCost !== null &&
-    selectedPricingItem.unitCost !== undefined
+    selectedPricingItem?.price > 0 &&
+    selectedPricingItem?.unitCost > 0
       ? Math.max(
           0,
           Math.min(
@@ -1350,27 +1425,31 @@ export function AISimulation() {
         predicted: 0,
         actual: 0,
         level: "Low",
-        requiredStaff: getRequiredStaff(sector.name, "Low"),
+        requiredStaff: 1,
         scheduledStaff: sector.placeholderStaff,
-        staffDelta: getRequiredStaff(sector.name, "Low") - sector.placeholderStaff,
+        staffDelta: 1 - sector.placeholderStaff,
       },
     );
+
+    const requiredStaff = erlangStaffing[sector.name] || peakForecast.requiredStaff;
 
     return {
       sector: sector.name,
       color: sector.color,
       ...peakForecast,
+      requiredStaff,
+      staffDelta: requiredStaff - peakForecast.scheduledStaff,
     };
   });
 
-  const totalPredictedTraffic = trafficOptimizerData?.totalVisits ||
-    sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0);
+  const totalPredictedTraffic = Math.round(trafficOptimizerData?.totalVisits ||
+    sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0));
   const highDemandSectors = selectedTimeStaffPlan.filter((sector) => sector.level === "High").length;
   const totalScheduledPlaceholderStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.scheduledStaff, 0);
   const totalRecommendedStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.requiredStaff, 0);
 
   const formatTrafficVisitValue = (value: number) =>
-    Number.isInteger(value) ? String(value) : value.toFixed(1);
+    Math.round(value).toString();
 
   // Traffic volume based on the Header Filter and selected time slot
   const trafficPrediction = useMemo(() => {
@@ -1435,6 +1514,8 @@ export function AISimulation() {
       temp: String(debouncedScenarioTemperature),
       rain: weather === "rainy" ? "1" : "0",
       holiday: paydayWeekend ? "1" : "0",
+      isPayday: paydayWeekend ? "1" : "0",
+      promoActive: promoActive ? "1" : "0",
     };
 
     Promise.all([
@@ -1472,9 +1553,23 @@ export function AISimulation() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedScenarioTemperature, paydayWeekend, scenarioRefreshKey, weather]);
+  }, [debouncedScenarioTemperature, paydayWeekend, scenarioRefreshKey, weather, promoActive]);
 
-  const scenarioFactorBreakdown = useMemo<ScenarioFactor[]>(() => {
+  const scenarioOutcome = useMemo(() => {
+    const baseline = combineForecastTotals(scenarioBaselineForecasts);
+    const scenarioBase = combineForecastTotals(scenarioForecasts);
+    
+    const baselineRevenue = baseline.revenue || rawAnalysis?.totalRevenue || 1;
+    const baselineOrders = baseline.orders || rawAnalysis?.totalTransactions || 1;
+    const modelRevenue = scenarioBase.revenue || baselineRevenue;
+    const modelOrders = scenarioBase.orders || baselineOrders;
+
+    // Use model results natively (backend already applies the impacts)
+    const projectedRevenue = modelRevenue;
+    const projectedOrders = modelOrders;
+
+    const actualTotalImpact = (projectedRevenue - baselineRevenue) / baselineRevenue;
+
     const isWeekend = dayOfWeek === "saturday" || dayOfWeek === "sunday";
     const promoProbability =
       scenarioPromoModel?.status === "success"
@@ -1482,20 +1577,28 @@ export function AISimulation() {
         : 0.55;
     const promoImpact = promoActive ? 0.08 + Math.min(0.12, promoProbability * 0.12) : 0;
 
-    return [
+    const weatherImpact = weather === "rainy" ? -0.06 : weather === "sunny" ? 0.04 : 0;
+    const dayOfWeekImpact = isWeekend ? 0.12 : 0;
+    const tempImpact = debouncedScenarioTemperature > 32 ? -0.04 : debouncedScenarioTemperature < 24 ? -0.02 : 0.02;
+    const paydayImpact = paydayWeekend ? 0.16 : 0;
+
+    // Mathematically balance the sum of factor impacts to equal the total scenario impact
+    const forecastModelImpact = actualTotalImpact - (weatherImpact + dayOfWeekImpact + promoImpact + tempImpact + paydayImpact);
+
+    const scenarioFactorBreakdown = [
       {
         factor: "Forecast Model",
-        impact: 0,
-        description: "Cafe, Services, and Retail forecasts provide the baseline demand and revenue.",
+        impact: forecastModelImpact,
+        description: "Cafe, Services, and Retail forecasts provide the baseline demand and revenue adjustments.",
       },
       {
         factor: "Weather",
-        impact: weather === "rainy" ? -0.06 : weather === "sunny" ? 0.04 : 0,
+        impact: weatherImpact,
         description: weather === "rainy" ? "Rain usually softens walk-in demand." : weather === "sunny" ? "Clear weather can improve walk-ins." : "Cloudy weather is treated as neutral.",
       },
       {
         factor: "Day of Week",
-        impact: isWeekend ? 0.12 : 0,
+        impact: dayOfWeekImpact,
         description: isWeekend ? "Weekend scenarios usually support more visits." : "Weekday demand is kept near forecast baseline.",
       },
       {
@@ -1509,35 +1612,16 @@ export function AISimulation() {
       },
       {
         factor: "Temperature",
-        impact: debouncedScenarioTemperature > 32 ? -0.04 : debouncedScenarioTemperature < 24 ? -0.02 : 0.02,
+        impact: tempImpact,
         description: "Comfortable weather gets a small lift; very hot or cool days reduce visits slightly.",
       },
       {
         factor: "Payday Weekend",
-        impact: paydayWeekend ? 0.16 : 0,
+        impact: paydayImpact,
         description: paydayWeekend ? "Payday timing increases expected spend and orders." : "No payday lift is applied.",
       },
     ];
-  }, [
-    dayOfWeek,
-    debouncedScenarioTemperature,
-    paydayWeekend,
-    promoActive,
-    scenarioPromoModel,
-    weather,
-  ]);
 
-  const scenarioOutcome = useMemo(() => {
-    const baseline = combineForecastTotals(scenarioBaselineForecasts);
-    const scenarioBase = combineForecastTotals(scenarioForecasts);
-    const baselineRevenue = baseline.revenue || rawAnalysis?.totalRevenue || 1;
-    const baselineOrders = baseline.orders || rawAnalysis?.totalTransactions || 1;
-    const totalImpact = scenarioFactorBreakdown.reduce((sum, factor) => sum + factor.impact, 0);
-    const cappedImpact = Math.max(-0.35, Math.min(0.55, totalImpact));
-    const modelRevenue = scenarioBase.revenue || baselineRevenue;
-    const modelOrders = scenarioBase.orders || baselineOrders;
-    const projectedRevenue = Math.max(0, modelRevenue * (1 + cappedImpact));
-    const projectedOrders = Math.max(0, modelOrders * (1 + cappedImpact * 0.8));
     const baselineAvgTransaction = baselineRevenue / Math.max(1, baselineOrders);
     const avgTransaction = projectedRevenue / Math.max(1, projectedOrders);
     const cafeShare = projectedRevenue > 0 ? (scenarioBase.cafeRevenue / projectedRevenue) * 100 : 0;
@@ -1566,8 +1650,19 @@ export function AISimulation() {
       baselineOrders: Math.round(baselineOrders),
       confidence,
       sourceLabel: baseline.revenue > 0 ? "Forecast APIs" : "Current filtered transaction summary",
+      scenarioFactorBreakdown
     };
-  }, [rawAnalysis, scenarioBaselineForecasts, scenarioFactorBreakdown, scenarioForecasts]);
+  }, [
+    rawAnalysis, 
+    scenarioBaselineForecasts, 
+    scenarioForecasts,
+    dayOfWeek,
+    debouncedScenarioTemperature,
+    paydayWeekend,
+    promoActive,
+    scenarioPromoModel,
+    weather
+  ]);
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
@@ -2075,9 +2170,9 @@ export function AISimulation() {
 
                     <div className="grid grid-cols-3 gap-2 mb-5">
                       {[
-                        { label: "Explore", support: 5, confidence: 60 },
-                        { label: "Balanced", support: 10, confidence: 70 },
-                        { label: "Strict", support: 20, confidence: 85 },
+                        { label: "Explore", support: 1, confidence: 60 },
+                        { label: "Balanced", support: 3, confidence: 70 },
+                        { label: "Strict", support: 5, confidence: 85 },
                       ].map((preset) => (
                         <button
                           key={preset.label}
@@ -2118,12 +2213,12 @@ export function AISimulation() {
                         value={supportThreshold}
                         onValueChange={setSupportThreshold}
                         max={100}
-                        min={5}
-                        step={5}
+                        min={1}
+                        step={1}
                         className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
                       />
                       <div className="flex justify-between text-[10px] opacity-75">
-                        <span>5%</span>
+                        <span>1%</span>
                         <span>50%</span>
                         <span>100%</span>
                       </div>
@@ -2342,6 +2437,17 @@ export function AISimulation() {
                   {formatBundleCategoryKey(category)}
                 </button>
               ))}
+              <div className="w-[1px] h-6 bg-slate-200 mx-1 self-center hidden sm:block"></div>
+              <button
+                type="button"
+                onClick={() => setOnlySignificant(!onlySignificant)}
+                className={`rounded-lg border px-3 py-2 text-xs font-bold transition flex items-center gap-1 ${onlySignificant
+                    ? "bg-[#5CE1E6] text-white border-[#5CE1E6]"
+                    : "bg-white text-[#223047] border-slate-200 hover:border-[#5CE1E6]"
+                  }`}
+              >
+                Significant Only (5% Support)
+              </button>
             </div>
 
             <div className="grid gap-3 md:gap-4">
@@ -2782,7 +2888,7 @@ export function AISimulation() {
                     <span>50%</span>
                   </div>
                   <div className="mt-3 rounded-lg bg-white border border-[#FFD9EC] px-3 py-2 text-xs text-[#223047] opacity-75" style={{ lineHeight: "1.5" }}>
-                    Simulation note: expected sales use an assumed elasticity based on sector and item velocity. This is decision support, not a guaranteed ML price forecast.
+                    Simulation note: Expected sales change is estimated using an assumed price elasticity. This is a financial planning tool, not a trained demand prediction model. Actual results may vary.
                   </div>
                 </div>
 
@@ -2954,7 +3060,7 @@ export function AISimulation() {
                       : "Unavailable"}
                   </div>
                   <div className="text-[11px] text-[#223047] opacity-70 mt-1">
-                    Safe ceiling: {maxSafeItemDiscount !== null ? `${maxSafeItemDiscount}%` : "Cost data unavailable"}
+                    Safe ceiling: {maxSafeItemDiscount !== null ? `${maxSafeItemDiscount}%` : "Cost data unavailable — margin ceiling cannot be calculated"}
                   </div>
                 </div>
               </div>
@@ -3048,8 +3154,13 @@ export function AISimulation() {
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalRecommendedStaff}</div>
               </div>
             </div>
+            
+            <div className="text-xs text-[#223047] opacity-70 bg-slate-100 p-2 rounded-lg mt-2 flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-info"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              Note: Placeholder staff are client-provided static capacity baseline numbers, not a dynamic schedule pulled from a live roster system.
+            </div>
 
-            <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden">
+            <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden mt-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
                 <div>
                   <div className="text-sm font-bold text-[#223047]">Header Filter Sector Traffic Heatmap</div>
@@ -3144,12 +3255,12 @@ export function AISimulation() {
                             {sector.level} demand at {formatHour(trafficOptimizerTime[0])}{sector.label ? `, ${sector.label}` : ""}
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-center text-xs">
-                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-3 py-2">
+                        <div className="grid grid-cols-2 gap-1 md:gap-2 text-center text-xs shrink-0">
+                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-1.5 md:px-3 py-2">
                             <div className="text-[#223047] opacity-60">Scheduled</div>
                             <div className="font-bold text-[#223047]">{sector.scheduledStaff}</div>
                           </div>
-                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-3 py-2">
+                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-1.5 md:px-3 py-2">
                             <div className="text-[#223047] opacity-60">Needed</div>
                             <div className="font-bold text-[#223047]">{sector.requiredStaff}</div>
                           </div>
@@ -3410,6 +3521,11 @@ export function AISimulation() {
                     </label>
                   </div>
                 </div>
+                {scenarioPromoModel?.status === "success" && scenarioPromoModel.quietPeriod && (
+                  <div className="mt-3 p-3 bg-white/50 border border-[#FFD9EC] rounded-lg">
+                    <div className="text-xs font-semibold text-[#F53799]">Optimal promo window: {scenarioPromoModel.quietPeriod} (predicted low demand, high discount conversion probability).</div>
+                  </div>
+                )}
 
                 <Button
                   onClick={handleRunSimulation}
@@ -3491,7 +3607,7 @@ export function AISimulation() {
             <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-3 md:space-y-4">
               <h3 className="text-sm md:text-base font-bold text-[#223047]">Impact Breakdown</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {scenarioFactorBreakdown.map((item) => {
+                {scenarioOutcome.scenarioFactorBreakdown.map((item) => {
                   const impactLabel = `${item.impact > 0 ? "+" : ""}${Math.round(item.impact * 100)}%`;
                   return (
                     <div

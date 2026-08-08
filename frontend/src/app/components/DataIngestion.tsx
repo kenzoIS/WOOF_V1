@@ -8,13 +8,21 @@ import { uploadCSV, getUploads, deleteUpload, getMetrics } from "../lib/api";
 
 interface CsvUploadRecord {
   _id: string;
+  id?: string;
   filename: string;
+  file_name?: string;
   channel: string;
-  recordCount: number;
-  totalRevenue: number;
-  totalQuantity: number;
-  totalTransactions: number;
-  uploadedAt: string;
+  recordCount?: number;
+  record_count?: number;
+  totalRevenue?: number;
+  total_revenue?: number;
+  totalQuantity?: number;
+  total_quantity?: number;
+  totalTransactions?: number;
+  total_transactions?: number;
+  uploadedAt?: string;
+  uploaded_at?: string;
+  created_at?: string;
   etlReport?: {
     stage1_droppedCount?: number;
     stage1_duplicateCount?: number;
@@ -50,6 +58,17 @@ export function DataIngestion() {
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
 
   const [lastReport, setLastReport] = useState<any>(null);
+
+  const numberOrZero = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const formatUploadDate = (value?: string) => {
+    if (!value) return "Unknown date";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "Unknown date" : parsed.toLocaleDateString();
+  };
 
   const refreshData = useCallback(async () => {
     try {
@@ -261,15 +280,22 @@ export function DataIngestion() {
         <div className="space-y-2">
           <h3 className="text-sm font-bold text-[#223047]">Upload History</h3>
           <div className="space-y-2 max-h-[250px] overflow-y-auto">
-            {uploads.map((upload) => (
-              <div key={upload._id} className="flex items-center justify-between p-3 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl">
+            {uploads.map((upload, index) => {
+              const uploadId = upload._id || upload.id || upload.filename || upload.file_name || `upload-${index}`;
+              const filename = upload.filename || upload.file_name || "Uploaded file";
+              const recordCount = numberOrZero(upload.recordCount ?? upload.record_count);
+              const totalRevenue = numberOrZero(upload.totalRevenue ?? upload.total_revenue);
+              const uploadedAt = upload.uploadedAt || upload.uploaded_at || upload.created_at;
+
+              return (
+              <div key={uploadId} className="flex items-center justify-between p-3 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <FileSpreadsheet className="w-5 h-5 text-[#F53799] flex-shrink-0" />
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-[#223047] truncate">{upload.filename}</div>
+                    <div className="text-sm font-semibold text-[#223047] truncate">{filename}</div>
                     <div className="text-xs text-[#223047] opacity-50">
-                      {upload.recordCount} records • ₱{upload.totalRevenue.toLocaleString()} • {upload.channel}
-                      {" • "}{new Date(upload.uploadedAt).toLocaleDateString()}
+                      {recordCount.toLocaleString()} records • ₱{totalRevenue.toLocaleString()} • {upload.channel || "Unknown"}
+                      {" • "}{formatUploadDate(uploadedAt)}
                     </div>
                     {upload.etlReport && (
                       <div className={`text-[10px] mt-1 ${(upload.etlReport.stage1_droppedCount || 0) > 0 || (upload.etlReport.stage1_duplicateCount || 0) > 0 ? "text-orange-500" : "text-green-500"}`}>
@@ -336,10 +362,10 @@ export function DataIngestion() {
                   <Button
                     size="sm" variant="outline"
                     className="border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0"
-                    disabled={deletingIds.includes(upload._id)}
-                    onClick={(e) => { e.stopPropagation(); handleDelete(upload._id, upload.filename); }}
+                    disabled={deletingIds.includes(String(uploadId))}
+                    onClick={(e) => { e.stopPropagation(); handleDelete(String(uploadId), filename); }}
                   >
-                    {deletingIds.includes(upload._id) ? (
+                    {deletingIds.includes(String(uploadId)) ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     ) : (
                       <Trash2 className="w-3.5 h-3.5" />
@@ -347,7 +373,8 @@ export function DataIngestion() {
                   </Button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

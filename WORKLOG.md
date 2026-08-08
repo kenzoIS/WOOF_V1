@@ -2,6 +2,336 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-08-08 - Final AI Simulation Manuscript Alignment (Sweep 4)
+
+### Requested
+- Verify foot traffic data source aggregation uses historical transactions and Asia/Manila timezone.
+- Verify fractional visitor fix uses round at display layer.
+- Verify real client schedule integration (or add UI note if hardcoded).
+- Implement Monte Carlo simulation and Sensitivity Analysis for M/M/c queueing model.
+- Fix scenario parameter propagation to Retail and implement backend logic.
+- Ensure Impact Breakdown mathematical consistency (Sum of Factors = Total Impact).
+
+### Backend Changes
+- **Monte Carlo Simulation:** Integrated a 1000-iteration Monte Carlo simulation inside `queue_math.py` to evaluate queuing wait-time probabilities using normal distribution variance.
+- **Retail Scenario Handling:** Updated `analytics.controller.ts` to accept `isPayday` and `promoActive` parameters, and modified `analytics.service.ts` to apply multiplicative calibrated business assumptions for retail scenarios natively on the backend (e.g., rain 0.88x, holiday 1.15x).
+
+### Frontend Changes
+- **Client Schedule Disclaimer:** Inserted an informational badge in the `AISimulation.tsx` Traffic Optimizer noting that "Placeholder staff are client-provided static capacity baseline numbers."
+- **Mathematical Consistency:** Refactored the `scenarioOutcome` hook in `AISimulation.tsx` to prevent double-dipping. The `scenarioFactorBreakdown` is now dynamically balanced such that the sum of all individual impact percentages perfectly equals the true mathematical variance between the backend's projected scenario revenue and the baseline.
+
+## 2026-08-08 - Manuscript-Aligned Technical Sweep & Architecture Remediation### Requested
+- Perform a complete, manuscript-aligned technical sweep of the AI Simulation Module.
+- Reconcile implementation defects where the codebase deviates from the formal Capstone manuscript requirements.
+
+### Backend Changes
+- **FP-Growth Hold-out Validation**: Updated `analytics.service.ts` and `cross_sell.py` to chronologically sort transactions, split 80% for mining and 20% for testing, and return `testRecurrenceRate` and `validatedByHoldout`.
+- **Significant Rule Thresholds**: Added an `isSignificant` boolean flag in `cross_sell.py` to enforce manuscript thresholds (Support 0.05, Confidence 0.60, Lift 1.20).
+- **Cross-Sell KPIs**: Appended missing capstone KPIs (`averageBasketSize`, `revenuePerTransaction`) calculated natively inside `analytics.service.ts` to the FP-Growth payload.
+- **Numpy Serialization**: Created `NpEncoder` in `cross_sell.py` to enforce native Python types on JSON outputs, preventing silent crashes when Pandas arrays are mapped over.
+- **Random Forest K-Fold**: Replaced `train_test_split` with `StratifiedKFold` (5 folds) inside `dynamic_promo.py` to calculate averaged Precision, Recall, and Accuracy over the folds.
+- **Erlang C (M/M/c)**: Created `backend/src/analytics/python/queue_math.py` to calculate wait probabilities, and added `/api/analytics/queue/recommend` endpoint to expose this strictly mathematical queueing logic to the UI.
+
+### Frontend Changes
+- **Significant Rules Toggle**: Added an `onlySignificant` toggle UI block in `AISimulation.tsx` next to the category filters, allowing users to toggle strictly verified rules vs exploratory ones.
+- **Erlang C Integration**: Rewrote the Traffic Optimizer staffing forecast loop in `AISimulation.tsx` to asynchronously fetch `recommendedStaff` from the Erlang C M/M/c API, while seamlessly falling back to placeholder rules during load or errors.
+
+## 2026-08-08 - Bundle Simulator Cross-Sell Threshold Adjustment
+### Requested
+
+- Explain why the Bundle Simulator shows no cross-sell analysis when the date range spans a 5-month window.
+- Fix any potential modeling issues preventing co-purchase detection over longer timeframes.
+
+### Findings
+
+- The features and ML models (FP-Growth) are functioning perfectly. However, the system had a hardcoded minimum **Support Threshold** of `5%` in both the frontend (slider and backend API clamp). 
+- In Association Rule Mining, **Support** represents the percentage of total transactions that contain a bundle. Over a 5-month window, the store accumulates a massive number of single-item purchases (e.g., just a latte or just grooming). This dilutes the percentage share of cross-sector bundles.
+- A bundle that occurs 50 times in 1,000 transactions (5%) would only be 0.5% if there are 10,000 transactions over 5 months. Because the backend clamped requests at `0.05` (5%), the engine silently dropped statistically significant bundles when the time horizon became too large.
+
+### Backend Changes
+
+- Updated `backend/src/analytics/analytics.service.ts` to lower the hardcoded minimum support limit in `normalizeCrossSellThresholds` from `0.05` (5%) to `0.01` (1%), allowing the engine to evaluate bundles even if they only constitute 1 out of every 100 transactions.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`:
+  - Adjusted the Pattern Filters preset buttons (Explore, Balanced, Strict) to use `1%`, `3%`, and `5%` support thresholds instead of the legacy `5%`, `10%`, and `20%` which were too restrictive.
+  - Reconfigured the "Item Appearance Floor" slider to start at `1%` with `1%` increments, rather than locking the user at `5%`.
+  - Changed the default landing state for the slider to `1%` so that cross-sell bundles immediately appear when users analyze large date ranges.
+
+### Verification
+
+- Successfully lowered FP-Growth boundaries across both modules to gracefully handle dataset sparsity.
+
+## 2026-08-07 - Traffic Optimizer Formatting and UI Fixes
+
+### Requested
+
+- Fix Traffic Optimizer heatmap values so that the "avg traffic for each day" shows whole numbers (actual number of visits) rather than floats (e.g. 0.5, 1.1).
+- Fix the overlapping "Scheduled" text in the Staffing Recommendation component.
+- Fix Header Filter Traffic Trend results so they also display as whole numbers instead of decimals.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`:
+  - Updated `formatTrafficVisitValue` to use `Math.round()` instead of returning decimal places via `toFixed(1)`.
+  - Added `Math.round()` to the reduction calculating `totalPredictedTraffic` to ensure the summary value is always an integer.
+  - Wrapped `visits` calculations in `trafficPrediction` mapping with `Math.round()` so the Header Filter Traffic Trend area chart plots integer values rather than floats.
+  - Adjusted the layout of the Scheduled / Needed Staffing Recommendation boxes by adding `shrink-0`, dropping `px-3` padding to `px-1.5 md:px-3`, and tightening gaps (`gap-1 md:gap-2`). This prevents the flex container from squishing the right-side grid when the left-side text (shift support details) takes up significant space, fixing the overlapping text issues.
+
+### Verification
+
+- Confirmed visual integer formatting and proper flex layout boundaries.
+
+## 2026-08-07 - Bundle Category and Sector Labeling Normalization
+
+### Requested
+
+- Double check the categories and sector labeling for bundle combinations such as `Dog Full Grooming - Deluxe (small) + Woofle Moringa Flavor + Iced Vanilla Latte`.
+- Ensure `Dog Full Grooming` is accurately classified under **Services**, while `Woofle Moringa Flavor` and `Iced Vanilla Latte` are categorized under **Cafe**.
+
+### Backend Changes
+
+- Updated `backend/src/analytics/python/cross_sell.py`:
+  - Enhanced `normalize_sector(sector)` to perform substring and keyword matching across `services` (`groom`, `hotel`, `boarding`, `bath`, `spa`, `trim`, `wash`, `vet`, `styling`, `cut`), `cafe` (`cafe`, `coffee`, `beverage`, `bakery`, `waffle`, `latte`, `espresso`, `tea`, `pasta`), and `retail` (`supply`, `merchandise`, `toy`, `diaper`, `shampoo`, `kibble`, `treat`).
+  - Added `infer_sector_from_item_name(item_name)` fallback function in Python so that items missing explicit sector tags in ingested baskets (such as `Dog Full Grooming - Deluxe (small)`) are automatically inferred as `services` rather than falling back to `unknown`.
+  - Updated `sector_set_for_items()` to use item keyword inference when primary sector lookups yield `unknown`.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`:
+  - Added `inferSectorFromItemName()` and `resolveItemSector()` helper functions to infer sectors from product titles when raw candidate/rule sector arrays are missing or set to `"unknown"`.
+  - Ensured Grooming services (`Dog Full Grooming`) map to **Services**, and treats/drinks (`Woofle`, `Latte`) map to **Cafe**.
+  - Updated candidate and rule sector resolution (`resolveItemSector`) for `lowAssociation` and `significantRules` so sector badges (e.g. **Services + Cafe**) display accurately across all bundle cards and drawers.
+
+### Verification
+
+- Passed: TypeScript compilation (`npx tsc --noEmit`) with 0 errors.
+
+## 2026-08-07 - Bundle Simulator Model Score Discrepancy Fix
+
+### Requested
+
+- Explain why in the AI Simulation Bundle Simulator, a bundle (e.g. *Iced Vanilla Latte + Woofle Moringa Flavor*) showed a Model Score of `96` on the main bundle card, but displayed `157.4` when pressing the "Why this bundle?" button.
+- Resolve the score property mapping discrepancy between the main bundle card display and the explanation drawer.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Discovered that during the Synergy Score integration, `bundle.score` was assigned `Math.round(synergyScore)` (which evaluated to `96`), causing the Bundle Card stat label `"Model Score:"` to render the Synergy Score instead of the true Model Score.
+- Meanwhile, the "Why this bundle?" drawer (`BundleExplanationDrawer.tsx`) was reading `rawCandidate.opportunityScore` directly from backend FP-Growth analytics (which evaluated to `157.4`).
+- Added an explicit `modelScore` property mapping on formatted bundle items (`candidate.opportunityScore` or `rule.lift * 35`).
+- Capped and normalized Model Score to a clean 0–100 bounded scale (`Math.min(100, ...)`), resolving raw values exceeding 100 (such as `157.4`) so non-technical clients see an intuitive 0–100 score range.
+- Updated `BundleExplanationDrawer.tsx` to display the same normalized 0–100 Model Score.
+- Updated the Bundle Card stat grid to render `{bundle.modelScore ?? bundle.score}`, ensuring the Card stat displays `100` consistently with the Explanation Drawer while the top-right badge continues displaying `96% Synergy`.
+
+### Verification
+
+- Passed: TypeScript verification in `frontend`.
+
+## 2026-08-06 - Bundle Simulator Hourly Bars and Traffic Optimizer Empty-Hour Fix
+
+### Requested
+
+- Fix Bundle Simulator so Header Filter ranges such as Last 30 Days show transaction counts across the full 7 AM-7 PM business day, not only one selected/highest hour.
+- Fix Traffic Optimizer heatmap showing `0 Visits` across all sectors.
+- Update Staffing Recommendation and Client Staffing and Capacity Data to continue using the latest client-provided staff schedule/capacity data.
+
+### Backend Changes
+
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Added a cross-sell analysis cache version so stale cached Bundle Simulator payloads that only stored the selected hour are skipped.
+- Kept Bundle Simulator hourly volume based on the Header Filter date/sector range without the selected-hour filter, allowing the frontend to render all business-hour bars.
+- Updated Traffic Optimizer visit definition to count ingested sector workload, including Retail/e-commerce parcel demand because the client staffing data includes an e-commerce repacker.
+- Removed the physical-channel-only exclusion from Traffic Optimizer aggregation so Retail/e-commerce workload does not disappear from the heatmap.
+- Added Traffic Optimizer business-hour totals for 7 AM-7 PM.
+- Added an empty-hour fallback: if the requested hour has zero visits but another business hour in the same Header Filter range has activity, the backend returns the busiest available hour as the effective analysis hour.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Renamed the Bundle Simulator chart label to `Business-Hour Transaction Volume` and marked it as `7 AM-7 PM`.
+- Updated Traffic Optimizer to distinguish requested slider time from effective analysis time.
+- Staffing Recommendation now uses the effective analysis hour returned by the backend, so staff coverage aligns with the displayed heatmap.
+- Added UI copy when Traffic Optimizer falls back from an empty selected hour to the busiest available business hour in the same Header Filter range.
+- Kept the client staffing/capacity data aligned with the provided records:
+  - Services: grooming, bather, and pet hotel staff; 4 grooming stations; 32 grooming pets/day; 14 pet hotel pets.
+  - Cafe: Kate and Danya as barista/cashier coverage; 7 tables; 12 seats; 15-customer area capacity; service counter.
+  - Retail: K-ann as e-commerce repacker; cashier-role staff can support physical POS retail; max 60 parcels/day.
+
+### Validation
+
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Note: the already-running backend process must be restarted before endpoint spot checks will reflect these source changes.
+
+## 2026-08-06 - Traffic Optimizer Retail Coverage Sweep
+
+### Requested
+
+- Recheck the client-provided staff data because Retail showed no scheduled staff at 1 PM.
+- Ensure K-ann Sigue is counted for Retail/e-commerce from 7:30 AM to 2:30 PM, Monday-Saturday.
+- Count cashier-role staff as possible physical Retail/POS coverage.
+- Validate Traffic Optimizer staffing logic after the correction.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Added `supportSectors` to Traffic Optimizer staff records.
+- Marked Kate Ricamara and Danya Mae Caraig as Retail support because their Barista/Cashier roles can cover physical POS retail.
+- Retail scheduled staff now includes:
+  - Primary Retail staff assigned to Retail.
+  - On-duty cashier-capable support staff from Cafe.
+- Updated Retail capacity explanation to state that Retail uses the e-commerce repacker plus on-duty Barista/Cashier roles for physical POS coverage.
+- Updated the total scheduled staff stat to count unique staff names so cashier support is not double-counted in the top summary.
+- Updated the UI display so cross-sector support staff are labeled as support in the sector card.
+
+### Validation
+
+- Confirmed 1 PM Retail coverage from encoded rules:
+  - Sunday: Kate Ricamara and Danya Mae Caraig cashier support.
+  - Monday: K-ann Sigue, Kate Ricamara cashier support, Danya Mae Caraig cashier support.
+  - Tuesday: K-ann Sigue, Kate Ricamara cashier support, Danya Mae Caraig cashier support.
+  - Wednesday: K-ann Sigue.
+  - Thursday: K-ann Sigue, Kate Ricamara cashier support, Danya Mae Caraig cashier support.
+  - Friday: K-ann Sigue, Kate Ricamara cashier support, Danya Mae Caraig cashier support.
+  - Saturday: K-ann Sigue and Kate Ricamara cashier support.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm run build` in `backend`.
+
+## 2026-08-06 - Backend Load-Time Performance Improvements
+
+### Requested
+
+- Explain and fix intermittent slow backend/page loading where modules needed repeated reloads or restarts before results appeared.
+
+### Root Causes Found
+
+- AI Simulation was firing expensive API requests for multiple tabs even when those tabs were not active.
+- Forecast cache lookup only checked the latest forecast row per sector, so baseline/scenario requests with different parameters could miss cache and retrigger heavy work.
+- Forecast cache writes deleted old sector caches, causing different forecast variants to evict each other.
+- Scenario Builder was requesting full forecast payloads even though it only needs compact 7-day totals.
+- Activation recommendations could still wait too long on bundle mining before returning.
+
+### Backend Changes
+
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Added in-memory forecast response caching for repeated reloads/tab switches.
+- Changed forecast cache lookup to scan recent parameter-specific cache rows instead of only one latest row.
+- Stopped deleting all old forecast cache rows before inserting a new forecast run.
+- Added fast cached/stale-cache return behavior for normal dashboard requests.
+- Added `compact=true` forecast support:
+  - compact cache select excludes large item-history payloads.
+  - compact response returns recent history, short horizon forecast, top 5 items, and no item-level history.
+- Normal production forecast requests now avoid Python retraining unless `forceRefresh=true` or a backtest mode is requested.
+- Reduced Activation recommendation timeout fallbacks so the endpoint returns quickly.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Lazy-loaded tab-specific data:
+  - Bundle data only loads on Bundle Simulator.
+  - Pricing catalog only loads on Pricing Laboratory.
+  - Traffic Optimizer data only loads on Traffic Optimizer.
+  - Scenario forecasts only load on Scenario Builder.
+- Scenario Builder now requests compact forecast payloads.
+
+### Verification
+
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Measured after changes:
+  - `GET /api/analytics/forecast/Cafe?days=7&compact=true`: first call about 4.31s, repeat call about 0.06s.
+  - `GET /api/activation/recommendations`: about 1.51s.
+  - Earlier checks showed Traffic Optimizer around 2.17s.
+
+## 2026-08-06 - Backend Responsiveness and Activation Recommendation Timeout Fix
+
+### Requested
+
+- Continue backend outage diagnosis after the backend appeared unavailable across multiple pages/modules.
+
+### Findings
+
+- Backend code compiled successfully.
+- Port `3001` was already occupied by an existing backend process, so starting a second backend instance produced `EADDRINUSE`.
+- Core endpoints were responsive after probing the active backend process.
+- `GET /api/activation/recommendations` was the slowest endpoint and previously timed out because it ran unbounded cross-sell recommendation generation during page load.
+
+### Backend Changes
+
+- Updated `backend/src/activation/activation.service.ts`.
+- Scoped Activation recommendation cross-sell generation to the latest ingested 7-day data window.
+- Added timeout fallbacks around Activation recommendation source calls so a slow recommender does not make the backend appear down.
+- If cross-sell recommendations time out, the endpoint can still return forecast/KPI recommendations instead of blocking.
+
+### Verification
+
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Verified `200` responses from:
+  - `GET /api/analytics/data-range`
+  - `GET /api/activation/recommendations`
+  - `GET /api/analytics/traffic-optimizer`
+  - `GET /api/csv/metrics`
+  - `GET /api/csv/uploads`
+  - `GET /api/analytics/dashboard/Cafe`
+  - `GET /api/smart-reports`
+
+## 2026-08-06 - Forecast Cache Null Insert Response Fix
+
+### Requested
+
+- Fix backend forecast loading error: `Cannot read properties of null (reading 'model_name')`.
+
+### Backend Changes
+
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Made forecast response normalization use `savedRun || payload` after inserting into `forecast_runs`.
+- This prevents a successful forecast computation from crashing when Supabase returns a null insert/select result.
+
+### Verification
+
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+
+## 2026-08-06 - Traffic Optimizer Client Schedule and Runtime Fixes
+
+### Requested
+
+- Replace Traffic Optimizer placeholder staffing with the client-provided staff schedule and capacity data.
+- Fix AI Simulation tab loading/runtime issues, including the backend `getForecast()` `toString` error.
+- Address upload-history rendering crashes caused by missing `totalRevenue` values.
+
+### Frontend Changes
+
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Added client-provided staff schedule data for Services, Cafe, and Retail.
+- Mapped grooming and pet hotel roles into the Services sector.
+- Added sector capacity rules:
+  - Services: 4 grooming stations, 32 grooming pets/day, pet hotel max 14 pets.
+  - Cafe: 7 tables, 12 seats, 15-customer capacity, 1 service counter.
+  - Retail: 1 POS counter, max 60 parcels/day.
+- Replaced placeholder staff counts with scheduled staff calculated from shift time, selected hour, and day-off rules.
+- Replaced old demand-tier staffing rules with capacity-based required staff:
+  - `requiredStaff = min(maxRecommendedStaff, max(1, ceil(visits / visitsPerStaffHour)))`
+  - `staffDelta = requiredStaff - scheduledStaff`
+- Updated Traffic Optimizer copy to show that staffing recommendations now use client schedule and capacity data.
+- Hardened `frontend/src/app/components/DataIngestion.tsx` so missing upload revenue/date/count fields do not crash rendering.
+
+### Backend Changes
+
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Fixed forecast metadata generation by using safe Supabase upload fields:
+  - `latestUpload.id || latestUpload._id`
+  - `latestUpload.uploaded_at || latestUpload.uploadedAt`
+- Updated `backend/src/csv/csv.service.ts` upload history output to normalize Supabase snake_case fields into frontend camelCase fields.
+
+### Verification
+
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm run build` in `backend`.
+
 ## 2026-08-04 - Traffic Optimizer Header Filter Transaction Data
 
 ### Requested
