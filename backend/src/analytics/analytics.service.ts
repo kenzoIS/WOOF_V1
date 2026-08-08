@@ -1817,9 +1817,8 @@ export class AnalyticsService {
       }
     } catch (e) {}
 
-    const hour = 15; 
+    
     const isWeekend = (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) ? 1 : 0;
-    const trafficDrop = 45.0;
     const proposedDiscountDepth = 0.15;
     const promoTrainingRows = await this.getPromoModelTrainingRows();
     const discountedRows = promoTrainingRows.filter(
@@ -1837,10 +1836,8 @@ export class AnalyticsService {
       mlResult = await this.runPython<any>(
         'dynamic_promo.py',
         {
-          hour,
           is_weekend: isWeekend,
           temp,
-          traffic_drop: trafficDrop,
           discount_depth: proposedDiscountDepth,
           trainingSignature: promoTrainingSignature,
           trainingRows: promoTrainingRows,
@@ -1870,8 +1867,8 @@ export class AnalyticsService {
     return {
       status: 'success',
       targetDate: tomorrowStr,
-      targetHour: hour,
-      predictedTrafficDrop: trafficDrop,
+      targetHour: mlResult.targetHour,
+      predictedTrafficDrop: mlResult.predictedTrafficDrop,
       probabilityScore: mlResult.probabilityScore,
       modelMetrics: mlResult.modelMetrics,
       featureImportance: mlResult.featureImportance,
@@ -1881,33 +1878,42 @@ export class AnalyticsService {
   }
 
   private async getPromoModelTrainingRows(): Promise<any[]> {
-    const { data, error } = await this.supabaseService.client
-      .from('fact_cross_channel_transactions')
-      .select(
-        [
-          'transaction_timestamp',
-          'product_id',
-          'service_id',
-          'channel_id',
-          'segment_id',
-          'quantity_sold',
-          'gross_sales',
-          'discount_amount',
-          'discount_depth',
-          'net_sales',
-          'gross_profit',
-        ].join(','),
-      )
-      .gt('gross_sales', 0)
-      .order('transaction_timestamp', { ascending: false })
-      .limit(15000);
+    const columns = [
+      'transaction_timestamp',
+      'product_id',
+      'service_id',
+      'channel_id',
+      'segment_id',
+      'quantity_sold',
+      'gross_sales',
+      'discount_amount',
+      'discount_depth',
+      'net_sales',
+      'gross_profit',
+    ].join(',');
 
-    if (error || !Array.isArray(data)) {
-      if (error) {
-        console.warn(`Could not load promo model training rows: ${error.message}`);
-      }
-      return [];
-    }
+    const { data: discountedRes } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select(columns)
+      .gt('gross_sales', 0)
+      .or('discount_amount.gt.0,discount_depth.gt.0')
+      .order('transaction_timestamp', { ascending: false })
+      .limit(500);
+
+    const { data: normalRes } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select(columns)
+      .gt('gross_sales', 0)
+      .eq('discount_amount', 0)
+      .eq('discount_depth', 0)
+      .order('transaction_timestamp', { ascending: false })
+      .limit(500);
+
+    let data: any[] = [];
+    if (discountedRes && Array.isArray(discountedRes)) data = data.concat(discountedRes);
+    if (normalRes && Array.isArray(normalRes)) data = data.concat(normalRes);
+
+    if (data.length === 0) return [];
 
     return data.map((row: any) => ({
       transactionTimestamp: row.transaction_timestamp,

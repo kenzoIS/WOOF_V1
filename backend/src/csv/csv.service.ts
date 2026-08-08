@@ -991,7 +991,17 @@ export class CsvService {
 
   async getUploads(): Promise<any[]> {
     const { data } = await this.supabaseService.client.from('csv_uploads').select('*').order('uploaded_at', { ascending: false });
-    return data || [];
+    return (data || []).map(row => ({
+      _id: row.id,
+      filename: row.filename,
+      channel: row.channel,
+      recordCount: row.record_count,
+      totalRevenue: row.total_revenue,
+      totalQuantity: row.total_quantity,
+      totalTransactions: row.total_transactions,
+      uploadedAt: row.uploaded_at,
+      etlReport: row.etl_report
+    }));
   }
 
   private async insertTransactionsInChunks(

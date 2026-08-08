@@ -1457,13 +1457,21 @@ export function Cafe() {
             </div>
 
             <div className="text-2xl md:text-3xl lg:text-4xl font-bold">
-              {quietPeriod && quietPeriod.status === 'success' ? `${formatChartDate(quietPeriod.targetDate)} ${quietPeriod.targetHour}:00` : "Calculating..."}
+              {quietPeriod === null 
+                ? "Calculating..." 
+                : quietPeriod.status === 'success' 
+                  ? `${formatChartDate(quietPeriod.targetDate)} ${quietPeriod.targetHour}:00` 
+                  : "None Detected"}
             </div>
 
             <div className="flex items-center gap-2 text-xs md:text-sm">
               <span className="opacity-70">Predicted Traffic:</span>
               <span className="font-semibold text-[#3AE4FA]">
-                {quietPeriod && quietPeriod.status === 'success' ? `${Math.round(quietPeriod.predictedTrafficDrop)}% below avg` : "..."}
+                {quietPeriod === null 
+                  ? "..." 
+                  : quietPeriod.status === 'success' 
+                    ? `${Math.round(quietPeriod.predictedTrafficDrop)}% below avg` 
+                    : "N/A"}
               </span>
             </div>
 
@@ -1488,12 +1496,14 @@ export function Cafe() {
                 <label className="text-xs opacity-70 mb-2 block">Discount %</label>
                 <div className="flex items-center gap-3">
                   <Slider
+                    defaultValue={[15]}
                     value={discountValue}
                     onValueChange={setDiscountValue}
                     max={80}
                     min={5}
                     step={5}
                     className="flex-1"
+                    disabled={!quietPeriod || quietPeriod.status !== 'success'}
                   />
                   <span className="text-base md:text-lg font-bold w-10 md:w-12">{discountValue[0]}%</span>
                 </div>
