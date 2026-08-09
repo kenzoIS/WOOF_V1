@@ -696,6 +696,29 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
     }
 
 
+def compute_null_invariant_metrics(supp_a, supp_b, supp_ab):
+    """
+    Computes Jiawei Han's Null-Invariant Data Mining Metrics:
+    1. Kulczynski Measure (Kulc): Arithmetic mean of conditional probabilities P(A|B) and P(B|A).
+       Kulc = 0.5 * ( (Supp(A∩B)/Supp(A)) + (Supp(A∩B)/Supp(B)) )
+    2. Imbalance Ratio (IR): Quantifies support asymmetry between anchor A and offer B.
+       IR = |Supp(A) - Supp(B)| / (Supp(A) + Supp(B) - Supp(A∩B))
+    """
+    sa = float(supp_a or 0.0)
+    sb = float(supp_b or 0.0)
+    sab = float(supp_ab or 0.0)
+
+    conf_a_b = (sab / sa) if sa > 0 else 0.0
+    conf_b_a = (sab / sb) if sb > 0 else 0.0
+
+    kulc = round(0.5 * (conf_a_b + conf_b_a), 4)
+
+    denom = sa + sb - sab
+    ir = round(abs(sa - sb) / denom, 4) if denom > 0 else 0.0
+
+    return kulc, ir
+
+
 def compute_synergy_score(
     lift,
     anchor_price,
@@ -922,6 +945,8 @@ def build_low_association_bundles(
 
             is_emerging_trend = bool(cooccurrences <= 3 and guardrail_res["isValid"] and synergy_score >= 70.0)
 
+            kulc, ir = compute_null_invariant_metrics(anchor_support, bundle_support, pair_support)
+
             candidates.append({
                 "anchorItem": anchor,
                 "bundleItem": bundle_item,
@@ -935,6 +960,8 @@ def build_low_association_bundles(
                 "pairSupport": round(pair_support, 4),
                 "confidence": round(confidence, 4),
                 "lift": round(lift, 2),
+                "kulc": kulc,
+                "imbalanceRatio": ir,
                 "cooccurrences": cooccurrences,
                 "coOccurrenceCount": backtest_metrics["coOccurrenceCount"],
                 "baseOpportunityScore": round(base_opportunity_score, 4),
@@ -1248,6 +1275,10 @@ def run_cross_sell(baskets, config=None):
                 and round(float(row['lift']), 2) >= 1.20
             )
 
+            bundle_basket_count = sum(1 for b in dataset if item_b in b) if dataset else 0
+            bundle_support = round(bundle_basket_count / len(dataset), 4) if dataset else round(float(row['support']), 4)
+            kulc, ir = compute_null_invariant_metrics(anchor_support, bundle_support, pair_support)
+
             rule_obj = {
                 "itemA": str(item_a),
                 "itemB": str(item_b),
@@ -1260,8 +1291,11 @@ def run_cross_sell(baskets, config=None):
                 "support": pair_support,
                 "pairSupport": pair_support,
                 "anchorSupport": anchor_support,
+                "bundleSupport": bundle_support,
                 "confidence": round(float(row['confidence']), 4),
                 "lift": round(float(row['lift']), 2),
+                "kulc": kulc,
+                "imbalanceRatio": ir,
                 "cooccurrences": rule_cooccurrences,
                 "coOccurrenceCount": backtest_metrics["coOccurrenceCount"],
                 "opportunityScore": score,

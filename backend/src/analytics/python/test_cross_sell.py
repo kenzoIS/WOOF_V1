@@ -52,6 +52,8 @@ class CrossSellTests(unittest.TestCase):
                 "support",
                 "confidence",
                 "lift",
+                "kulc",
+                "imbalanceRatio",
                 "isMultiItem",
                 "crossSector",
             ]:
