@@ -803,6 +803,7 @@ export function AISimulation() {
       attachRateLift: (candidate as any).attachRateLift,
       backtestValidationStatus: (candidate as any).backtestValidationStatus,
       estimatedMarginImpact: (candidate as any).estimatedMarginImpact,
+      isSignificant: (candidate as any).isSignificant ?? false,
       rawCandidate: candidate,
     }));
     const significantRules = rules.map((rule) => ({
@@ -853,6 +854,7 @@ export function AISimulation() {
       attachRateLift: (rule as any).attachRateLift,
       backtestValidationStatus: (rule as any).backtestValidationStatus,
       estimatedMarginImpact: (rule as any).estimatedMarginImpact,
+      isSignificant: (rule as any).isSignificant ?? true,
       rawCandidate: rule as any,
     }));
 
@@ -1050,26 +1052,30 @@ export function AISimulation() {
       );
   }, [confidenceLevel, networkNodes, rules, supportThreshold]);
 
-  // Top AI Insights from network analysis - strictly filtered to exclude banned/excluded pairs
+  // Top AI Insights from network analysis - strictly filtered to exclude banned/excluded pairs and deduplicated across cards
   const topInsights = useMemo(() => {
     const valid = allBundlePredictions.filter((b) => !isExcludedPair(b.itemA, b.itemB, b.bundleArchetype));
     const pool = valid.length > 0 ? valid : allBundlePredictions;
 
-    const topLiftRule = rules.find((r) => !isExcludedPair(r.itemA, r.itemB, (r as any).bundleArchetype)) || rules[0];
     const topLiftBundle = pool.slice().sort((a, b) => (b.lift || 0) - (a.lift || 0))[0];
+    const topKey = topLiftBundle ? getBundleKey(topLiftBundle.itemA, topLiftBundle.itemB) : "";
 
     const emergingTrendCandidate =
-      pool.find((b) => b.isEmergingTrend) ||
-      pool.filter((b) => (b.frequency || 0) <= 3).sort((a, b) => (b.synergyScore || 0) - (a.synergyScore || 0))[0] ||
-      pool.slice().sort((a, b) => (b.synergyScore || 0) - (a.synergyScore || 0))[0];
+      pool.find((b) => b.isEmergingTrend && getBundleKey(b.itemA, b.itemB) !== topKey) ||
+      pool.filter((b) => (b.frequency || 0) <= 3 && getBundleKey(b.itemA, b.itemB) !== topKey).sort((a, b) => (b.synergyScore || 0) - (a.synergyScore || 0))[0] ||
+      pool.filter((b) => getBundleKey(b.itemA, b.itemB) !== topKey).sort((a, b) => (b.synergyScore || 0) - (a.synergyScore || 0))[0] ||
+      topLiftBundle;
+
+    const emergingKey = emergingTrendCandidate ? getBundleKey(emergingTrendCandidate.itemA, emergingTrendCandidate.itemB) : "";
 
     const crossSectorMatch =
-      pool.find((b) => (b as any).crossSector || (b.sectors[0] !== "unknown" && b.sectors[0] !== b.sectors[1])) ||
-      rules.find((r) => r.crossSector && !isExcludedPair(r.itemA, r.itemB, (r as any).bundleArchetype));
+      pool.find((b) => ((b as any).crossSector || (b.sectors[0] !== "unknown" && b.sectors[0] !== b.sectors[1])) && getBundleKey(b.itemA, b.itemB) !== topKey && getBundleKey(b.itemA, b.itemB) !== emergingKey) ||
+      rules.find((r) => r.crossSector && !isExcludedPair(r.itemA, r.itemB, (r as any).bundleArchetype) && getBundleKey(r.itemA, r.itemB) !== topKey && getBundleKey(r.itemA, r.itemB) !== emergingKey) ||
+      pool.find((b) => getBundleKey(b.itemA, b.itemB) !== topKey && getBundleKey(b.itemA, b.itemB) !== emergingKey);
 
-    const displayTopBundle = topLiftBundle ? topLiftBundle.bundle : (topLiftRule ? formatPair(topLiftRule.itemA, topLiftRule.itemB) : "No patterns detected");
-    const displayTopLift = topLiftBundle ? topLiftBundle.lift : (topLiftRule ? topLiftRule.lift || 0 : 0);
-    const displayTopConf = topLiftBundle ? topLiftBundle.confidence : (topLiftRule ? Math.round((topLiftRule.confidence || 0) * 100) : 0);
+    const displayTopBundle = topLiftBundle ? topLiftBundle.bundle : "No patterns detected";
+    const displayTopLift = topLiftBundle ? topLiftBundle.lift : 0;
+    const displayTopConf = topLiftBundle ? topLiftBundle.confidence : 0;
 
     return {
       topBundle: displayTopBundle,
@@ -1306,8 +1312,13 @@ export function AISimulation() {
           (a.projectedProfit ?? a.projectedRevenue),
       )[0] || null;
   const maxSafeItemDiscount =
-    selectedPricingItem?.price > 0 &&
-    selectedPricingItem?.unitCost > 0
+    selectedPricingItem &&
+    selectedPricingItem.price !== null &&
+    selectedPricingItem.price !== undefined &&
+    selectedPricingItem.price > 0 &&
+    selectedPricingItem.unitCost !== null &&
+    selectedPricingItem.unitCost !== undefined &&
+    selectedPricingItem.unitCost > 0
       ? Math.max(
           0,
           Math.min(
