@@ -249,11 +249,50 @@ def load_cached_model(signature):
     return None
 
 
+def detect_quiet_period(history_rows):
+    if not history_rows:
+        return 15, 45.0  # Default fallback if no data
+
+    # Create a quick DataFrame of just hour and quantity
+    df = pd.DataFrame(history_rows)
+    if "transactionTimestamp" not in df.columns or "quantitySold" not in df.columns:
+        return 15, 45.0
+
+    # Parse hour and sum quantity
+    df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"])
+    df["hour"] = df["transactionTimestamp"].dt.hour
+    df["quantitySold"] = pd.to_numeric(df["quantitySold"], errors="coerce").fillna(0)
+
+    hourly_sales = df.groupby("hour")["quantitySold"].sum()
+
+    if hourly_sales.empty:
+        return 15, 45.0
+
+    peak_volume = hourly_sales.max()
+
+    # Filter for standard business hours (9 AM to 5 PM) to find realistic slump
+    business_hours = hourly_sales.loc[hourly_sales.index.isin(range(9, 18))]
+    if business_hours.empty:
+        business_hours = hourly_sales
+
+    slump_hour = business_hours.idxmin()
+    slump_volume = business_hours.min()
+
+    # Calculate traffic drop percentage
+    if peak_volume > 0:
+        traffic_drop = ((peak_volume - slump_volume) / peak_volume) * 100
+        traffic_drop = float(np.clip(traffic_drop, 0, 100))
+    else:
+        traffic_drop = 45.0
+
+    return int(slump_hour), round(traffic_drop, 2)
+
+
 def predict_promo_success(payload):
     history_rows = payload.get("trainingRows") or []
     signature = payload.get("trainingSignature") or f"inline:{len(history_rows)}"
     examples = build_training_examples(history_rows)
-    using_real_history = len(examples) >= 12 and examples["success"].nunique() > 1
+    using_real_history = len(examples) >= 20 and examples["success"].value_counts().min() >= 5
 
     cached = load_cached_model(signature)
     if cached:
@@ -283,10 +322,13 @@ def predict_promo_success(payload):
         )
 
     medians = examples[FEATURE_COLUMNS].median(numeric_only=True)
-    hour = safe_float(payload.get("hour"), safe_float(medians.get("hour"), 15))
+    
+    dynamic_hour, dynamic_traffic_drop = detect_quiet_period(history_rows)
+    
+    hour = safe_float(payload.get("hour"), dynamic_hour)
     is_weekend = safe_float(payload.get("is_weekend"), safe_float(medians.get("is_weekend"), 0))
     temp = safe_float(payload.get("temp"), safe_float(medians.get("temp"), 28))
-    traffic_drop = safe_float(payload.get("traffic_drop"), safe_float(medians.get("traffic_drop"), 35))
+    traffic_drop = safe_float(payload.get("traffic_drop"), dynamic_traffic_drop)
     discount_depth = safe_float(payload.get("discount_depth"), 0.15)
     baseline_units = safe_float(payload.get("baseline_units"), safe_float(medians.get("baseline_units"), 2))
     baseline_margin_rate = safe_float(
@@ -313,13 +355,15 @@ def predict_promo_success(payload):
         "probabilityScore": float(prob),
         "featureImportance": {key: float(value) for key, value in importances.items()},
         "modelMetrics": metrics,
+        "targetHour": int(hour),
+        "predictedTrafficDrop": float(traffic_drop),
     }
 
 
 if __name__ == "__main__":
     try:
         input_data = json.load(sys.stdin)
-        required = ["hour", "is_weekend", "temp", "traffic_drop"]
+        required = ["is_weekend", "temp"]
         if any(input_data.get(key) is None for key in required):
             raise ValueError("Missing required inputs")
 

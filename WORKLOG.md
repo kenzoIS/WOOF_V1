@@ -332,6 +332,42 @@ This file records requested revisions, implementation details, verification, and
 - Passed: `npx tsc --noEmit --pretty false` in `frontend`.
 - Passed: `npm run build` in `backend`.
 
+## 2026-08-04 - Resilience Fixes, UI Safeguards, and Chatbot Context Improvements
+
+### Requested
+
+- Fix various edge-case crashes on the frontend when dealing with partial or missing forecast data.
+- Improve backend robustness for handling missing storage or invalid dates in analytical data.
+- Enhance the AI chatbot's ability to maintain context in follow-up questions and multi-turn planning.
+- Document deployment requirements for Python dependencies in the backend.
+
+### Backend Changes
+
+- **Chatbot Context Awareness**: Updated `backend/src/chatbot/chatbot.service.ts` to properly resolve follow-up context and make the chatbot planner context-aware across multiple conversational turns.
+- **Data Resilience**:
+  - `backend/src/analytics/analytics.service.ts`: Hardened forecast upload cache stamps, added handling to read Supabase upload fields correctly, skipped invalid dates in forecast series, and tolerated missing dynamic promo storage to prevent analytics API failures.
+  - `backend/src/common/time-series.ts`: Adjusted time-series utilities to safely bypass invalid dates.
+- **Documentation**: Updated `backend/README.md` and `backend/package.json` with instructions on how to install Python dependencies properly for Render deployment.
+
+### Frontend Changes
+
+- **UI Safeguards**: 
+  - Updated `frontend/src/app/pages/Cafe.tsx` to prevent application crashes when encountering partial forecast data.
+  - Updated `frontend/src/app/pages/Home.tsx` and `frontend/src/app/components/DataIngestion.tsx` to safely format numbers and metrics on the home dashboard, handling edge cases gracefully.
+  - Minor updates to `frontend/src/app/components/ui/chart.tsx` to align with the new data formatting guards.
+
+### Files Changed
+
+- `backend/README.md`
+- `backend/package.json`
+- `backend/src/analytics/analytics.service.ts`
+- `backend/src/chatbot/chatbot.service.ts`
+- `backend/src/common/time-series.ts`
+- `frontend/src/app/components/DataIngestion.tsx`
+- `frontend/src/app/components/ui/chart.tsx`
+- `frontend/src/app/pages/Cafe.tsx`
+- `frontend/src/app/pages/Home.tsx`
+- `WORKLOG.md`
 ## 2026-08-04 - Traffic Optimizer Header Filter Transaction Data
 
 ### Requested

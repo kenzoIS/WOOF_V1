@@ -93,6 +93,11 @@ interface HomeOverview {
   nextAction: HomeSuggestion | null;
 }
 
+const toNumber = (value: unknown, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
 export function Home() {
   const [timeRange, setTimeRange] = useState("today");
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
@@ -161,27 +166,30 @@ export function Home() {
     };
   }, [globalDateRange]);
 
-  const formatCurrency = (value: number) =>
-    `PHP ${Math.round(value || 0).toLocaleString()}`;
+  const formatCurrency = (value: unknown) =>
+    `PHP ${Math.round(toNumber(value)).toLocaleString()}`;
 
-  const formatPercent = (value: number) =>
-    `${value >= 0 ? "+" : ""}${Number(value || 0).toFixed(1)}%`;
+  const formatPercent = (value: unknown) => {
+    const number = toNumber(value);
+    return `${number >= 0 ? "+" : ""}${number.toFixed(1)}%`;
+  };
 
   const scaledKPIs = useMemo(() => {
     const kpis = homeOverview?.kpis;
-    const totalRevenue = kpis?.totalRevenue || 0;
+    const totalRevenue = toNumber(kpis?.totalRevenue);
     const retailRevenue =
       kpis?.retailRevenue ??
       homeOverview?.sectorSummary.find((item) => item.sector === "Retail")?.revenue ??
       0;
-    const revChange = kpis?.revenueChangePercent || 0;
-    const ordChange = kpis?.ordersChangePercent || 0;
+    const safeRetailRevenue = toNumber(retailRevenue);
+    const revChange = toNumber(kpis?.revenueChangePercent);
+    const ordChange = toNumber(kpis?.ordersChangePercent);
     return {
       revenue: formatCurrency(totalRevenue),
-      orders: (kpis?.totalOrders || 0).toLocaleString(),
-      retail: formatCurrency(retailRevenue),
+      orders: toNumber(kpis?.totalOrders).toLocaleString(),
+      retail: formatCurrency(safeRetailRevenue),
       retailPercent:
-        totalRevenue > 0 ? `${((retailRevenue / totalRevenue) * 100).toFixed(1)}% of revenue` : "0.0% of revenue",
+        totalRevenue > 0 ? `${((safeRetailRevenue / totalRevenue) * 100).toFixed(1)}% of revenue` : "0.0% of revenue",
       revenuePercent: `${formatPercent(revChange)} vs previous period`,
       ordersPercent: `${formatPercent(ordChange)} vs previous period`,
       revenueColorClass: revChange >= 0 ? "text-green-600" : "text-rose-600",
@@ -209,7 +217,7 @@ export function Home() {
     : "Waiting for uploaded transactions";
   const legendData = useMemo(() => {
     const sectorTotal = (sector: string) =>
-      homeOverview?.sectorSummary.find((item) => item.sector === sector)?.revenue || 0;
+      toNumber(homeOverview?.sectorSummary.find((item) => item.sector === sector)?.revenue);
     const total = sectorTotal("Cafe") + sectorTotal("Services") + sectorTotal("Retail");
     return [
       { key: "cafe", label: "Cafe", color: "#F53799", value: sectorTotal("Cafe") },
@@ -218,7 +226,7 @@ export function Home() {
     ].map((item) => ({
       ...item,
       total: formatCurrency(item.value),
-      percent: total > 0 ? `${((item.value / total) * 100).toFixed(1)}%` : "0.0%",
+      percent: total > 0 ? `${((toNumber(item.value) / total) * 100).toFixed(1)}%` : "0.0%",
     }));
   }, [homeOverview]);
 
@@ -325,7 +333,7 @@ export function Home() {
       return dayMatches && row.hourBucket === hourBucket && sectorMatches;
     });
     if (!rows.length) return 0;
-    return rows.reduce((max, row) => Math.max(max, row.intensity), 0);
+    return rows.reduce((max, row) => Math.max(max, toNumber(row.intensity)), 0);
   };
 
   return (

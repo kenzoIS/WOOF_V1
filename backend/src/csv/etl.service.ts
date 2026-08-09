@@ -296,6 +296,8 @@ export class EtlService {
               valid_from: new Date().toISOString(),
               valid_to: null,
               is_current: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             });
           } else {
             const currentVersion = versions.find(v => v.is_current === true || v.valid_to === null);
@@ -315,6 +317,8 @@ export class EtlService {
                   valid_from: new Date().toISOString(),
                   valid_to: null,
                   is_current: true,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
                 });
               } else {
                 finalProductsToInsert.push({
@@ -322,6 +326,7 @@ export class EtlService {
                   sku: p.sku || currentVersion.sku,
                   category: p.category || currentVersion.category,
                   product_name: p.product_name || currentVersion.product_name,
+                  updated_at: new Date().toISOString(),
                 });
               }
             } else {
@@ -330,6 +335,8 @@ export class EtlService {
                 valid_from: new Date().toISOString(),
                 valid_to: null,
                 is_current: true,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
               });
             }
           }

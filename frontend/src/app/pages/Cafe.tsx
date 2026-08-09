@@ -75,6 +75,20 @@ const getProjectedRevenue = (
   return unitPrice > 0 ? Math.round(quantity * unitPrice) : quantity;
 };
 
+const toNumber = (value: unknown, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+const formatNumber = (value: unknown) => toNumber(value).toLocaleString();
+
+const formatCurrency = (value: unknown) => `₱${formatNumber(value)}`;
+
+const formatFixed = (value: unknown, decimals = 1, fallback = "—") => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(decimals) : fallback;
+};
+
 const getMetadataDate = (
   forecastRun: ForecastRun | null,
   key: string,
@@ -106,8 +120,9 @@ const aggregateItemHistory = (
   }>();
 
   for (const row of rows) {
-    const existing = grouped.get(row.name) || {
-      name: row.name,
+    const name = row.name || "Unknown Cafe Item";
+    const existing = grouped.get(name) || {
+      name,
       revenue: 0,
       quantity: 0,
       orderCount: 0,
@@ -115,12 +130,12 @@ const aggregateItemHistory = (
       category: row.category || "Cafe",
       byDate: new Map<string, number>(),
     };
-    existing.revenue += Number(row.revenue) || 0;
-    existing.quantity += Number(row.quantity) || 0;
-    existing.orderCount += Number(row.orderCount) || 0;
-    existing.byDate.set(row.date, (existing.byDate.get(row.date) || 0) + (Number(row.revenue) || 0));
-    existing.avgPrice = existing.quantity > 0 ? existing.revenue / existing.quantity : Number(row.avgPrice) || 0;
-    grouped.set(row.name, existing);
+    existing.revenue += toNumber(row.revenue);
+    existing.quantity += toNumber(row.quantity);
+    existing.orderCount += toNumber(row.orderCount);
+    existing.byDate.set(row.date, (existing.byDate.get(row.date) || 0) + toNumber(row.revenue));
+    existing.avgPrice = existing.quantity > 0 ? existing.revenue / existing.quantity : toNumber(row.avgPrice);
+    grouped.set(name, existing);
   }
 
   return [...grouped.values()]
@@ -392,48 +407,49 @@ export function Cafe() {
     const sourceItems = scopedRows.length
       ? aggregateItemHistory(scopedRows)
       : (forecastRun.topItems || []).map((item) => ({
-          name: item.name,
-          revenue: Math.round(item.revenue),
-          quantity: item.quantity,
-          orderCount: item.orderCount,
-          avgPrice: item.avgPrice,
+          name: item.name || "Unknown Cafe Item",
+          revenue: Math.round(toNumber(item.revenue)),
+          quantity: toNumber(item.quantity),
+          orderCount: toNumber(item.orderCount),
+          avgPrice: toNumber(item.avgPrice),
           category: item.category || "Cafe",
           trend: [] as number[],
         }));
 
     // Get last 7 days of total revenue to build per-item trend sparklines
-    const last7Days = forecastRun.historical.slice(-7);
+    const historicalRows = forecastRun.historical || [];
+    const last7Days = historicalRows.slice(-7);
     const unitPrice = getCafeForecastUnitPrice(forecastRun);
     const averageQuantity =
-      sourceItems.reduce((sum, item) => sum + item.quantity, 0) /
+      sourceItems.reduce((sum, item) => sum + toNumber(item.quantity), 0) /
       Math.max(sourceItems.length, 1);
 
     return sourceItems.slice(0, 15).map((item) => {
       // Scale the cafe's daily revenue shape to this item's proportion
       const itemProportion =
-        item.revenue / (forecastRun.kpis.totalRevenue || 1);
+        toNumber(item.revenue) / (toNumber(forecastRun.kpis?.totalRevenue) || 1);
       const fallbackTrend = last7Days.length > 0
         ? last7Days.map((day) =>
             Math.max(0, Math.round(getHistoricalRevenue(day, unitPrice) * itemProportion)),
           )
-        : [item.revenue];
+        : [toNumber(item.revenue)];
       const trend = item.trend.length ? item.trend : fallbackTrend;
 
       // Determine status based on quantity thresholds from actual dataset
       const equilibrium =
-        item.quantity >= averageQuantity
+        toNumber(item.quantity) >= averageQuantity
           ? "balanced"
-          : item.quantity >= averageQuantity * 0.5
+          : toNumber(item.quantity) >= averageQuantity * 0.5
             ? "diverging"
             : "critical";
 
       return {
         name: item.name,
-        qtySold: item.quantity,
+        qtySold: toNumber(item.quantity),
         category: item.category || "Cafe",
         equilibrium,
         trend,
-        revenue: Math.round(item.revenue),
+        revenue: Math.round(toNumber(item.revenue)),
       };
     });
   }, [forecastRun, globalDateRange, menuPerformanceMode]);
@@ -441,9 +457,9 @@ export function Cafe() {
   // Aggregated KPI values dynamically calculated from API history based on globalDateRange
   const aggregatedKpis = useMemo(() => {
     const defaultKpis = {
-      totalRevenue: forecastRun?.kpis?.totalRevenue || 0,
-      totalOrders: forecastRun?.kpis?.totalOrders || 0,
-      avgOrderValue: forecastRun?.kpis?.avgOrderValue || 0,
+      totalRevenue: toNumber(forecastRun?.kpis?.totalRevenue),
+      totalOrders: toNumber(forecastRun?.kpis?.totalOrders),
+      avgOrderValue: toNumber(forecastRun?.kpis?.avgOrderValue),
       revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
       ordersGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
       checkGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
@@ -459,8 +475,9 @@ export function Cafe() {
     const sliced = filterByDateRange(forecastRun.historical, range);
     const unitPrice = getCafeForecastUnitPrice(forecastRun);
     const totalRevenue = sliced.reduce((sum, d) => sum + getHistoricalRevenue(d, unitPrice), 0);
-    const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || Math.round(getHistoricalRevenue(d, unitPrice) / (forecastRun?.kpis?.avgOrderValue || 150))), 0);
-    const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : (forecastRun?.kpis?.avgOrderValue || 0);
+    const fallbackAvgOrderValue = toNumber(forecastRun?.kpis?.avgOrderValue, 150) || 150;
+    const totalOrders = sliced.reduce((sum, d) => sum + (toNumber(d.orders) || Math.round(getHistoricalRevenue(d, unitPrice) / fallbackAvgOrderValue)), 0);
+    const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : toNumber(forecastRun?.kpis?.avgOrderValue);
 
     const dayCount = countDays(range.start, range.end);
     const previousEnd = addDays(range.start, -1);
@@ -468,7 +485,7 @@ export function Cafe() {
     const prevRange = { start: previousStart, end: previousEnd, isCustom: range.isCustom };
     const prevSliced = filterByDateRange(forecastRun.historical, prevRange);
     const prevRevenue = prevSliced.reduce((sum, d) => sum + getHistoricalRevenue(d, unitPrice), 0);
-    const prevOrders = prevSliced.reduce((sum, d) => sum + (d.orders || Math.round(getHistoricalRevenue(d, unitPrice) / (forecastRun?.kpis?.avgOrderValue || 150))), 0);
+    const prevOrders = prevSliced.reduce((sum, d) => sum + (toNumber(d.orders) || Math.round(getHistoricalRevenue(d, unitPrice) / fallbackAvgOrderValue)), 0);
     const prevAvgOrderValue = prevOrders > 0 ? Math.round(prevRevenue / prevOrders) : 0;
 
     return {
@@ -481,9 +498,9 @@ export function Cafe() {
     };
   }, [forecastRun, globalDateRange]);
 
-  const cafeRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
+  const cafeRevenue = formatCurrency(aggregatedKpis.totalRevenue);
   const totalOrders = aggregatedKpis.totalOrders || 0;
-  const avgCheck = aggregatedKpis.avgOrderValue ? `₱${aggregatedKpis.avgOrderValue.toLocaleString()}` : "₱0";
+  const avgCheck = formatCurrency(aggregatedKpis.avgOrderValue);
   const activeItems = menuItems.length || forecastRun?.topItems?.length || 0;
 
   // Build forecast chart data from API based on globalDateRange
@@ -898,7 +915,7 @@ export function Cafe() {
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Active model: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
-              {forecastRun && <span className="hidden sm:inline"> (MASE: {forecastRun.mase.toFixed(2)}, Accuracy: {forecastRun.accuracy.toFixed(1)}%)</span>}
+              {forecastRun && <span className="hidden sm:inline"> (MASE: {formatFixed(forecastRun.mase, 2)}, Accuracy: {formatFixed(forecastRun.accuracy, 1)}%)</span>}
             </p>
             {forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
@@ -977,11 +994,11 @@ export function Cafe() {
             <YAxis 
               stroke="#223047" 
               style={{ fontSize: "12px" }} 
-              tickFormatter={(value) => `₱${Number(value).toLocaleString()}`}
+              tickFormatter={(value) => formatCurrency(value)}
             />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
-              formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString()}`, name]}
+              formatter={(value: any, name: any) => [formatCurrency(value), name]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -1068,16 +1085,16 @@ export function Cafe() {
             <div className="grid grid-cols-2 gap-3 md:gap-4">
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#F53799]">{forecastRun?.mase.toFixed(2) ?? "—"}</div>
+                <div className="text-xl md:text-2xl font-bold text-[#F53799]">{formatFixed(forecastRun?.mase, 2)}</div>
                 <div className="text-xs text-[#223047] opacity-60 hidden md:block">Quality threshold: 1.20</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.accuracy.toFixed(1)}%` : "—"}</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${formatFixed(forecastRun.accuracy, 1)}%` : "—"}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${forecastRun.smape.toFixed(2)}%` : "—"}</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{forecastRun ? `${formatFixed(forecastRun.smape, 2)}%` : "—"}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
@@ -1251,7 +1268,7 @@ export function Cafe() {
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
             {forecastRun?.topItems?.[0]
-              ? `${forecastRun.topItems[0].name} leads Cafe revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} across ${forecastRun.topItems[0].quantity} units.`
+              ? `${forecastRun.topItems[0].name || "This item"} leads Cafe revenue at ${formatCurrency(forecastRun.topItems[0].revenue)} across ${formatNumber(forecastRun.topItems[0].quantity)} units.`
               : "Upload Cafe history from POS or PetHub to populate item-level insights."}
           </p>
         </div>
@@ -1350,7 +1367,7 @@ export function Cafe() {
                           </LineChart>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center font-semibold">₱{item.revenue.toLocaleString()}</TableCell>
+                      <TableCell className="text-center font-semibold">{formatCurrency(item.revenue)}</TableCell>
                       <TableCell className="text-center">
                         <div className="inline-flex items-center justify-center p-1 rounded hover:bg-[#FFF2FA] text-[#F53799] transition-colors">
                           {expandedRow === item.name ? (
@@ -1440,13 +1457,21 @@ export function Cafe() {
             </div>
 
             <div className="text-2xl md:text-3xl lg:text-4xl font-bold">
-              {quietPeriod && quietPeriod.status === 'success' ? `${formatChartDate(quietPeriod.targetDate)} ${quietPeriod.targetHour}:00` : "Calculating..."}
+              {quietPeriod === null 
+                ? "Calculating..." 
+                : quietPeriod.status === 'success' 
+                  ? `${formatChartDate(quietPeriod.targetDate)} ${quietPeriod.targetHour}:00` 
+                  : "None Detected"}
             </div>
 
             <div className="flex items-center gap-2 text-xs md:text-sm">
               <span className="opacity-70">Predicted Traffic:</span>
               <span className="font-semibold text-[#3AE4FA]">
-                {quietPeriod && quietPeriod.status === 'success' ? `${Math.round(quietPeriod.predictedTrafficDrop)}% below avg` : "..."}
+                {quietPeriod === null 
+                  ? "..." 
+                  : quietPeriod.status === 'success' 
+                    ? `${Math.round(quietPeriod.predictedTrafficDrop)}% below avg` 
+                    : "N/A"}
               </span>
             </div>
 
@@ -1471,12 +1496,14 @@ export function Cafe() {
                 <label className="text-xs opacity-70 mb-2 block">Discount %</label>
                 <div className="flex items-center gap-3">
                   <Slider
+                    defaultValue={[15]}
                     value={discountValue}
                     onValueChange={setDiscountValue}
                     max={80}
                     min={5}
                     step={5}
                     className="flex-1"
+                    disabled={!quietPeriod || quietPeriod.status !== 'success'}
                   />
                   <span className="text-base md:text-lg font-bold w-10 md:w-12">{discountValue[0]}%</span>
                 </div>

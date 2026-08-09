@@ -17,7 +17,7 @@ export function WOOFChatbot() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: "Hi, I'm WOOF. Ask me about dashboard sales, orders, channels, sectors, top items, forecasts, or bundle recommendations.",
+      text: "Hi, I'm WOOF. Tell me what you want to check in the dashboard, like sales for a date, top items, best channel, or sector performance.",
       sender: "woof",
       timestamp: new Date(),
     },

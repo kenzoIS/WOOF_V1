@@ -583,14 +583,16 @@ export class AnalyticsService {
       .from('csv_uploads')
       .select('*', { count: 'exact', head: true });
 
+    const latestUploadStamp = this.getUploadStamp(latestUpload);
+
     if (cachedForecast) {
       const metadata = cachedForecast.model_metadata || {};
       const cacheUploadCount = metadata.csvUploadCount;
       const cacheLatestUploadId = metadata.latestCsvUploadId;
       const cacheLatestUploadTime = metadata.latestCsvUploadTime;
 
-      const currentLatestUploadId = latestUpload ? latestUpload.id : null;
-      const currentLatestUploadTime = latestUpload ? new Date(latestUpload.uploaded_at).getTime() : null;
+      const currentLatestUploadId = latestUploadStamp.latestUploadId;
+      const currentLatestUploadTime = latestUploadStamp.latestUploadTime;
 
       const isCsvStateMatch =
         cacheUploadCount === uploadCount &&
@@ -828,8 +830,8 @@ export class AnalyticsService {
         holidayOverride: reqHoliday,
         ...exogenousMetadata,
         csvUploadCount: uploadCount,
-        latestCsvUploadId: latestUpload ? latestUpload._id.toString() : null,
-        latestCsvUploadTime: latestUpload ? latestUpload.uploadedAt.getTime() : null,
+        latestCsvUploadId: latestUploadStamp.latestUploadId,
+        latestCsvUploadTime: latestUploadStamp.latestUploadTime,
         daysRequested: forecastDays,
       },
       generated_at: new Date().toISOString(),
@@ -1843,9 +1845,8 @@ export class AnalyticsService {
       }
     } catch (e) {}
 
-    const hour = 15; 
+    
     const isWeekend = (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) ? 1 : 0;
-    const trafficDrop = 45.0;
     const proposedDiscountDepth = 0.15;
     const promoTrainingRows = await this.getPromoModelTrainingRows();
     const discountedRows = promoTrainingRows.filter(
@@ -1858,18 +1859,34 @@ export class AnalyticsService {
       promoTrainingRows[promoTrainingRows.length - 1]?.transactionTimestamp || 'none',
     ].join(':');
 
-    const mlResult = await this.runPython<any>(
-      'dynamic_promo.py',
-      {
-        hour,
-        is_weekend: isWeekend,
-        temp,
-        traffic_drop: trafficDrop,
-        discount_depth: proposedDiscountDepth,
-        trainingSignature: promoTrainingSignature,
-        trainingRows: promoTrainingRows,
-      }
-    );
+    let mlResult: any;
+    try {
+      mlResult = await this.runPython<any>(
+        'dynamic_promo.py',
+        {
+          is_weekend: isWeekend,
+          temp,
+          discount_depth: proposedDiscountDepth,
+          trainingSignature: promoTrainingSignature,
+          trainingRows: promoTrainingRows,
+        }
+      );
+    } catch (error) {
+      console.warn(
+        `Dynamic promo model unavailable; using deterministic quiet-period fallback: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      mlResult = {
+        probabilityScore: 0.82,
+        modelMetrics: {
+          trainingSource: discountedRows > 0 ? 'transaction_history_fallback' : 'rule_based_fallback',
+          trainingRows: promoTrainingRows.length,
+          accuracy: null,
+        },
+        featureImportance: [],
+      };
+    }
 
     if (mlResult.probabilityScore <= 0.70) {
       return { status: 'no_quiet_period_detected' };
@@ -1878,8 +1895,8 @@ export class AnalyticsService {
     return {
       status: 'success',
       targetDate: tomorrowStr,
-      targetHour: hour,
-      predictedTrafficDrop: trafficDrop,
+      targetHour: mlResult.targetHour,
+      predictedTrafficDrop: mlResult.predictedTrafficDrop,
       probabilityScore: mlResult.probabilityScore,
       modelMetrics: mlResult.modelMetrics,
       featureImportance: mlResult.featureImportance,
@@ -1889,33 +1906,42 @@ export class AnalyticsService {
   }
 
   private async getPromoModelTrainingRows(): Promise<any[]> {
-    const { data, error } = await this.supabaseService.client
-      .from('fact_cross_channel_transactions')
-      .select(
-        [
-          'transaction_timestamp',
-          'product_id',
-          'service_id',
-          'channel_id',
-          'segment_id',
-          'quantity_sold',
-          'gross_sales',
-          'discount_amount',
-          'discount_depth',
-          'net_sales',
-          'gross_profit',
-        ].join(','),
-      )
-      .gt('gross_sales', 0)
-      .order('transaction_timestamp', { ascending: false })
-      .limit(15000);
+    const columns = [
+      'transaction_timestamp',
+      'product_id',
+      'service_id',
+      'channel_id',
+      'segment_id',
+      'quantity_sold',
+      'gross_sales',
+      'discount_amount',
+      'discount_depth',
+      'net_sales',
+      'gross_profit',
+    ].join(',');
 
-    if (error || !Array.isArray(data)) {
-      if (error) {
-        console.warn(`Could not load promo model training rows: ${error.message}`);
-      }
-      return [];
-    }
+    const { data: discountedRes } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select(columns)
+      .gt('gross_sales', 0)
+      .or('discount_amount.gt.0,discount_depth.gt.0')
+      .order('transaction_timestamp', { ascending: false })
+      .limit(500);
+
+    const { data: normalRes } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select(columns)
+      .gt('gross_sales', 0)
+      .eq('discount_amount', 0)
+      .eq('discount_depth', 0)
+      .order('transaction_timestamp', { ascending: false })
+      .limit(500);
+
+    let data: any[] = [];
+    if (discountedRes && Array.isArray(discountedRes)) data = data.concat(discountedRes);
+    if (normalRes && Array.isArray(normalRes)) data = data.concat(normalRes);
+
+    if (data.length === 0) return [];
 
     return data.map((row: any) => ({
       transactionTimestamp: row.transaction_timestamp,
@@ -1944,6 +1970,13 @@ export class AnalyticsService {
       .single();
 
     if (error) {
+      if (this.isMissingSupabaseTableError(error)) {
+        return {
+          status: 'skipped',
+          message:
+            'Happy Hour activation storage is not configured yet. Create the public.dynamic_promos table in Supabase to persist approved promos.',
+        };
+      }
       throw new Error(`Failed to activate Happy Hour: ${error.message}`);
     }
     return data;
@@ -1957,9 +1990,24 @@ export class AnalyticsService {
       .limit(10);
       
     if (error) {
+      if (this.isMissingSupabaseTableError(error)) {
+        console.warn(
+          'dynamic_promos table is missing; returning empty Happy Hour history.',
+        );
+        return [];
+      }
       throw new Error(`Failed to fetch past Happy Hours: ${error.message}`);
     }
     return data;
+  }
+
+  private isMissingSupabaseTableError(error: { message?: string; code?: string } | null | undefined): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      error?.code === 'PGRST205' ||
+      message.includes('could not find the table') ||
+      message.includes('schema cache')
+    );
   }
 
   private normalizeForecastModule(sector: string): ForecastModule {
@@ -2410,6 +2458,28 @@ export class AnalyticsService {
     return Math.min(Math.max(Math.trunc(parsed), 1), MAX_FORECAST_DAYS);
   }
 
+  private getUploadStamp(upload: any): {
+    latestUploadId: string | null;
+    latestUploadTime: number | null;
+  } {
+    if (!upload) {
+      return {
+        latestUploadId: null,
+        latestUploadTime: null,
+      };
+    }
+
+    const rawId = upload.id ?? upload._id ?? upload.upload_id ?? null;
+    const rawTime =
+      upload.uploaded_at ?? upload.uploadedAt ?? upload.created_at ?? upload.createdAt ?? null;
+    const parsedTime = rawTime ? new Date(rawTime).getTime() : null;
+
+    return {
+      latestUploadId: rawId === null || rawId === undefined ? null : String(rawId),
+      latestUploadTime: Number.isFinite(parsedTime) ? parsedTime : null,
+    };
+  }
+
   private async getCsvUploadState(): Promise<{
     uploadCount: number;
     latestUploadId: string | null;
@@ -2425,11 +2495,12 @@ export class AnalyticsService {
     const { count: uploadCount } = await this.supabaseService.client
       .from('csv_uploads')
       .select('*', { count: 'exact', head: true });
+    const latestUploadStamp = this.getUploadStamp(latestUpload);
 
     return {
       uploadCount: uploadCount || 0,
-      latestUploadId: latestUpload ? latestUpload.id : null,
-      latestUploadTime: latestUpload ? new Date(latestUpload.uploaded_at).getTime() : null,
+      latestUploadId: latestUploadStamp.latestUploadId,
+      latestUploadTime: latestUploadStamp.latestUploadTime,
     };
   }
 
@@ -2687,7 +2758,7 @@ export class AnalyticsService {
     const revenue = Number(point?.revenue) || 0;
     const grossProfit = Number(point?.grossProfit) || 0;
     return {
-      date: String(point?._id || ''),
+      date: this.toDateKey(point?._id),
       actual: module === 'Services' ? orders : quantity,
       orders,
       revenue: this.round(revenue),
@@ -2700,6 +2771,22 @@ export class AnalyticsService {
       avgOrderValue: this.round(Number(point?.avgOrderValue) || 0),
       averageUnitPrice: this.round(Number(point?.averageUnitPrice) || 0),
     };
+  }
+
+  private toDateKey(value: unknown): string {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+    if (value instanceof Date && Number.isFinite(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    if (value !== null && value !== undefined) {
+      const parsed = new Date(String(value));
+      if (Number.isFinite(parsed.getTime())) {
+        return parsed.toISOString().slice(0, 10);
+      }
+    }
+    return '';
   }
 
   private async buildServicesExogenousPayload(

@@ -52,6 +52,16 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
+For Render backend deployment, install the Python forecasting dependencies
+before building the Nest app:
+
+```bash
+npm install && npm run build:render
+```
+
+Set `PYTHON_VERSION=3.12.8` in Render environment variables so packages such
+as `pandas`, `prophet`, and `statsmodels` install on a stable Python runtime.
+
 Historical forecasting uploads use:
 
 ```text

@@ -1,11 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import axios from 'axios';
-import { Model } from 'mongoose';
 import {
-  Transaction,
-  TransactionDocument,
-} from '../csv/schemas/transaction.schema';
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import axios from 'axios';
+import { SupabaseService } from '../common/supabase/supabase.service';
 
 type DashboardIntent =
   | 'total_revenue'
@@ -54,8 +53,26 @@ interface ChatHistoryItem {
   text?: string;
 }
 
+interface WarehouseFilters {
+  dateStart?: string;
+  dateEnd?: string;
+  sector?: QueryPlan['sector'];
+  channel?: QueryPlan['channel'];
+}
+
+interface WarehouseRow {
+  net_sales?: number | string | null;
+  quantity_sold?: number | string | null;
+  transaction_id?: string | null;
+  product_id?: string | null;
+  service_id?: string | null;
+  channel_dim?: { channel_name?: string | null } | null;
+  date_dim?: { full_date?: string | null } | null;
+  business_segment_dim?: { segment_name?: string | null } | null;
+}
+
 const OUT_OF_SCOPE_MESSAGE =
-  'I can help with WOOF dashboard questions only, like sales, orders, quantity sold, channels, sectors, top items, forecasts, and bundle recommendations. Ask me something from the dashboard and I will compute it for you.';
+  'I am built for WOOF dashboard analytics, so I cannot help with that one. I can still help you check sales, orders, quantity sold, channels, sectors, top items, forecasts, and bundle recommendations.';
 
 const MONTHS: Record<string, number> = {
   january: 0,
@@ -100,10 +117,7 @@ const MONTH_ALIASES: Record<string, string> = {
 
 @Injectable()
 export class ChatbotService {
-  constructor(
-    @InjectModel(Transaction.name)
-    private readonly transactionModel: Model<TransactionDocument>,
-  ) {}
+  constructor(private readonly supabaseService: SupabaseService) {}
 
   async answer(question: string, history: ChatHistoryItem[] = []): Promise<any> {
     const cleanedQuestion = String(question || '').trim();
@@ -112,11 +126,30 @@ export class ChatbotService {
     }
 
     const conversationContext = this.buildConversationContext(history);
+    const conversationalAnswer = this.getConversationalAnswer(
+      cleanedQuestion,
+      conversationContext,
+    );
+    if (conversationalAnswer) {
+      return {
+        answer: conversationalAnswer,
+        scope: 'dashboard_conversation',
+        queryPlan: {
+          intent: 'out_of_scope',
+          dateRange: 'all',
+          answerMode: 'unsupported',
+          classifier: 'fallback',
+          analysisSteps: ['Handled as conversational WOOF assistant turn'],
+        },
+        confidence: 'high',
+      };
+    }
+
     const questionForPlanning = this.resolveFollowUpQuestion(
       cleanedQuestion,
       conversationContext,
     );
-    let plan = await this.planQuestion(questionForPlanning);
+    let plan = await this.planQuestion(questionForPlanning, conversationContext);
     const fallbackClarification = this.getClarificationQuestion(
       questionForPlanning,
       plan,
@@ -176,12 +209,7 @@ export class ChatbotService {
       };
     }
 
-    const dateMatch = this.buildDateMatch(plan, latestDate);
-    const baseMatch = {
-      ...dateMatch,
-      ...(plan.sector ? { sector: plan.sector } : {}),
-      ...(plan.channel ? { channel: plan.channel } : {}),
-    };
+    const baseMatch = this.buildWarehouseFilters(plan, latestDate);
 
     const result = await this.executePlan(plan, baseMatch);
     const factualAnswer = this.renderAnswer(plan, result, latestDate);
@@ -206,7 +234,10 @@ export class ChatbotService {
     };
   }
 
-  private async planQuestion(question: string): Promise<QueryPlan> {
+  private async planQuestion(
+    question: string,
+    history: ChatHistoryItem[] = [],
+  ): Promise<QueryPlan> {
     const fallback = this.classifyQuestion(question);
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -228,7 +259,7 @@ export class ChatbotService {
           messages: [
             {
               role: 'user',
-              content: this.buildPlannerPrompt(question),
+              content: this.buildPlannerPrompt(question, history),
             },
           ],
         },
@@ -249,15 +280,27 @@ export class ChatbotService {
     }
   }
 
-  private buildPlannerPrompt(question: string): string {
+  private buildPlannerPrompt(
+    question: string,
+    history: ChatHistoryItem[] = [],
+  ): string {
+    const recentContext = history.length
+      ? history
+          .map((item) => `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`)
+          .join('\n')
+      : 'None';
     return [
       'Think through the user question as a controlled WOOF dashboard analyst, then convert it into a safe query plan.',
       'Do not reveal private chain-of-thought. Return only the required JSON with short public analysisSteps.',
       'The chatbot is only allowed to answer WOOF dashboard questions about sales, revenue, orders, quantity sold, average order value, top items, sector breakdown, channel breakdown, forecasts, and bundle recommendations.',
-      'If the question is not dashboard-related, set intent to "out_of_scope".',
+      'Classify by meaning, not keywords. Do not require trigger words such as "sales" when the user clearly continues a previous dashboard question.',
+      'Use the recent chat context to resolve follow-ups, corrections, confirmations, pronouns, and elliptical prompts.',
+      'If the user asks whether the previous answer is accurate, recompute the same dashboard query plan instead of marking it out_of_scope.',
+      'If the user gives only a new date, sector, channel, or range, inherit the previous dashboard metric and filters, then replace only the newly mentioned part.',
+      'Set intent to "out_of_scope" only when the latest message cannot be mapped to a WOOF dashboard metric even after using recent context.',
       'Before selecting SQL, decide whether the question is answerable, ambiguous, unsupported, or needs a clarification question.',
       'Use answerMode "compute" only when the metric, dashboard domain, and date/range are clear enough to compute.',
-      'Use answerMode "clarify" when the user mentions a month without year, asks "best" without enough context, asks a correction without prior context, or provides a vague metric like "performance" without saying sales/orders/quantity/channel/sector.',
+      'Use answerMode "clarify" when the user mentions a month without year, asks "best" without enough context, asks a correction/follow-up without usable prior context, or asks for a vague metric that cannot be mapped to the allowed dashboard metrics.',
       'Use answerMode "unsupported" when the topic is WOOF-related but not computable from the current dashboard aggregations.',
       'Allowed intents: total_revenue, total_orders, total_quantity, average_order_value, top_items, sector_breakdown, channel_breakdown, best_sector, best_channel, forecast_overview, cross_sell_overview, out_of_scope.',
       'Allowed dateRange values: today, yesterday, last_7_days, this_month, custom, all.',
@@ -291,6 +334,8 @@ export class ChatbotService {
         generatedSql:
           'SELECT SUM(net_sales) AS revenue FROM fact_cross_channel_transactions WHERE transaction_timestamp >= :start AND transaction_timestamp <= :end;',
       }),
+      'Recent chat context:',
+      recentContext,
       `User question: ${question}`,
     ].join('\n');
   }
@@ -849,15 +894,15 @@ export class ChatbotService {
     return steps.slice(0, 4);
   }
 
-  private async executePlan(plan: QueryPlan, match: Record<string, unknown>) {
+  private async executePlan(plan: QueryPlan, match: WarehouseFilters) {
     if (plan.intent === 'top_items') {
       return this.getTopItems(match, plan.limit || 5);
     }
     if (plan.intent === 'sector_breakdown' || plan.intent === 'best_sector') {
-      return this.getBreakdown(match, '$sector');
+      return this.getBreakdown(match, 'sector');
     }
     if (plan.intent === 'channel_breakdown' || plan.intent === 'best_channel') {
-      return this.getBreakdown(match, '$channel');
+      return this.getBreakdown(match, 'channel');
     }
     if (plan.intent === 'forecast_overview') {
       return {
@@ -874,79 +919,94 @@ export class ChatbotService {
     return this.getTotals(match);
   }
 
-  private async getTotals(match: Record<string, unknown>) {
-    const [row] = await this.transactionModel.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: null,
-          revenue: { $sum: '$netSales' },
-          orders: { $addToSet: '$transactionId' },
-          quantity: { $sum: '$quantity' },
-          rows: { $sum: 1 },
-        },
-      },
-    ]);
-    const orderCount = Array.isArray(row?.orders) ? row.orders.length : 0;
-    const revenue = this.money(row?.revenue || 0);
+  private async getTotals(match: WarehouseFilters) {
+    const rows = await this.getWarehouseRows(match);
+    const orders = new Set<string>();
+    let revenue = 0;
+    let quantity = 0;
+
+    rows.forEach((row) => {
+      revenue += Number(row.net_sales) || 0;
+      quantity += Number(row.quantity_sold) || 0;
+      if (row.transaction_id) orders.add(row.transaction_id);
+    });
+
+    revenue = this.money(revenue);
+    const orderCount = orders.size;
     return {
       revenue,
       orders: orderCount,
-      quantity: Number(row?.quantity) || 0,
-      rows: Number(row?.rows) || 0,
+      quantity: this.money(quantity),
+      rows: rows.length,
       avgOrderValue: orderCount ? this.money(revenue / orderCount) : 0,
     };
   }
 
-  private async getTopItems(match: Record<string, unknown>, limit: number) {
-    return this.transactionModel.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: '$productName',
-          revenue: { $sum: '$netSales' },
-          quantity: { $sum: '$quantity' },
-          orders: { $addToSet: '$transactionId' },
-        },
-      },
-      { $addFields: { orderCount: { $size: '$orders' } } },
-      { $sort: { revenue: -1 } },
-      { $limit: limit },
-      {
-        $project: {
-          _id: 0,
-          name: '$_id',
-          revenue: { $round: ['$revenue', 2] },
-          quantity: 1,
-          orderCount: 1,
-        },
-      },
-    ]);
+  private async getTopItems(match: WarehouseFilters, limit: number) {
+    const rows = await this.getWarehouseRows(match);
+    const itemNames = await this.getItemNameMap();
+    const grouped = new Map<
+      string,
+      { name: string; revenue: number; quantity: number; orders: Set<string> }
+    >();
+
+    rows.forEach((row) => {
+      const itemId = row.product_id || row.service_id || 'unknown';
+      const current =
+        grouped.get(itemId) ||
+        {
+          name: itemNames.get(itemId) || itemId || 'Unknown item',
+          revenue: 0,
+          quantity: 0,
+          orders: new Set<string>(),
+        };
+      current.revenue += Number(row.net_sales) || 0;
+      current.quantity += Number(row.quantity_sold) || 0;
+      if (row.transaction_id) current.orders.add(row.transaction_id);
+      grouped.set(itemId, current);
+    });
+
+    return Array.from(grouped.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, limit)
+      .map((item) => ({
+        name: item.name,
+        revenue: this.money(item.revenue),
+        quantity: this.money(item.quantity),
+        orderCount: item.orders.size,
+      }));
   }
 
-  private async getBreakdown(match: Record<string, unknown>, groupBy: string) {
-    return this.transactionModel.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: groupBy,
-          revenue: { $sum: '$netSales' },
-          orders: { $addToSet: '$transactionId' },
-          quantity: { $sum: '$quantity' },
-        },
-      },
-      { $addFields: { orderCount: { $size: '$orders' } } },
-      { $sort: { revenue: -1 } },
-      {
-        $project: {
-          _id: 0,
-          label: '$_id',
-          revenue: { $round: ['$revenue', 2] },
-          orderCount: 1,
-          quantity: 1,
-        },
-      },
-    ]);
+  private async getBreakdown(match: WarehouseFilters, groupBy: 'sector' | 'channel') {
+    const rows = await this.getWarehouseRows(match);
+    const grouped = new Map<
+      string,
+      { label: string; revenue: number; quantity: number; orders: Set<string> }
+    >();
+
+    rows.forEach((row) => {
+      const rawLabel =
+        groupBy === 'sector'
+          ? row.business_segment_dim?.segment_name
+          : row.channel_dim?.channel_name;
+      const label = this.toDisplaySector(rawLabel || 'Unknown');
+      const current =
+        grouped.get(label) ||
+        { label, revenue: 0, quantity: 0, orders: new Set<string>() };
+      current.revenue += Number(row.net_sales) || 0;
+      current.quantity += Number(row.quantity_sold) || 0;
+      if (row.transaction_id) current.orders.add(row.transaction_id);
+      grouped.set(label, current);
+    });
+
+    return Array.from(grouped.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .map((row) => ({
+        label: row.label,
+        revenue: this.money(row.revenue),
+        orderCount: row.orders.size,
+        quantity: this.money(row.quantity),
+      }));
   }
 
   private renderAnswer(plan: QueryPlan, result: any, latestDate: Date): string {
@@ -996,54 +1056,144 @@ export class ChatbotService {
   }
 
   private async getLatestTransactionDate(): Promise<Date | null> {
-    const [row] = await this.transactionModel.aggregate([
-      { $group: { _id: null, latestDate: { $max: '$date' } } },
-    ]);
-    return row?.latestDate ? new Date(row.latestDate) : null;
+    const { data, error } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select('date_id, date_dim:date_id!inner(full_date)')
+      .order('date_id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `Failed to read latest warehouse transaction date: ${error.message}`,
+      );
+    }
+
+    const fullDate = (data as any)?.date_dim?.full_date;
+    return fullDate ? new Date(`${fullDate}T00:00:00.000Z`) : null;
   }
 
-  private buildDateMatch(plan: QueryPlan, latestDate: Date) {
+  private buildWarehouseFilters(
+    plan: QueryPlan,
+    latestDate: Date,
+  ): WarehouseFilters {
     const range = plan.dateRange;
-    if (range === 'all') return {};
+    const filters: WarehouseFilters = {
+      ...(plan.sector ? { sector: plan.sector } : {}),
+      ...(plan.channel ? { channel: plan.channel } : {}),
+    };
+    if (range === 'all') return filters;
     if (range === 'custom' && plan.dateStart && plan.dateEnd) {
       return {
-        date: {
-          $gte: this.startOfDay(new Date(plan.dateStart)),
-          $lte: this.endOfDay(new Date(plan.dateEnd)),
-        },
+        ...filters,
+        dateStart: plan.dateStart,
+        dateEnd: plan.dateEnd,
       };
     }
-    const end = this.endOfDay(latestDate);
+    const end = this.isoDate(latestDate);
     if (range === 'today') {
-      return { date: { $gte: this.startOfDay(latestDate), $lte: end } };
+      return { ...filters, dateStart: end, dateEnd: end };
     }
     if (range === 'yesterday') {
       const yesterday = new Date(latestDate);
       yesterday.setDate(yesterday.getDate() - 1);
-      return {
-        date: { $gte: this.startOfDay(yesterday), $lte: this.endOfDay(yesterday) },
-      };
+      const date = this.isoDate(yesterday);
+      return { ...filters, dateStart: date, dateEnd: date };
     }
     if (range === 'this_month') {
       const start = new Date(latestDate);
       start.setDate(1);
-      return { date: { $gte: this.startOfDay(start), $lte: end } };
+      return { ...filters, dateStart: this.isoDate(start), dateEnd: end };
     }
     const start = new Date(latestDate);
     start.setDate(start.getDate() - 6);
-    return { date: { $gte: this.startOfDay(start), $lte: end } };
+    return { ...filters, dateStart: this.isoDate(start), dateEnd: end };
   }
 
-  private startOfDay(date: Date): Date {
-    const value = new Date(date);
-    value.setHours(0, 0, 0, 0);
-    return value;
+  private async getWarehouseRows(filters: WarehouseFilters): Promise<WarehouseRow[]> {
+    const pageSize = 1000;
+    const rows: WarehouseRow[] = [];
+    let from = 0;
+
+    while (true) {
+      let query = this.supabaseService.client
+        .from('fact_cross_channel_transactions')
+        .select(`
+          net_sales,
+          quantity_sold,
+          transaction_id,
+          product_id,
+          service_id,
+          channel_dim:channel_id!inner(channel_name),
+          date_dim:date_id!inner(full_date),
+          business_segment_dim:segment_id!inner(segment_name)
+        `)
+        .range(from, from + pageSize - 1);
+
+      if (filters.dateStart) {
+        query = query.gte('date_dim.full_date', filters.dateStart);
+      }
+      if (filters.dateEnd) {
+        query = query.lte('date_dim.full_date', filters.dateEnd);
+      }
+      if (filters.sector) {
+        query = query.eq(
+          'business_segment_dim.segment_name',
+          this.toWarehouseSector(filters.sector),
+        );
+      }
+      if (filters.channel) {
+        query = query.eq('channel_dim.channel_name', filters.channel);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        throw new InternalServerErrorException(
+          `Failed to read warehouse transactions: ${error.message}`,
+        );
+      }
+
+      const batch = (data || []) as WarehouseRow[];
+      rows.push(...batch);
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return rows;
   }
 
-  private endOfDay(date: Date): Date {
-    const value = new Date(date);
-    value.setHours(23, 59, 59, 999);
-    return value;
+  private async getItemNameMap(): Promise<Map<string, string>> {
+    const [productsResult, servicesResult] = await Promise.all([
+      this.supabaseService.client
+        .from('product_dim')
+        .select('product_id, product_name, category'),
+      this.supabaseService.client
+        .from('service_dim')
+        .select('service_id, service_name, service_type'),
+    ]);
+
+    const map = new Map<string, string>();
+    (productsResult.data || []).forEach((product: any) => {
+      map.set(
+        product.product_id,
+        product.product_name || product.category || product.product_id,
+      );
+    });
+    (servicesResult.data || []).forEach((service: any) => {
+      map.set(
+        service.service_id,
+        service.service_name || service.service_type || service.service_id,
+      );
+    });
+    return map;
+  }
+
+  private toWarehouseSector(sector: QueryPlan['sector']): string {
+    return sector === 'Services' ? 'Service' : String(sector || '');
+  }
+
+  private toDisplaySector(sector: string): string {
+    return sector === 'Service' ? 'Services' : sector;
   }
 
   private rangeLabel(plan: QueryPlan, latestDate: Date): string {
@@ -1091,20 +1241,107 @@ export class ChatbotService {
       }));
   }
 
+  private getConversationalAnswer(
+    question: string,
+    history: ChatHistoryItem[],
+  ): string | undefined {
+    const q = this.normalizeQuestion(question)
+      .replace(/[!?.,]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const hasPriorDashboardContext = history.some(
+      (item) =>
+        item.sender === 'user' &&
+        item.text &&
+        this.isDashboardQuestion(this.normalizeQuestion(item.text)),
+    );
+
+    if (
+      /^(hi|hello|hey|yo|good morning|good afternoon|good evening|kumusta|kamusta|hii+|helloo+)$/.test(
+        q,
+      )
+    ) {
+      return hasPriorDashboardContext
+        ? 'Hi! I am still here. Want me to check another WOOF metric or continue from the last dashboard result?'
+        : 'Hi! I am WOOF. You can ask me things like today\'s sales, orders for a specific date, top items, channel performance, sector breakdowns, forecasts, or bundle recommendations.';
+    }
+
+    if (
+      /^(thanks|thank you|ty|salamat|thank u|thx|okay thanks|ok thanks|sige thanks)$/.test(
+        q,
+      )
+    ) {
+      return 'You got it. I can keep checking the dashboard whenever you need another number.';
+    }
+
+    if (/^(ok|okay|sige|copy|noted|got it|gets|ge)$/.test(q)) {
+      return 'Got it. Send me the next dashboard question when you are ready.';
+    }
+
+    if (/^(bye|goodbye|later|see you|exit|close)$/.test(q)) {
+      return 'Alright, I will be here when you need another WOOF dashboard check.';
+    }
+
+    if (
+      /\b(what can you do|help|guide|sample question|examples?|how do i use you|ano kaya mo|ano pwede itanong|paano gamitin)\b/.test(
+        q,
+      )
+    ) {
+      return [
+        'You can ask me about the WOOF dashboard in normal language.',
+        'For example: "What were the sales on November 11, 2022?", "Which channel performed best this month?", "Top 5 items last week", or "How about Retail?".',
+      ].join(' ');
+    }
+
+    if (/^(are you there|nandyan ka|online ka|can you hear me|test)$/.test(q)) {
+      return 'Yes, I am here. Ask me any WOOF dashboard question and I will check the warehouse data for you.';
+    }
+
+    return undefined;
+  }
+
   private resolveFollowUpQuestion(
     question: string,
     history: ChatHistoryItem[],
   ): string {
     const normalized = this.normalizeQuestion(question);
-    const hasExplicitRange = Boolean(this.extractExplicitDateRange(question));
-    const likelyCorrection =
-      hasExplicitRange &&
-      !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|units|top|best|sector|channel|forecast|bundle|item|items|product|products)\b/.test(
+    const previousUserQuestion = this.findPreviousDashboardQuestion(history);
+    if (!previousUserQuestion) return question;
+
+    const asksToVerifyPrevious =
+      /\b(is this accurate|is that accurate|accurate ba|tama ba|correct ba|sure ka|are you sure|verify|check that|check this)\b/.test(
         normalized,
       );
-    if (!likelyCorrection) return question;
+    if (asksToVerifyPrevious) {
+      return `Recompute and verify this previous WOOF dashboard question: ${previousUserQuestion}`;
+    }
 
-    const previousUserQuestion = [...history]
+    const hasExplicitRange = Boolean(this.extractExplicitDateRange(question));
+    const hasDashboardMetric =
+      /\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+        normalized,
+      );
+    const looksLikeFollowUp =
+      /^(how about|what about|and|then|next|same for|paano naman|eh yung|yung|for)\b/.test(
+        normalized,
+      ) ||
+      hasExplicitRange ||
+      Boolean(this.extractSector(normalized)) ||
+      Boolean(this.extractChannel(normalized));
+
+    if (!looksLikeFollowUp || hasDashboardMetric) return question;
+
+    return [
+      question,
+      `Use the same WOOF dashboard metric and filters as this previous question: ${previousUserQuestion}`,
+      'If the new message includes a date, sector, channel, or range, replace only that part with the new value.',
+    ].join('\n');
+  }
+
+  private findPreviousDashboardQuestion(
+    history: ChatHistoryItem[],
+  ): string | undefined {
+    return [...history]
       .reverse()
       .find(
         (item) =>
@@ -1112,9 +1349,6 @@ export class ChatbotService {
           item.text &&
           this.isDashboardQuestion(this.normalizeQuestion(item.text)),
       )?.text;
-
-    if (!previousUserQuestion) return question;
-    return `${previousUserQuestion}. Correct the date/range to: ${question}`;
   }
 
   private async humanizeAnswer(input: {
@@ -1127,7 +1361,8 @@ export class ChatbotService {
     history: ChatHistoryItem[];
   }): Promise<string> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return input.factualAnswer;
+    const styleDirective = this.getResponseStyleDirective(input);
+    if (!apiKey) return this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
 
     try {
       const response = await axios.post(
@@ -1142,9 +1377,15 @@ export class ChatbotService {
           system: [
             'You are WOOF, a friendly AI revenue assistant inside the Happy Tails dashboard.',
             'Reply conversationally, but only using the validated dashboard facts provided by the backend.',
-            'Do not add new calculations, estimates, advice, or facts that are not in the factual answer.',
+            'Never change, round differently, infer, estimate, or add numbers beyond the validated backend answer.',
+            'Do not add new calculations, advice, causes, trends, or facts that are not in the factual answer.',
+            'Answer the user intent, not just the metric. If they ask for confirmation, confirm that WOOF rechecked the warehouse result.',
+            'If the latest message is a follow-up or correction, acknowledge the change naturally and answer the newly resolved query.',
+            'For normal metric answers, avoid robotic phrasing when possible; lead with the answer and keep the exact date/range visible.',
+            'For top item or breakdown answers, keep list formatting readable and compact.',
             'If the factual answer says no records were found, acknowledge it clearly and suggest checking another date or range.',
-            'Keep the answer concise: 1 to 3 short sentences. No markdown tables.',
+            'If the user asks something outside dashboard scope, do not answer generally; keep the response scoped to WOOF.',
+            'Keep the answer concise: 1 to 3 short sentences, or a compact numbered list for ranked results. No markdown tables.',
           ].join(' '),
           messages: [
             {
@@ -1159,6 +1400,7 @@ export class ChatbotService {
                 `Validated backend answer: ${input.factualAnswer}`,
                 `Validated intent: ${input.plan.intent}`,
                 `Validated date range: ${this.rangeLabel(input.plan, input.latestDate)}`,
+                `Response style instruction: ${styleDirective}`,
                 'Write the final user-facing answer now.',
               ].join('\n'),
             },
@@ -1174,10 +1416,84 @@ export class ChatbotService {
         },
       );
       const text = this.extractAnthropicText(response.data);
-      return text || input.factualAnswer;
+      return text || this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
     } catch {
-      return input.factualAnswer;
+      return this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
     }
+  }
+
+  private getResponseStyleDirective(input: {
+    question: string;
+    factualAnswer: string;
+    plan: QueryPlan;
+    result: any;
+  }): string {
+    const q = this.normalizeQuestion(input.question);
+    const isVerification =
+      /\b(is this accurate|is that accurate|accurate ba|tama ba|correct ba|sure ka|are you sure|verify|check that|check this)\b/.test(
+        q,
+      );
+    if (isVerification) {
+      return 'Verification: say that WOOF rechecked the Supabase warehouse result, then restate the exact validated answer. Do not sound uncertain.';
+    }
+
+    const isFollowUp =
+      /^(how about|what about|and|then|next|same for|paano naman|eh yung|yung|for)\b/.test(
+        q,
+      ) ||
+      (Boolean(this.extractExplicitDateRange(input.question)) &&
+        !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+          q,
+        )) ||
+      (Boolean(this.extractSector(q)) &&
+        !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+          q,
+        )) ||
+      (Boolean(this.extractChannel(q)) &&
+        !/\b(sale|sales|revenue|order|orders|transaction|transactions|quantity|qty|units|sold|aov|average order|top|best|forecast|demand|bundle|item|items|product|products)\b/.test(
+          q,
+        ));
+    if (isFollowUp) {
+      return 'Follow-up: briefly acknowledge the requested new date/range/filter, then answer with the exact validated backend result.';
+    }
+
+    if (typeof input.result?.rows === 'number' && input.result.rows === 0) {
+      return 'No-data: clearly say no matching warehouse records were found for the requested scope and suggest trying another date, range, sector, or channel.';
+    }
+
+    if (input.plan.intent === 'top_items') {
+      return 'Ranked result: introduce the scope in one short phrase, then keep the ranked item list compact and readable.';
+    }
+
+    if (
+      input.plan.intent === 'sector_breakdown' ||
+      input.plan.intent === 'channel_breakdown'
+    ) {
+      return 'Breakdown: summarize that this is a warehouse breakdown, then present each row compactly without inventing percentages.';
+    }
+
+    if (input.plan.intent === 'best_sector' || input.plan.intent === 'best_channel') {
+      return 'Best performer: answer directly with the leading sector/channel and the exact supporting revenue, orders, and units.';
+    }
+
+    if (
+      input.plan.intent === 'forecast_overview' ||
+      input.plan.intent === 'cross_sell_overview'
+    ) {
+      return 'Unsupported dashboard detail: be friendly but explain the current dashboard limitation briefly.';
+    }
+
+    return 'Metric answer: answer naturally and directly using the exact validated metric, date/range, orders, and units when present.';
+  }
+
+  private fallbackStyledAnswer(
+    factualAnswer: string,
+    styleDirective: string,
+  ): string {
+    if (styleDirective.startsWith('Verification:')) {
+      return `Yes, I rechecked the Supabase warehouse result. ${factualAnswer}`;
+    }
+    return factualAnswer;
   }
 
   private extractAnthropicText(data: any): string {
