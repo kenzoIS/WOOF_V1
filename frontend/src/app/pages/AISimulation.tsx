@@ -2360,13 +2360,6 @@ export function AISimulation() {
                     <span className="ml-1 font-bold text-[#F53799]">{topInsights.bundleLift.toFixed(2)}x</span>
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-[#F53799]/20">
-                  <div className="text-xs text-green-600 font-semibold">
-                    {topInsights.bundleLift > 0
-                      ? `${Math.max(0, Math.round(topInsights.bundleLift * 100 - 100))}% association lift over baseline`
-                      : "No association lift detected"}
-                  </div>
-                </div>
               </div>
 
               <div className="bg-gradient-to-br from-[#3AE4FA]/5 to-[#FFF7FB] border-2 border-[#3AE4FA]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#3AE4FA] transition-all cursor-pointer">
@@ -2379,13 +2372,8 @@ export function AISimulation() {
                 <div className="text-lg font-bold text-[#223047] mb-2">
                   {topInsights.emergingTrend}
                 </div>
-                <div className="text-sm text-[#223047] opacity-60 mb-3">
+                <div className="text-sm text-[#223047] opacity-60">
                   Highest-ranked model recommendation
-                </div>
-                <div className="mt-3 pt-3 border-t border-[#3AE4FA]/20">
-                  <div className="text-xs text-emerald-600 font-semibold">
-                    {topInsights.trendGrowth}
-                  </div>
                 </div>
               </div>
 
@@ -2399,13 +2387,8 @@ export function AISimulation() {
                 <div className="text-lg font-bold text-[#223047] mb-2">
                   {topInsights.crossSell}
                 </div>
-                <div className="text-sm text-[#223047] opacity-60 mb-3">
+                <div className="text-sm text-[#223047] opacity-60">
                   Cross-sector or cross-category pathway detected
-                </div>
-                <div className="mt-3 pt-3 border-t border-[#D42A7D]/20">
-                  <div className="text-xs font-semibold text-[#D42A7D]">
-                    {topInsights.crossSellRate} conversion rate
-                  </div>
                 </div>
               </div>
             </div>
