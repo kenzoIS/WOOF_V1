@@ -2704,23 +2704,13 @@ export function AISimulation() {
                   key={idx}
                   className="bg-gradient-to-br from-white to-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 hover:border-[#F53799] transition-all"
                 >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                      style={{ backgroundColor: `${rec.color}20` }}
-                    >
-                      <Zap className="w-4 h-4" style={{ color: rec.color }} />
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-xs text-[#3AE4FA] font-semibold mb-1">STRATEGIC PAIRING</div>
-                      <h3 className="text-base font-bold text-[#223047] mb-3">{rec.pairing}</h3>
-                      <div className="text-xs text-[#223047] opacity-60 mb-2">MERCHANDISING ADVICE</div>
-                      <p className="text-sm text-[#223047]" style={{ lineHeight: "1.6" }}>
-                        {rec.advice}
-                      </p>
-
-
-                    </div>
+                  <div>
+                    <div className="text-xs text-[#3AE4FA] font-semibold mb-1">STRATEGIC PAIRING</div>
+                    <h3 className="text-base font-bold text-[#223047] mb-3">{rec.pairing}</h3>
+                    <div className="text-xs text-[#223047] opacity-60 mb-2">MERCHANDISING ADVICE</div>
+                    <p className="text-sm text-[#223047]" style={{ lineHeight: "1.6" }}>
+                      {rec.advice}
+                    </p>
                   </div>
 
 
