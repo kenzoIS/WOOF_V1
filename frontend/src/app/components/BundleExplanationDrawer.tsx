@@ -243,58 +243,59 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
               Section 4: Financial & Margin Impact
             </h3>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
-                <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Regular Total</span>
-                <span className="text-base font-bold text-[#223047] font-mono">
-                  {candidate.regularPrice !== undefined && candidate.regularPrice !== null
-                    ? `₱${candidate.regularPrice.toFixed(2)}`
-                    : "N/A"}
-                </span>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
-                <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Bundle Promo Price</span>
-                <span className="text-base font-bold text-[#F53799] font-mono">
-                  {candidate.bundlePrice !== undefined && candidate.bundlePrice !== null
-                    ? `₱${candidate.bundlePrice.toFixed(2)}`
-                    : "N/A"}
-                </span>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
-                <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Customer Savings</span>
-                <span className="text-base font-bold text-emerald-600 font-mono">
-                  {candidate.savings !== undefined && candidate.savings !== null
-                    ? `₱${candidate.savings.toFixed(2)}`
-                    : "N/A"}
-                </span>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
-                <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Projected Profit</span>
-                <span className="text-base font-bold text-emerald-700 font-mono">
-                  {candidate.projectedGrossProfit !== undefined && candidate.projectedGrossProfit !== null
-                    ? `₱${candidate.projectedGrossProfit.toFixed(2)}`
-                    : "N/A"}
-                </span>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
-                <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Projected Margin</span>
-                <span className="text-base font-bold text-[#223047] font-mono">
-                  {candidate.projectedMarginPercent !== undefined && candidate.projectedMarginPercent !== null
-                    ? `${candidate.projectedMarginPercent.toFixed(1)}%`
-                    : "N/A"}
-                </span>
-              </div>
-              <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
-                <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Est. Margin Impact</span>
-                <span className="text-base font-bold text-purple-700 font-mono">
-                  {(() => {
-                    const minMargin = candidate.minimumMarginPercent ?? 30;
-                    const marginImpact = candidate.estimatedMarginImpact ?? (candidate.projectedMarginPercent !== undefined && candidate.projectedMarginPercent !== null ? candidate.projectedMarginPercent - minMargin : 12.5);
-                    return `${marginImpact > 0 ? "+" : ""}${marginImpact.toFixed(1)}%`;
-                  })()}
-                </span>
-              </div>
-            </div>
+            {(() => {
+              const regPrice = candidate?.regularPrice ?? (candidate?.itemAPrice && candidate?.itemBPrice ? candidate.itemAPrice + candidate.itemBPrice : null);
+              const discPercent = candidate?.suggestedDiscountPercent ?? candidate?.proposedDiscountPercent ?? 15;
+              const bndlPrice = candidate?.bundlePrice ?? (regPrice ? Math.round(regPrice * (1 - discPercent / 100) * 100) / 100 : null);
+              const sav = candidate?.savings ?? (regPrice && bndlPrice ? Math.round((regPrice - bndlPrice) * 100) / 100 : null);
+              
+              const regCost = candidate?.regularCost ?? (candidate?.itemACost && candidate?.itemBCost ? candidate.itemACost + candidate.itemBCost : null);
+              const grossProfit = candidate?.projectedGrossProfit ?? (bndlPrice !== null && regCost !== null ? Math.round((bndlPrice - regCost) * 100) / 100 : null);
+              const marginPct = candidate?.projectedMarginPercent ?? (grossProfit !== null && bndlPrice && bndlPrice > 0 ? Math.round((grossProfit / bndlPrice) * 1000) / 10 : null);
+              const minMargin = candidate?.minimumMarginPercent ?? 30;
+              const marginImpact = candidate?.estimatedMarginImpact ?? (marginPct !== null ? marginPct - minMargin : 12.5);
+
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
+                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Regular Total</span>
+                    <span className="text-base font-bold text-[#223047] font-mono">
+                      {regPrice !== null ? `₱${regPrice.toFixed(2)}` : "N/A"}
+                    </span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
+                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Bundle Promo Price</span>
+                    <span className="text-base font-bold text-[#F53799] font-mono">
+                      {bndlPrice !== null ? `₱${bndlPrice.toFixed(2)}` : "N/A"}
+                    </span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
+                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Customer Savings</span>
+                    <span className="text-base font-bold text-emerald-600 font-mono">
+                      {sav !== null ? `₱${sav.toFixed(2)}` : "N/A"}
+                    </span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
+                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Projected Profit</span>
+                    <span className="text-base font-bold text-emerald-700 font-mono">
+                      {grossProfit !== null ? `₱${grossProfit.toFixed(2)}` : "N/A"}
+                    </span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
+                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Projected Margin</span>
+                    <span className="text-base font-bold text-[#223047] font-mono">
+                      {marginPct !== null ? `${marginPct.toFixed(1)}%` : "N/A"}
+                    </span>
+                  </div>
+                  <div className="bg-white p-3 rounded-xl border border-[#FFD9EC] shadow-xs">
+                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Est. Margin Impact</span>
+                    <span className="text-base font-bold text-purple-700 font-mono">
+                      {`${marginImpact > 0 ? "+" : ""}${marginImpact.toFixed(1)}%`}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Section 5: Attach-Rate Lift Backtesting Engine */}

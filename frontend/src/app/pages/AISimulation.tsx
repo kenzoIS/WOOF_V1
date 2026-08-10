@@ -2642,7 +2642,7 @@ export function AISimulation() {
                   <div className="flex flex-col sm:flex-row md:flex-col lg:flex-row gap-2 w-full md:w-auto shrink-0">
                     <Button
                       variant="outline"
-                      onClick={() => handleOpenDrawer((bundle as any).rawCandidate || (bundle as any))}
+                      onClick={() => handleOpenDrawer(bundle as any)}
                       className="border-[#F53799] text-[#F53799] hover:bg-[#FFF2FA] text-xs md:text-sm font-bold flex items-center justify-center gap-1.5"
                     >
                       <HelpCircle className="w-4 h-4" />
