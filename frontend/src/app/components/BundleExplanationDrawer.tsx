@@ -77,7 +77,7 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
 
   if (!isOpen || !candidate) return null;
 
-  const cooccurrences = candidate.coOccurrenceCount ?? candidate.cooccurrences ?? 0;
+  const cooccurrences = candidate.coOccurrenceCount ?? candidate.cooccurrences ?? (candidate as any).frequency ?? 0;
   const validationStatus = candidate.backtestValidationStatus ?? "PASSED";
   const fitScorePercent = Math.round((candidate.businessFitScore ?? 0.8) * 100);
 
@@ -122,7 +122,7 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
               {getValidationBadge(validationStatus)}
             </div>
             <h2 className="text-xl font-bold text-[#223047]">
-              {candidate.anchorItem} + {candidate.bundleItem}
+              {candidate.anchorItem || candidate.itemA} + {candidate.bundleItem || candidate.itemB}
             </h2>
             <p className="text-xs text-[#223047] opacity-60 mt-1">
               AI Bundle Recommendation Diagnostics & Behavioral Basis
@@ -147,7 +147,7 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
                 Section 1: FP-Growth Behavioral Basis
               </h3>
               <span className="text-xs font-mono font-bold text-[#F53799] bg-[#F53799]/10 px-2.5 py-1 rounded-lg border border-[#F53799]/20">
-                Model Score: {candidate.opportunityScore !== undefined && candidate.opportunityScore !== null ? Math.min(100, Math.round(candidate.opportunityScore <= 1 ? candidate.opportunityScore * 100 : candidate.opportunityScore)) : ((candidate as any).score ?? (candidate.lift ? Math.min(100, Math.round(candidate.lift * 35)) : 85))}
+                Model Score: {(candidate as any).score ?? (candidate.opportunityScore !== undefined && candidate.opportunityScore !== null ? Math.min(100, Math.round(candidate.opportunityScore <= 1 ? candidate.opportunityScore * 100 : candidate.opportunityScore)) : (candidate.lift ? Math.min(100, Math.round(candidate.lift * 35)) : 85))}
               </span>
             </div>
 
@@ -155,21 +155,21 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
               <div className="bg-white p-3.5 rounded-xl border border-[#FFD9EC] shadow-xs">
                 <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Co-occurrences</span>
                 <span className="text-lg font-bold text-[#F53799] font-mono">
-                  {cooccurrences > 0 ? cooccurrences : 12} <span className="text-xs font-normal text-[#223047] opacity-70">baskets</span>
+                  {cooccurrences} <span className="text-xs font-normal text-[#223047] opacity-70">{cooccurrences === 1 ? "basket" : "baskets"}</span>
                 </span>
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-[#FFD9EC] shadow-xs">
                 <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Hist. Confidence</span>
                 <span className="text-lg font-bold text-[#3AE4FA] font-mono">
-                  {candidate.confidence !== undefined && candidate.confidence !== null && candidate.confidence > 0
+                  {candidate.confidence !== undefined && candidate.confidence !== null
                     ? `${(candidate.confidence * (candidate.confidence <= 1 ? 100 : 1)).toFixed(1)}%`
-                    : "72.5%"}
+                    : "0.0%"}
                 </span>
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-[#FFD9EC] shadow-xs">
                 <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Lift Multiplier</span>
                 <span className="text-lg font-bold text-[#D42A7D] font-mono">
-                  {candidate.lift ? `${candidate.lift.toFixed(2)}x` : "1.85x"}
+                  {candidate.lift !== undefined && candidate.lift !== null ? `${candidate.lift.toFixed(2)}x` : "1.00x"}
                 </span>
               </div>
             </div>
