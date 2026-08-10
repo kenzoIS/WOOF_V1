@@ -636,7 +636,31 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
         }
 
     # ---------------------------------------------------------
-    # ❌ 3. Species Mismatch Guardrail Rule
+    # ❌ 3. Human Main Meals (Rice Meals / Pasta) + Pet Items Exclusion Rule
+    # Human Main Dishes (Rice Meals / Pasta) cannot be bundled with Pet Supplies/Utilities or Pet Treats/Food.
+    # Prevents cross-contaminated pairings (e.g. Rice Meal + Dental Treats or Anti-Mange Shampoo).
+    # ---------------------------------------------------------
+    is_main_meal_pet_pair = (
+        (anchor_cat in ("Rice Meals", "Pasta/Snacks") and offer_type in ("Pet Care / Utility", "Pet Treat"))
+        or (offer_cat in ("Rice Meals", "Pasta/Snacks") and anchor_type in ("Pet Care / Utility", "Pet Treat"))
+    )
+    if is_main_meal_pet_pair:
+        return {
+            "isValid": False,
+            "exclusionReason": "Human Main Meals (Rice Meals/Pasta) cannot be bundled with Pet Supplies or Pet Treats.",
+            "categoryCompat": 0.0,
+            "speciesMatch": 1.0,
+            "bundleArchetype": "Excluded / Main Meal + Pet Item",
+            "anchorCategory": anchor_cat,
+            "offerCategory": offer_cat,
+            "anchorType": anchor_type,
+            "offerType": offer_type,
+            "anchorSpecies": anchor_sp,
+            "offerSpecies": offer_sp,
+        }
+
+    # ---------------------------------------------------------
+    # ❌ 4. Species Mismatch Guardrail Rule
     # Dog item + Cat item is BANNED.
     # ---------------------------------------------------------
     if anchor_sp != "neutral" and offer_sp != "neutral" and anchor_sp != offer_sp:
@@ -655,7 +679,7 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
         }
 
     # ---------------------------------------------------------
-    # 4. 4 Valid Bundle Archetypes (isValid = True)
+    # 5. Valid Bundle Archetypes (isValid = True)
     # ---------------------------------------------------------
     types = {anchor_type, offer_type}
     cats = {anchor_cat, offer_cat}
@@ -666,15 +690,19 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
     if types == {"Human Drink", "Human Food"}:
         archetype = "Human Cafe Combo"
 
-    # 🐶 Type B: "Pamper Both" / Duo Experience (Human Drink or Food + Pet Bakery)
-    elif "Pet Treat" in types and ("Human Drink" in types or "Human Food" in types):
+    # 🐶 Type B: "Pamper Both / Duo Experience" (Human Drink + Pet Bakery)
+    elif "Pet Treat" in types and "Human Drink" in types:
         archetype = "Pamper Both / Duo Experience"
 
-    # ✂️ Type C: "Service + Aftercare / Reward" (Pet Service + Pet Supplies OR Pet Bakery)
+    # ⏳ Type C: "Cafe + Service Waiting Combo" (Human Drink/Food + Pet Service)
+    elif ("Human Drink" in types or "Human Food" in types) and "Pet Service" in types:
+        archetype = "Cafe + Service Waiting Combo"
+
+    # ✂️ Type D: "Service + Aftercare / Reward" (Pet Service + Pet Supplies OR Pet Bakery)
     elif "Pet Service" in types and ("Pet Care / Utility" in types or "Pet Treat" in types):
         archetype = "Service + Aftercare / Reward"
 
-    # 🍖 Type D: "Pet Meal + Specialty Treat" (Pet Supplies + Pet Bakery)
+    # 🍖 Type E: "Pet Meal + Specialty Treat" (Pet Supplies + Pet Bakery)
     elif cats == {"Pet Supplies", "Pet Bakery"} or types == {"Pet Care / Utility", "Pet Treat"}:
         archetype = "Pet Meal + Specialty Treat"
 

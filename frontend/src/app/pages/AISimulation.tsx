@@ -719,7 +719,9 @@ export function AISimulation() {
 
     const drinks = ["coffee", "latte", "cappuccino", "americano", "espresso", "macchiato", "mocha", "frappe", "tea", "matcha", "beverage", "drink", "brew", "chocolate", "iced"];
     const foods = ["pasta", "snack", "sandwich", "waffle", "fries", "burger", "spaghetti", "carbonara", "bread", "toast", "pancake", "muffin", "rice", "meal", "pork", "chicken", "beef", "cordon bleu"];
+    const mainFoods = ["pasta", "spaghetti", "carbonara", "rice", "meal", "pork", "chicken", "beef", "cordon bleu"];
     const utilities = ["shampoo", "conditioner", "soap", "diaper", "toy", "chew", "brush", "comb", "cologne", "spray", "litter", "leash", "harness"];
+    const petTreats = ["woofle", "pupcake", "dog cake", "cat treat", "pet bakery", "dental chew", "pet treat", "biscuit"];
 
     const isADrink = drinks.some((k) => a.includes(k));
     const isBDrink = drinks.some((k) => b.includes(k));
@@ -727,8 +729,14 @@ export function AISimulation() {
     const isAFood = foods.some((k) => a.includes(k));
     const isBFood = foods.some((k) => b.includes(k));
 
+    const isAMainFood = mainFoods.some((k) => a.includes(k));
+    const isBMainFood = mainFoods.some((k) => b.includes(k));
+
     const isAUtility = utilities.some((k) => a.includes(k));
     const isBUtility = utilities.some((k) => b.includes(k));
+
+    const isAPetTreat = petTreats.some((k) => a.includes(k));
+    const isBPetTreat = petTreats.some((k) => b.includes(k));
 
     // Rule 1: Same High-Level Type Exclusion (Drink+Drink, Food+Food)
     if (isADrink && isBDrink) return true;
@@ -737,7 +745,10 @@ export function AISimulation() {
     // Rule 2: Human Beverage + Utility Restriction (Drink+Utility)
     if ((isADrink && isBUtility) || (isBDrink && isAUtility)) return true;
 
-    // Rule 3: Species Mismatch
+    // Rule 3: Human Main Meals (Rice Meals / Pasta) + Pet Items Exclusion (Pet Utility, Pet Treats, Pet Supplies)
+    if ((isAMainFood && (isBUtility || isBPetTreat)) || (isBMainFood && (isAUtility || isAPetTreat))) return true;
+
+    // Rule 4: Species Mismatch
     const isADog = a.includes("dog") || a.includes("pup") || a.includes("woof");
     const isBDog = b.includes("dog") || b.includes("pup") || b.includes("woof");
     const isACat = a.includes("cat") || a.includes("kitten") || a.includes("feline") || a.includes("meow");

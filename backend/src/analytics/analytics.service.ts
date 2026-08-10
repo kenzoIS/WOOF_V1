@@ -841,19 +841,20 @@ export class AnalyticsService {
     await this.supabaseService.client.from('forecast_runs').delete().eq('module', module);
 
     const { data: savedRun } = await this.supabaseService.client.from('forecast_runs').insert(payload).select().single();
-    
+
     // Map snake_case back to camelCase for the frontend (withForecastStartAnchor uses camelCase)
+    const runSource = savedRun || payload;
     const normalizedRun = {
-      ...savedRun,
-      modelName: savedRun.model_name,
-      isFallback: savedRun.is_fallback,
-      rejectionReason: savedRun.rejection_reason,
-      volumeForecast: savedRun.volume_forecast,
-      revenueForecast: savedRun.revenue_forecast,
-      topItems: savedRun.top_items,
-      itemHistory: savedRun.item_history,
-      modelMetadata: savedRun.model_metadata,
-      generatedAt: new Date(savedRun.generated_at),
+      ...runSource,
+      modelName: runSource.model_name || 'Prophet',
+      isFallback: runSource.is_fallback || false,
+      rejectionReason: runSource.rejection_reason || null,
+      volumeForecast: runSource.volume_forecast || [],
+      revenueForecast: runSource.revenue_forecast || [],
+      topItems: runSource.top_items || [],
+      itemHistory: runSource.item_history || [],
+      modelMetadata: runSource.model_metadata || null,
+      generatedAt: runSource.generated_at ? new Date(runSource.generated_at) : new Date(),
     };
 
     return this.withForecastStartAnchor(normalizedRun);

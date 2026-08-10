@@ -141,30 +141,40 @@ class CrossSellTests(unittest.TestCase):
         self.assertFalse(res_bev_utility["isValid"])
         self.assertEqual(res_bev_utility["bundleArchetype"], "Excluded / Beverage + Utility")
 
-        # 4. Rule 3: Species Mismatch Guardrail (Dog Grooming + Cat Food)
+        # 4. Rule 3: Main Meal + Pet Item Exclusion (Chicken Rice Meal + Shampoo / Dental Treats)
+        res_main_meal = evaluate_bundle_guardrails("Chicken Rice Meal", "Dog Shampoo Retail")
+        self.assertFalse(res_main_meal["isValid"])
+        self.assertEqual(res_main_meal["bundleArchetype"], "Excluded / Main Meal + Pet Item")
+
+        # 5. Rule 4: Species Mismatch Guardrail (Dog Grooming + Cat Food)
         res_mismatch = evaluate_bundle_guardrails("Dog Grooming Service", "Cat Kibble Wet Food")
         self.assertFalse(res_mismatch["isValid"])
         self.assertEqual(res_mismatch["bundleArchetype"], "Excluded / Species Mismatch")
 
-        # 5. Type A: Human Cafe Combo (Coffee + Rice Meal)
+        # 6. Type A: Human Cafe Combo (Coffee + Rice Meal)
         res_type_a = evaluate_bundle_guardrails("Iced Americano", "Chicken Rice Meal")
         self.assertTrue(res_type_a["isValid"])
         self.assertEqual(res_type_a["bundleArchetype"], "Human Cafe Combo")
 
-        # 6. Type B: Pamper Both / Duo Experience (Coffee + Pupcake)
+        # 7. Type B: Pamper Both / Duo Experience (Coffee + Pupcake)
         res_type_b = evaluate_bundle_guardrails("Iced Americano", "Dog Pupcake Bakery")
         self.assertTrue(res_type_b["isValid"])
         self.assertEqual(res_type_b["bundleArchetype"], "Pamper Both / Duo Experience")
 
-        # 7. Type C: Service + Aftercare / Reward (Grooming + Shampoo)
-        res_type_c = evaluate_bundle_guardrails("Dog Grooming", "Dog Shampoo")
-        self.assertTrue(res_type_c["isValid"])
-        self.assertEqual(res_type_c["bundleArchetype"], "Service + Aftercare / Reward")
+        # 8. Type C: Cafe + Service Waiting Combo (Iced Latte + Dog Grooming)
+        res_type_c_waiting = evaluate_bundle_guardrails("Iced Vanilla Latte Coffee", "Full Dog Grooming Service")
+        self.assertTrue(res_type_c_waiting["isValid"])
+        self.assertEqual(res_type_c_waiting["bundleArchetype"], "Cafe + Service Waiting Combo")
 
-        # 8. Type D: Pet Meal + Specialty Treat (Pet Food + Cat Bento Cake)
-        res_type_d = evaluate_bundle_guardrails("Cat Dry Pet Food", "Cat Bento Cake Bakery")
+        # 9. Type D: Service + Aftercare / Reward (Grooming + Shampoo)
+        res_type_d = evaluate_bundle_guardrails("Dog Grooming", "Dog Shampoo")
         self.assertTrue(res_type_d["isValid"])
-        self.assertEqual(res_type_d["bundleArchetype"], "Pet Meal + Specialty Treat")
+        self.assertEqual(res_type_d["bundleArchetype"], "Service + Aftercare / Reward")
+
+        # 10. Type E: Pet Meal + Specialty Treat (Pet Food + Cat Bento Cake)
+        res_type_e = evaluate_bundle_guardrails("Cat Dry Pet Food", "Cat Bento Cake Bakery")
+        self.assertTrue(res_type_e["isValid"])
+        self.assertEqual(res_type_e["bundleArchetype"], "Pet Meal + Specialty Treat")
 
 
 if __name__ == "__main__":

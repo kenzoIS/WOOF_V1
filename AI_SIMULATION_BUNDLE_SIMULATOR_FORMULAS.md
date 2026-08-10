@@ -100,11 +100,11 @@ $$\text{Synergy Score} = \left(0.35 \times \text{Lift}_{\text{norm}} + 0.35 \tim
    Normalizes the sales lift multiplier to a $[0, 1]$ scale against a dataset maximum threshold ($\text{Max Lift} = 5.0$):
    $$\text{Lift}_{\text{norm}} = \min\left(1.0, \max\left(0.0, \frac{\text{Lift} - 1.0}{5.0 - 1.0}\right)\right)$$
 
-2. **Category Compatibility ($C_{\text{compat}}$)**:
-   Evaluating high-level category pair archetypes:
+2. **Category Compatibility ($C_{\text{compat}}$) & Category Pairing Matrix**:
+   Evaluating domain category pair archetypes:
    $$C_{\text{compat}} = \begin{cases} 
-   0.0, & \text{if Banned Same-Type (Drink+Drink, Food+Food) or Drink+Utility} \\ 
-   1.0, & \text{if Valid Archetype (Cafe Combo, Pamper Both, Service+Aftercare, Pet Meal+Treat)} 
+   0.0, & \text{if Banned (Same-Type, Drink+Utility, Main Meal+Pet Item, Species Mismatch)} \\ 
+   1.0, & \text{if Valid Archetype (Human Cafe Combo, Pamper Both, Cafe+Service Waiting, Service+Aftercare, Pet Meal+Treat)} 
    \end{cases}$$
 
 3. **Species Match ($S_{\text{match}}$)**:
