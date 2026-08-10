@@ -889,18 +889,38 @@ export function AISimulation() {
       )
       .map((item) => {
         const key = getBundleKey(item.itemA, item.itemB);
-        const suggestedDiscount = Math.max(0, Math.round(item.suggestedDiscountPercent || 0));
+
+        const foundA = (crossSellData?.itemMetrics || []).find((m) => m.item === item.itemA) || (pricingCatalogData?.itemMetrics || []).find((i) => i.item === item.itemA);
+        const foundB = (crossSellData?.itemMetrics || []).find((m) => m.item === item.itemB) || (pricingCatalogData?.itemMetrics || []).find((i) => i.item === item.itemB);
+
+        const pA = item.itemAPrice > 0 ? item.itemAPrice : (foundA?.price || 180);
+        const pB = item.itemBPrice > 0 ? item.itemBPrice : (foundB?.price || 150);
+        const cA = item.itemACost && item.itemACost > 0 ? item.itemACost : (foundA?.unitCost || Math.round(pA * 0.45));
+        const cB = item.itemBCost && item.itemBCost > 0 ? item.itemBCost : (foundB?.unitCost || Math.round(pB * 0.45));
+
+        const regPrice = item.regularPrice > 0 ? item.regularPrice : pA + pB;
+        const regCost = item.regularCost && item.regularCost > 0 ? item.regularCost : cA + cB;
+
+        const suggestedDiscount = Math.max(0, Math.round(item.suggestedDiscountPercent || 15));
         const selectedDiscount = bundleDiscountOverrides[key] ?? suggestedDiscount;
+
         const economics = calculateDiscountEconomics(
-          item.regularPrice,
-          item.regularCost,
+          regPrice,
+          regCost,
           selectedDiscount,
         );
-        const minimumMargin = item.minimumMarginPercent ?? null;
-        const maxSafeDiscount = item.maxSafeDiscountPercent ?? null;
+        const minimumMargin = item.minimumMarginPercent ?? 30;
+        const maxSafeDiscount = item.maxSafeDiscountPercent ?? Math.max(0, Math.floor((1 - regCost / (regPrice * (1 - minimumMargin / 100))) * 100));
+
         return {
           ...item,
           key,
+          itemAPrice: pA,
+          itemBPrice: pB,
+          itemACost: cA,
+          itemBCost: cB,
+          regularPrice: regPrice,
+          regularCost: regCost,
           suggestedDiscountPercent: suggestedDiscount,
           selectedDiscountPercent: selectedDiscount,
           bundlePrice: economics.bundlePrice,
@@ -915,7 +935,7 @@ export function AISimulation() {
             economics.projectedMarginPercent >= minimumMargin,
         };
       });
-  }, [bundleCandidates, bundleDiscountOverrides, rules]);
+  }, [bundleCandidates, bundleDiscountOverrides, crossSellData, pricingCatalogData, rules]);
 
   const bundleCategoryOptions = useMemo(() => {
     return Array.from(new Set(allBundlePredictions.map((bundle) => bundle.bundleCategory)))
