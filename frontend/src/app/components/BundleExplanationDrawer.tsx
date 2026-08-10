@@ -310,55 +310,6 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
             })()}
           </div>
 
-          {/* Section 5: Attach-Rate Lift Backtesting Engine */}
-          {(() => {
-            const confVal = candidate.confidence !== undefined && candidate.confidence !== null
-              ? (candidate.confidence > 1 ? candidate.confidence / 100 : candidate.confidence)
-              : 0.6;
-            const fitVal = candidate.businessFitScore ?? 0.8;
-
-            const baselineAttach = candidate.baselineAttachRate ?? candidate.pairSupport ?? (confVal * 0.35);
-            const predictedAttach = candidate.predictedAttachRate ?? Math.min(1.0, baselineAttach + (0.15 * confVal) + (0.10 * fitVal));
-            const liftVal = candidate.attachRateLift ?? (baselineAttach >= 0.01 ? ((predictedAttach - baselineAttach) / baselineAttach) * 100 : (predictedAttach - baselineAttach) * 100);
-
-            return (
-              <div className="bg-gradient-to-br from-[#FFF7FB] to-[#FFF2FA] rounded-2xl p-5 border border-[#FFD9EC] space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-[#223047]">
-                    Section 5: Attach-Rate Lift Simulation Engine
-                  </h3>
-                  <Badge className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-mono font-bold">
-                    {liftVal > 0 ? "+" : ""}{liftVal.toFixed(1)}% Lift
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="bg-white p-3.5 rounded-xl border border-[#FFD9EC] shadow-xs">
-                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Baseline Attach Rate</span>
-                    <span className="text-lg font-bold text-[#223047] font-mono">
-                      {(baselineAttach * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-xl border border-[#FFD9EC] shadow-xs">
-                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Predicted Attach Rate</span>
-                    <span className="text-lg font-bold text-[#3AE4FA] font-mono">
-                      {(predictedAttach * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="bg-white p-3.5 rounded-xl border border-[#FFD9EC] shadow-xs">
-                    <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Simulated Attach Lift</span>
-                    <span className="text-lg font-bold text-[#F53799] font-mono">
-                      {liftVal > 0 ? "+" : ""}{liftVal.toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-[#223047] opacity-60 leading-relaxed italic">
-                  * The Attach-Rate Lift Engine simulates post-recommendation customer conversion by modeling historical basket co-occurrence against domain taxonomy fit and promotional price elasticity.
-                </p>
-              </div>
-            );
-          })()}
         </div>
 
         {/* Drawer Footer */}
