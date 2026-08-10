@@ -872,7 +872,7 @@ export function AISimulation() {
     const seenKeys = new Set<string>();
     const combined: Array<(typeof lowAssociation)[number] | (typeof significantRules)[number]> = [];
 
-    [...lowAssociation, ...significantRules].forEach((item) => {
+    [...significantRules, ...lowAssociation].forEach((item) => {
       const canonicalKey = [item.itemA, item.itemB].sort().join(" + ");
       if (!seenKeys.has(canonicalKey)) {
         seenKeys.add(canonicalKey);
@@ -944,15 +944,24 @@ export function AISimulation() {
   }, [allBundlePredictions]);
 
   const filteredBundlePredictions = useMemo(() => {
-    let filtered = allBundlePredictions;
+    // Statistically significant bundles with reliable historical backing (co-occurrences >= 2)
+    let filtered = allBundlePredictions.filter(
+      (bundle) => bundle.isSignificant && (bundle.frequency || 0) >= 2
+    );
+
+    // Fallback if dataset has limited multi-item transactions
+    if (filtered.length === 0) {
+      filtered = allBundlePredictions.filter((bundle) => bundle.isSignificant);
+    }
+    if (filtered.length === 0) {
+      filtered = allBundlePredictions;
+    }
+
     if (bundleCategoryFilter !== "all") {
       filtered = filtered.filter((bundle) => bundle.bundleCategory === bundleCategoryFilter);
     }
-    if (onlySignificant) {
-      filtered = filtered.filter((bundle) => bundle.isSignificant);
-    }
     return filtered;
-  }, [allBundlePredictions, bundleCategoryFilter, onlySignificant]);
+  }, [allBundlePredictions, bundleCategoryFilter]);
 
   const bundlePredictions = useMemo(() => {
     return filteredBundlePredictions.slice(0, 8);
