@@ -2508,36 +2508,6 @@ export function AISimulation() {
                           🔥 Emerging Trend
                         </Badge>
                       )}
-                      {bundle.synergyScore !== undefined && bundle.synergyScore !== null && (
-                        <div className="relative group inline-block">
-                          <Badge className="bg-gradient-to-r from-[#F53799] to-[#3AE4FA] text-white border-0 text-xs font-mono font-bold cursor-help shadow-xs">
-                            {bundle.synergyScore.toFixed(0)}% Synergy
-                          </Badge>
-                          {bundle.synergyBreakdown && (
-                            <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-30 bg-[#223047] text-white text-[11px] p-3 rounded-xl shadow-xl w-60 space-y-1.5 border border-slate-700">
-                              <p className="font-bold border-b border-slate-700 pb-1 text-[#3AE4FA]">
-                                Synergy Formula Breakdown
-                              </p>
-                              <div className="flex justify-between">
-                                <span>Norm. Lift (35%):</span>
-                                <span className="font-mono text-emerald-400">{(bundle.synergyBreakdown.liftScore * 100).toFixed(0)}%</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Category Fit (35%):</span>
-                                <span className="font-mono text-amber-400">{(bundle.synergyBreakdown.categoryCompat * 100).toFixed(0)}%</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Species Match (15%):</span>
-                                <span className="font-mono text-purple-400">{(bundle.synergyBreakdown.speciesMatch * 100).toFixed(0)}%</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span>Price Affinity (15%):</span>
-                                <span className="font-mono text-teal-400">{(bundle.synergyBreakdown.priceAffinity * 100).toFixed(0)}%</span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
                       <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs">
                         {bundle.confidence}% Historical Confidence
                       </Badge>
