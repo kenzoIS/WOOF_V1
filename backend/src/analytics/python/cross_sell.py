@@ -1180,8 +1180,8 @@ def run_cross_sell(baskets, config=None):
         te_ary = te.fit(train_dataset).transform(train_dataset)
         df = pd.DataFrame(te_ary, columns=te.columns_)
         
-        # FP-Growth
-        frequent_itemsets = fpgrowth(df, min_support=min_support, use_colnames=True)
+        # FP-Growth (Restricted to bundles of 2 to 3 items maximum)
+        frequent_itemsets = fpgrowth(df, min_support=min_support, use_colnames=True, max_len=3)
         if frequent_itemsets.empty:
             return base_result(
                 [],
@@ -1239,6 +1239,12 @@ def run_cross_sell(baskets, config=None):
         for _, row in rules.iterrows():
             antecedents = sorted(str(item) for item in row['antecedents'])
             consequents = sorted(str(item) for item in row['consequents'])
+
+            # Strictly limit bundle size to 2-3 items together
+            total_items = len(antecedents) + len(consequents)
+            if total_items < 2 or total_items > 3:
+                continue
+
             antecedent_sectors = sorted(sector_set_for_items(antecedents, product_sectors))
             consequent_sectors = sorted(sector_set_for_items(consequents, product_sectors))
 
