@@ -29,6 +29,16 @@ type RangeKey =
   | 'all';
 
 type AnswerMode = 'compute' | 'clarify' | 'unsupported';
+type NarrativeGoal =
+  | 'direct_answer'
+  | 'business_explanation'
+  | 'comparison'
+  | 'diagnostic'
+  | 'recommendation'
+  | 'verification'
+  | 'follow_up'
+  | 'no_data'
+  | 'out_of_scope';
 
 interface QueryPlan {
   intent: DashboardIntent;
@@ -39,9 +49,10 @@ interface QueryPlan {
   limit?: number;
   dateStart?: string;
   dateEnd?: string;
-  generatedSql?: string;
   classifier?: 'claude' | 'fallback';
   answerMode?: AnswerMode;
+  narrativeGoal?: NarrativeGoal;
+  includeComparison?: boolean;
   needsClarification?: boolean;
   clarificationQuestion?: string;
   analysisSteps?: string[];
@@ -69,6 +80,22 @@ interface WarehouseRow {
   channel_dim?: { channel_name?: string | null } | null;
   date_dim?: { full_date?: string | null } | null;
   business_segment_dim?: { segment_name?: string | null } | null;
+}
+
+interface VerifiedFactPack {
+  source: 'supabase_warehouse';
+  method: 'backend_validated_analytics_retrieval';
+  dateRange: { start: string | null; end: string | null; label: string };
+  filters: { sector: string | null; channel: string | null };
+  intent: DashboardIntent;
+  metrics: Record<string, unknown>;
+  comparisons?: Record<string, unknown>;
+  audit: {
+    tablesUsed: string[];
+    aggregations: string[];
+    rowsUsed?: number;
+    confidence: 'verified' | 'limited' | 'unsupported';
+  };
 }
 
 const OUT_OF_SCOPE_MESSAGE =
@@ -213,11 +240,18 @@ export class ChatbotService {
 
     const result = await this.executePlan(plan, baseMatch);
     const factualAnswer = this.renderAnswer(plan, result, latestDate);
+    const factPack = await this.buildVerifiedFactPack(
+      plan,
+      result,
+      baseMatch,
+      latestDate,
+    );
     return {
       answer: await this.humanizeAnswer({
         question: cleanedQuestion,
         questionForPlanning,
         factualAnswer,
+        factPack,
         plan,
         result,
         latestDate,
@@ -226,9 +260,10 @@ export class ChatbotService {
       scope: 'dashboard',
       queryPlan: {
         ...plan,
-        nl2sql:
-          'Claude-generated NL2SQL plan validated by backend allowlists, then executed through controlled dashboard aggregations.',
+        analyticsApproach:
+          'NLP intent understanding with backend-validated Supabase warehouse facts and generative business narration.',
       },
+      verifiedFacts: factPack,
       data: result,
       confidence: 'high',
     };
@@ -241,7 +276,7 @@ export class ChatbotService {
     const fallback = this.classifyQuestion(question);
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      return { ...fallback, classifier: 'fallback' };
+      return this.enrichFallbackPlan(fallback, question);
     }
 
     try {
@@ -255,7 +290,7 @@ export class ChatbotService {
           max_tokens: 900,
           temperature: 0,
           system:
-            'You are the controlled NL2SQL planner for the WOOF dashboard chatbot. Return only valid JSON. Do not answer the user directly.',
+            'You are the controlled NLP analytics intent planner for the WOOF dashboard chatbot. Return only valid JSON. Do not answer the user directly.',
           messages: [
             {
               role: 'user',
@@ -276,8 +311,19 @@ export class ChatbotService {
       const parsed = this.parseJsonObject(this.extractAnthropicText(response.data));
       return this.validateClaudePlan(parsed, fallback, question);
     } catch {
-      return { ...fallback, classifier: 'fallback' };
+      return this.enrichFallbackPlan(fallback, question);
     }
+  }
+
+  private enrichFallbackPlan(plan: QueryPlan, question: string): QueryPlan {
+    const narrativeGoal = plan.narrativeGoal || this.inferNarrativeGoal(question, plan.intent);
+    return {
+      ...plan,
+      narrativeGoal,
+      includeComparison:
+        plan.includeComparison ?? this.shouldIncludeComparison(question, narrativeGoal),
+      classifier: 'fallback',
+    };
   }
 
   private buildPlannerPrompt(
@@ -290,7 +336,7 @@ export class ChatbotService {
           .join('\n')
       : 'None';
     return [
-      'Think through the user question as a controlled WOOF dashboard analyst, then convert it into a safe query plan.',
+      'Think through the user question as a controlled WOOF dashboard analyst, then convert it into a safe analytics intent plan.',
       'Do not reveal private chain-of-thought. Return only the required JSON with short public analysisSteps.',
       'The chatbot is only allowed to answer WOOF dashboard questions about sales, revenue, orders, quantity sold, average order value, top items, sector breakdown, channel breakdown, forecasts, and bundle recommendations.',
       'Classify by meaning, not keywords. Do not require trigger words such as "sales" when the user clearly continues a previous dashboard question.',
@@ -298,25 +344,28 @@ export class ChatbotService {
       'If the user asks whether the previous answer is accurate, recompute the same dashboard query plan instead of marking it out_of_scope.',
       'If the user gives only a new date, sector, channel, or range, inherit the previous dashboard metric and filters, then replace only the newly mentioned part.',
       'Set intent to "out_of_scope" only when the latest message cannot be mapped to a WOOF dashboard metric even after using recent context.',
-      'Before selecting SQL, decide whether the question is answerable, ambiguous, unsupported, or needs a clarification question.',
+      'Before selecting an analytics capability, decide whether the question is answerable, ambiguous, unsupported, or needs a clarification question.',
       'Use answerMode "compute" only when the metric, dashboard domain, and date/range are clear enough to compute.',
       'Use answerMode "clarify" when the user mentions a month without year, asks "best" without enough context, asks a correction/follow-up without usable prior context, or asks for a vague metric that cannot be mapped to the allowed dashboard metrics.',
       'Use answerMode "unsupported" when the topic is WOOF-related but not computable from the current dashboard aggregations.',
       'Allowed intents: total_revenue, total_orders, total_quantity, average_order_value, top_items, sector_breakdown, channel_breakdown, best_sector, best_channel, forecast_overview, cross_sell_overview, out_of_scope.',
+      'Allowed narrativeGoal values: direct_answer, business_explanation, comparison, diagnostic, recommendation, verification, follow_up, no_data, out_of_scope.',
       'Allowed dateRange values: today, yesterday, last_7_days, this_month, custom, all.',
       'For explicit dates, months, or years, set dateRange to "custom" and return dateStart/dateEnd in YYYY-MM-DD. Example: April 2025 means dateStart "2025-04-01" and dateEnd "2025-04-30".',
       'For exact dates, set dateStart and dateEnd to the same date. Example: April 13, 2023 means dateStart "2023-04-13" and dateEnd "2023-04-13".',
       'Allowed sectors: Cafe, Retail, Services.',
       'Allowed channels: POS, Shopee, TikTok Shop, PetHub.',
       'Allowed metrics: netSales, orders, quantity, avgOrderValue.',
-      'Use this SQL-safe warehouse model for generatedSql only: fact_cross_channel_transactions(transaction_timestamp, transaction_id, product_id, service_id, channel_id, segment_id, quantity_sold, net_sales).',
-      'Do not use DELETE, UPDATE, INSERT, DROP, ALTER, CREATE, TRUNCATE, raw user text, joins, subqueries, comments, or unlisted tables.',
-      'analysisSteps must be 2 to 4 short audit-friendly phrases, not hidden reasoning. Example: ["Detected sales metric", "Detected exact date", "Mapped to total revenue aggregation"].',
+      'Do not generate SQL. The backend will select safe Supabase warehouse retrieval logic from the validated analytics intent.',
+      'Set includeComparison true when the user asks why, how it performed, if it is good/bad, if it is accurate, asks for insight, or when a short comparison would make the answer more useful.',
+      'analysisSteps must be 2 to 4 short audit-friendly phrases, not hidden reasoning. Example: ["Detected revenue question", "Resolved exact date", "Use sales summary capability"].',
       'Return exactly this JSON shape:',
       JSON.stringify({
         answerMode: 'compute',
         intent: 'total_revenue',
         metric: 'netSales',
+        narrativeGoal: 'business_explanation',
+        includeComparison: true,
         dateRange: 'today',
         dateStart: null,
         dateEnd: null,
@@ -328,11 +377,9 @@ export class ChatbotService {
         analysisSteps: [
           'Detected revenue question',
           'Resolved date range',
-          'Use controlled total revenue aggregation',
+          'Use backend sales summary capability',
         ],
         warnings: [],
-        generatedSql:
-          'SELECT SUM(net_sales) AS revenue FROM fact_cross_channel_transactions WHERE transaction_timestamp >= :start AND transaction_timestamp <= :end;',
       }),
       'Recent chat context:',
       recentContext,
@@ -375,25 +422,18 @@ export class ChatbotService {
       typeof value.limit === 'number'
         ? Math.min(Math.max(Math.round(value.limit), 1), 10)
         : fallback.limit;
-    const generatedSql =
-      typeof value.generatedSql === 'string' &&
-      this.isSafeGeneratedSql(value.generatedSql)
-        ? value.generatedSql
-        : this.buildSqlPreview({
-            intent,
-            metric,
-            dateRange: normalizedDateRange,
-            sector,
-            channel,
-            limit,
-            dateStart,
-            dateEnd,
-          });
     const answerMode = this.allowedAnswerMode(value.answerMode)
       ? value.answerMode
       : intent === 'out_of_scope'
         ? 'unsupported'
         : 'compute';
+    const narrativeGoal = this.allowedNarrativeGoal(value.narrativeGoal)
+      ? value.narrativeGoal
+      : this.inferNarrativeGoal(question, intent);
+    const includeComparison =
+      typeof value.includeComparison === 'boolean'
+        ? value.includeComparison
+        : this.shouldIncludeComparison(question, narrativeGoal);
     const analysisSteps = Array.isArray(value.analysisSteps)
       ? value.analysisSteps
           .filter((item): item is string => typeof item === 'string')
@@ -446,8 +486,9 @@ export class ChatbotService {
       limit,
       dateStart,
       dateEnd,
-      generatedSql,
       answerMode: needsClarification ? 'clarify' : answerMode,
+      narrativeGoal,
+      includeComparison,
       needsClarification,
       clarificationQuestion: backendClarification || clarificationFromClaude,
       analysisSteps,
@@ -600,6 +641,20 @@ export class ChatbotService {
     return ['compute', 'clarify', 'unsupported'].includes(String(value));
   }
 
+  private allowedNarrativeGoal(value: unknown): value is NarrativeGoal {
+    return [
+      'direct_answer',
+      'business_explanation',
+      'comparison',
+      'diagnostic',
+      'recommendation',
+      'verification',
+      'follow_up',
+      'no_data',
+      'out_of_scope',
+    ].includes(String(value));
+  }
+
   private allowedMetric(value: unknown): value is QueryPlan['metric'] {
     return ['netSales', 'orders', 'quantity', 'avgOrderValue'].includes(
       String(value),
@@ -614,59 +669,48 @@ export class ChatbotService {
     return ['POS', 'Shopee', 'TikTok Shop', 'PetHub'].includes(String(value));
   }
 
-  private isSafeGeneratedSql(sql: string): boolean {
-    const normalized = sql.toLowerCase();
-    const forbidden = [
-      'delete',
-      'update',
-      'insert',
-      'drop',
-      'alter',
-      'create',
-      'truncate',
-      '--',
-      '/*',
-      '*/',
-      ';--',
-    ];
-    return (
-      normalized.startsWith('select') &&
-      normalized.includes('fact_cross_channel_transactions') &&
-      !forbidden.some((term) => normalized.includes(term))
-    );
+  private inferNarrativeGoal(question: string, intent: DashboardIntent): NarrativeGoal {
+    const q = this.normalizeQuestion(question);
+    if (intent === 'out_of_scope') return 'out_of_scope';
+    if (/\b(is this accurate|is that accurate|accurate ba|tama ba|verify|check that|check this|sure ka|are you sure)\b/.test(q)) {
+      return 'verification';
+    }
+    if (/^(how about|what about|and|then|next|same for|paano naman|eh yung|yung|for)\b/.test(q)) {
+      return 'follow_up';
+    }
+    if (/\b(why|bakit|reason|cause|diagnose|explain)\b/.test(q)) {
+      return 'diagnostic';
+    }
+    if (/\b(recommend|suggest|what should|ano dapat|action|campaign|promo)\b/.test(q)) {
+      return 'recommendation';
+    }
+    if (/\b(compare|versus|vs\.?|difference|growth|increase|decrease|trend|better|worse)\b/.test(q)) {
+      return 'comparison';
+    }
+    if (/\b(insight|overview|performance|performing|kumusta|status)\b/.test(q)) {
+      return 'business_explanation';
+    }
+    return 'direct_answer';
   }
 
-  private buildSqlPreview(plan: QueryPlan): string {
-    const where =
-      plan.dateRange === 'custom' && plan.dateStart && plan.dateEnd
-        ? [
-            `transaction_timestamp >= '${plan.dateStart}'`,
-            `transaction_timestamp <= '${plan.dateEnd}'`,
-          ]
-        : [':date_range'];
-    if (plan.sector) where.push(`segment_id = '${plan.sector}'`);
-    if (plan.channel) where.push(`channel_id = '${plan.channel}'`);
-    const whereClause = `WHERE ${where.join(' AND ')}`;
-
-    if (plan.intent === 'top_items') {
-      return `SELECT product_id, service_id, SUM(net_sales) AS revenue, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause} GROUP BY product_id, service_id ORDER BY revenue DESC LIMIT ${plan.limit || 5};`;
+  private shouldIncludeComparison(
+    question: string,
+    narrativeGoal: NarrativeGoal,
+  ): boolean {
+    if (
+      [
+        'business_explanation',
+        'comparison',
+        'diagnostic',
+        'recommendation',
+        'verification',
+      ].includes(narrativeGoal)
+    ) {
+      return true;
     }
-    if (plan.intent === 'sector_breakdown' || plan.intent === 'best_sector') {
-      return `SELECT segment_id, SUM(net_sales) AS revenue, COUNT(DISTINCT transaction_id) AS orders, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause} GROUP BY segment_id ORDER BY revenue DESC;`;
-    }
-    if (plan.intent === 'channel_breakdown' || plan.intent === 'best_channel') {
-      return `SELECT channel_id, SUM(net_sales) AS revenue, COUNT(DISTINCT transaction_id) AS orders, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause} GROUP BY channel_id ORDER BY revenue DESC;`;
-    }
-    if (plan.intent === 'total_orders') {
-      return `SELECT COUNT(DISTINCT transaction_id) AS orders FROM fact_cross_channel_transactions ${whereClause};`;
-    }
-    if (plan.intent === 'total_quantity') {
-      return `SELECT SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause};`;
-    }
-    if (plan.intent === 'average_order_value') {
-      return `SELECT SUM(net_sales) / NULLIF(COUNT(DISTINCT transaction_id), 0) AS avg_order_value FROM fact_cross_channel_transactions ${whereClause};`;
-    }
-    return `SELECT SUM(net_sales) AS revenue, COUNT(DISTINCT transaction_id) AS orders, SUM(quantity_sold) AS quantity FROM fact_cross_channel_transactions ${whereClause};`;
+    return /\b(insight|performance|performing|compare|trend|accurate|good|bad|higher|lower|why|bakit)\b/.test(
+      this.normalizeQuestion(question),
+    );
   }
 
   private extractRange(q: string): RangeKey {
@@ -1007,6 +1051,200 @@ export class ChatbotService {
         orderCount: row.orders.size,
         quantity: this.money(row.quantity),
       }));
+  }
+
+  private async buildVerifiedFactPack(
+    plan: QueryPlan,
+    result: any,
+    filters: WarehouseFilters,
+    latestDate: Date,
+  ): Promise<VerifiedFactPack> {
+    const metrics = this.extractMetricsForFacts(plan, result);
+    const comparisons =
+      plan.includeComparison && this.canCompareIntent(plan.intent)
+        ? await this.buildComparisonFacts(filters, result)
+        : undefined;
+
+    return {
+      source: 'supabase_warehouse',
+      method: 'backend_validated_analytics_retrieval',
+      intent: plan.intent,
+      dateRange: {
+        start: filters.dateStart || null,
+        end: filters.dateEnd || null,
+        label: this.rangeLabel(plan, latestDate),
+      },
+      filters: {
+        sector: filters.sector || null,
+        channel: filters.channel || null,
+      },
+      metrics,
+      comparisons,
+      audit: {
+        tablesUsed: [
+          'fact_cross_channel_transactions',
+          'date_dim',
+          'channel_dim',
+          'business_segment_dim',
+          ...(plan.intent === 'top_items' ? ['product_dim', 'service_dim'] : []),
+        ],
+        aggregations: this.getAuditAggregations(plan.intent),
+        rowsUsed:
+          typeof result?.rows === 'number'
+            ? result.rows
+            : Array.isArray(result)
+              ? result.length
+              : undefined,
+        confidence:
+          plan.intent === 'forecast_overview' || plan.intent === 'cross_sell_overview'
+            ? 'limited'
+            : 'verified',
+      },
+    };
+  }
+
+  private extractMetricsForFacts(
+    plan: QueryPlan,
+    result: any,
+  ): Record<string, unknown> {
+    if (Array.isArray(result)) {
+      return {
+        rows: result,
+        rowCount: result.length,
+      };
+    }
+    if (plan.intent === 'forecast_overview' || plan.intent === 'cross_sell_overview') {
+      return {
+        message: result?.message || 'Dashboard detail is currently limited.',
+      };
+    }
+    return {
+      totalRevenue: result?.revenue ?? null,
+      totalOrders: result?.orders ?? null,
+      totalQuantity: result?.quantity ?? null,
+      averageOrderValue: result?.avgOrderValue ?? null,
+      rowsUsed: result?.rows ?? null,
+    };
+  }
+
+  private canCompareIntent(intent: DashboardIntent): boolean {
+    return [
+      'total_revenue',
+      'total_orders',
+      'total_quantity',
+      'average_order_value',
+    ].includes(intent);
+  }
+
+  private async buildComparisonFacts(
+    filters: WarehouseFilters,
+    result: any,
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!filters.dateStart || !filters.dateEnd || typeof result?.revenue !== 'number') {
+      return undefined;
+    }
+
+    const currentStart = new Date(`${filters.dateStart}T00:00:00.000Z`);
+    const currentEnd = new Date(`${filters.dateEnd}T00:00:00.000Z`);
+    const periodDays =
+      Math.max(
+        1,
+        Math.round(
+          (currentEnd.getTime() - currentStart.getTime()) / (24 * 60 * 60 * 1000),
+        ) + 1,
+      );
+
+    const previousEnd = new Date(currentStart);
+    previousEnd.setDate(previousEnd.getDate() - 1);
+    const previousStart = new Date(previousEnd);
+    previousStart.setDate(previousStart.getDate() - periodDays + 1);
+
+    const previousFilters = {
+      ...filters,
+      dateStart: this.isoDate(previousStart),
+      dateEnd: this.isoDate(previousEnd),
+    };
+    const previousTotals = await this.getTotals(previousFilters);
+
+    const averageFilters = {
+      ...filters,
+      dateStart: this.isoDate(
+        new Date(currentStart.getTime() - 7 * 24 * 60 * 60 * 1000),
+      ),
+      dateEnd: this.isoDate(previousEnd),
+    };
+    const averageRows = await this.getWarehouseRows(averageFilters);
+    const dailyAverageRevenue = this.averageDailyRevenue(averageRows);
+    const currentDailyRevenue = result.revenue / periodDays;
+
+    return {
+      previousPeriod: {
+        dateStart: previousFilters.dateStart,
+        dateEnd: previousFilters.dateEnd,
+        revenue: previousTotals.revenue,
+        orders: previousTotals.orders,
+        quantity: previousTotals.quantity,
+        revenueChangePercent: this.percentChange(
+          result.revenue,
+          previousTotals.revenue,
+        ),
+      },
+      trailingSevenDayAverage: {
+        revenuePerDay: dailyAverageRevenue,
+        requestedRevenuePerDay: this.money(currentDailyRevenue),
+        differencePercent: this.percentChange(currentDailyRevenue, dailyAverageRevenue),
+      },
+    };
+  }
+
+  private averageDailyRevenue(rows: WarehouseRow[]): number {
+    const byDate = new Map<string, number>();
+    rows.forEach((row) => {
+      const date = row.date_dim?.full_date;
+      if (!date) return;
+      byDate.set(date, (byDate.get(date) || 0) + (Number(row.net_sales) || 0));
+    });
+    if (!byDate.size) return 0;
+    const total = Array.from(byDate.values()).reduce((sum, value) => sum + value, 0);
+    return this.money(total / byDate.size);
+  }
+
+  private percentChange(current: number, baseline: number): number | null {
+    if (!Number.isFinite(baseline) || baseline === 0) return null;
+    return this.money(((current - baseline) / baseline) * 100);
+  }
+
+  private getAuditAggregations(intent: DashboardIntent): string[] {
+    if (intent === 'top_items') {
+      return [
+        'GROUP BY product_id/service_id',
+        'SUM(net_sales)',
+        'SUM(quantity_sold)',
+        'COUNT(DISTINCT transaction_id)',
+      ];
+    }
+    if (intent === 'sector_breakdown') {
+      return [
+        'GROUP BY business_segment_dim.segment_name',
+        'SUM(net_sales)',
+        'SUM(quantity_sold)',
+        'COUNT(DISTINCT transaction_id)',
+      ];
+    }
+    if (intent === 'channel_breakdown') {
+      return [
+        'GROUP BY channel_dim.channel_name',
+        'SUM(net_sales)',
+        'SUM(quantity_sold)',
+        'COUNT(DISTINCT transaction_id)',
+      ];
+    }
+    return [
+      'SUM(net_sales)',
+      'SUM(quantity_sold)',
+      'COUNT(DISTINCT transaction_id)',
+      'SUM(net_sales) / COUNT(DISTINCT transaction_id)',
+    ];
   }
 
   private renderAnswer(plan: QueryPlan, result: any, latestDate: Date): string {
@@ -1355,6 +1593,7 @@ export class ChatbotService {
     question: string;
     questionForPlanning: string;
     factualAnswer: string;
+    factPack: VerifiedFactPack;
     plan: QueryPlan;
     result: any;
     latestDate: Date;
@@ -1375,17 +1614,17 @@ export class ChatbotService {
           max_tokens: 220,
           temperature: 0.2,
           system: [
-            'You are WOOF, a friendly AI revenue assistant inside the Happy Tails dashboard.',
-            'Reply conversationally, but only using the validated dashboard facts provided by the backend.',
-            'Never change, round differently, infer, estimate, or add numbers beyond the validated backend answer.',
-            'Do not add new calculations, advice, causes, trends, or facts that are not in the factual answer.',
-            'Answer the user intent, not just the metric. If they ask for confirmation, confirm that WOOF rechecked the warehouse result.',
+            'You are WOOF, a friendly AI business analyst inside the Happy Tails dashboard.',
+            'Generate a business narrative through NLP using only the verified Supabase warehouse fact pack and validated backend answer.',
+            'Never change, round differently, infer, estimate, or add numbers beyond the verified facts.',
+            'Do not claim causes, trends, or recommendations unless supported by the verified facts or comparison facts.',
+            'Answer the user intent, not just the metric. Explain what the number means when the fact pack includes comparison context.',
             'If the latest message is a follow-up or correction, acknowledge the change naturally and answer the newly resolved query.',
-            'For normal metric answers, avoid robotic phrasing when possible; lead with the answer and keep the exact date/range visible.',
+            'For normal metric answers, lead with the answer, then add one concise business interpretation if available.',
             'For top item or breakdown answers, keep list formatting readable and compact.',
             'If the factual answer says no records were found, acknowledge it clearly and suggest checking another date or range.',
             'If the user asks something outside dashboard scope, do not answer generally; keep the response scoped to WOOF.',
-            'Keep the answer concise: 1 to 3 short sentences, or a compact numbered list for ranked results. No markdown tables.',
+            'Keep the answer concise: 2 to 4 short sentences, or a compact numbered list for ranked results. No markdown tables.',
           ].join(' '),
           messages: [
             {
@@ -1398,7 +1637,9 @@ export class ChatbotService {
                 `Latest user question: ${input.question}`,
                 `Validated planning question: ${input.questionForPlanning}`,
                 `Validated backend answer: ${input.factualAnswer}`,
+                `Verified fact pack JSON: ${JSON.stringify(input.factPack)}`,
                 `Validated intent: ${input.plan.intent}`,
+                `Narrative goal: ${input.plan.narrativeGoal || 'direct_answer'}`,
                 `Validated date range: ${this.rangeLabel(input.plan, input.latestDate)}`,
                 `Response style instruction: ${styleDirective}`,
                 'Write the final user-facing answer now.',
@@ -1434,7 +1675,7 @@ export class ChatbotService {
         q,
       );
     if (isVerification) {
-      return 'Verification: say that WOOF rechecked the Supabase warehouse result, then restate the exact validated answer. Do not sound uncertain.';
+      return 'Verification: say that WOOF rechecked the Supabase warehouse facts, confirm the result, and briefly mention whether comparison facts support any context.';
     }
 
     const isFollowUp =
@@ -1454,11 +1695,11 @@ export class ChatbotService {
           q,
         ));
     if (isFollowUp) {
-      return 'Follow-up: briefly acknowledge the requested new date/range/filter, then answer with the exact validated backend result.';
+      return 'Follow-up: briefly acknowledge the requested new date/range/filter, then answer with the verified facts and one useful business interpretation if comparison context exists.';
     }
 
     if (typeof input.result?.rows === 'number' && input.result.rows === 0) {
-      return 'No-data: clearly say no matching warehouse records were found for the requested scope and suggest trying another date, range, sector, or channel.';
+      return 'No-data: clearly say no matching Supabase warehouse records were found for the requested scope and suggest trying another date, range, sector, or channel.';
     }
 
     if (input.plan.intent === 'top_items') {
@@ -1483,7 +1724,7 @@ export class ChatbotService {
       return 'Unsupported dashboard detail: be friendly but explain the current dashboard limitation briefly.';
     }
 
-    return 'Metric answer: answer naturally and directly using the exact validated metric, date/range, orders, and units when present.';
+    return 'Metric narrative: answer naturally using the exact verified metric, date/range, orders, and units, then add a concise interpretation from comparison facts if available.';
   }
 
   private fallbackStyledAnswer(
@@ -1491,7 +1732,7 @@ export class ChatbotService {
     styleDirective: string,
   ): string {
     if (styleDirective.startsWith('Verification:')) {
-      return `Yes, I rechecked the Supabase warehouse result. ${factualAnswer}`;
+      return `Yes, I rechecked the Supabase warehouse facts. ${factualAnswer}`;
     }
     return factualAnswer;
   }
