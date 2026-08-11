@@ -28,6 +28,14 @@ export class EtlService {
   // -----------------------------
   // Helpers
   // -----------------------------
+  
+  private getLocalDateString(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   private getDateId(date: Date): number {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -86,15 +94,15 @@ export class EtlService {
       const uniqueDateStrings = new Set<string>();
       for (const t of transactions) {
         const orderDate = new Date(t.date);
-        uniqueDateStrings.add(orderDate.toISOString().slice(0, 10));
+        uniqueDateStrings.add(this.getLocalDateString(orderDate));
 
         const dateBefore = new Date(orderDate);
         dateBefore.setDate(dateBefore.getDate() - 1);
-        uniqueDateStrings.add(dateBefore.toISOString().slice(0, 10));
+        uniqueDateStrings.add(this.getLocalDateString(dateBefore));
 
         const dateAfter = new Date(orderDate);
         dateAfter.setDate(dateAfter.getDate() + 1);
-        uniqueDateStrings.add(dateAfter.toISOString().slice(0, 10));
+        uniqueDateStrings.add(this.getLocalDateString(dateAfter));
       }
 
       const dateArray = Array.from(uniqueDateStrings).sort();
@@ -143,15 +151,15 @@ export class EtlService {
         const orderDate = new Date(t.date);
         const dateId = this.getDateId(orderDate);
         if (!datesMap.has(dateId)) {
-          const dateString = orderDate.toISOString().slice(0, 10);
+          const dateString = this.getLocalDateString(orderDate);
 
           const dateBefore = new Date(orderDate);
           dateBefore.setDate(dateBefore.getDate() - 1);
-          const dateBeforeString = dateBefore.toISOString().slice(0, 10);
+          const dateBeforeString = this.getLocalDateString(dateBefore);
 
           const dateAfter = new Date(orderDate);
           dateAfter.setDate(dateAfter.getDate() + 1);
-          const dateAfterString = dateAfter.toISOString().slice(0, 10);
+          const dateAfterString = this.getLocalDateString(dateAfter);
 
           const holiday = holidayMap.get(dateString);
           const dayBeforeHoliday = holidayMap.get(dateBeforeString);
@@ -164,7 +172,7 @@ export class EtlService {
 
           datesMap.set(dateId, {
             date_id: dateId,
-            full_date: orderDate.toISOString(),
+            full_date: this.getLocalDateString(orderDate),
             day_of_week: dayOfWeek,
             day_name: orderDate.toLocaleDateString('en-US', { weekday: 'long' }),
             week_of_year: this.getWeekOfYear(orderDate),
