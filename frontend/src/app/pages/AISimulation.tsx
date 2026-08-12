@@ -1404,8 +1404,8 @@ export function AISimulation() {
   };
 
   const getDemandLevel = (value: number): DemandLevel => {
-    if (value >= 42) return "High";
-    if (value >= 28) return "Medium";
+    if (value >= 26) return "High";
+    if (value >= 11) return "Medium";
     return "Low";
   };
 
@@ -1437,7 +1437,10 @@ export function AISimulation() {
       const dayForecasts = trafficColumns.map((column) => {
         const trafficValue = valuesByKey.get(column.key);
         const visits = Number(trafficValue?.visits || 0);
-        const level = getDemandLevel(visits);
+        const sampleDays = Number(column.sampleDays || (trafficValue as any)?.sampleDays || 1);
+        const cumulativeVisits = Number((trafficValue as any)?.cumulativeVisits || Math.round(visits * sampleDays));
+        const displayVal = trafficDisplayMode === "weekday_average" ? cumulativeVisits : visits;
+        const level = getDemandLevel(displayVal);
         const requiredStaff = getRequiredStaff(sector.name, level);
         const scheduledStaff = sector.placeholderStaff;
         const staffDelta = requiredStaff - scheduledStaff;
@@ -1448,6 +1451,7 @@ export function AISimulation() {
           key: column.key,
           date: column.date,
           predicted: visits,
+          cumulativeVisits,
           actual: visits,
           level,
           requiredStaff,
@@ -1467,31 +1471,38 @@ export function AISimulation() {
   }, [trafficOptimizerData, trafficColumns]);
 
   const selectedTimeStaffPlan = sectorTrafficForecast.map((sector) => {
-    const peakForecast = sector.forecasts.reduce(
-      (peak, forecast) => (forecast.predicted > peak.predicted ? forecast : peak),
-      sector.forecasts[0] || {
-        day: "",
-        label: "No matching transactions",
-        key: "empty",
-        predicted: 0,
-        actual: 0,
-        level: "Low",
-        requiredStaff: 1,
-        scheduledStaff: sector.placeholderStaff,
-        staffDelta: 1 - sector.placeholderStaff,
-      },
-    );
+    const peakForecast = sector.forecasts.reduce((peak, forecast) => {
+      const forecastVal = trafficDisplayMode === "weekday_average" ? forecast.cumulativeVisits : forecast.predicted;
+      const peakVal = trafficDisplayMode === "weekday_average" ? peak.cumulativeVisits : peak.predicted;
+      return forecastVal > peakVal ? forecast : peak;
+    }, sector.forecasts[0]);
 
-    const requiredStaff = erlangStaffing[sector.name] || peakForecast.requiredStaff;
+    const activeVal = trafficDisplayMode === "weekday_average" ? (peakForecast?.cumulativeVisits || 0) : (peakForecast?.predicted || 0);
+    const activeLevel = getDemandLevel(activeVal);
+    const requiredStaff = getRequiredStaff(sector.name, activeLevel);
+    const scheduledStaff = sector.placeholderStaff;
 
     return {
       sector: sector.name,
       color: sector.color,
       ...peakForecast,
+      level: activeLevel,
       requiredStaff,
-      staffDelta: requiredStaff - peakForecast.scheduledStaff,
+      scheduledStaff,
+      staffDelta: requiredStaff - scheduledStaff,
     };
   });
+
+  const maxCumulativeVisits = useMemo(() => {
+    let maxVal = 1;
+    sectorTrafficForecast.forEach((sector) => {
+      sector.forecasts.forEach((f) => {
+        const val = trafficDisplayMode === "weekday_average" ? f.cumulativeVisits : f.predicted;
+        if (val > maxVal) maxVal = val;
+      });
+    });
+    return maxVal;
+  }, [sectorTrafficForecast, trafficDisplayMode]);
 
   const totalPredictedTraffic = Math.round(trafficOptimizerData?.totalVisits ||
     sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0));
@@ -1506,12 +1517,31 @@ export function AISimulation() {
   const trafficPrediction = useMemo(() => {
     return trafficColumns.map((column, columnIndex) => {
       const sectorTotals = sectorTrafficForecast.map((sector) => sector.forecasts[columnIndex]);
+      const displayDay = column.dayLabel || column.label.replace(/\s+(avg|total)$/i, "");
+
+      const servicesVisits = trafficDisplayMode === "weekday_average"
+        ? (sectorTotals.find((_, idx) => sectorTrafficForecast[idx]?.name === "Services")?.cumulativeVisits || 0)
+        : Math.round(sectorTotals.find((_, idx) => sectorTrafficForecast[idx]?.name === "Services")?.predicted || 0);
+
+      const cafeVisits = trafficDisplayMode === "weekday_average"
+        ? (sectorTotals.find((_, idx) => sectorTrafficForecast[idx]?.name === "Cafe")?.cumulativeVisits || 0)
+        : Math.round(sectorTotals.find((_, idx) => sectorTrafficForecast[idx]?.name === "Cafe")?.predicted || 0);
+
+      const retailVisits = trafficDisplayMode === "weekday_average"
+        ? (sectorTotals.find((_, idx) => sectorTrafficForecast[idx]?.name === "Retail")?.cumulativeVisits || 0)
+        : Math.round(sectorTotals.find((_, idx) => sectorTrafficForecast[idx]?.name === "Retail")?.predicted || 0);
+
+      const totalVisits = servicesVisits + cafeVisits + retailVisits;
+
       return {
-        day: column.label,
-        visits: sectorTotals.reduce((sum, item) => sum + (item?.predicted || 0), 0),
+        day: displayDay,
+        visits: totalVisits,
+        services: servicesVisits,
+        cafe: cafeVisits,
+        retail: retailVisits,
       };
     });
-  }, [sectorTrafficForecast, trafficColumns]);
+  }, [sectorTrafficForecast, trafficColumns, trafficDisplayMode]);
 
   // Past Happy Hour Performance
   const happyHourHistory = [
@@ -3132,8 +3162,11 @@ export function AISimulation() {
             {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Observed Visits</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Observed Visits (All Hours)</div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalPredictedTraffic}</div>
+                <div className="text-[10px] text-[#223047] opacity-55 mt-0.5">
+                  All operating hours in {selectedHeaderRangeLabel}
+                </div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
                 <div className="text-xs text-[#223047] opacity-60 mb-1">High Demand Sectors</div>
@@ -3157,15 +3190,20 @@ export function AISimulation() {
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden mt-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
                 <div>
-                  <div className="text-sm font-bold text-[#223047]">Traffic Heatmap</div>
-                  <div className="text-xs text-[#223047] opacity-60 mt-1">
-                    {trafficVisitDefinition} {trafficDisplayMode === "weekday_average" ? "Values are weekday averages because the selected range is longer than 14 days." : "Values are daily counts for the selected range."}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-[#223047]">Traffic Heatmap</span>
+                    <Badge className="bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC] text-[11px] font-bold">
+                      {formatHour(trafficOptimizerTime[0])} Cumulative Volume & Capacity Load (%)
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-[#223047] opacity-65 mt-1">
+                    Showing cumulative customer visits & capacity intensity load (%) specifically at <span className="font-semibold text-[#F53799]">{formatHour(trafficOptimizerTime[0])}</span> across {selectedHeaderRangeLabel}. Change Time Slider above for other hours.
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-100 border border-green-200" /> Low</span>
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-100 border border-yellow-200" /> Medium</span>
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-100 border border-red-200" /> High</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-100 border border-green-200" /> Low (1-10)</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-100 border border-yellow-200" /> Medium (11-25)</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-100 border border-red-200" /> High (26+)</span>
                 </div>
               </div>
 
@@ -3174,9 +3212,12 @@ export function AISimulation() {
                   <thead>
                     <tr className="border-t border-[#FFD9EC] bg-white text-left text-xs uppercase tracking-wide text-[#223047] opacity-70">
                       <th className="px-4 py-3 font-semibold">Sector</th>
-                      {trafficColumns.map((column) => (
-                        <th key={column.key} className="px-3 py-3 font-semibold text-center">{column.label}</th>
-                      ))}
+                      {trafficColumns.map((column) => {
+                        const headerLabel = (column.dayLabel || column.label.replace(/\s+(avg|total)$/i, "")).toUpperCase();
+                        return (
+                          <th key={column.key} className="px-3 py-3 font-semibold text-center">{headerLabel}</th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
@@ -3202,19 +3243,25 @@ export function AISimulation() {
                             {sector.name}
                           </span>
                         </td>
-                        {sector.forecasts.map((forecast) => (
-                          <td key={`${sector.name}-${forecast.day}`} className="px-3 py-3">
-                            <div
-                              className={`mx-auto flex min-h-[54px] w-full max-w-[92px] items-center justify-center rounded-lg px-2 py-2 text-center ${demandStyles[forecast.level].bg}`}
-                              title={`${forecast.level} demand from ingested transactions`}
-                            >
-                              <div className={`text-sm font-bold ${demandStyles[forecast.level].text}`}>
-                                {formatTrafficVisitValue(forecast.predicted)}
-                                <span className="block text-[10px] font-semibold text-[#223047] opacity-65">visits</span>
+                        {sector.forecasts.map((forecast) => {
+                          const displayVal = trafficDisplayMode === "weekday_average" ? forecast.cumulativeVisits : forecast.predicted;
+                          const loadPercent = Math.min(100, Math.max(10, Math.round((displayVal / Math.max(maxCumulativeVisits, 1)) * 100)));
+                          return (
+                            <td key={`${sector.name}-${forecast.day}`} className="px-3 py-3">
+                              <div
+                                className={`mx-auto flex min-h-[58px] w-full max-w-[96px] flex-col items-center justify-center rounded-xl px-2 py-1.5 text-center transition-all ${demandStyles[forecast.level].bg}`}
+                                title={`${forecast.level} demand (${displayVal} total visits in period, ${loadPercent}% capacity load)`}
+                              >
+                                <div className={`text-sm font-extrabold ${demandStyles[forecast.level].text}`}>
+                                  {displayVal} <span className="text-[11px] font-semibold opacity-75">visits</span>
+                                </div>
+                                <div className="mt-0.5 text-[10px] font-bold text-[#223047] opacity-65">
+                                  {loadPercent}% Load
+                                </div>
                               </div>
-                            </div>
-                          </td>
-                        ))}
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
@@ -3307,11 +3354,11 @@ export function AISimulation() {
             </div>
           </div>
 
-          {/* Header Filter Traffic Trend */}
+          {/* Traffic Trend */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div>
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Header Filter Traffic Trend
+                Traffic Trend
               </h2>
               <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
                 Transaction-visit volume for {formatHour(trafficOptimizerTime[0])} within {selectedHeaderRangeLabel}
@@ -3328,12 +3375,37 @@ export function AISimulation() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
                 <XAxis dataKey="day" stroke="#223047" style={{ fontSize: "12px" }} />
-                <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
+                <YAxis stroke="#223047" style={{ fontSize: "12px" }} allowDecimals={false} />
                 <RechartsTooltip
-                  contentStyle={{
-                    backgroundColor: "white",
-                    border: "1px solid #FFD9EC",
-                    borderRadius: "12px",
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload || !payload.length) return null;
+                    const data = payload[0].payload;
+                    return (
+                      <div className="rounded-xl border border-[#FFD9EC] bg-white p-3 shadow-lg text-xs space-y-1.5 min-w-[180px]">
+                        <div className="font-bold text-[#223047] border-b border-[#FFD9EC] pb-1 flex items-center justify-between">
+                          <span>{label}</span>
+                          <span className="text-[10px] opacity-60 font-semibold">{formatHour(trafficOptimizerTime[0])}</span>
+                        </div>
+                        <div className="space-y-1 text-[#223047]">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#F53799]" /> Cafe</span>
+                            <span className="font-bold">{data.cafe || 0} visits</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#3AE4FA]" /> Services</span>
+                            <span className="font-bold">{data.services || 0} visits</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#F59E0B]" /> Retail</span>
+                            <span className="font-bold">{data.retail || 0} visits</span>
+                          </div>
+                        </div>
+                        <div className="border-t border-[#FFD9EC] pt-1 flex items-center justify-between font-bold text-[#223047]">
+                          <span>Combined Total:</span>
+                          <span className="text-[#F53799]">{data.visits || 0} visits</span>
+                        </div>
+                      </div>
+                    );
                   }}
                 />
                 <Area
@@ -3351,59 +3423,6 @@ export function AISimulation() {
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
                 <span className="text-sm text-[#223047]">Observed Transaction Visits</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Past Happy Hour Performance */}
-          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-            <div>
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Past Happy Hour Performance
-              </h2>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Historical effectiveness of traffic optimization campaigns
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-              <div className="space-y-3">
-                {happyHourHistory.map((item) => (
-                  <div
-                    key={item.date}
-                    className="flex items-center justify-between p-4 rounded-xl bg-[#FFF2FA]"
-                  >
-                    <div>
-                      <div className="text-sm font-semibold text-[#223047]">{item.date}</div>
-                      <div className="text-xs text-[#223047] opacity-60">{item.time}</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-[#223047] opacity-60">Predicted → Actual</div>
-                      <div className="text-sm font-semibold text-[#223047]">
-                        {item.predicted} → {item.actual}
-                      </div>
-                    </div>
-                    <div className="text-2xl">{item.result}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div>
-                <ResponsiveContainer width="100%" height={220} className="md:!h-[250px]">
-                  <BarChart data={happyHourHistory}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-                    <XAxis dataKey="date" stroke="#223047" style={{ fontSize: "11px" }} />
-                    <YAxis stroke="#223047" style={{ fontSize: "11px" }} />
-                    <RechartsTooltip
-                      contentStyle={{
-                        backgroundColor: "white",
-                        border: "1px solid #FFD9EC",
-                        borderRadius: "12px",
-                      }}
-                    />
-                    <Bar dataKey="lift" fill="#3AE4FA" radius={[6, 6, 0, 0]} animationDuration={800} />
-                  </BarChart>
-                </ResponsiveContainer>
               </div>
             </div>
           </div>

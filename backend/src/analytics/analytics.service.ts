@@ -1459,6 +1459,7 @@ export class AnalyticsService {
 
     const dailyVisits = new Map<string, number>();
     const weekdayVisits = new Map<string, number>();
+    const weekdayDailySamples = new Map<string, number[]>();
     let totalVisits = 0;
 
     rows.forEach((row: any) => {
@@ -1478,14 +1479,34 @@ export class AnalyticsService {
         weekdayKey,
         (weekdayVisits.get(weekdayKey) || 0) + visits,
       );
+      if (!weekdayDailySamples.has(weekdayKey)) {
+        weekdayDailySamples.set(weekdayKey, []);
+      }
+      weekdayDailySamples.get(weekdayKey)!.push(visits);
     });
+
+    const filterOutliersIQR = (values: number[]): number[] => {
+      if (values.length < 4) return values;
+      const sorted = [...values].sort((a, b) => a - b);
+      const q1 = sorted[Math.floor(sorted.length * 0.25)];
+      const q3 = sorted[Math.floor(sorted.length * 0.75)];
+      const iqr = q3 - q1;
+      const upperBound = q3 + 1.5 * iqr;
+      const lowerBound = Math.max(0, q1 - 1.5 * iqr);
+      const nonOutliers = sorted.filter((v) => v >= lowerBound && v <= upperBound);
+      if (nonOutliers.length === 0) return values;
+      const median = nonOutliers[Math.floor(nonOutliers.length / 2)];
+      return values.map((v) => (v > upperBound || v < lowerBound ? median : v));
+    };
 
     const sectors = trackedSectors.map((sector) => {
       const values = columns.map((column) => {
+        const samples = weekdayDailySamples.get(`${sector}:${column.weekday}`) || [];
+        const sanitizedSamples = displayMode === 'weekday_average' ? filterOutliersIQR(samples) : samples;
         const rawVisits =
           displayMode === 'daily'
             ? dailyVisits.get(`${sector}:${column.key}`) || 0
-            : weekdayVisits.get(`${sector}:${column.weekday}`) || 0;
+            : sanitizedSamples.reduce((sum, v) => sum + v, 0);
         const sampleDays =
           displayMode === 'weekday_average'
             ? weekdaySampleDays.get(column.weekday) || 1
@@ -1498,6 +1519,7 @@ export class AnalyticsService {
         return {
           key: column.key,
           visits,
+          cumulativeVisits: Math.round(rawVisits),
           ...(column.date ? { date: column.date } : {}),
           ...(sampleDays ? { sampleDays } : {}),
         };
