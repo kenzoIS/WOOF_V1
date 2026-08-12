@@ -1267,6 +1267,11 @@ export class AnalyticsService {
                 $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
               },
             },
+            prices: {
+              $push: {
+                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+              },
+            },
             avgUnitCost: {
               $avg: {
                 $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
@@ -1289,6 +1294,7 @@ export class AnalyticsService {
             totalQuantity: 1,
             transactionCount: { $size: '$transactions' },
             avgPrice: 1,
+            prices: 1,
             avgUnitCost: 1,
             avgUnitGrossProfit: 1,
             avgMargin: 1,
@@ -1319,7 +1325,30 @@ export class AnalyticsService {
           : index < (totalItems * 2) / 3
             ? 'moderate'
             : 'slow';
-      const price = this.nullableFiniteNumber(row.avgPrice);
+      
+      const rawPrice = this.nullableFiniteNumber(row.avgPrice);
+      let price: number | null = null;
+      if (Array.isArray(row.prices) && row.prices.length > 0) {
+        const priceCounts = new Map<number, number>();
+        row.prices.forEach((p: any) => {
+          const val = Number(p);
+          if (Number.isFinite(val) && val > 0) {
+            const rounded = Math.round(val);
+            priceCounts.set(rounded, (priceCounts.get(rounded) || 0) + 1);
+          }
+        });
+        let maxFreq = 0;
+        for (const [pVal, freq] of priceCounts.entries()) {
+          if (freq > maxFreq) {
+            maxFreq = freq;
+            price = pVal;
+          }
+        }
+      }
+      if (price === null && rawPrice !== null) {
+        price = Math.round(rawPrice);
+      }
+
       const unitCost = this.nullableFiniteNumber(row.avgUnitCost);
       const unitGrossProfit = this.nullableFiniteNumber(row.avgUnitGrossProfit);
       const margin = this.nullableFiniteNumber(row.avgMargin);

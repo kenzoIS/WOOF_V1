@@ -1158,7 +1158,7 @@ export function AISimulation() {
         support: input.support ?? existing?.support ?? 0,
         basketCount: input.basketCount ?? existing?.basketCount ?? 0,
         velocity: input.velocity || existing?.velocity || "moderate",
-        price: input.price ?? existing?.price ?? null,
+        price: input.price !== undefined && input.price !== null ? Math.round(input.price) : (existing?.price !== undefined && existing?.price !== null ? Math.round(existing.price) : null),
         unitCost: input.unitCost ?? existing?.unitCost ?? null,
         unitGrossProfit: input.unitGrossProfit ?? existing?.unitGrossProfit ?? null,
         margin: input.margin ?? existing?.margin ?? null,
@@ -1174,7 +1174,7 @@ export function AISimulation() {
         support: metric.support || 0,
         basketCount: metric.basketCount || 0,
         velocity: metric.velocity,
-        price: metric.price ?? null,
+        price: metric.price !== undefined && metric.price !== null ? Math.round(metric.price) : null,
         unitCost: metric.unitCost ?? null,
         unitGrossProfit: metric.unitGrossProfit ?? null,
         margin: metric.margin ?? null,
@@ -1187,7 +1187,7 @@ export function AISimulation() {
           name: entry.itemA || entry.anchorItem,
           sector: firstSector(entry.antecedentSectors),
           sectors: entry.antecedentSectors || [firstSector(entry.antecedentSectors)],
-          price: entry.itemAPrice ?? null,
+          price: entry.itemAPrice !== undefined && entry.itemAPrice !== null ? Math.round(entry.itemAPrice) : null,
           unitCost: entry.itemACost ?? null,
         });
       }
@@ -1196,7 +1196,7 @@ export function AISimulation() {
           name: entry.itemB || entry.bundleItem,
           sector: firstSector(entry.consequentSectors),
           sectors: entry.consequentSectors || [firstSector(entry.consequentSectors)],
-          price: entry.itemBPrice ?? null,
+          price: entry.itemBPrice !== undefined && entry.itemBPrice !== null ? Math.round(entry.itemBPrice) : null,
           unitCost: entry.itemBCost ?? null,
         });
       }
