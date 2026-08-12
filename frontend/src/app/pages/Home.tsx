@@ -728,6 +728,37 @@ export function Home() {
               </div>
             </div>
           </div>
+
+          {/* Sales Intensity Legend */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#FFD9EC]/70">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-[#223047]">
+                Sales Intensity Legend:
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-4 text-xs text-[#223047]">
+              <div className="flex items-center gap-1.5">
+                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-white shadow-xs" />
+                <span className="opacity-70">None (0%)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#FFF7FB] shadow-xs" />
+                <span className="opacity-70">Low (1–40%)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#FFF2FA] shadow-xs" />
+                <span className="opacity-70">Moderate (41–60%)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#FFD9EC] shadow-xs" />
+                <span className="opacity-70">High (61–80%)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#F53799] shadow-xs" />
+                <span className="font-semibold text-[#F53799]">Peak (&gt;80%)</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
