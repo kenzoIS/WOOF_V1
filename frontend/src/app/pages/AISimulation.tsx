@@ -3157,7 +3157,7 @@ export function AISimulation() {
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden mt-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
                 <div>
-                  <div className="text-sm font-bold text-[#223047]">Header Filter Sector Traffic Heatmap</div>
+                  <div className="text-sm font-bold text-[#223047]">Traffic Heatmap</div>
                   <div className="text-xs text-[#223047] opacity-60 mt-1">
                     {trafficVisitDefinition} {trafficDisplayMode === "weekday_average" ? "Values are weekday averages because the selected range is longer than 14 days." : "Values are daily counts for the selected range."}
                   </div>
