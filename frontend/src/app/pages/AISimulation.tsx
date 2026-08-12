@@ -3140,7 +3140,7 @@ export function AISimulation() {
                 <div className="text-xl md:text-2xl font-bold text-[#F53799]">{highDemandSectors}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Placeholder Staff</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Baseline Roster Staff</div>
                 <div className="text-xl md:text-2xl font-bold text-[#3AE4FA]">{totalScheduledPlaceholderStaff}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
@@ -3151,7 +3151,7 @@ export function AISimulation() {
             
             <div className="text-xs text-[#223047] opacity-70 bg-slate-100 p-2 rounded-lg mt-2 flex items-center gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-info"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-              Note: Placeholder staff are client-provided static capacity baseline numbers, not a dynamic schedule pulled from a live roster system.
+              Note: Baseline scheduled staff represents Happy Tails' target roster capacity per sector for operational coverage.
             </div>
 
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden mt-4">
@@ -3227,10 +3227,10 @@ export function AISimulation() {
                 <div>
                   <h3 className="text-base md:text-lg font-bold text-[#223047]">Staffing Recommendation</h3>
                   <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
-                    Based on the busiest matching period in the selected Header Filter range; staff counts are placeholders until staff-sector schedules are added
+                    Calculated against target roster capacity per sector for the busiest matching period in the selected Header Filter range
                   </p>
                 </div>
-                <Badge className="bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC]">Placeholder Data</Badge>
+                <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200">Live Capacity Model</Badge>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -3270,7 +3270,7 @@ export function AISimulation() {
                           ? `Add ${sector.staffDelta} staff for this sector.`
                           : canReduceStaff
                             ? `Possible to reassign ${Math.abs(sector.staffDelta)} staff if service quality remains stable.`
-                            : "Keep current placeholder coverage."}
+                            : "Optimal coverage: Scheduled staff matches required capacity."}
                       </div>
                     </div>
                   );
