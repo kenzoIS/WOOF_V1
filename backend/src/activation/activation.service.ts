@@ -2,11 +2,14 @@ import {
   BadRequestException,
   BadGatewayException,
   Injectable,
+  Logger,
 } from '@nestjs/common';
+import { GoogleGenAI } from '@google/genai';
 import { InjectModel } from '@nestjs/mongoose';
 import axios from 'axios';
 import { Model } from 'mongoose';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { SupabaseService } from '../common/supabase/supabase.service';
 import {
   CampaignActivation,
   CampaignActivationDocument,
@@ -23,17 +26,18 @@ interface GeneratedCampaignAssets {
   petHubBannerText: string;
   termsAndConditions: string[];
   pubmatPrompt: string;
+  campaignImageUrl?: string;
 }
 
-interface PetHubAnnouncementPayload {
-  category: string;
-  tag: string;
-  meta: string;
+interface PetHubCampaignPayload {
   title: string;
+  subtitle: string;
   description: string;
-  note: string;
-  highlight: string;
-  footer: string;
+  campaignImageUrl: string;
+  ctaText: string;
+  promoMechanic: string;
+  targetSegment: string;
+  source: string;
   sortOrder: number;
   isActive: boolean;
 }
@@ -53,8 +57,11 @@ interface ActivationRecommendation {
 
 @Injectable()
 export class ActivationService {
+  private readonly logger = new Logger(ActivationService.name);
+
   constructor(
     private readonly analyticsService: AnalyticsService,
+    private readonly supabaseService: SupabaseService,
     @InjectModel(CampaignActivation.name)
     private readonly campaignModel: Model<CampaignActivationDocument>,
   ) {}
@@ -163,6 +170,12 @@ export class ActivationService {
       .toUpperCase()}`;
     const generatedAssets =
       await this.generateAssetsWithClaude(recommendation);
+    const campaignImageUrl = await this.generateAndStoreCampaignImage(
+      campaignId,
+      recommendation,
+      generatedAssets,
+    );
+    generatedAssets.campaignImageUrl = campaignImageUrl || undefined;
     const pethubPayload = this.buildPetHubPayload(
       campaignId,
       recommendation,
@@ -187,10 +200,10 @@ export class ActivationService {
   }
 
   async publishCampaignToPetHub(campaignId: string) {
-    const endpoint = this.getPetHubAnnouncementsEndpoint();
+    const endpoint = this.getPetHubCampaignsEndpoint();
     if (!endpoint) {
       throw new BadRequestException(
-        'PETHUB_ANNOUNCEMENTS_ENDPOINT or PETHUB_API_BASE_URL must be configured',
+        'PETHUB_CAMPAIGNS_ENDPOINT or PETHUB_API_BASE_URL must be configured',
       );
     }
 
@@ -206,7 +219,7 @@ export class ActivationService {
 
     const payload = this.buildPublishPayload(campaign);
     const token = process.env.PETHUB_API_TOKEN;
-    const response = await this.postPetHubAnnouncement(endpoint, payload, token);
+    const response = await this.postPetHubCampaign(endpoint, payload, token);
 
     const updated = await this.campaignModel
       .findOneAndUpdate({ campaignId }, { status: 'published' }, { new: true })
@@ -378,17 +391,22 @@ export class ActivationService {
         'Promo availability may depend on inventory, appointment slots, or service capacity.',
         'Final approval is required before pushing this campaign to PetHub.',
       ],
-      pubmatPrompt: `Create a bright, friendly Happy Tails PetHub campaign pubmat for "${pair}". Emphasize ${recommendation.promoMechanic}. Use playful pet-care visuals, clean product/service focus, readable banner text, and a clear ${cta} call-to-action.`,
+      pubmatPrompt: this.buildCampaignImagePrompt(
+        recommendation,
+        `Create a polished promotional campaign image for "${pair}". Emphasize ${recommendation.promoMechanic}. Use a clear ${cta} call-to-action area.`,
+      ),
     };
   }
 
   private buildClaudePrompt(recommendation: ActivationRecommendation) {
     return [
-      'Generate campaign materials for a PetHub announcement from this WOOF promo recommendation.',
+      'Generate campaign materials for a WOOF Offers campaign in PetHub from this WOOF promo recommendation.',
       'Use friendly customer-facing Happy Tails wording for pet owners.',
       'Do not mention analytics, forecasts, inventory, staffing, operational action, KPIs, market basket analysis, or WOOF internals.',
       'Do not invent prices, customer names, competitor names, medical claims, guaranteed outcomes, or unverifiable claims.',
-      'Use short copy that fits homepage announcement cards. Prefer simple retail/pet-care language.',
+      'Use short copy that fits a homepage campaign card. Prefer simple retail/pet-care language.',
+      'The pubmatPrompt must include the required Happy Tails PetHub brand context and visual style below.',
+      this.requiredCampaignImageContext(),
       'Return exactly this JSON shape:',
       JSON.stringify({
         headline: 'string, max 42 chars, 3-6 words',
@@ -409,56 +427,154 @@ export class ActivationService {
     campaignId: string,
     recommendation: ActivationRecommendation,
     generatedAssets: GeneratedCampaignAssets,
-  ): PetHubAnnouncementPayload {
+  ): PetHubCampaignPayload {
     return {
-      category: 'Promo',
-      tag: 'WOOF',
-      meta: 'Limited time',
       title: this.limitText(generatedAssets.headline, 42),
+      subtitle: this.limitText(generatedAssets.shortCaption, 100),
       description: this.limitText(generatedAssets.longCaption, 150),
-      note: this.limitText(generatedAssets.shortCaption, 100),
-      highlight: this.limitText(generatedAssets.petHubBannerText, 34),
-      footer: this.limitText(generatedAssets.termsAndConditions[0] || '', 80),
+      campaignImageUrl: generatedAssets.campaignImageUrl || '',
+      ctaText: this.limitText(generatedAssets.callToAction, 24),
+      promoMechanic: this.limitText(recommendation.promoMechanic, 120),
+      targetSegment: this.limitText(recommendation.targetSegment, 80),
+      source: 'WOOF',
       sortOrder: 0,
       isActive: false,
     };
   }
 
-  private buildPublishPayload(campaign: any): PetHubAnnouncementPayload {
+  private buildPublishPayload(campaign: any): PetHubCampaignPayload {
     const assets = campaign.generatedAssets || {};
     const payload = campaign.pethubPayload || {};
     return {
-      category: this.safeString(payload.category, 'Promo'),
-      tag: this.safeString(payload.tag, 'WOOF'),
-      meta: this.safeString(payload.meta, 'Limited time'),
       title: this.limitText(
         this.safeString(assets.headline, payload.title || campaign.title),
         42,
+      ),
+      subtitle: this.limitText(
+        this.safeString(assets.shortCaption, payload.subtitle || payload.note || ''),
+        100,
       ),
       description: this.limitText(
         this.safeString(assets.longCaption, payload.description || ''),
         150,
       ),
-      note: this.limitText(
-        this.safeString(assets.shortCaption, payload.note || ''),
-        100,
+      campaignImageUrl: this.safeString(
+        assets.campaignImageUrl,
+        payload.campaignImageUrl || payload.campaign_image_url || '',
       ),
-      highlight: this.limitText(
-        this.safeString(assets.petHubBannerText, payload.highlight || ''),
-        34,
+      ctaText: this.limitText(
+        this.safeString(assets.callToAction, payload.ctaText || payload.cta_text || 'View Offer'),
+        24,
       ),
-      footer: this.limitText(
-        this.safeString(
-          Array.isArray(assets.termsAndConditions)
-            ? assets.termsAndConditions[0]
-            : payload.footer,
-          'Availability may vary by branch stock.',
-        ),
+      promoMechanic: this.limitText(
+        this.safeString(campaign.promoMechanic, payload.promoMechanic || payload.promo_mechanic || 'Featured PetHub placement'),
+        120,
+      ),
+      targetSegment: this.limitText(
+        this.safeString(campaign.targetSegment, payload.targetSegment || payload.target_segment || 'Pet owners'),
         80,
       ),
+      source: 'WOOF',
       sortOrder: Number(payload.sortOrder ?? payload.sort_order ?? 0),
       isActive: true,
     };
+  }
+
+  private async generateAndStoreCampaignImage(
+    campaignId: string,
+    recommendation: ActivationRecommendation,
+    generatedAssets: GeneratedCampaignAssets,
+  ): Promise<string | null> {
+    const apiKey = process.env.GEMINI_API_KEY?.trim();
+    const bucket = process.env.SUPABASE_CAMPAIGN_BUCKET?.trim();
+    if (!apiKey || !bucket) {
+      return null;
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = this.buildCampaignImagePrompt(
+        recommendation,
+        generatedAssets.pubmatPrompt,
+      );
+      generatedAssets.pubmatPrompt = prompt;
+
+      const interaction = await ai.interactions.create({
+        model: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image',
+        input: prompt,
+      });
+      const image = interaction.output_image;
+      if (!image?.data) {
+        return null;
+      }
+
+      const mimeType = image.mime_type || 'image/png';
+      const extension = this.imageExtensionFromMimeType(mimeType);
+      const path = `campaigns/${campaignId}.${extension}`;
+      const buffer = Buffer.from(image.data, 'base64');
+      const { error } = await this.supabaseService.client.storage
+        .from(bucket)
+        .upload(path, buffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+      if (error) {
+        this.logger.warn(`Campaign image upload failed: ${error.message}`);
+        return null;
+      }
+
+      const { data } = this.supabaseService.client.storage
+        .from(bucket)
+        .getPublicUrl(path);
+      return data.publicUrl || null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`Campaign image generation failed: ${message}`);
+      return null;
+    }
+  }
+
+  private requiredCampaignImageContext(): string {
+    return [
+      'Create a polished promotional campaign image for Happy Tails PetHub.',
+      '',
+      'Brand context:',
+      'Happy Tails is a pet cafe, grooming, boarding, and pet retail business.',
+      'WOOF is the analytics system that recommends smart offers based on sales and demand data.',
+      'The image should feel cute, friendly, clean, trustworthy, and customer-facing.',
+      '',
+      'Visual style:',
+      'Use pink, cyan, white, and soft pastel accents.',
+      'Show happy pets, pet care, grooming, pet cafe, or pet retail elements depending on the offer.',
+      'Modern social-media promo banner style.',
+      'No clutter, no scary visuals, no fake logos, no excessive text.',
+      'Leave clean space for campaign title/CTA.',
+    ].join('\n');
+  }
+
+  private buildCampaignImagePrompt(
+    recommendation: ActivationRecommendation,
+    prompt: string,
+  ): string {
+    const items = recommendation.featuredItems.filter(Boolean).join(', ');
+    return [
+      this.requiredCampaignImageContext(),
+      '',
+      'Campaign context:',
+      `Offer title: ${recommendation.title}`,
+      `Featured item/service: ${items || recommendation.title}`,
+      `Promo mechanic: ${recommendation.promoMechanic}`,
+      `Target segment: ${recommendation.targetSegment}`,
+      '',
+      'Specific creative direction:',
+      prompt,
+    ].join('\n');
+  }
+
+  private imageExtensionFromMimeType(mimeType: string): string {
+    if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
+    if (mimeType.includes('webp')) return 'webp';
+    return 'png';
   }
 
   private extractAnthropicText(data: any): string {
@@ -556,29 +672,29 @@ export class ActivationService {
     return items.length ? items.slice(0, 5) : fallback;
   }
 
-  private getPetHubAnnouncementsEndpoint(): string | null {
-    const explicitEndpoint = process.env.PETHUB_ANNOUNCEMENTS_ENDPOINT?.trim();
+  private getPetHubCampaignsEndpoint(): string | null {
+    const explicitEndpoint = process.env.PETHUB_CAMPAIGNS_ENDPOINT?.trim();
     if (explicitEndpoint) {
-      return this.normalizePetHubAnnouncementsEndpoint(explicitEndpoint);
+      return this.normalizePetHubCampaignsEndpoint(explicitEndpoint);
     }
     const baseUrl = process.env.PETHUB_API_BASE_URL?.trim();
     if (!baseUrl) {
       return null;
     }
-    return this.normalizePetHubAnnouncementsEndpoint(baseUrl);
+    return this.normalizePetHubCampaignsEndpoint(baseUrl);
   }
 
-  private normalizePetHubAnnouncementsEndpoint(value: string): string {
+  private normalizePetHubCampaignsEndpoint(value: string): string {
     const trimmed = value.replace(/\/+$/, '');
-    if (/\/api\/announcements$/i.test(trimmed)) {
+    if (/\/api\/campaigns$/i.test(trimmed)) {
       return trimmed;
     }
-    return `${trimmed}/api/announcements`;
+    return `${trimmed}/api/campaigns`;
   }
 
-  private async postPetHubAnnouncement(
+  private async postPetHubCampaign(
     endpoint: string,
-    payload: PetHubAnnouncementPayload,
+    payload: PetHubCampaignPayload,
     token?: string,
   ) {
     try {
@@ -596,7 +712,7 @@ export class ActivationService {
           error.response?.data,
         );
         const message = [
-          'PetHub announcement publish failed',
+          'PetHub campaign publish failed',
           status ? `(${status})` : null,
           responseMessage || error.message,
           `Endpoint: ${endpoint}`,
@@ -605,7 +721,7 @@ export class ActivationService {
           .join(' ');
         throw new BadGatewayException(message);
       }
-      throw new BadGatewayException('PetHub announcement publish failed');
+      throw new BadGatewayException('PetHub campaign publish failed');
     }
   }
 

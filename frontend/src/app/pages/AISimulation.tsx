@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search, Users, CalendarDays, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -289,6 +290,7 @@ function useDebouncedValue<T>(value: T, delayMs = 400): T {
 }
 
 export function AISimulation() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("bundle-simulator");
   const [discountValue, setDiscountValue] = useState([15]);
   const [trafficOptimizerTime, setTrafficOptimizerTime] = useState([14]); // 2 PM (14 in 24h format)
@@ -367,6 +369,23 @@ export function AISimulation() {
     { id: "scenario-builder", label: "Scenario Builder", icon: FlaskConical },
     { id: "activation-layer", label: "Activation Layer", icon: Megaphone },
   ];
+
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    const tab = typeof router.query.tab === "string" ? router.query.tab : "";
+    const knownTabs = [
+      "bundle-simulator",
+      "pricing-lab",
+      "traffic-optimizer",
+      "scenario-builder",
+      "activation-layer",
+    ];
+
+    if (knownTabs.includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [router.isReady, router.query.tab]);
 
   const handleBundleTimeChange = (value: number[]) => {
     setDataTime(value);

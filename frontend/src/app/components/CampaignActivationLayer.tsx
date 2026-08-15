@@ -40,16 +40,21 @@ interface Campaign {
     petHubBannerText: string;
     termsAndConditions: string[];
     pubmatPrompt: string;
+    campaignImageUrl?: string;
   };
   pethubPayload?: {
-    category: string;
-    tag: string;
-    meta: unknown;
     title: string;
+    subtitle?: string;
     description: string;
-    note: string;
-    highlight: string;
-    footer: string;
+    campaignImageUrl?: string;
+    campaign_image_url?: string;
+    ctaText?: string;
+    cta_text?: string;
+    promoMechanic?: string;
+    promo_mechanic?: string;
+    targetSegment?: string;
+    target_segment?: string;
+    source?: string;
     sortOrder?: number;
     isActive?: boolean;
     sort_order?: number;
@@ -280,15 +285,16 @@ export function CampaignActivationLayer() {
 
               {selectedCampaign.pethubPayload && (
                 <div className="border border-[#FFD9EC] rounded-xl p-3 bg-white">
-                  <div className="text-xs font-semibold text-[#F53799] mb-2">PetHub Announcement Payload</div>
+                  <div className="text-xs font-semibold text-[#F53799] mb-2">PetHub WOOF Offers Campaign Payload</div>
                   <div className="grid gap-2 text-xs text-[#223047]">
-                    <PayloadRow label="category" value={selectedCampaign.pethubPayload.category} />
-                    <PayloadRow label="tag" value={selectedCampaign.pethubPayload.tag} />
                     <PayloadRow label="title" value={selectedCampaign.pethubPayload.title} />
+                    <PayloadRow label="subtitle" value={selectedCampaign.pethubPayload.subtitle} />
                     <PayloadRow label="description" value={selectedCampaign.pethubPayload.description} />
-                    <PayloadRow label="note" value={selectedCampaign.pethubPayload.note} />
-                    <PayloadRow label="highlight" value={selectedCampaign.pethubPayload.highlight} />
-                    <PayloadRow label="footer" value={selectedCampaign.pethubPayload.footer} />
+                    <PayloadRow label="campaignImageUrl" value={selectedCampaign.pethubPayload.campaignImageUrl || selectedCampaign.pethubPayload.campaign_image_url || selectedCampaign.generatedAssets.campaignImageUrl} />
+                    <PayloadRow label="ctaText" value={selectedCampaign.pethubPayload.ctaText || selectedCampaign.pethubPayload.cta_text} />
+                    <PayloadRow label="promoMechanic" value={selectedCampaign.pethubPayload.promoMechanic || selectedCampaign.pethubPayload.promo_mechanic} />
+                    <PayloadRow label="targetSegment" value={selectedCampaign.pethubPayload.targetSegment || selectedCampaign.pethubPayload.target_segment} />
+                    <PayloadRow label="source" value={selectedCampaign.pethubPayload.source || "WOOF"} />
                   </div>
                 </div>
               )}
@@ -363,7 +369,7 @@ function AssetBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PayloadRow({ label, value }: { label: string; value: string }) {
+function PayloadRow({ label, value }: { label: string; value?: string }) {
   return (
     <div className="grid sm:grid-cols-[120px_1fr] gap-1 border-b border-[#FFF2FA] pb-2 last:border-b-0 last:pb-0">
       <span className="font-semibold text-[#F53799]">{label}</span>

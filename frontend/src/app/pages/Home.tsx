@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown } from "lucide-react";
+import { useRouter } from "next/router";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -7,7 +8,7 @@ import { toast } from "sonner";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { DataIngestion } from "../components/DataIngestion";
-import { getHomeOverview } from "../lib/api";
+import { generateActivationCampaign, getHomeOverview } from "../lib/api";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
 
@@ -93,18 +94,61 @@ interface HomeOverview {
   nextAction: HomeSuggestion | null;
 }
 
+const inferActionSector = (action: HomeSuggestion) => {
+  const text = `${action.title} ${action.trigger} ${action.reason}`.toLowerCase();
+  if (text.includes("service") || text.includes("groom")) return "Services";
+  if (text.includes("cafe") || text.includes("food") || text.includes("drink")) return "Cafe";
+  if (text.includes("retail") || text.includes("product") || text.includes("stock")) return "Retail";
+  return "Retail";
+};
+
+const getFeaturedItemName = (title: string) => {
+  const cleaned = title
+    .replace(/^promote\s+/i, "")
+    .replace(/\s*\([^)]*\)\s*$/g, "")
+    .trim();
+  return cleaned || title;
+};
+
+const buildActivationRecommendation = (action: HomeSuggestion) => {
+  const sector = inferActionSector(action);
+  const itemName = getFeaturedItemName(action.title);
+
+  return {
+    id: `home-next-action-${action.id}`,
+    source: "home_next_scheduled_action",
+    title: action.title,
+    reason: action.reason || action.detailedExplanation || "Generated from WOOF Home analytics.",
+    confidence: action.confidence || "Live recommendation",
+    promoMechanic: action.discount || "Featured PetHub placement",
+    expectedLift: action.expectedLift || "Projected lift unavailable",
+    targetSegment: `PetHub customers interested in ${sector.toLowerCase()}`,
+    triggerMetric: action.trigger || "Home next scheduled action",
+    featuredItems: [itemName],
+    analyticsContext: {
+      sector,
+      sourcePage: "Home",
+      recommendationType: "Next Scheduled Action",
+      trigger: action.trigger,
+      detailedExplanation: action.detailedExplanation,
+    },
+  };
+};
+
 const toNumber = (value: unknown, fallback = 0) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 };
 
 export function Home() {
+  const router = useRouter();
   const [timeRange, setTimeRange] = useState("today");
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [expandedSuggestions, setExpandedSuggestions] = useState<number[]>([]);
   const [homeOverview, setHomeOverview] = useState<HomeOverview | null>(null);
   const [homeLoading, setHomeLoading] = useState(false);
   const [homeError, setHomeError] = useState<string | null>(null);
+  const [isExecutingAction, setIsExecutingAction] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -275,7 +319,7 @@ export function Home() {
     window.dispatchEvent(new Event("simulateOffline"));
   };
 
-  const handleExecuteNow = () => {
+  const handleExecuteNow = async () => {
     const nextAction = homeOverview?.nextAction;
     if (!nextAction) {
       toast.info("No live action is currently queued.", {
@@ -283,7 +327,23 @@ export function Home() {
       });
       return;
     }
-    handleApprove(nextAction.id);
+
+    setIsExecutingAction(true);
+    try {
+      await generateActivationCampaign(buildActivationRecommendation(nextAction));
+      setApprovedSuggestions((prev) => (prev.includes(nextAction.id) ? prev : [...prev, nextAction.id]));
+      toast.success("Campaign draft created for PetHub.", {
+        description: "Review, queue, and publish it in the Activation Layer.",
+      });
+      router.push("/ai-simulation?tab=activation-layer");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to create campaign draft.";
+      toast.error("PetHub activation draft failed", {
+        description: message,
+      });
+    } finally {
+      setIsExecutingAction(false);
+    }
   };
 
   const handleRefreshData = () => {
@@ -896,9 +956,17 @@ export function Home() {
             {homeOverview?.nextAction ? "Queued from live data" : "Waiting for data"}
           </Badge>
 
-          <Button onClick={handleExecuteNow} className="w-full bg-[#F53799] hover:bg-[#D42A7D]">
-            <Play className="w-4 h-4 mr-2" />
-            Execute Now
+          <Button
+            onClick={handleExecuteNow}
+            disabled={isExecutingAction}
+            className="w-full bg-[#F53799] hover:bg-[#D42A7D]"
+          >
+            {isExecutingAction ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4 mr-2" />
+            )}
+            {isExecutingAction ? "Creating Draft..." : "Execute Now"}
           </Button>
         </div>
 

@@ -42,18 +42,19 @@ export class CampaignActivation {
     petHubBannerText: string;
     termsAndConditions: string[];
     pubmatPrompt: string;
+    campaignImageUrl?: string;
   };
 
   @Prop({ type: Object, default: {} })
   pethubPayload: {
-    category: string;
-    tag: string;
-    meta: string;
     title: string;
+    subtitle: string;
     description: string;
-    note: string;
-    highlight: string;
-    footer: string;
+    campaignImageUrl: string;
+    ctaText: string;
+    promoMechanic: string;
+    targetSegment: string;
+    source: string;
     sortOrder: number;
     isActive: boolean;
   };
