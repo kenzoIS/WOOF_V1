@@ -162,8 +162,11 @@ export function CampaignActivationLayer() {
         current.map((item) => item.campaignId === updated.campaignId ? updated : item),
       );
       setSelectedCampaign(updated);
+      const pethubId = result.pethubResponse?.campaign?.id || result.pethubResponse?.id;
       toast.success("Campaign sent to PetHub", {
-        description: "The announcement payload was published successfully.",
+        description: pethubId
+          ? `Created in PetHub WOOF Offers: ${pethubId}`
+          : "The WOOF Offers campaign payload was published successfully.",
       });
     } catch (error: any) {
       toast.error("PetHub publish failed", {

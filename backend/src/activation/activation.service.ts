@@ -207,7 +207,7 @@ export class ActivationService {
       );
     }
 
-    const campaign = await this.campaignModel.findOne({ campaignId }).lean().exec();
+    let campaign = await this.campaignModel.findOne({ campaignId }).lean().exec();
     if (!campaign) {
       throw new BadRequestException('Campaign not found');
     }
@@ -217,6 +217,7 @@ export class ActivationService {
       );
     }
 
+    campaign = await this.ensureCampaignHasImage(campaign);
     const payload = this.buildPublishPayload(campaign);
     const token = process.env.PETHUB_API_TOKEN;
     const response = await this.postPetHubCampaign(endpoint, payload, token);
@@ -229,6 +230,99 @@ export class ActivationService {
     return {
       campaign: updated,
       pethubResponse: response.data,
+    };
+  }
+
+  private async ensureCampaignHasImage(campaign: any) {
+    const existingUrl = this.resolveCampaignImageUrl(campaign);
+    if (existingUrl) {
+      return campaign;
+    }
+
+    const generatedAssets = {
+      ...(campaign.generatedAssets || {}),
+    } as GeneratedCampaignAssets;
+    const recommendation = this.rebuildRecommendationFromCampaign(campaign);
+    const campaignImageUrl = await this.generateAndStoreCampaignImage(
+      campaign.campaignId,
+      recommendation,
+      generatedAssets,
+    );
+
+    if (!campaignImageUrl) {
+      throw new BadGatewayException(
+        'Campaign image was not generated. Check GEMINI_API_KEY, GEMINI_IMAGE_MODEL, SUPABASE_CAMPAIGN_BUCKET, and that the Supabase bucket is public before publishing to PetHub.',
+      );
+    }
+
+    const updatedAssets = {
+      ...(campaign.generatedAssets || {}),
+      pubmatPrompt: generatedAssets.pubmatPrompt,
+      campaignImageUrl,
+    };
+    const updatedPayload = {
+      ...(campaign.pethubPayload || {}),
+      campaignImageUrl,
+    };
+
+    const updated = await this.campaignModel
+      .findOneAndUpdate(
+        { campaignId: campaign.campaignId },
+        {
+          generatedAssets: updatedAssets,
+          pethubPayload: updatedPayload,
+        },
+        { new: true },
+      )
+      .lean()
+      .exec();
+
+    return updated || {
+      ...campaign,
+      generatedAssets: updatedAssets,
+      pethubPayload: updatedPayload,
+    };
+  }
+
+  private resolveCampaignImageUrl(campaign: any): string {
+    return this.safeString(
+      campaign?.generatedAssets?.campaignImageUrl,
+      campaign?.pethubPayload?.campaignImageUrl ||
+        campaign?.pethubPayload?.campaign_image_url ||
+        '',
+    );
+  }
+
+  private rebuildRecommendationFromCampaign(
+    campaign: any,
+  ): ActivationRecommendation {
+    return {
+      id: String(campaign.sourceRecommendationId || campaign.campaignId),
+      source: String(campaign.source || 'campaign_activation'),
+      title: String(campaign.title || 'WOOF Recommended Campaign'),
+      featuredItems: Array.isArray(campaign.featuredItems)
+        ? campaign.featuredItems.map(String)
+        : [String(campaign.title || 'Happy Tails offer')],
+      promoMechanic: String(
+        campaign.promoMechanic ||
+          campaign.pethubPayload?.promoMechanic ||
+          'Featured PetHub placement',
+      ),
+      targetSegment: String(
+        campaign.targetSegment ||
+          campaign.pethubPayload?.targetSegment ||
+          'Pet owners',
+      ),
+      expectedLift: 'N/A',
+      confidence: 'N/A',
+      reason: String(
+        campaign.analyticsContext?.reason || 'Generated from WOOF analytics.',
+      ),
+      analyticsContext:
+        typeof campaign.analyticsContext === 'object' &&
+        campaign.analyticsContext
+          ? campaign.analyticsContext
+          : {},
     };
   }
 
@@ -502,9 +596,19 @@ export class ActivationService {
       const interaction = await ai.interactions.create({
         model: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image',
         input: prompt,
+        response_format: [
+          {
+            type: 'image',
+            mime_type: 'image/jpeg',
+            aspect_ratio: '16:9',
+          },
+        ],
       });
       const image = interaction.output_image;
       if (!image?.data) {
+        this.logger.warn(
+          `Gemini returned no campaign image data. Output text: ${interaction.output_text || 'none'}`,
+        );
         return null;
       }
 
