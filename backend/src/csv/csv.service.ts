@@ -46,13 +46,27 @@ function mapCategoryToSector(category: string): string {
   return match?.[1] || 'Retail';
 }
 
-// Detect channel from filename
-function detectChannel(filename: string): string {
+// Detect channel from filename and optionally file buffer content
+function detectChannel(filename: string, buffer?: Buffer): string {
   const lower = filename.toLowerCase();
-  if (lower.includes('pos')) return 'POS';
   if (lower.includes('shopee')) return 'Shopee';
   if (lower.includes('tiktok') || lower.includes('tiktokshop')) return 'TikTok Shop';
   if (lower.includes('pethub') || lower.includes('pet-hub')) return 'PetHub';
+  
+  if (buffer) {
+    const head = buffer.toString('utf-8', 0, 1024).toLowerCase();
+    if (head.includes('sku platform discount') || head.includes('tiktok')) {
+      return 'TikTok Shop';
+    }
+    if (head.includes('shopee') || head.includes('deal price')) {
+      return 'Shopee';
+    }
+    if (head.includes('pethub')) {
+      return 'PetHub';
+    }
+  }
+
+  if (lower.includes('pos')) return 'POS';
   return 'POS';
 }
 
@@ -82,9 +96,19 @@ export class CsvService {
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
-    const channel = normalizeUploadChannel(
-      userChannel || detectChannel(file.originalname),
+    let channel = normalizeUploadChannel(
+      userChannel || detectChannel(file.originalname, file.buffer),
     );
+
+    // Auto-correct if user accidentally left it as default POS but headers indicate otherwise
+    if (channel === 'POS' && file.buffer) {
+      const detected = detectChannel(file.originalname, file.buffer);
+      if (detected !== 'POS') {
+        this.logger.log(`Auto-corrected channel from POS to ${detected} based on file headers`);
+        channel = detected;
+      }
+    }
+
     const isExcel = file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls');
 
     let transactions: Partial<Transaction>[];
