@@ -7,6 +7,7 @@ import { EtlService } from './etl.service';
 import { DataValidationService } from './data-validation.service';
 import { ContextModule } from '../context/context.module';
 import { CommonModule } from '../common/common.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { CommonModule } from '../common/common.module';
     ]),
     ContextModule,
     CommonModule,
+    AnalyticsModule,
   ],
   controllers: [CsvController],
   providers: [CsvService, EtlService, DataValidationService],

@@ -4,7 +4,6 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { GoogleGenAI } from '@google/genai';
 import { InjectModel } from '@nestjs/mongoose';
 import axios from 'axios';
 import { Model } from 'mongoose';
@@ -251,7 +250,7 @@ export class ActivationService {
 
     if (!campaignImageUrl) {
       throw new BadGatewayException(
-        'Campaign image was not generated. Check GEMINI_API_KEY, GEMINI_IMAGE_MODEL, SUPABASE_CAMPAIGN_BUCKET, and that the Supabase bucket is public before publishing to PetHub.',
+        'Campaign image was not generated. Check SUPABASE_CAMPAIGN_BUCKET and that the Supabase bucket is public before publishing to PetHub.',
       );
     }
 
@@ -579,47 +578,24 @@ export class ActivationService {
     recommendation: ActivationRecommendation,
     generatedAssets: GeneratedCampaignAssets,
   ): Promise<string | null> {
-    const apiKey = process.env.GEMINI_API_KEY?.trim();
     const bucket = process.env.SUPABASE_CAMPAIGN_BUCKET?.trim();
-    if (!apiKey || !bucket) {
+    if (!bucket) {
       return null;
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
       const prompt = this.buildCampaignImagePrompt(
         recommendation,
         generatedAssets.pubmatPrompt,
       );
       generatedAssets.pubmatPrompt = prompt;
-
-      const interaction = await ai.interactions.create({
-        model: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image',
-        input: prompt,
-        response_format: [
-          {
-            type: 'image',
-            mime_type: 'image/jpeg',
-            aspect_ratio: '16:9',
-          },
-        ],
-      });
-      const image = interaction.output_image;
-      if (!image?.data) {
-        this.logger.warn(
-          `Gemini returned no campaign image data. Output text: ${interaction.output_text || 'none'}`,
-        );
-        return null;
-      }
-
-      const mimeType = image.mime_type || 'image/png';
-      const extension = this.imageExtensionFromMimeType(mimeType);
-      const path = `campaigns/${campaignId}.${extension}`;
-      const buffer = Buffer.from(image.data, 'base64');
+      const svg = this.buildCampaignPubmatSvg(recommendation, generatedAssets);
+      const path = `campaigns/${campaignId}.svg`;
+      const buffer = Buffer.from(svg, 'utf8');
       const { error } = await this.supabaseService.client.storage
         .from(bucket)
         .upload(path, buffer, {
-          contentType: mimeType,
+          contentType: 'image/svg+xml',
           upsert: true,
         });
       if (error) {
@@ -633,9 +609,141 @@ export class ActivationService {
       return data.publicUrl || null;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.warn(`Campaign image generation failed: ${message}`);
+      this.logger.warn(`Campaign template image generation failed: ${message}`);
       return null;
     }
+  }
+
+  private buildCampaignPubmatSvg(
+    recommendation: ActivationRecommendation,
+    generatedAssets: GeneratedCampaignAssets,
+  ): string {
+    const sector = this.inferCampaignSector(recommendation);
+    const icon = sector === 'Services' ? 'SV' : sector === 'Cafe' ? 'CF' : 'RT';
+    const titleLines = this.wrapSvgText(
+      generatedAssets.headline || recommendation.title,
+      22,
+      2,
+    );
+    const subtitleLines = this.wrapSvgText(
+      generatedAssets.shortCaption || recommendation.targetSegment,
+      42,
+      2,
+    );
+    const mechanicLines = this.wrapSvgText(recommendation.promoMechanic, 46, 2);
+    const featured = recommendation.featuredItems.filter(Boolean).slice(0, 2);
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="${this.escapeXml(generatedAssets.headline)}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff7fb"/>
+      <stop offset="48%" stop-color="#ffe2f2"/>
+      <stop offset="100%" stop-color="#e8fbff"/>
+    </linearGradient>
+    <linearGradient id="hot" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F53799"/>
+      <stop offset="100%" stop-color="#3AE4FA"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#223047" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="675" rx="48" fill="url(#bg)"/>
+  <circle cx="1045" cy="102" r="180" fill="#3AE4FA" opacity="0.18"/>
+  <circle cx="130" cy="604" r="220" fill="#F53799" opacity="0.12"/>
+  <rect x="64" y="58" width="1072" height="559" rx="42" fill="#ffffff" opacity="0.78" filter="url(#shadow)"/>
+  <rect x="96" y="91" width="102" height="102" rx="30" fill="url(#hot)"/>
+  <text x="147" y="156" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="900" fill="#ffffff">${icon}</text>
+  <text x="224" y="122" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="900" fill="#223047">Happy Tails PetHub</text>
+  <text x="224" y="158" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" fill="#F53799">WOOF Offers</text>
+  <rect x="96" y="226" width="178" height="48" rx="24" fill="#FFE1F1"/>
+  <text x="185" y="258" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#C21872">${this.escapeXml(sector.toUpperCase())}</text>
+  ${titleLines
+    .map(
+      (line, index) =>
+        `<text x="96" y="${342 + index * 66}" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="900" fill="#C21872">${this.escapeXml(line.toUpperCase())}</text>`,
+    )
+    .join('\n  ')}
+  ${subtitleLines
+    .map(
+      (line, index) =>
+        `<text x="100" y="${486 + index * 34}" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="700" fill="#596174">${this.escapeXml(line)}</text>`,
+    )
+    .join('\n  ')}
+  <rect x="96" y="548" width="330" height="58" rx="29" fill="url(#hot)"/>
+  <text x="261" y="585" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="900" fill="#ffffff">${this.escapeXml((generatedAssets.callToAction || 'View Offer').toUpperCase())}</text>
+  <g transform="translate(710 185)">
+    <circle cx="160" cy="125" r="120" fill="#FFE1F1"/>
+    <circle cx="108" cy="88" r="31" fill="#F53799"/>
+    <circle cx="210" cy="88" r="31" fill="#F53799"/>
+    <circle cx="80" cy="152" r="33" fill="#3AE4FA"/>
+    <circle cx="240" cy="152" r="33" fill="#3AE4FA"/>
+    <path d="M82 206 C110 136, 210 136, 238 206 C253 244, 223 277, 160 277 C97 277, 67 244, 82 206 Z" fill="#F53799"/>
+    <circle cx="134" cy="218" r="13" fill="#ffffff" opacity="0.94"/>
+    <circle cx="186" cy="218" r="13" fill="#ffffff" opacity="0.94"/>
+  </g>
+  <rect x="662" y="467" width="420" height="96" rx="28" fill="#223047"/>
+  ${mechanicLines
+    .map(
+      (line, index) =>
+        `<text x="690" y="${508 + index * 34}" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800" fill="#ffffff">${this.escapeXml(line)}</text>`,
+    )
+    .join('\n  ')}
+  ${
+    featured.length
+      ? `<text x="690" y="596" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800" fill="#3AE4FA">${this.escapeXml(featured.join(' + '))}</text>`
+      : ''
+  }
+</svg>`;
+  }
+
+  private inferCampaignSector(recommendation: ActivationRecommendation): string {
+    const text = [
+      recommendation.title,
+      recommendation.promoMechanic,
+      recommendation.targetSegment,
+      ...recommendation.featuredItems,
+    ]
+      .join(' ')
+      .toLowerCase();
+    if (text.includes('groom') || text.includes('service') || text.includes('boarding')) {
+      return 'Services';
+    }
+    if (text.includes('cafe') || text.includes('drink') || text.includes('treat') || text.includes('food')) {
+      return 'Cafe';
+    }
+    return 'Retail';
+  }
+
+  private wrapSvgText(value: string, maxChars: number, maxLines: number): string[] {
+    const words = this.safeString(value, 'Happy Tails Offer').split(/\s+/);
+    const lines: string[] = [];
+    let current = '';
+    for (const word of words) {
+      const next = current ? `${current} ${word}` : word;
+      if (next.length > maxChars && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+      if (lines.length === maxLines) break;
+    }
+    if (current && lines.length < maxLines) lines.push(current);
+    if (lines.length === maxLines && words.join(' ').length > lines.join(' ').length) {
+      lines[maxLines - 1] = this.limitText(lines[maxLines - 1], maxChars);
+    }
+    return lines;
+  }
+
+  private escapeXml(value: unknown): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
   }
 
   private requiredCampaignImageContext(): string {
@@ -673,12 +781,6 @@ export class ActivationService {
       'Specific creative direction:',
       prompt,
     ].join('\n');
-  }
-
-  private imageExtensionFromMimeType(mimeType: string): string {
-    if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
-    if (mimeType.includes('webp')) return 'webp';
-    return 'png';
   }
 
   private extractAnthropicText(data: any): string {

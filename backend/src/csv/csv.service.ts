@@ -10,6 +10,7 @@ import { SupabaseService } from '../common/supabase/supabase.service';
 import { Transaction, TransactionDocument } from './schemas/transaction.schema';
 import { EtlService } from './etl.service';
 import { DataValidationService } from './data-validation.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import {
@@ -77,6 +78,7 @@ export class CsvService {
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
     private etlService: EtlService,
     private dataValidationService: DataValidationService,
+    private analyticsService: AnalyticsService,
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
@@ -184,6 +186,7 @@ export class CsvService {
       this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
         this.logger.error('Background ETL process failed for upload ' + uploadId, err.stack);
       });
+      this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions);
     } catch (error) {
       await this.rollbackUpload(uploadId);
       if (error instanceof BadRequestException) {
@@ -292,6 +295,7 @@ export class CsvService {
       this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
         this.logger.error('Background ETL process failed for historical upload ' + uploadId, err.stack);
       });
+      this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions, [module]);
     } catch (error) {
       await this.rollbackUpload(uploadId);
       if (error instanceof BadRequestException) {
@@ -330,6 +334,54 @@ export class CsvService {
       },
       normalizedSeries,
     };
+  }
+
+  private warmForecastCacheAfterUpload(
+    uploadId: string,
+    transactions: Partial<Transaction>[],
+    forcedModules?: ForecastModule[],
+  ) {
+    const modules = forcedModules?.length
+      ? forcedModules
+      : Array.from(
+          new Set(
+            transactions
+              .map((transaction) => transaction.sector)
+              .filter((sector): sector is ForecastModule =>
+                sector === 'Cafe' || sector === 'Services',
+              ),
+          ),
+        );
+
+    if (modules.length === 0) return;
+
+    setTimeout(() => {
+      Promise.allSettled(
+        modules.map((module) =>
+          this.analyticsService.getForecast(module, {
+            days: module === 'Cafe' ? '14' : '30',
+            forceRefresh: 'true',
+          }),
+        ),
+      ).then((results) => {
+        results.forEach((result, index) => {
+          const module = modules[index];
+          if (result.status === 'rejected') {
+            this.logger.warn(
+              `Forecast cache warmup failed for ${module} after upload ${uploadId}: ${
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(result.reason)
+              }`,
+            );
+          } else {
+            this.logger.log(
+              `Forecast cache warmed for ${module} after upload ${uploadId}.`,
+            );
+          }
+        });
+      });
+    }, 1000);
   }
 
   private parseFlexibleCsv(
