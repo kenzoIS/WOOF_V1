@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search, Users, CalendarDays, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -299,6 +299,7 @@ export function AISimulation() {
   const [confidenceLevel, setConfidenceLevel] = useState([60]);
   const [fpGrowthTime, setFpGrowthTime] = useState([13]); // Time slider for FP-Growth
   const [crossSellData, setCrossSellData] = useState<CrossSellResponse | null>(null);
+  const [crossSellDataAllDay, setCrossSellDataAllDay] = useState<CrossSellResponse | null>(null);
   const [crossSellLoading, setCrossSellLoading] = useState(false);
   const [crossSellError, setCrossSellError] = useState<string | null>(null);
   const [bundleDiscountOverrides, setBundleDiscountOverrides] = useState<Record<string, number>>({});
@@ -316,10 +317,14 @@ export function AISimulation() {
   const [pricingCatalogLoading, setPricingCatalogLoading] = useState(false);
   const [pricingCatalogError, setPricingCatalogError] = useState<string | null>(null);
   const [selectedPricingItemName, setSelectedPricingItemName] = useState<string | null>(null);
+  const [expandedSectors, setExpandedSectors] = useState<Record<string, boolean>>({});
+  const toggleSector = (sectorName: string) => setExpandedSectors(prev => ({ ...prev, [sectorName]: !prev[sectorName] }));
   const [trafficOptimizerData, setTrafficOptimizerData] = useState<TrafficOptimizerResponse | null>(null);
+  const [trafficOptimizerDataAllDay, setTrafficOptimizerDataAllDay] = useState<TrafficOptimizerResponse | null>(null);
   const [trafficOptimizerLoading, setTrafficOptimizerLoading] = useState(false);
   const [trafficOptimizerError, setTrafficOptimizerError] = useState<string | null>(null);
   const [erlangStaffing, setErlangStaffing] = useState<Record<string, number>>({});
+  const [staffingDayFilter, setStaffingDayFilter] = useState("All");
 
   const handleOpenDrawer = (candidate: DrawerBundleCandidate) => {
     setSelectedCandidateForDrawer(candidate);
@@ -493,6 +498,23 @@ export function AISimulation() {
         }
       });
 
+    getCrossSell({
+      minSupport: (debouncedSupportThreshold / 100).toFixed(2),
+      minConfidence: (debouncedConfidenceLevel / 100).toFixed(2),
+      minLift: "1.20",
+      maxBundleCandidates: "20",
+      hour: "all",
+      sector: "all",
+      dateStart: selectedHeaderRange.start,
+      dateEnd: selectedHeaderRange.end,
+    })
+      .then((result: CrossSellResponse) => {
+        if (!cancelled) {
+          setCrossSellDataAllDay(result);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
     };
@@ -567,6 +589,18 @@ export function AISimulation() {
         }
       });
 
+    getTrafficOptimizer({
+      hour: "all",
+      dateStart: selectedHeaderRange.start,
+      dateEnd: selectedHeaderRange.end,
+    })
+      .then((result) => {
+        if (!cancelled) {
+          setTrafficOptimizerDataAllDay(result);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
     };
@@ -579,10 +613,15 @@ export function AISimulation() {
   useEffect(() => {
     let cancelled = false;
     const fetchErlang = async () => {
-      const getDemandLevel = (value: number) => {
-        if (value >= 42) return "High";
-        if (value >= 28) return "Medium";
-        return "Low";
+      const getDemandLevelForSector = (sectorName: string, value: number) => {
+        const normalized = sectorName.toLowerCase();
+        if (normalized === 'cafe') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
+        if (normalized === 'retail') return value >= 10 ? 'High' : value >= 5 ? 'Medium' : 'Low';
+        if (normalized === 'services') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
+        if (normalized === 'grooming') return value >= 4 ? 'High' : value >= 3 ? 'Medium' : 'Low';
+        if (normalized === 'pet hotel') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+        if (normalized === 'bday pawty') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+        return value >= 42 ? 'High' : value >= 28 ? 'Medium' : 'Low';
       };
 
       const getFallbackStaff = (sector: string, level: string) => {
@@ -620,9 +659,9 @@ export function AISimulation() {
                 serviceTime: sector.serviceTime, 
                 targetWait: 5 
               });
-              recommendations[sector.name] = res.recommendedStaff || getFallbackStaff(sector.name, getDemandLevel(peakVisits));
+              recommendations[sector.name] = res.recommendedStaff || getFallbackStaff(sector.name, getDemandLevelForSector(sector.name, peakVisits));
             } catch (err) {
-              recommendations[sector.name] = getFallbackStaff(sector.name, getDemandLevel(peakVisits));
+              recommendations[sector.name] = getFallbackStaff(sector.name, getDemandLevelForSector(sector.name, peakVisits));
             }
           } else {
             recommendations[sector.name] = 1;
@@ -977,18 +1016,49 @@ export function AISimulation() {
   }, [bundleCategoryFilter, bundleCategoryOptions]);
 
   const proximityRecommendations = useMemo(() => {
-    const valid = allBundlePredictions.filter((b) => !isExcludedPair(b.itemA, b.itemB, b.bundleArchetype));
-    const pool = valid.length > 0 ? valid : allBundlePredictions;
+    if (!crossSellDataAllDay) return [];
+
+    const candidates = crossSellDataAllDay.bundleCandidates || [];
+    const allDayBundles = candidates.map((candidate) => {
+      const pA = candidate.itemAPrice || 0;
+      const pB = candidate.itemBPrice || 0;
+      const sectors = [
+        firstSector(candidate.antecedentSectors),
+        firstSector(candidate.consequentSectors),
+      ];
+      return {
+        bundle: formatPair(candidate.anchorItem, candidate.bundleItem),
+        itemA: candidate.anchorItem,
+        itemB: candidate.bundleItem,
+        confidence: Math.round((candidate.confidence || 0) * 100),
+        lift: candidate.lift || 0,
+        score: (candidate as any).synergyScore !== undefined && (candidate as any).synergyScore !== null ? Math.round((candidate as any).synergyScore) : Math.round((candidate.opportunityScore || 0) * 100),
+        sectors,
+        sectorPair: formatSectorPair(sectors),
+        regularPrice: candidate.regularPrice || (pA + pB),
+        bundlePrice: candidate.bundlePrice || (pA + pB) * 0.85,
+        savings: candidate.savings || ((pA + pB) * 0.15),
+        bundleArchetype: (candidate as any).bundleArchetype,
+        synergyScore: (candidate as any).synergyScore
+      };
+    });
+
+    const valid = allDayBundles.filter((b) => 
+      !isExcludedPair(b.itemA, b.itemB, b.bundleArchetype) && 
+      b.sectors[0] === "Retail" && 
+      b.sectors[1] === "Retail"
+    );
+    const pool = valid.length > 0 ? valid : allDayBundles.filter(b => b.sectors[0] === "Retail" && b.sectors[1] === "Retail");
+    
     return pool.slice(0, 6).map((bundle, index) => {
       const color =
         sectorColors[bundle.sectors[0]] ||
         sectorColors[bundle.sectors[1]] ||
         sectorColors.unknown;
-      const sameSector =
-        bundle.sectors[0] !== "unknown" && bundle.sectors[0] === bundle.sectors[1];
-      const advice = sameSector
-        ? `Place these ${bundle.sectorPair.toLowerCase()} offers in the same shelf, menu, or service zone to increase discovery inside an already active category.`
-        : `Place ${bundle.bundle} near the transition between ${bundle.sectorPair} touchpoints so the stronger purchase intent can expose the slower-moving offer.`;
+      
+      const confidenceStr = bundle.confidence ? `${bundle.confidence}%` : "High";
+      const liftStr = bundle.lift ? `${bundle.lift.toFixed(1)}x` : "significant";
+      const advice = `Place "${bundle.itemA}" and "${bundle.itemB}" on the same or adjacent retail shelves. Customers who buy ${bundle.itemA} have a ${confidenceStr} probability of buying ${bundle.itemB}, representing a ${liftStr} lift over random chance. Physical proximity will capture this existing purchase intent and increase basket size.`;
 
       const synergyVal = bundle.synergyScore !== undefined && bundle.synergyScore !== null
         ? Math.round(bundle.synergyScore)
@@ -1006,7 +1076,7 @@ export function AISimulation() {
         savings: bundle.savings,
       };
     });
-  }, [allBundlePredictions]);
+  }, [crossSellDataAllDay]);
 
   // Live Behavioral Web Network Data - Responsive to AI Controls
   const networkNodes = useMemo(() => {
@@ -1385,9 +1455,9 @@ export function AISimulation() {
       : null;
 
   const trafficSectors = [
-    { name: "Services", color: "#3AE4FA", placeholderStaff: 2 },
-    { name: "Cafe", color: "#F53799", placeholderStaff: 2 },
-    { name: "Retail", color: "#F59E0B", placeholderStaff: 1 },
+    { name: "Cafe", color: "#F59E0B", serviceTime: 20 },
+    { name: "Retail", color: "#06B6D4", serviceTime: 10 },
+    { name: "Services", color: "#F53799", serviceTime: 35 },
   ];
   const trafficColumns = useMemo(
     () => trafficOptimizerData?.columns || [],
@@ -1403,10 +1473,15 @@ export function AISimulation() {
     High: { bg: "bg-red-50", text: "text-red-700", label: "High" },
   };
 
-  const getDemandLevel = (value: number): DemandLevel => {
-    if (value >= 42) return "High";
-    if (value >= 28) return "Medium";
-    return "Low";
+  const getDemandLevelForSector = (sectorName: string, value: number): DemandLevel => {
+    const normalized = sectorName.toLowerCase();
+    if (normalized === 'cafe') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
+    if (normalized === 'retail') return value >= 10 ? 'High' : value >= 5 ? 'Medium' : 'Low';
+    if (normalized === 'services') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
+    if (normalized === 'grooming') return value >= 4 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+    if (normalized === 'pet hotel') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+    if (normalized === 'bday pawty') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+    return value >= 42 ? 'High' : value >= 28 ? 'Medium' : 'Low';
   };
 
   const getRequiredStaff = (sector: string, level: string) => {
@@ -1424,6 +1499,39 @@ export function AISimulation() {
     return 1;
   };
 
+  const STAFF_SCHEDULE = [
+    { name: "K-ann Sigue", sectors: ["Retail"], startHour: 7.5, endHour: 14.5, offDays: [0], hourlyRate: 450/7, capacityPerHour: 0, commission: false },
+    { name: "Evangeline Alano", sectors: ["Services"], startHour: 7.5, endHour: 19, offDays: [], hourlyRate: 650/11.5, capacityPerHour: 13/11.5, commission: true },
+    { name: "Jason Dedios", sectors: ["Services"], startHour: 8.5, endHour: 17.5, offDays: [2], hourlyRate: 800/9, capacityPerHour: 12/9, commission: true },
+    { name: "Angelito De Dios", sectors: ["Services"], startHour: 7.5, endHour: 19.5, offDays: [], hourlyRate: 650/12, capacityPerHour: 12/12, commission: true },
+    { name: "Precey Mae Dedios", sectors: ["Services"], startHour: 0, endHour: 24, offDays: [], hourlyRate: 450/24, capacityPerHour: 0, commission: true },
+    { name: "Danya Mae Caraig", sectors: ["Cafe", "Retail"], startHour: 11, endHour: 19, offDays: [3, 6], hourlyRate: 450/8, capacityPerHour: 0, commission: false },
+    { name: "Maica Adorno Dignos", sectors: ["Services"], startHour: 8, endHour: 17, offDays: [3], hourlyRate: 450/9, capacityPerHour: 0, commission: false },
+    { name: "Kate Ricamara", sectors: ["Cafe", "Retail"], startHour: 8, endHour: 17, offDays: [3], hourlyRate: 450/9, capacityPerHour: 0, commission: false },
+  ];
+
+  const getScheduledStaff = (sectorName: string, hour: number, dayFilter: string) => {
+    let dayOfWeek: number | null = null;
+    if (dayFilter !== "All") {
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const index = days.findIndex(d => d === dayFilter);
+      if (index !== -1) dayOfWeek = index;
+    }
+    
+    let count = 0;
+    STAFF_SCHEDULE.forEach(staff => {
+      if (staff.sectors.includes(sectorName)) {
+        if (dayOfWeek !== null && staff.offDays.includes(dayOfWeek)) {
+          return;
+        }
+        if (hour >= staff.startHour && hour < staff.endHour) {
+          count++;
+        }
+      }
+    });
+    return count;
+  };
+
   const sectorTrafficForecast = useMemo(() => {
     const trafficRowsBySector = new Map(
       (trafficOptimizerData?.sectors || []).map((sector) => [sector.sector, sector]),
@@ -1437,9 +1545,9 @@ export function AISimulation() {
       const dayForecasts = trafficColumns.map((column) => {
         const trafficValue = valuesByKey.get(column.key);
         const visits = Number(trafficValue?.visits || 0);
-        const level = getDemandLevel(visits);
+        const level = getDemandLevelForSector(sector.name, visits);
         const requiredStaff = getRequiredStaff(sector.name, level);
-        const scheduledStaff = sector.placeholderStaff;
+        const scheduledStaff = getScheduledStaff(sector.name, debouncedTrafficOptimizerTime, staffingDayFilter);
         const staffDelta = requiredStaff - scheduledStaff;
 
         return {
@@ -1456,70 +1564,188 @@ export function AISimulation() {
         };
       });
 
+      const subSectors = trafficRow?.subSectors?.map(sub => {
+        const subValuesByKey = new Map((sub.values || []).map((value) => [value.key, value]));
+        const subForecasts = trafficColumns.map((column) => {
+          const trafficValue = subValuesByKey.get(column.key);
+          const visits = Number(trafficValue?.visits || 0);
+          const level = getDemandLevelForSector(sub.sector, visits);
+          return {
+            day: column.dayLabel,
+            label: column.label,
+            key: column.key,
+            date: column.date,
+            predicted: visits,
+            actual: visits,
+            level,
+          };
+        });
+        return {
+          name: sub.sector,
+          forecasts: subForecasts,
+          totalVisits: sub.totalVisits,
+          peakVisits: sub.peakVisits,
+          averageVisits: sub.averageVisits,
+        };
+      });
+
       return {
         ...sector,
         forecasts: dayForecasts,
         totalVisits: trafficRow?.totalVisits || 0,
         peakVisits: trafficRow?.peakVisits || 0,
         averageVisits: trafficRow?.averageVisits || 0,
+        subSectors,
       };
     });
-  }, [trafficOptimizerData, trafficColumns]);
+  }, [trafficOptimizerData, trafficColumns, debouncedTrafficOptimizerTime, staffingDayFilter]);
 
   const selectedTimeStaffPlan = sectorTrafficForecast.map((sector) => {
-    const peakForecast = sector.forecasts.reduce(
-      (peak, forecast) => (forecast.predicted > peak.predicted ? forecast : peak),
-      sector.forecasts[0] || {
-        day: "",
-        label: "No matching transactions",
-        key: "empty",
-        predicted: 0,
-        actual: 0,
-        level: "Low",
-        requiredStaff: 1,
-        scheduledStaff: sector.placeholderStaff,
-        staffDelta: 1 - sector.placeholderStaff,
-      },
-    );
+    let targetForecast;
+    const scheduledStaff = getScheduledStaff(sector.name, debouncedTrafficOptimizerTime, staffingDayFilter);
 
-    const requiredStaff = erlangStaffing[sector.name] || peakForecast.requiredStaff;
+    if (staffingDayFilter === "All") {
+      const totalPredicted = sector.forecasts.reduce((sum, f) => sum + f.predicted, 0);
+      const avgPredicted = sector.forecasts.length > 0 ? Math.round(totalPredicted / sector.forecasts.length) : 0;
+      const level = getDemandLevelForSector(sector.name, avgPredicted);
+      const requiredStaff = getRequiredStaff(sector.name, level);
+      
+      targetForecast = {
+        day: "Average",
+        label: "Average across period",
+        key: "average",
+        date: "N/A",
+        predicted: avgPredicted,
+        actual: avgPredicted,
+        level,
+        requiredStaff,
+        scheduledStaff,
+        staffDelta: requiredStaff - scheduledStaff,
+      };
+    } else {
+      const dayAbbrev = staffingDayFilter.substring(0, 3);
+      const specificDayForecast = sector.forecasts.find(f => f.day.startsWith(dayAbbrev));
+      
+      if (specificDayForecast) {
+        targetForecast = specificDayForecast;
+      } else {
+        targetForecast = {
+          day: staffingDayFilter,
+          label: "No matching transactions",
+          key: "empty",
+          predicted: 0,
+          actual: 0,
+          level: "Low",
+          requiredStaff: 1,
+          scheduledStaff,
+          staffDelta: 1 - scheduledStaff,
+        };
+      }
+    }
+
+    const requiredStaff = erlangStaffing[sector.name] || targetForecast.requiredStaff;
 
     return {
       sector: sector.name,
       color: sector.color,
-      ...peakForecast,
+      ...targetForecast,
       requiredStaff,
-      staffDelta: requiredStaff - peakForecast.scheduledStaff,
+      staffDelta: requiredStaff - targetForecast.scheduledStaff,
     };
   });
 
+  const liveCostAndCapacity = useMemo(() => {
+    let dayOfWeek: number | null = null;
+    if (staffingDayFilter !== "All") {
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const index = days.findIndex(d => d === staffingDayFilter);
+      if (index !== -1) dayOfWeek = index;
+    }
+
+    let totalHourlyCost = 0;
+    let servicesCapacityPerHour = 0;
+    let activeCommissionStaff = 0;
+
+    STAFF_SCHEDULE.forEach(staff => {
+      if (dayOfWeek !== null && staff.offDays.includes(dayOfWeek)) return;
+      
+      if (debouncedTrafficOptimizerTime >= staff.startHour && debouncedTrafficOptimizerTime < staff.endHour) {
+        totalHourlyCost += staff.hourlyRate;
+        servicesCapacityPerHour += staff.capacityPerHour;
+        if (staff.commission) activeCommissionStaff++;
+      }
+    });
+
+    let totalPredictedVisits = 0;
+    let servicesPredictedVisits = 0;
+
+    selectedTimeStaffPlan.forEach(plan => {
+      totalPredictedVisits += plan.predicted;
+      if (plan.sector === "Services") {
+        servicesPredictedVisits = plan.predicted;
+      }
+    });
+
+    const costPerVisit = totalPredictedVisits > 0 ? (totalHourlyCost / totalPredictedVisits) : totalHourlyCost;
+
+    let groomingStatus = "Stable";
+    let groomingMessage = "Grooming capacity meets predicted traffic demand.";
+    let groomingColor = "text-green-700 bg-green-50";
+    
+    if (servicesCapacityPerHour > 0) {
+      if (servicesPredictedVisits > servicesCapacityPerHour * 1.5) {
+        groomingStatus = "Severe Bottleneck";
+        groomingMessage = `Warning: Predicted ${servicesPredictedVisits} visits exceeds physical max capacity (~${servicesCapacityPerHour.toFixed(1)} slots/hr).`;
+        groomingColor = "text-red-700 bg-red-50";
+      } else if (servicesPredictedVisits > servicesCapacityPerHour) {
+        groomingStatus = "Warning";
+        groomingMessage = `Predicted ${servicesPredictedVisits} visits exceeds physical max capacity (~${servicesCapacityPerHour.toFixed(1)} slots/hr).`;
+        groomingColor = "text-yellow-700 bg-yellow-50";
+      } else if (servicesPredictedVisits < servicesCapacityPerHour * 0.5) {
+        groomingStatus = "Underutilized";
+        groomingMessage = `High idle time. Scheduled capacity (~${servicesCapacityPerHour.toFixed(1)} slots/hr) heavily outweighs demand.`;
+        groomingColor = "text-[#F53799] bg-[#FFF7FB]";
+      }
+    } else {
+       groomingStatus = "No Groomers on Duty";
+       groomingMessage = "No grooming staff are scheduled for this hour.";
+       groomingColor = "text-[#223047] bg-gray-100";
+    }
+
+    return {
+      totalHourlyCost,
+      servicesCapacityPerHour,
+      activeCommissionStaff,
+      totalPredictedVisits,
+      servicesPredictedVisits,
+      costPerVisit,
+      groomingStatus,
+      groomingMessage,
+      groomingColor
+    };
+  }, [debouncedTrafficOptimizerTime, staffingDayFilter, selectedTimeStaffPlan]);
+
   const totalPredictedTraffic = Math.round(trafficOptimizerData?.totalVisits ||
     sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0));
-  const highDemandSectors = selectedTimeStaffPlan.filter((sector) => sector.level === "High").length;
+  const highDemandSectorsList = selectedTimeStaffPlan.filter((sector) => sector.level === "High").map(s => s.sector);
+  const highDemandSectors = highDemandSectorsList.length > 0 ? highDemandSectorsList.join(", ") : "None";
   const totalScheduledPlaceholderStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.scheduledStaff, 0);
   const totalRecommendedStaff = selectedTimeStaffPlan.reduce((sum, sector) => sum + sector.requiredStaff, 0);
 
   const formatTrafficVisitValue = (value: number) =>
     Math.round(value).toString();
 
-  // Traffic volume based on the Header Filter and selected time slot
+  // Traffic volume based on the Header Filter (overall, all hours)
   const trafficPrediction = useMemo(() => {
-    return trafficColumns.map((column, columnIndex) => {
-      const sectorTotals = sectorTrafficForecast.map((sector) => sector.forecasts[columnIndex]);
+    if (!trafficOptimizerDataAllDay) return [];
+    return (trafficOptimizerDataAllDay.columns || []).map((column: any, columnIndex: number) => {
+      const sectorTotals = (trafficOptimizerDataAllDay.sectors || []).map((sector: any) => sector.values[columnIndex]);
       return {
         day: column.label,
-        visits: sectorTotals.reduce((sum, item) => sum + (item?.predicted || 0), 0),
+        visits: sectorTotals.reduce((sum: number, val: any) => sum + Number(val?.visits || 0), 0)
       };
     });
-  }, [sectorTrafficForecast, trafficColumns]);
-
-  // Past Happy Hour Performance
-  const happyHourHistory = [
-    { date: "Apr 12", time: "3-4 PM", predicted: "+15%", actual: "+18%", result: "✓", lift: 18 },
-    { date: "Apr 10", time: "2-3 PM", predicted: "+12%", actual: "+14%", result: "✓", lift: 14 },
-    { date: "Apr 8", time: "4-5 PM", predicted: "+20%", actual: "+16%", result: "~", lift: 16 },
-    { date: "Apr 6", time: "3-4 PM", predicted: "+18%", actual: "+22%", result: "✓", lift: 22 },
-  ];
+  }, [trafficOptimizerDataAllDay]);
 
   const extractForecastTotals = (run?: ForecastRun | any | null) => {
     const forecastRows = Array.isArray(run?.forecast) ? run.forecast.slice(0, 7) : [];
@@ -1740,7 +1966,7 @@ export function AISimulation() {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <Badge className="bg-[#5CE1E6] text-white hover:bg-[#5CE1E6] px-3 md:px-4 py-1 text-xs md:text-sm">
+          <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-3 md:px-4 py-1 text-xs md:text-sm">
             AI Laboratory
           </Badge>
           <Button onClick={handleRunSimulation} className="bg-[#F53799] hover:bg-[#D42A7D] gap-2 text-sm md:text-base">
@@ -1762,23 +1988,23 @@ export function AISimulation() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
-                  <span className="truncate">Discovered Item Bundles</span>
+                  <span className="truncate">Active Rules</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <HelpCircle className="w-3 h-3 text-[#F53799] cursor-pointer" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-[220px]">
-                      Number of statistically validated product combination rules automatically extracted from customer transaction history.
+                      Number of statistically validated association rules detected within the selected timeframe.
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <div className="text-base md:text-xl font-bold text-[#223047]">{rules.length}</div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">{networkConnections.length}</div>
               </div>
             </div>
 
             {/* Bundle Candidates */}
             <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
                 <Target className="w-4 h-4 md:w-5 md:h-5 text-white" />
               </div>
               <div className="flex-1 min-w-0">
@@ -1786,14 +2012,14 @@ export function AISimulation() {
                   <span className="truncate">Bundle Candidates</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <HelpCircle className="w-3 h-3 text-[#3AE4FA] cursor-pointer" />
+                      <HelpCircle className="w-3 h-3 text-[#06B6D4] cursor-pointer" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-[220px]">
                       High-potential product pairs combining popular fast-sellers with slower-moving offers to boost revenue.
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <div className="text-base md:text-xl font-bold text-[#223047]">{bundleCandidates.length}</div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">{allBundlePredictions.length}</div>
               </div>
             </div>
 
@@ -1804,38 +2030,42 @@ export function AISimulation() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
-                  <span className="truncate">Avg Sales Boost (Lift)</span>
+                  <span className="truncate">Avg Bundle Lift</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <HelpCircle className="w-3 h-3 text-[#F53799] cursor-pointer" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-[240px]">
-                      Lift measures how much more frequently two items are bought together compared to random chance. 2.0x means double the normal co-purchase probability.
+                      The average lift factor for currently identified bundle opportunities.
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <div className="text-base md:text-xl font-bold text-[#223047]">{avgRuleLift.toFixed(2)}x</div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">
+                  {(allBundlePredictions.length > 0 ? allBundlePredictions.reduce((sum, b) => sum + b.lift, 0) / allBundlePredictions.length : 0).toFixed(2)}x
+                </div>
               </div>
             </div>
 
             {/* Avg Historical Confidence */}
             <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
                 <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-white" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1 text-xs text-[#223047] opacity-70">
-                  <span className="truncate">Avg Historical Confidence</span>
+                  <span className="truncate">Avg Confidence</span>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <HelpCircle className="w-3 h-3 text-[#3AE4FA] cursor-pointer" />
+                      <HelpCircle className="w-3 h-3 text-[#06B6D4] cursor-pointer" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-[220px]">
-                      Historical confidence measures how often Item B appeared in uploaded baskets that contained Item A.
+                      The average confidence percentage across all identified bundle opportunities.
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <div className="text-base md:text-xl font-bold text-[#223047]">{formatPercent(avgRuleConfidence)}</div>
+                <div className="text-base md:text-xl font-bold text-[#223047]">
+                  {Math.round(allBundlePredictions.length > 0 ? allBundlePredictions.reduce((sum, b) => sum + b.confidence, 0) / allBundlePredictions.length : 0)}%
+                </div>
               </div>
             </div>
           </div>
@@ -1889,7 +2119,7 @@ export function AISimulation() {
                   Live transaction stream feeding AI pattern detection models for {selectedHeaderRangeLabel}
                 </p>
               </div>
-              <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs md:text-sm">
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm">
                 Real-Time Data
               </Badge>
             </div>
@@ -1908,7 +2138,7 @@ export function AISimulation() {
                   max={19}
                   min={7}
                   step={1}
-                  className="[&_[role=slider]]:bg-gradient-to-r [&_[role=slider]]:from-[#F53799] [&_[role=slider]]:to-[#3AE4FA] [&_[role=slider]]:w-6 [&_[role=slider]]:h-6 [&_[role=slider]]:border-4 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-lg"
+                  className="[&_[role=slider]]:bg-gradient-to-r [&_[role=slider]]:from-[#F53799] [&_[role=slider]]:to-[#06B6D4] [&_[role=slider]]:w-6 [&_[role=slider]]:h-6 [&_[role=slider]]:border-4 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-lg"
                 />
                 <div className="flex justify-between mt-3 text-xs text-[#223047] opacity-60">
                   <span>07:00</span>
@@ -1943,7 +2173,7 @@ export function AISimulation() {
                     />
                     <Bar dataKey="transactions" radius={[6, 6, 0, 0]}>
                       {transactionVolumeData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.selected ? "#F53799" : "#3AE4FA"} />
+                        <Cell key={`cell-${index}`} fill={entry.selected ? "#F53799" : "#06B6D4"} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -1953,7 +2183,7 @@ export function AISimulation() {
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs md:text-sm font-bold text-[#223047]">Top Product Co-Purchases</h3>
-                  <Badge variant="outline" className="text-xs border-[#3AE4FA] text-[#3AE4FA]">
+                  <Badge variant="outline" className="text-xs border-[#06B6D4] text-[#06B6D4]">
                     {formatHour(dataTime[0])} Window
                   </Badge>
                 </div>
@@ -1971,7 +2201,7 @@ export function AISimulation() {
                       </div>
                       <div className="h-2 bg-[#FFD9EC] rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-[#F53799] to-[#3AE4FA] transition-all"
+                          className="h-full bg-gradient-to-r from-[#F53799] to-[#06B6D4] transition-all"
                           style={{ width: `${(item.frequency / maxCoPurchaseFrequency) * 100}%` }}
                         />
                       </div>
@@ -2007,7 +2237,7 @@ export function AISimulation() {
                     AI Learning Active
                   </div>
                 </Badge>
-                <Badge variant="outline" className="border-[#3AE4FA] text-[#3AE4FA] px-3 md:px-4 py-1.5 text-xs">
+                <Badge variant="outline" className="border-[#06B6D4] text-[#06B6D4] px-3 md:px-4 py-1.5 text-xs">
                   {networkNodes.length} Active Nodes
                 </Badge>
               </div>
@@ -2031,7 +2261,7 @@ export function AISimulation() {
                       </filter>
                       <linearGradient key="lineGradient-gradient" id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
                         <stop offset="0%" stopColor="#F53799" />
-                        <stop offset="100%" stopColor="#3AE4FA" />
+                        <stop offset="100%" stopColor="#06B6D4" />
                       </linearGradient>
                     </defs>
 
@@ -2172,15 +2402,15 @@ export function AISimulation() {
                   <div className="text-[9px] md:text-[10px] font-bold text-[#223047] mb-1.5 md:mb-2 tracking-wider">CONNECTION STRENGTH</div>
                   <div className="space-y-1 md:space-y-1.5">
                     <div className="flex items-center gap-1.5 md:gap-2">
-                      <div className="w-6 md:w-8 h-1 bg-gradient-to-r from-[#F53799] to-[#3AE4FA] rounded-full opacity-40" />
+                      <div className="w-6 md:w-8 h-1 bg-gradient-to-r from-[#F53799] to-[#06B6D4] rounded-full opacity-40" />
                       <span className="text-[9px] md:text-[10px] text-[#223047]">Weak (&lt;70%)</span>
                     </div>
                     <div className="flex items-center gap-1.5 md:gap-2">
-                      <div className="w-6 md:w-8 h-1.5 bg-gradient-to-r from-[#F53799] to-[#3AE4FA] rounded-full opacity-60" />
+                      <div className="w-6 md:w-8 h-1.5 bg-gradient-to-r from-[#F53799] to-[#06B6D4] rounded-full opacity-60" />
                       <span className="text-[9px] md:text-[10px] text-[#223047]">Medium (70-85%)</span>
                     </div>
                     <div className="flex items-center gap-1.5 md:gap-2">
-                      <div className="w-6 md:w-8 h-2.5 bg-gradient-to-r from-[#F53799] to-[#3AE4FA] rounded-full opacity-90 shadow-lg" />
+                      <div className="w-6 md:w-8 h-2.5 bg-gradient-to-r from-[#F53799] to-[#06B6D4] rounded-full opacity-90 shadow-lg" />
                       <span className="text-[9px] md:text-[10px] text-[#223047] font-semibold">Strong (&gt;85%)</span>
                     </div>
                   </div>
@@ -2319,9 +2549,9 @@ export function AISimulation() {
                         <span className="text-lg font-bold text-[#F53799]">{networkConnections.length}</span>
                       </div>
 
-                      <div className="flex items-center justify-between p-3 bg-[#3AE4FA]/5 rounded-lg">
+                      <div className="flex items-center justify-between p-3 bg-[#06B6D4]/5 rounded-lg">
                         <span className="text-xs text-[#223047]">Pattern Nodes</span>
-                        <span className="text-lg font-bold text-[#3AE4FA]">{networkNodes.length}</span>
+                        <span className="text-lg font-bold text-[#06B6D4]">{networkNodes.length}</span>
                       </div>
 
                       <div className="flex items-center justify-between p-3 bg-[#D42A7D]/5 rounded-lg">
@@ -2362,12 +2592,12 @@ export function AISimulation() {
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-[#3AE4FA]/5 to-[#FFF7FB] border-2 border-[#3AE4FA]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#3AE4FA] transition-all cursor-pointer">
+              <div className="bg-gradient-to-br from-[#06B6D4]/5 to-[#FFF7FB] border-2 border-[#06B6D4]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#06B6D4] transition-all cursor-pointer">
                 <div className="flex items-center gap-2 mb-3">
-                  <div className="w-8 h-8 rounded-lg bg-[#3AE4FA] flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-lg bg-[#06B6D4] flex items-center justify-center">
                     <TrendingUp className="w-4 h-4 text-white" />
                   </div>
-                  <div className="text-xs font-bold text-[#3AE4FA] tracking-wider">EMERGING TREND</div>
+                  <div className="text-xs font-bold text-[#06B6D4] tracking-wider">EMERGING TREND</div>
                 </div>
                 <div className="text-lg font-bold text-[#223047] mb-2">
                   {topInsights.emergingTrend}
@@ -2397,7 +2627,7 @@ export function AISimulation() {
             <div className="bg-gradient-to-br from-[#FFF7FB] to-[#FFF2FA] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3 md:mb-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-gradient-to-br from-[#F53799] to-[#3AE4FA] flex items-center justify-center flex-shrink-0">
+                  <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-gradient-to-br from-[#F53799] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
                     <span className="text-white text-xs font-bold">⏰</span>
                   </div>
                   <div className="flex-1">
@@ -2418,7 +2648,7 @@ export function AISimulation() {
                   max={19}
                   min={7}
                   step={1}
-                  className="[&_[role=slider]]:bg-gradient-to-r [&_[role=slider]]:from-[#F53799] [&_[role=slider]]:to-[#3AE4FA] [&_[role=slider]]:w-6 [&_[role=slider]]:h-6 [&_[role=slider]]:border-4 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-lg"
+                  className="[&_[role=slider]]:bg-gradient-to-r [&_[role=slider]]:from-[#F53799] [&_[role=slider]]:to-[#06B6D4] [&_[role=slider]]:w-6 [&_[role=slider]]:h-6 [&_[role=slider]]:border-4 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-lg"
                 />
                 <div className="flex justify-between mt-4 text-xs text-[#223047] opacity-60">
                   <span>07:00</span>
@@ -2442,7 +2672,7 @@ export function AISimulation() {
                   Generated from FP-Growth analysis of {formatHour(dataTime[0])} transaction patterns for {selectedHeaderRangeLabel}
                 </p>
               </div>
-              <Badge className="bg-[#5CE1E6] text-white hover:bg-[#5CE1E6] text-xs md:text-sm">
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm">
                 {bundlePredictions.length} of {allBundlePredictions.length} Bundles Shown
               </Badge>
             </div>
@@ -2476,8 +2706,8 @@ export function AISimulation() {
                 type="button"
                 onClick={() => setOnlySignificant(!onlySignificant)}
                 className={`rounded-lg border px-3 py-2 text-xs font-bold transition flex items-center gap-1 ${onlySignificant
-                    ? "bg-[#5CE1E6] text-white border-[#5CE1E6]"
-                    : "bg-white text-[#223047] border-slate-200 hover:border-[#5CE1E6]"
+                    ? "bg-[#06B6D4] text-white border-[#06B6D4]"
+                    : "bg-white text-[#223047] border-slate-200 hover:border-[#06B6D4]"
                   }`}
               >
                 Significant Only (5% Support)
@@ -2508,7 +2738,7 @@ export function AISimulation() {
                           🔥 Emerging Trend
                         </Badge>
                       )}
-                      <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs">
+                      <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs">
                         {bundle.confidence}% Historical Confidence
                       </Badge>
                       <Badge variant="outline" className="text-xs border-[#F53799] text-[#F53799]">
@@ -2646,7 +2876,7 @@ export function AISimulation() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+                <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg md:rounded-xl bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
                   <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
                 </div>
                 <div className="flex-1">
@@ -2658,7 +2888,7 @@ export function AISimulation() {
                   </p>
                 </div>
               </div>
-              <Badge className="bg-gradient-to-r from-[#F53799] to-[#3AE4FA] text-white hover:opacity-90 text-xs md:text-sm">
+              <Badge className="bg-gradient-to-r from-[#F53799] to-[#06B6D4] text-white hover:opacity-90 text-xs md:text-sm">
                 Store Layout AI
               </Badge>
             </div>
@@ -2666,7 +2896,7 @@ export function AISimulation() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
               {proximityRecommendations.length === 0 && (
                 <div className="lg:col-span-2 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 text-sm text-[#223047] opacity-70">
-                  No proximity recommendations are available for the selected hour and Header Filter range. The placement advice will appear once FP-Growth rules or bundle candidates are detected from the ingested baskets.
+                  No proximity recommendations are available for the selected Header Filter range. The placement advice will appear once FP-Growth rules or bundle candidates are detected from the ingested baskets.
                 </div>
               )}
               {proximityRecommendations.map((rec, idx) => (
@@ -2675,7 +2905,7 @@ export function AISimulation() {
                   className="bg-gradient-to-br from-white to-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 hover:border-[#F53799] transition-all"
                 >
                   <div>
-                    <div className="text-xs text-[#3AE4FA] font-semibold mb-1">STRATEGIC PAIRING</div>
+                    <div className="text-xs text-[#06B6D4] font-semibold mb-1">STRATEGIC PAIRING</div>
                     <h3 className="text-base font-bold text-[#223047] mb-3">{rec.pairing}</h3>
                     <div className="text-xs text-[#223047] opacity-60 mb-2">MERCHANDISING ADVICE</div>
                     <p className="text-sm text-[#223047]" style={{ lineHeight: "1.6" }}>
@@ -2688,18 +2918,18 @@ export function AISimulation() {
               ))}
             </div>
 
-            <div className="bg-gradient-to-br from-[#FFF7FB] to-[#FFF2FA] border border-[#3AE4FA]/30 rounded-lg md:rounded-xl p-3 md:p-4">
+            <div className="bg-gradient-to-br from-[#FFF7FB] to-[#FFF2FA] border border-[#06B6D4]/30 rounded-lg md:rounded-xl p-3 md:p-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <Badge variant="outline" className="text-xs">
-                      WOOF AI Insight
+                      WOOF Insight
                     </Badge>
                   </div>
                   <p className="text-xs md:text-sm text-[#223047] opacity-80 italic" style={{ lineHeight: "1.6" }}>
                     {proximityRecommendations.length > 0
-                      ? `${proximityRecommendations.length} placement recommendations were generated from live FP-Growth rules and low-association bundle opportunities for ${formatHour(dataTime[0])}. Same-sector and cross-sector pairs are both included when the ingested baskets support them.`
-                      : `No placement recommendation is currently available for ${formatHour(dataTime[0])}; adjust thresholds or select a busier transaction hour to inspect weaker patterns.`}
+                      ? `${proximityRecommendations.length} placement recommendations were generated from FP-Growth rules and low-association bundle opportunities across the selected date range. Pairs are intelligently filtered to show viable retail pairings.`
+                      : `No placement recommendation is currently available for the selected date range; adjust thresholds to inspect weaker patterns.`}
                   </p>
                 </div>
                 <img
@@ -2949,7 +3179,7 @@ export function AISimulation() {
                       type="monotone"
                       dataKey="projectedRevenue"
                       name="Projected Revenue"
-                      stroke="#3AE4FA"
+                      stroke="#06B6D4"
                       strokeWidth={2.5}
                       dot={(props: any) => {
                         const isSelected = props.payload?.discount === discountValue[0];
@@ -2961,8 +3191,8 @@ export function AISimulation() {
                             cx={props.cx}
                             cy={props.cy}
                             r={isSelected ? 5 : 3}
-                            fill={isSelected ? "white" : "#3AE4FA"}
-                            stroke={isSelected ? "#223047" : "#3AE4FA"}
+                            fill={isSelected ? "white" : "#06B6D4"}
+                            stroke={isSelected ? "#223047" : "#06B6D4"}
                             strokeWidth={isSelected ? 2 : 1}
                           />
                         );
@@ -3062,7 +3292,7 @@ export function AISimulation() {
 
             <div className="flex flex-wrap items-center gap-4 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] px-4 py-3 text-xs text-[#223047]">
               <span className="flex items-center gap-2">
-                <span className="h-0.5 w-8 rounded-full bg-[#3AE4FA]" />
+                <span className="h-0.5 w-8 rounded-full bg-[#06B6D4]" />
                 Projected Revenue
               </span>
               <span className="flex items-center gap-2">
@@ -3117,7 +3347,7 @@ export function AISimulation() {
                   max={19}
                   min={7}
                   step={1}
-                  className="[&_[role=slider]]:bg-gradient-to-r [&_[role=slider]]:from-[#F53799] [&_[role=slider]]:to-[#3AE4FA] [&_[role=slider]]:w-6 [&_[role=slider]]:h-6 [&_[role=slider]]:border-4 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-lg"
+                  className="[&_[role=slider]]:bg-gradient-to-r [&_[role=slider]]:from-[#F53799] [&_[role=slider]]:to-[#06B6D4] [&_[role=slider]]:w-6 [&_[role=slider]]:h-6 [&_[role=slider]]:border-4 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-lg"
                 />
                 <div className="flex justify-between mt-3 text-xs text-[#223047] opacity-60">
                   <span>07:00</span>
@@ -3140,8 +3370,8 @@ export function AISimulation() {
                 <div className="text-xl md:text-2xl font-bold text-[#F53799]">{highDemandSectors}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Placeholder Staff</div>
-                <div className="text-xl md:text-2xl font-bold text-[#3AE4FA]">{totalScheduledPlaceholderStaff}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Active Staff</div>
+                <div className="text-xl md:text-2xl font-bold text-[#06B6D4]">{totalScheduledPlaceholderStaff}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Recommended Staff</div>
@@ -3151,15 +3381,15 @@ export function AISimulation() {
             
             <div className="text-xs text-[#223047] opacity-70 bg-slate-100 p-2 rounded-lg mt-2 flex items-center gap-2">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-info"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-              Note: Placeholder staff are client-provided static capacity baseline numbers, not a dynamic schedule pulled from a live roster system.
+              Note: Active staff are client-provided static capacity baseline numbers, not a dynamic schedule pulled from a live roster system.
             </div>
 
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden mt-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
                 <div>
-                  <div className="text-sm font-bold text-[#223047]">Header Filter Sector Traffic Heatmap</div>
+                  <div className="text-sm font-bold text-[#223047]">Traffic Heatmap per Sector</div>
                   <div className="text-xs text-[#223047] opacity-60 mt-1">
-                    {trafficVisitDefinition} {trafficDisplayMode === "weekday_average" ? "Values are weekday averages because the selected range is longer than 14 days." : "Values are daily counts for the selected range."}
+                    {trafficVisitDefinition} Values are total visits for the selected range.
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
@@ -3195,45 +3425,93 @@ export function AISimulation() {
                       </tr>
                     )}
                     {!trafficOptimizerLoading && !trafficOptimizerError && sectorTrafficForecast.map((sector) => (
-                      <tr key={sector.name} className="border-t border-[#FFD9EC]">
-                        <td className="px-4 py-3 font-semibold text-[#223047]">
-                          <span className="inline-flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: sector.color }} />
-                            {sector.name}
-                          </span>
-                        </td>
-                        {sector.forecasts.map((forecast) => (
-                          <td key={`${sector.name}-${forecast.day}`} className="px-3 py-3">
-                            <div
-                              className={`mx-auto flex min-h-[54px] w-full max-w-[92px] items-center justify-center rounded-lg px-2 py-2 text-center ${demandStyles[forecast.level].bg}`}
-                              title={`${forecast.level} demand from ingested transactions`}
-                            >
-                              <div className={`text-sm font-bold ${demandStyles[forecast.level].text}`}>
-                                {formatTrafficVisitValue(forecast.predicted)}
-                                <span className="block text-[10px] font-semibold text-[#223047] opacity-65">visits</span>
-                              </div>
+                      <React.Fragment key={sector.name}>
+                        <tr className="border-t border-[#FFD9EC]">
+                          <td className="px-4 py-3 font-semibold text-[#223047]">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: sector.color }} />
+                              {sector.name}
+                              {sector.subSectors && sector.subSectors.length > 0 && (
+                                <button 
+                                  onClick={() => toggleSector(sector.name)}
+                                  className="ml-auto flex items-center justify-center p-1 rounded hover:bg-gray-100 text-gray-500 transition-colors"
+                                  title={expandedSectors[sector.name] ? "Hide sub-sectors" : "Show sub-sectors"}
+                                >
+                                  {expandedSectors[sector.name] ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-up"><path d="m18 15-6-6-6 6"/></svg>
+                                  ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-down"><path d="m6 9 6 6 6-6"/></svg>
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </td>
+                          {sector.forecasts.map((forecast) => (
+                            <td key={`${sector.name}-${forecast.day}`} className="px-3 py-3">
+                              <div
+                                className={`mx-auto flex min-h-[54px] w-full max-w-[92px] items-center justify-center rounded-lg px-2 py-2 text-center ${demandStyles[forecast.level].bg}`}
+                                title={`${forecast.level} demand from ingested transactions`}
+                              >
+                                <div className={`text-sm font-bold ${demandStyles[forecast.level].text}`}>
+                                  {formatTrafficVisitValue(forecast.predicted)}
+                                  <span className="block text-[10px] font-semibold text-[#223047] opacity-65">visits</span>
+                                </div>
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                        {expandedSectors[sector.name] && sector.subSectors?.map(sub => (
+                          <tr key={sub.name} className="bg-slate-50 border-t border-[#FFD9EC]">
+                            <td className="px-4 py-3 pl-8 text-sm font-medium text-[#223047] opacity-80">
+                              {sub.name}
+                            </td>
+                            {sub.forecasts.map((forecast) => (
+                              <td key={`${sub.name}-${forecast.day}`} className="px-3 py-3">
+                                <div className={`mx-auto flex min-h-[44px] w-full max-w-[80px] items-center justify-center rounded-lg px-2 py-1 text-center ${demandStyles[forecast.level].bg}`} title={`${forecast.level} demand`}>
+                                  <div className={`text-xs font-bold ${demandStyles[forecast.level].text}`}>
+                                    {formatTrafficVisitValue(forecast.predicted)}
+                                    <span className="block text-[9px] font-semibold text-[#223047] opacity-65">visits</span>
+                                  </div>
+                                </div>
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
-            </div>
 
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div>
                   <h3 className="text-base md:text-lg font-bold text-[#223047]">Staffing Recommendation</h3>
                   <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
-                    Based on the busiest matching period in the selected Header Filter range; staff counts are placeholders until staff-sector schedules are added
+                    Based on the busiest matching period in the selected Header Filter range, incorporating actual employee shift schedules.
                   </p>
                 </div>
-                <Badge className="bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC]">Placeholder Data</Badge>
+                <div className="flex items-center gap-2">
+                  <select 
+                    value={staffingDayFilter}
+                    onChange={(e) => setStaffingDayFilter(e.target.value)}
+                    className="h-7 w-[110px] rounded-md border border-[#FFD9EC] bg-white px-2 text-xs text-[#223047] focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                  >
+                    <option value="All">All Days</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                    <option value="Sunday">Sunday</option>
+                  </select>
+                  <Badge className="bg-[#E8F8F5] text-[#10B981] border border-[#A7F3D0]">Live Schedules</Badge>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {selectedTimeStaffPlan.map((sector) => {
                   const needsMoreStaff = sector.staffDelta > 0;
                   const canReduceStaff = sector.staffDelta < 0;
@@ -3270,7 +3548,7 @@ export function AISimulation() {
                           ? `Add ${sector.staffDelta} staff for this sector.`
                           : canReduceStaff
                             ? `Possible to reassign ${Math.abs(sector.staffDelta)} staff if service quality remains stable.`
-                            : "Keep current placeholder coverage."}
+                            : "Current scheduled coverage is optimal."}
                       </div>
                     </div>
                   );
@@ -3279,42 +3557,78 @@ export function AISimulation() {
             </div>
 
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
-              <h3 className="text-base md:text-lg font-bold text-[#223047]">Optimization Inputs Needed Later</h3>
+              <h3 className="text-base md:text-lg font-bold text-[#223047]">Live Cost Efficiency & Capacity Dashboard</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                {[
-                  { icon: Users, title: "Staff roster", detail: "Name, role, sector, and service capability" },
-                  { icon: CalendarDays, title: "Shift schedule", detail: "Start time, end time, day, and assigned sector" },
-                  { icon: Target, title: "Service capacity", detail: "How many visits each staff member can handle" },
-                  { icon: Zap, title: "Cost rules", detail: "Hourly rate or salary estimate for cost efficiency" },
-                ].map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <div key={item.title} className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
-                      <Icon className="h-5 w-5 text-[#F53799] mb-3" />
-                      <div className="text-sm font-bold text-[#223047]">{item.title}</div>
-                      <div className="text-xs text-[#223047] opacity-65 mt-1" style={{ lineHeight: "1.5" }}>{item.detail}</div>
-                    </div>
-                  );
-                })}
+                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Zap className="h-5 w-5 text-[#F53799]" />
+                    <div className="text-sm font-bold text-[#223047]">Live Labor Burn Rate</div>
+                  </div>
+                  <div className="text-2xl font-black text-[#223047]">
+                    ₱{liveCostAndCapacity.totalHourlyCost.toFixed(2)}<span className="text-sm font-medium opacity-60">/hr</span>
+                  </div>
+                  <div className="text-xs text-[#223047] opacity-65 mt-1">
+                    Combined hourly wage of scheduled staff
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <TrendingUp className="h-5 w-5 text-[#F53799]" />
+                    <div className="text-sm font-bold text-[#223047]">Cost Per Visit (Efficiency)</div>
+                  </div>
+                  <div className="text-2xl font-black text-[#223047]">
+                    ₱{liveCostAndCapacity.costPerVisit.toFixed(2)}<span className="text-sm font-medium opacity-60">/visit</span>
+                  </div>
+                  <div className="text-xs text-[#223047] opacity-65 mt-1">
+                    Labor cost vs. total predicted traffic
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Target className="h-5 w-5 text-[#F53799]" />
+                    <div className="text-sm font-bold text-[#223047]">Grooming Capacity</div>
+                  </div>
+                  <div className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold mb-2 ${liveCostAndCapacity.groomingColor}`}>
+                    {liveCostAndCapacity.groomingStatus}
+                  </div>
+                  <div className="text-xs text-[#223047] opacity-65">
+                    {liveCostAndCapacity.groomingMessage}
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Users className="h-5 w-5 text-[#F53799]" />
+                    <div className="text-sm font-bold text-[#223047]">Projected Commissions</div>
+                  </div>
+                  <div className="text-xl font-bold text-[#223047]">
+                    {liveCostAndCapacity.activeCommissionStaff} Staff <span className="text-sm font-medium opacity-60">on 10% Tier</span>
+                  </div>
+                  <div className="text-xs text-[#223047] opacity-65 mt-1">
+                    Active commission multipliers for grooming/boarding
+                  </div>
+                </div>
               </div>
             </div>
 
             <div className="rounded-xl md:rounded-2xl bg-[#223047] p-4 md:p-5 text-white">
               <div className="text-xs font-bold tracking-wide mb-2">WOOF Traffic Recommendation</div>
               <p className="text-sm opacity-90" style={{ lineHeight: "1.6" }}>
-                At {formatHour(trafficOptimizerTime[0])}, WOOF found {formatTrafficVisitValue(totalPredictedTraffic)} transaction-visits across Services, Cafe, and Retail for {selectedHeaderRangeLabel}. Replace the placeholder staff counts with real schedules to turn these recommendations into accurate shift adjustments and salary-cost insights.
+                At {formatHour(trafficOptimizerTime[0])}, WOOF found {formatTrafficVisitValue(totalPredictedTraffic)} transaction-visits across Services, Cafe, and Retail for {selectedHeaderRangeLabel}. The staffing recommendations are calculated using real employee shift schedules and availability to provide accurate shift adjustments and salary-cost insights.
               </p>
             </div>
           </div>
 
-          {/* Header Filter Traffic Trend */}
+          {/* Traffic Trend */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div>
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Header Filter Traffic Trend
+                Traffic Trend
               </h2>
               <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Transaction-visit volume for {formatHour(trafficOptimizerTime[0])} within {selectedHeaderRangeLabel}
+                Total transaction-visit volume within {selectedHeaderRangeLabel}
               </p>
             </div>
 
@@ -3322,8 +3636,8 @@ export function AISimulation() {
               <AreaChart data={trafficPrediction}>
                 <defs>
                   <linearGradient key="trafficGradient-gradient" id="trafficGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3AE4FA" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#3AE4FA" stopOpacity={0.05} />
+                    <stop offset="0%" stopColor="#06B6D4" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#06B6D4" stopOpacity={0.05} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
@@ -3339,7 +3653,7 @@ export function AISimulation() {
                 <Area
                   type="monotone"
                   dataKey="visits"
-                  stroke="#3AE4FA"
+                  stroke="#06B6D4"
                   strokeWidth={2.5}
                   fill="url(#trafficGradient)"
                   animationDuration={800}
@@ -3349,61 +3663,8 @@ export function AISimulation() {
 
             <div className="flex justify-center gap-8 pt-4">
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
+                <div className="w-3 h-3 bg-[#06B6D4] rounded-full" />
                 <span className="text-sm text-[#223047]">Observed Transaction Visits</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Past Happy Hour Performance */}
-          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-            <div>
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Past Happy Hour Performance
-              </h2>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Historical effectiveness of traffic optimization campaigns
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-              <div className="space-y-3">
-                {happyHourHistory.map((item) => (
-                  <div
-                    key={item.date}
-                    className="flex items-center justify-between p-4 rounded-xl bg-[#FFF2FA]"
-                  >
-                    <div>
-                      <div className="text-sm font-semibold text-[#223047]">{item.date}</div>
-                      <div className="text-xs text-[#223047] opacity-60">{item.time}</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-[#223047] opacity-60">Predicted → Actual</div>
-                      <div className="text-sm font-semibold text-[#223047]">
-                        {item.predicted} → {item.actual}
-                      </div>
-                    </div>
-                    <div className="text-2xl">{item.result}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div>
-                <ResponsiveContainer width="100%" height={220} className="md:!h-[250px]">
-                  <BarChart data={happyHourHistory}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-                    <XAxis dataKey="date" stroke="#223047" style={{ fontSize: "11px" }} />
-                    <YAxis stroke="#223047" style={{ fontSize: "11px" }} />
-                    <RechartsTooltip
-                      contentStyle={{
-                        backgroundColor: "white",
-                        border: "1px solid #FFD9EC",
-                        borderRadius: "12px",
-                      }}
-                    />
-                    <Bar dataKey="lift" fill="#3AE4FA" radius={[6, 6, 0, 0]} animationDuration={800} />
-                  </BarChart>
-                </ResponsiveContainer>
               </div>
             </div>
           </div>

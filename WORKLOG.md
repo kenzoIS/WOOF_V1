@@ -2245,3 +2245,57 @@ This file records requested revisions, implementation details, verification, and
 - Not completed: Full `test_cafe_prophet.py` validation was interrupted before completion because Prophet candidate fitting was taking too long in the local environment.
 
 
+
+### UI Fixes (2026-08-18)
+- Fixed the Header Filter UI Custom Range date picker. Moved the Start and End Date inputs to appear below the Range Option picker (using an absolute container positioned below the dropdown) instead of beside it to prevent overlapping with other UI Indicators on the right.
+
+### AI Simulation & Staffing Updates (2026-08-18)
+- Updated Traffic Optimization Staffing Recommendation to use dynamic scheduled staff logic based on client's actual employee data, shift hours, and availability. Replaced hardcoded placeholder values with accurate logic. Removed 'Placeholder Data' UI badges from AISimulation.tsx.
+
+- Removed remaining 'Keep current placeholder coverage' hardcoded text in AISimulation.tsx and changed it to 'Current scheduled coverage is optimal.' to reflect the live data integration.
+
+- Adjusted Staffing Recommendation logic to evaluate coverage purely based on the selected hour (ignoring specific off-days) as requested by the user, so baseline scheduled staff represents standard daily staffing for that time slot.
+
+- Added a specific 'Day' filter (select dropdown) directly inside the Staffing Recommendation UI. This gives users the option to manually calculate staffing based strictly on shift hours ('All Days') or selectively check an exact day to properly evaluate the effect of staff rest days on coverage.
+
+- Updated the Staffing Recommendation UI grid layout from 2 columns to 3 columns to display all 3 sectors in a single seamless row, removing any awkward white space.
+
+### Cost Efficiency & Capacity Dashboard (2026-08-18)
+- Replaced the 'Optimization Inputs Needed Later' UI block with a Live Cost Efficiency & Capacity Dashboard in AISimulation.tsx.
+- Implemented dynamic staff data mapping to calculate Live Labor Burn Rate (?/hr), Cost Per Visit, Grooming Capacity (Bottleneck Warning), and Projected Commission Staff based on user-provided wage and scheduling constraints.
+
+- Updated Cost Efficiency logic: 'Cost Per Visit' and 'Grooming Capacity' now evaluate against Average traffic when 'All Days' is selected, and Day-specific traffic when a day is selected, rather than using Peak traffic, providing a more accurate baseline.
+
+### Home Module Layout Adjustments (2026-08-18)
+- Renamed 'WOOF AI Insight' to 'WOOF Insight' and moved it below Omnichannel Revenue Accumulation.
+- Restructured Offline vs Online Balance and Sales Intensity Map to display in a single row.
+- Updated Sales Intensity Map colors to reflect strict thresholds (None, Low, Moderate, High, Peak) and added a legend.
+- Removed the Next Scheduled Action and Your AI Business Partner sections.
+
+- Refactored Offline vs. Online Channel Balance: Stacked Shopee, TikTok Shop, and PetHub into a single 'Digital Channels' bar row. Users can hover over the segments to distinguish each revenue stream. Reduced chart height to fix awkward white space.
+
+- Further adjusted Home layout: Made digital channels in the channel balance chart a single solid color. Moved Offline vs. Online Channel Balance to a separate full-width row above the heatmap. Combined WOOF Autonomous Suggestions and Sales Intensity Map into one row (Suggestions on the left, Heatmap on the right).
+
+- Swapped the Sales Intensity Map and WOOF Autonomous Suggestions so the Heatmap is on the left and Suggestions are on the right.
+
+- Globally replaced #5CE1E6 (bright cyan) with #06B6D4 (darker cyan) across all frontend components to improve readability and reduce eye strain.
+
+- Ran a comprehensive global pass to replace the secondary lighter cyan (#3AE4FA) used in buttons, borders, active states, and gradients with #06B6D4 to ensure the entire system has a unified and darker cyan tone.
+
+- Cafe Module: Moved the WOOF AI Insight section below the Menu Item Performance table. Removed the 'Status' column from the Menu Item Performance table.
+
+- Cafe Module: Removed the Past Happy Hour Effectiveness section and adjusted the grid layout so the Next Quiet Period takes the full row width.
+
+- Globally renamed all remaining instances of 'WOOF AI Insight' to 'WOOF Insight' across all frontend modules (AISimulation, Cafe, Feedback, Retail, and Services).
+
+- Services Module: Moved WOOF Insight below Service Utilization Monitor and removed the Booking Weekly Volume section.
+- Retail Module: Removed WOOF Retail Analysis, connected Omnichannel Performance by Sectors to the Header Filter feature, and removed the Retail Review Sentiment Monitor.
+
+- Retail Module: Actually connected the Omnichannel Performance by Sectors to the Header Filter feature by dynamically recalculating data from channelForecast based on globalDateRange when 'Header Filter' is toggled.
+
+- AI Simulation Module: Updated Strategic Proximity Recommendations in the Bundle Simulator to strictly suggest retail-only items and modified the recommendation text to use factual data like confidence and lift.
+
+
+- AI Simulation Module: Modified the Strategic Proximity Recommendations section to fetch data for all hours so that it relies purely on the Header Filter date range, rather than being limited to the selected hour slider.
+
+- Traffic Optimizer: Fixed High Demand Sectors KPI to show sector names, changed 'Placeholder Staff' to 'Active Staff', modified Traffic Trend to show overall data unconstrained by hour, and removed Past Happy Hour Performance.

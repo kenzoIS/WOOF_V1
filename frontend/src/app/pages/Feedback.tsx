@@ -151,11 +151,11 @@ export function Feedback() {
       case "bundle":
         return "bg-[#F53799]";
       case "discount":
-        return "bg-[#3AE4FA]";
+        return "bg-[#06B6D4]";
       case "happy-hour":
         return "bg-[#D42A7D]";
       case "flash-sale":
-        return "bg-[#5CE1E6]";
+        return "bg-[#06B6D4]";
       default:
         return "bg-[#FFD9EC]";
     }
@@ -164,9 +164,9 @@ export function Feedback() {
   const getSectorColor = (sector: string) => {
     if (sector.includes("Cafe") && sector.includes("Services")) return "#F53799";
     if (sector.includes("Cafe")) return "#F53799";
-    if (sector.includes("Services")) return "#3AE4FA";
+    if (sector.includes("Services")) return "#06B6D4";
     if (sector.includes("Retail")) return "#D42A7D";
-    return "#5CE1E6";
+    return "#06B6D4";
   };
 
   const calculateAccuracy = (predicted: string, actual: string | null) => {
@@ -244,7 +244,7 @@ export function Feedback() {
             <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
               Avg Accuracy
             </h3>
-            <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-[#3AE4FA]" />
+            <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
           </div>
           <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
             {avgAccuracy.toFixed(1)}%
@@ -272,7 +272,7 @@ export function Feedback() {
             <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
               Learning Rate
             </h3>
-            <RefreshCw className="w-4 h-4 md:w-5 md:h-5 text-[#5CE1E6]" />
+            <RefreshCw className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
           </div>
           <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
             High
@@ -291,7 +291,7 @@ export function Feedback() {
         <div className="flex-1">
           <div className="mb-2">
             <Badge variant="outline" className="text-xs">
-              WOOF AI Insight
+              WOOF Insight
             </Badge>
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>

@@ -868,7 +868,7 @@ export function Cafe() {
 
           {/* Total Orders */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <Coffee className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
@@ -880,7 +880,7 @@ export function Cafe() {
 
           {/* Avg Check Size */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
@@ -892,13 +892,13 @@ export function Cafe() {
 
           {/* Active Menu Items */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <PieChart className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">Active Menu Items</div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeItems}</div>
-              <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs mt-1 hidden md:inline-flex">
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs mt-1 hidden md:inline-flex">
                 All Active
               </Badge>
             </div>
@@ -1255,30 +1255,6 @@ export function Cafe() {
         </div>
       </div>
 
-      {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
-      <div
-        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
-        style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
-      >
-        <div className="flex-1">
-          <div className="mb-2">
-            <Badge variant="outline" className="text-xs">
-              WOOF AI Insight
-            </Badge>
-          </div>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            {forecastRun?.topItems?.[0]
-              ? `${forecastRun.topItems[0].name || "This item"} leads Cafe revenue at ${formatCurrency(forecastRun.topItems[0].revenue)} across ${formatNumber(forecastRun.topItems[0].quantity)} units.`
-              : "Upload Cafe history from POS or PetHub to populate item-level insights."}
-          </p>
-        </div>
-        <img
-          src={cafeMascot.src}
-          alt="Cafe Mascot"
-          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
-        />
-      </div>
-
       {/* MENU PERFORMANCE */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1327,7 +1303,6 @@ export function Cafe() {
                     Qty Sold {sortColumn === "qty" && (sortDirection === "asc" ? "↑" : "↓")}
                   </TableHead>
                   <TableHead className="text-center">Category</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
                   <TableHead className="text-center">Trend</TableHead>
                   <TableHead
                     className="cursor-pointer hover:bg-[#FFF2FA] text-center"
@@ -1349,9 +1324,6 @@ export function Cafe() {
                       <TableCell className="text-center">{item.qtySold}</TableCell>
                       <TableCell className="text-center">
                         <span className="text-xs px-2 py-0.5 rounded-full bg-[#FFF2FA] text-[#223047] opacity-80">{item.category}</span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className={`w-2 h-2 rounded-full mx-auto ${getEquilibriumColor(item.equilibrium)}`} />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-center h-8">
@@ -1380,7 +1352,7 @@ export function Cafe() {
                     </TableRow>
                     {expandedRow === item.name && (
                       <TableRow>
-                        <TableCell colSpan={7} className="bg-[#FFF7FB]">
+                        <TableCell colSpan={6} className="bg-[#FFF7FB]">
                           <div className="p-4 space-y-3">
                             <ResponsiveContainer width="100%" height={120} className="md:!h-[150px]">
                               <LineChart data={item.trend.map((sales: number, index: number) => ({
@@ -1445,13 +1417,37 @@ export function Cafe() {
           )}
         </div>
 
+      {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
+      <div
+        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
+        style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
+      >
+        <div className="flex-1">
+          <div className="mb-2">
+            <Badge variant="outline" className="text-xs">
+              WOOF Insight
+            </Badge>
+          </div>
+          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+            {forecastRun?.topItems?.[0]
+              ? `${forecastRun.topItems[0].name || "This item"} leads Cafe revenue at ${formatCurrency(forecastRun.topItems[0].revenue)} across ${formatNumber(forecastRun.topItems[0].quantity)} units.`
+              : "Upload Cafe history from POS or PetHub to populate item-level insights."}
+          </p>
+        </div>
+        <img
+          src={cafeMascot.src}
+          alt="Cafe Mascot"
+          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
+        />
+      </div>
+
       {/* QUIET PERIOD + HAPPY HOUR */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 gap-4 md:gap-6">
         <div className="space-y-4 md:space-y-6">
           <div className="bg-[#223047] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
             <div className="flex items-start justify-between">
               <h3 className="text-base md:text-lg font-bold">Next Quiet Period</h3>
-              <Badge className="bg-[#5CE1E6] text-white hover:bg-[#5CE1E6] text-xs">
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs">
                 ⚙ ENGINE
               </Badge>
             </div>
@@ -1466,7 +1462,7 @@ export function Cafe() {
 
             <div className="flex items-center gap-2 text-xs md:text-sm">
               <span className="opacity-70">Predicted Traffic:</span>
-              <span className="font-semibold text-[#3AE4FA]">
+              <span className="font-semibold text-[#06B6D4]">
                 {quietPeriod === null 
                   ? "..." 
                   : quietPeriod.status === 'success' 
@@ -1478,7 +1474,7 @@ export function Cafe() {
             {quietPeriod && quietPeriod.status === 'success' && quietPeriod.modelMetrics && (
               <div className="rounded-xl bg-white/10 p-3 text-xs">
                 <div className="opacity-70">Promo model source</div>
-                <div className="font-semibold text-[#3AE4FA]">
+                <div className="font-semibold text-[#06B6D4]">
                   {quietPeriod.modelMetrics.trainingSource === "real_discount_history"
                     ? `Real discount history (${quietPeriod.modelMetrics.trainingRows} examples)`
                     : "Fallback model; not enough historical discount examples yet"}
@@ -1513,51 +1509,6 @@ export function Cafe() {
             <Button onClick={handleActivateHappyHour} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
               Activate Happy Hour
             </Button>
-          </div>
-
-        </div>
-
-        <div className="space-y-4 md:space-y-6">
-          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4 h-full">
-            <div>
-              <h3 className="text-sm md:text-base font-bold text-[#223047]">Past Happy Hour Effectiveness</h3>
-              <p className="text-xs text-[#223047] opacity-60 mt-1">
-                Percentages show <strong>Revenue Lift</strong> (the increase in sales achieved compared to typical quiet hours).
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              {pastHappyHours.length > 0 ? pastHappyHours.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between p-2 rounded-lg bg-[#FFF2FA]"
-                >
-                  <span className="text-xs text-[#223047] opacity-60">
-                    {formatChartDate(item.target_date.split('T')[0])}
-                  </span>
-                  <span className="text-xs font-medium text-[#223047]">
-                    Discount: {item.owner_approved_discount_percent}% 
-                  </span>
-                  <span className="text-sm font-bold text-green-600">
-                    {item.sales_uplift_percent ? `+${item.sales_uplift_percent}%` : "Pending..."}
-                  </span>
-                </div>
-              )) : (
-                <div className="p-2 rounded-lg bg-[#FFF2FA] text-xs opacity-60 text-center">No past happy hours found.</div>
-              )}
-            </div>
-
-            <div className="pt-3 md:pt-4 border-t border-[#FFD9EC]">
-              <p className="text-xs text-[#223047] opacity-60 mb-2 md:mb-3">Was this helpful?</p>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" className="flex-1 text-xs md:text-sm">
-                  👍 <span className="hidden sm:inline ml-1">Yes</span>
-                </Button>
-                <Button size="sm" variant="outline" className="flex-1 text-xs md:text-sm">
-                  👎 <span className="hidden sm:inline ml-1">No</span>
-                </Button>
-              </div>
-            </div>
           </div>
         </div>
       </div>

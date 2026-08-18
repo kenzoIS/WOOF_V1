@@ -205,9 +205,9 @@ export function Header({ onMenuClick }: HeaderProps) {
       case "alert":
         return "border-l-[#F53799]";
       case "suggestion":
-        return "border-l-[#3AE4FA]";
+        return "border-l-[#06B6D4]";
       case "system":
-        return "border-l-[#5CE1E6]";
+        return "border-l-[#06B6D4]";
       default:
         return "border-l-[#FFD9EC]";
     }
@@ -246,56 +246,58 @@ export function Header({ onMenuClick }: HeaderProps) {
         </div>
 
         {/* Center: Global Date Range (hidden on small mobile) */}
-        <div className="hidden md:flex items-center gap-2 flex-shrink-0 absolute left-1/2 -translate-x-1/2">
-          <Calendar className="w-4 h-4 text-[#223047] opacity-50" />
-          <Select
-            value={dateRange.startsWith("custom:") ? "custom" : dateRange}
-            onValueChange={handleDateRangeChange}
-          >
-            <SelectTrigger className="w-[160px] lg:w-[200px] border-[#FFD9EC] focus:ring-[#F53799]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="center">
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="yesterday">Yesterday</SelectItem>
-              <SelectItem value="last-7-days">Last 7 Days</SelectItem>
-              <SelectItem value="last-30-days">Last 30 Days</SelectItem>
-              <SelectItem value="last-90-days">Last 90 Days</SelectItem>
-              <SelectItem value="last-12-months">Last 12 Months</SelectItem>
-              <SelectItem value="custom">Custom Range</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {(dateRange === "custom" || dateRange.startsWith("custom:")) && (
-          <div className="hidden lg:flex items-center gap-2 absolute left-1/2 translate-x-[110px]">
-            <input
-              type="date"
-              min={historyStartDate}
-              max={historyEndDate}
-              value={customStartDate}
-              onChange={(event) => setCustomStartDate(event.target.value)}
-              className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-              title={`Historical data starts on ${historyStartDate}`}
-            />
-            <input
-              type="date"
-              min={customStartDate || historyStartDate}
-              max={historyEndDate}
-              value={customEndDate}
-              onChange={(event) => setCustomEndDate(event.target.value)}
-              className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-              title={`Historical data is available through ${historyEndDate}`}
-            />
-            <Button
-              size="sm"
-              onClick={applyCustomDateRange}
-              className="h-9 bg-[#F53799] hover:bg-[#D42A7D] text-xs"
+        <div className="hidden md:flex flex-col items-center absolute left-1/2 -translate-x-1/2 z-50">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Calendar className="w-4 h-4 text-[#223047] opacity-50" />
+            <Select
+              value={dateRange.startsWith("custom:") ? "custom" : dateRange}
+              onValueChange={handleDateRangeChange}
             >
-              Apply
-            </Button>
+              <SelectTrigger className="w-[160px] lg:w-[200px] border-[#FFD9EC] focus:ring-[#F53799]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="center">
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="yesterday">Yesterday</SelectItem>
+                <SelectItem value="last-7-days">Last 7 Days</SelectItem>
+                <SelectItem value="last-30-days">Last 30 Days</SelectItem>
+                <SelectItem value="last-90-days">Last 90 Days</SelectItem>
+                <SelectItem value="last-12-months">Last 12 Months</SelectItem>
+                <SelectItem value="custom">Custom Range</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-        )}
+
+          {(dateRange === "custom" || dateRange.startsWith("custom:")) && (
+            <div className="hidden lg:flex items-center gap-2 absolute top-[115%] bg-white p-2 rounded-lg border border-[#FFD9EC] shadow-lg">
+              <input
+                type="date"
+                min={historyStartDate}
+                max={historyEndDate}
+                value={customStartDate}
+                onChange={(event) => setCustomStartDate(event.target.value)}
+                className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+                title={`Historical data starts on ${historyStartDate}`}
+              />
+              <input
+                type="date"
+                min={customStartDate || historyStartDate}
+                max={historyEndDate}
+                value={customEndDate}
+                onChange={(event) => setCustomEndDate(event.target.value)}
+                className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+                title={`Historical data is available through ${historyEndDate}`}
+              />
+              <Button
+                size="sm"
+                onClick={applyCustomDateRange}
+                className="h-9 bg-[#F53799] hover:bg-[#D42A7D] text-xs"
+              >
+                Apply
+              </Button>
+            </div>
+          )}
+        </div>
 
         {/* Right: Status Pills, Weather, Notifications, Avatar */}
         <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">

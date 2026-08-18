@@ -366,7 +366,7 @@ export function SmartReports() {
           {/* Historical Log list */}
           <div className="bg-white border-2 border-[#FFD9EC] rounded-2xl p-5 shadow-sm space-y-4">
             <h2 className="text-base font-extrabold text-[#223047] flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-[#3AE4FA]" />
+              <Calendar className="w-5 h-5 text-[#06B6D4]" />
               Reports Log
             </h2>
 
@@ -491,7 +491,7 @@ export function SmartReports() {
                   </div>
                   <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3">
                     <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block">Completeness</span>
-                    <span className="text-base font-black text-[#3AE4FA] block mt-1">
+                    <span className="text-base font-black text-[#06B6D4] block mt-1">
                       {selectedReport.dataCompleteness ?? 100}%
                     </span>
                   </div>
@@ -519,8 +519,8 @@ export function SmartReports() {
                       <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorProjected" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3AE4FA" stopOpacity={0.2}/>
-                            <stop offset="95%" stopColor="#3AE4FA" stopOpacity={0}/>
+                            <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.2}/>
+                            <stop offset="95%" stopColor="#06B6D4" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -531,7 +531,7 @@ export function SmartReports() {
                         <Area
                           type="monotone"
                           dataKey="projected"
-                          stroke="#3AE4FA"
+                          stroke="#06B6D4"
                           strokeWidth={2}
                           fillOpacity={1}
                           fill="url(#colorProjected)"
@@ -555,7 +555,7 @@ export function SmartReports() {
                       
                       if (idx === 1) {
                         titleStr = "Trend Analysis & Forecasts";
-                        icon = <TrendingUp className="w-4.5 h-4.5 text-[#3AE4FA]" />;
+                        icon = <TrendingUp className="w-4.5 h-4.5 text-[#06B6D4]" />;
                       } else if (idx === 2) {
                         titleStr = "Customer Sentiment Analysis";
                         icon = <Sparkles className="w-4.5 h-4.5 text-[#F53799]" />;
@@ -645,8 +645,8 @@ export function SmartReports() {
                                 onClick={() => setUsefulnessRating(val)}
                                 className={`w-8 h-8 rounded-lg font-bold text-xs transition-all border ${
                                   usefulnessRating === val
-                                    ? "bg-[#3AE4FA] border-[#3AE4FA] text-white"
-                                    : "bg-white border-[#FFD9EC] text-[#223047] hover:border-[#3AE4FA]/50"
+                                    ? "bg-[#06B6D4] border-[#06B6D4] text-white"
+                                    : "bg-white border-[#FFD9EC] text-[#223047] hover:border-[#06B6D4]/50"
                                 }`}
                               >
                                 {val}

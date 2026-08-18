@@ -26,7 +26,7 @@ export function Sidebar({ onClose }: SidebarProps) {
   return (
     <div className="w-[240px] h-full bg-white border-r border-[#FFD9EC] flex flex-col relative overflow-hidden">
       {/* Left gradient bar */}
-      <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#F53799] to-[#3AE4FA]" />
+      <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#F53799] to-[#06B6D4]" />
       
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Logo */}
@@ -103,7 +103,7 @@ export function Sidebar({ onClose }: SidebarProps) {
             </div>
           </div>
           
-          <Badge className="w-full justify-center bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs py-1">
+          <Badge className="w-full justify-center bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs py-1">
             Level 3 Live-Ready
           </Badge>
         </div>

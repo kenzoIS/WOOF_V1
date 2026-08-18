@@ -196,6 +196,18 @@ export interface TrafficOptimizerResponse {
       date?: string;
       sampleDays?: number;
     }>;
+    subSectors?: Array<{
+      sector: string;
+      totalVisits: number;
+      peakVisits: number;
+      averageVisits: number;
+      values: Array<{
+        key: string;
+        visits: number;
+        date?: string;
+        sampleDays?: number;
+      }>;
+    }>;
   }>;
 }
 

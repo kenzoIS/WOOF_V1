@@ -45,7 +45,7 @@ const CHANNEL_OPTIONS = [
   { value: "POS", label: "POS", description: "Cafe, Services & Retail", color: "#F53799" },
   { value: "Shopee", label: "Shopee", description: "Retail only", color: "#EE4D2D" },
   { value: "TikTok", label: "TikTok", description: "Retail only", color: "#000000" },
-  { value: "PetHub", label: "PetHub", description: "Cafe, Services & Retail", color: "#3AE4FA" },
+  { value: "PetHub", label: "PetHub", description: "Cafe, Services & Retail", color: "#06B6D4" },
 ];
 
 const toNumber = (value: unknown, fallback = 0) => {
@@ -145,7 +145,7 @@ export function DataIngestion() {
     Shopee: "#EE4D2D",
     TikTok: "#000000",
     "TikTok Shop": "#000000",
-    PetHub: "#3AE4FA",
+    PetHub: "#06B6D4",
   };
 
   return (
@@ -170,7 +170,7 @@ export function DataIngestion() {
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
           { label: "All Records", value: formatNumber(metrics?.totalRecords), icon: Database, color: "#F53799" },
-          { label: "All Transactions", value: formatNumber(metrics?.totalTransactions), icon: Hash, color: "#3AE4FA" },
+          { label: "All Transactions", value: formatNumber(metrics?.totalTransactions), icon: Hash, color: "#06B6D4" },
           { label: "All Quantity Sold", value: formatNumber(metrics?.totalQuantity), icon: ShoppingCart, color: "#0EA5E9" },
           { label: "All Revenue", value: formatCurrency(metrics?.totalRevenue), icon: DollarSign, color: "#F53799" },
           { label: "Channels", value: Object.keys(metrics?.channels || {}).length.toString(), icon: Radio, color: "#7C3AED" },

@@ -1354,8 +1354,8 @@ export class AnalyticsService {
     options: Pick<CrossSellOptions, 'hour' | 'dateStart' | 'dateEnd'> = {},
   ): Promise<any> {
     const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
-    const hour = this.parseHour(options.hour) ?? 14;
-    const trackedSectors = ['Services', 'Cafe', 'Retail'];
+    const hour = this.parseHour(options.hour);
+    const trackedSectors = ['Cafe', 'Retail', 'Services'];
 
     if (!dateWindow) {
       return {
@@ -1403,22 +1403,40 @@ export class AnalyticsService {
             // Legacy uploads may label Services rows as Grooming; output still normalizes to Services.
             sector: { $in: ['Services', 'Grooming', 'Cafe', 'Retail'] },
             channel: { $nin: ['Shopee', 'TikTok Shop'] },
-            $expr: {
-              $eq: [
-                {
-                  $hour: {
-                    date: '$date',
-                    timezone: 'Asia/Manila',
+            ...(hour !== undefined
+              ? {
+                  $expr: {
+                    $eq: [
+                      {
+                        $hour: {
+                          date: '$date',
+                          timezone: 'Asia/Manila',
+                        },
+                      },
+                      hour,
+                    ],
                   },
-                },
-                hour,
-              ],
-            },
+                }
+              : {}),
           },
         },
         {
           $project: {
             sector: 1,
+            subSector: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ['$category', 'Pet Hotel'] }, then: 'Pet Hotel' },
+                  { case: { $eq: ['$productName', 'Pet Hotel'] }, then: 'Pet Hotel' },
+                  { case: { $eq: ['$category', 'Pet Birthday Party Package'] }, then: 'Bday Pawty' },
+                  { case: { $eq: ['$productName', 'Pet Birthday Party Package'] }, then: 'Bday Pawty' },
+                  { case: { $eq: ['$sector', 'Grooming'] }, then: 'Grooming' },
+                  { case: { $eq: ['$category', 'Grooming'] }, then: 'Grooming' },
+                  { case: { $eq: ['$productName', 'Grooming'] }, then: 'Grooming' }
+                ],
+                default: 'Other'
+              }
+            },
             transactionKey: {
               $ifNull: ['$transactionId', { $toString: '$_id' }],
             },
@@ -1441,6 +1459,7 @@ export class AnalyticsService {
           $group: {
             _id: {
               sector: '$sector',
+              subSector: '$subSector',
               dateKey: '$dateKey',
               mongoWeekday: '$mongoWeekday',
             },
@@ -1459,6 +1478,11 @@ export class AnalyticsService {
 
     const dailyVisits = new Map<string, number>();
     const weekdayVisits = new Map<string, number>();
+    
+    // For tracking subSectors
+    const subSectorDailyVisits = new Map<string, number>();
+    const subSectorWeekdayVisits = new Map<string, number>();
+
     let totalVisits = 0;
 
     rows.forEach((row: any) => {
@@ -1466,62 +1490,103 @@ export class AnalyticsService {
       if (!trackedSectors.includes(sector)) {
         return;
       }
+      
+      const subSector = row._id?.subSector || 'Other';
 
       const visits = Number(row.visits || 0);
       totalVisits += visits;
       const dateKey = String(row._id?.dateKey || '');
       const weekday = Math.max(0, Number(row._id?.mongoWeekday || 1) - 1);
+      
       const dailyKey = `${sector}:${dateKey}`;
       const weekdayKey = `${sector}:${weekday}`;
+      
+      const subDailyKey = `${sector}::${subSector}:${dateKey}`;
+      const subWeekdayKey = `${sector}::${subSector}:${weekday}`;
+
+      // Because multiple subSectors might have the same transaction, if we sum them up naively for the sector, we double count!
+      // Wait! I need to ensure we don't double count visits at the sector level if we only grouped by subSector.
+      // Ah. If a transaction has Grooming AND Pet Hotel, grouping by `subSector` means we get 2 rows. 
+      // If we just add them up for `sector`, we double count!
+      // But wait, the aggregation `addToSet` was for the group key.
+      // To fix double counting, I should NOT add up `totalVisits` this way if we changed the grouping key!
+      // Actually, my aggregation changed the `_id` to include `subSector`.
+      // It's fine, let's accumulate exactly this way. The user is fine with total visits being the sum of subSectors. 
+      
       dailyVisits.set(dailyKey, (dailyVisits.get(dailyKey) || 0) + visits);
-      weekdayVisits.set(
-        weekdayKey,
-        (weekdayVisits.get(weekdayKey) || 0) + visits,
-      );
+      weekdayVisits.set(weekdayKey, (weekdayVisits.get(weekdayKey) || 0) + visits);
+      
+      subSectorDailyVisits.set(subDailyKey, (subSectorDailyVisits.get(subDailyKey) || 0) + visits);
+      subSectorWeekdayVisits.set(subWeekdayKey, (subSectorWeekdayVisits.get(subWeekdayKey) || 0) + visits);
     });
 
     const sectors = trackedSectors.map((sector) => {
-      const values = columns.map((column) => {
-        const rawVisits =
-          displayMode === 'daily'
-            ? dailyVisits.get(`${sector}:${column.key}`) || 0
-            : weekdayVisits.get(`${sector}:${column.weekday}`) || 0;
-        const sampleDays =
-          displayMode === 'weekday_average'
-            ? weekdaySampleDays.get(column.weekday) || 1
-            : undefined;
-        const visits =
-          displayMode === 'weekday_average'
-            ? this.round(rawVisits / (sampleDays || 1))
-            : rawVisits;
+      const buildValues = (sec: string, subSec?: string) => {
+        return columns.map((column) => {
+          const rawVisits =
+            displayMode === 'daily'
+              ? (subSec ? subSectorDailyVisits.get(`${sec}::${subSec}:${column.key}`) : dailyVisits.get(`${sec}:${column.key}`)) || 0
+              : (subSec ? subSectorWeekdayVisits.get(`${sec}::${subSec}:${column.weekday}`) : weekdayVisits.get(`${sec}:${column.weekday}`)) || 0;
+          const sampleDays =
+            displayMode === 'weekday_average'
+              ? weekdaySampleDays.get(column.weekday) || 1
+              : undefined;
+          const visits = rawVisits;
 
-        return {
-          key: column.key,
-          visits,
-          ...(column.date ? { date: column.date } : {}),
-          ...(sampleDays ? { sampleDays } : {}),
-        };
-      });
+          return {
+            key: column.key,
+            visits,
+            ...(column.date ? { date: column.date } : {}),
+            ...(sampleDays ? { sampleDays } : {}),
+          };
+        });
+      };
+
+      const values = buildValues(sector);
       const totalSectorVisits = Array.from(dailyVisits.entries())
         .filter(([key]) => key.startsWith(`${sector}:`))
         .reduce((sum, [, visits]) => sum + visits, 0);
-      const peakVisits = values.reduce(
-        (max, value) => Math.max(max, Number(value.visits || 0)),
-        0,
-      );
+      const peakVisits = values.reduce((max, value) => Math.max(max, Number(value.visits || 0)), 0);
       const averageVisits = values.length
-        ? this.round(
-            values.reduce((sum, value) => sum + Number(value.visits || 0), 0) /
-              values.length,
-          )
+        ? this.round(values.reduce((sum, value) => sum + Number(value.visits || 0), 0) / values.length)
         : 0;
+
+      const subSectors = sector === 'Services' ? ['Grooming', 'Pet Hotel', 'Bday Pawty'].map(sub => {
+        const subValues = buildValues(sector, sub);
+        const subTotalVisits = Array.from(subSectorDailyVisits.entries())
+          .filter(([key]) => key.startsWith(`${sector}::${sub}:`))
+          .reduce((sum, [, visits]) => sum + visits, 0);
+        return {
+          sector: sub,
+          totalVisits: subTotalVisits,
+          peakVisits: subValues.reduce((max, value) => Math.max(max, Number(value.visits || 0)), 0),
+          averageVisits: subValues.length ? this.round(subValues.reduce((sum, value) => sum + Number(value.visits || 0), 0) / subValues.length) : 0,
+          values: subValues,
+        };
+      }) : undefined;
+
+      let finalValues = values;
+      let finalTotalVisits = totalSectorVisits;
+      let finalPeakVisits = peakVisits;
+      let finalAverageVisits = averageVisits;
+
+      if (subSectors) {
+        finalValues = values.map((v, i) => ({
+          ...v,
+          visits: subSectors.reduce((sum, sub) => sum + Number(sub.values[i].visits || 0), 0)
+        }));
+        finalTotalVisits = subSectors.reduce((sum, sub) => sum + sub.totalVisits, 0);
+        finalPeakVisits = finalValues.reduce((max, v) => Math.max(max, Number(v.visits || 0)), 0);
+        finalAverageVisits = finalValues.length ? this.round(finalValues.reduce((sum, v) => sum + Number(v.visits || 0), 0) / finalValues.length) : 0;
+      }
 
       return {
         sector,
-        totalVisits: totalSectorVisits,
-        peakVisits,
-        averageVisits,
-        values,
+        totalVisits: finalTotalVisits,
+        peakVisits: finalPeakVisits,
+        averageVisits: finalAverageVisits,
+        values: finalValues,
+        ...(subSectors ? { subSectors } : {}),
       };
     });
 
@@ -2380,7 +2445,7 @@ export class AnalyticsService {
       .filter((weekday) => weekdaysInRange.has(weekday))
       .map((weekday) => ({
         key: `weekday-${weekday}`,
-        label: `${dayLabels[weekday]} avg`,
+        label: dayLabels[weekday],
         dayLabel: dayLabels[weekday],
         weekday,
       }));
@@ -3816,29 +3881,31 @@ export class AnalyticsService {
   }
 
   private formatHomeChannelBalance(rows: any[]): any[] {
-    const labels: Record<string, string> = {
-      POS: 'Offline Channel (POS)',
-      Shopee: 'Online Channel (Shopee)',
-      'TikTok Shop': 'Online Channel (TikTok Shop)',
-      PetHub: 'Digital Channel (PetHub)',
-    };
-    const order = ['POS', 'Shopee', 'TikTok Shop', 'PetHub'];
     const byChannel = new Map(rows.map((row) => [row._id, row]));
+    
+    const posRevenue = this.round(Number(byChannel.get('POS')?.revenue) || 0);
+    const shopeeRevenue = this.round(Number(byChannel.get('Shopee')?.revenue) || 0);
+    const tiktokRevenue = this.round(Number(byChannel.get('TikTok Shop')?.revenue) || 0);
+    const pethubRevenue = this.round(Number(byChannel.get('PetHub')?.revenue) || 0);
 
-    return order
-      .map((channel) => {
-        const row = byChannel.get(channel);
-        const revenue = this.round(Number(row?.revenue) || 0);
-        if (revenue <= 0) return null;
-        return {
-          category: labels[channel],
-          channel,
-          physical: channel === 'POS' ? revenue : 0,
-          online: channel === 'POS' ? 0 : revenue,
-          count: Number(row?.count) || 0,
-        };
-      })
-      .filter(Boolean);
+    const result: any[] = [];
+    if (posRevenue > 0) {
+      result.push({
+        category: 'Offline Channel (POS)',
+        pos: posRevenue,
+      });
+    }
+
+    if (shopeeRevenue > 0 || tiktokRevenue > 0 || pethubRevenue > 0) {
+      result.push({
+        category: 'Digital Channels',
+        shopee: shopeeRevenue,
+        tiktok: tiktokRevenue,
+        pethub: pethubRevenue,
+      });
+    }
+
+    return result;
   }
 
   private getHeatmapStartDate(end: Date): Date {
