@@ -10,6 +10,7 @@ import { SupabaseService } from '../common/supabase/supabase.service';
 import { Transaction, TransactionDocument } from './schemas/transaction.schema';
 import { EtlService } from './etl.service';
 import { DataValidationService } from './data-validation.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import {
@@ -45,13 +46,27 @@ function mapCategoryToSector(category: string): string {
   return match?.[1] || 'Retail';
 }
 
-// Detect channel from filename
-function detectChannel(filename: string): string {
+// Detect channel from filename and optionally file buffer content
+function detectChannel(filename: string, buffer?: Buffer): string {
   const lower = filename.toLowerCase();
-  if (lower.includes('pos')) return 'POS';
   if (lower.includes('shopee')) return 'Shopee';
   if (lower.includes('tiktok') || lower.includes('tiktokshop')) return 'TikTok Shop';
   if (lower.includes('pethub') || lower.includes('pet-hub')) return 'PetHub';
+  
+  if (buffer) {
+    const head = buffer.toString('utf-8', 0, 1024).toLowerCase();
+    if (head.includes('sku platform discount') || head.includes('tiktok')) {
+      return 'TikTok Shop';
+    }
+    if (head.includes('shopee') || head.includes('deal price')) {
+      return 'Shopee';
+    }
+    if (head.includes('pethub')) {
+      return 'PetHub';
+    }
+  }
+
+  if (lower.includes('pos')) return 'POS';
   return 'POS';
 }
 
@@ -77,12 +92,23 @@ export class CsvService {
     @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
     private etlService: EtlService,
     private dataValidationService: DataValidationService,
+    private analyticsService: AnalyticsService,
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
-    const channel = normalizeUploadChannel(
-      userChannel || detectChannel(file.originalname),
+    let channel = normalizeUploadChannel(
+      userChannel || detectChannel(file.originalname, file.buffer),
     );
+
+    // Auto-correct if user accidentally left it as default POS but headers indicate otherwise
+    if (channel === 'POS' && file.buffer) {
+      const detected = detectChannel(file.originalname, file.buffer);
+      if (detected !== 'POS') {
+        this.logger.log(`Auto-corrected channel from POS to ${detected} based on file headers`);
+        channel = detected;
+      }
+    }
+
     const isExcel = file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls');
 
     let transactions: Partial<Transaction>[];
@@ -184,6 +210,7 @@ export class CsvService {
       this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
         this.logger.error('Background ETL process failed for upload ' + uploadId, err.stack);
       });
+      this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions);
     } catch (error) {
       await this.rollbackUpload(uploadId);
       if (error instanceof BadRequestException) {
@@ -292,6 +319,7 @@ export class CsvService {
       this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
         this.logger.error('Background ETL process failed for historical upload ' + uploadId, err.stack);
       });
+      this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions, [module]);
     } catch (error) {
       await this.rollbackUpload(uploadId);
       if (error instanceof BadRequestException) {
@@ -330,6 +358,54 @@ export class CsvService {
       },
       normalizedSeries,
     };
+  }
+
+  private warmForecastCacheAfterUpload(
+    uploadId: string,
+    transactions: Partial<Transaction>[],
+    forcedModules?: ForecastModule[],
+  ) {
+    const modules = forcedModules?.length
+      ? forcedModules
+      : Array.from(
+          new Set(
+            transactions
+              .map((transaction) => transaction.sector)
+              .filter((sector): sector is ForecastModule =>
+                sector === 'Cafe' || sector === 'Services',
+              ),
+          ),
+        );
+
+    if (modules.length === 0) return;
+
+    setTimeout(() => {
+      Promise.allSettled(
+        modules.map((module) =>
+          this.analyticsService.getForecast(module, {
+            days: module === 'Cafe' ? '14' : '30',
+            forceRefresh: 'true',
+          }),
+        ),
+      ).then((results) => {
+        results.forEach((result, index) => {
+          const module = modules[index];
+          if (result.status === 'rejected') {
+            this.logger.warn(
+              `Forecast cache warmup failed for ${module} after upload ${uploadId}: ${
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(result.reason)
+              }`,
+            );
+          } else {
+            this.logger.log(
+              `Forecast cache warmed for ${module} after upload ${uploadId}.`,
+            );
+          }
+        });
+      });
+    }, 1000);
   }
 
   private parseFlexibleCsv(

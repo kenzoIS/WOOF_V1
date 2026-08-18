@@ -123,7 +123,7 @@ def get_price(item_prices, item_name):
         return None, False
     if price <= 0:
         return None, False
-    return round(price, 2), True
+    return round(price), True
 
 
 def get_item_economics(item_prices, item_economics, item_name):
@@ -1062,7 +1062,7 @@ def build_item_metrics(dataset, product_sectors, item_prices=None, item_economic
             "velocity": velocity,
         }
         if has_price:
-            metric["price"] = round(price, 2)
+            metric["price"] = round(price)
         if has_cost:
             metric["unitCost"] = round(cost, 2)
         if unit_gross_profit is not None:

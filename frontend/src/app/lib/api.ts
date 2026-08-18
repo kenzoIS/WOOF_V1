@@ -3,6 +3,35 @@ const DIRECT_UPLOAD_API_BASE =
   process.env.NEXT_PUBLIC_UPLOAD_API_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   'http://localhost:3001/api';
+const API_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type ApiCacheEntry = {
+  expiresAt: number;
+  data: unknown;
+};
+
+const apiCache = new Map<string, ApiCacheEntry>();
+const apiInFlight = new Map<string, Promise<unknown>>();
+
+function cloneCachedValue<T>(value: T): T {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+export function clearApiCache() {
+  apiCache.clear();
+  apiInFlight.clear();
+}
+
+function getRequestMethod(options?: RequestInit) {
+  return (options?.method || 'GET').toUpperCase();
+}
+
+function shouldCacheRequest(path: string, options?: RequestInit) {
+  return getRequestMethod(options) === 'GET' && !path.includes('forceRefresh=true');
+}
 
 async function request(
   path: string,
@@ -212,16 +241,51 @@ export interface TrafficOptimizerResponse {
 }
 
 async function fetchApi(path: string, options?: RequestInit) {
-  const res = await request(path, {
-    ...options,
-    headers: {
-      ...options?.headers,
-    },
-  });
-  if (!res.ok) {
-    throw await apiError(res, res.statusText || 'API request failed');
+  const canUseCache = shouldCacheRequest(path, options);
+  const cacheKey = `${API_BASE}${path}`;
+
+  if (canUseCache) {
+    const cached = apiCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cloneCachedValue(cached.data);
+    }
+
+    const inFlight = apiInFlight.get(cacheKey);
+    if (inFlight) {
+      return cloneCachedValue(await inFlight);
+    }
   }
-  return res.json();
+
+  const promise = (async () => {
+    const res = await request(path, {
+      ...options,
+      headers: {
+        ...options?.headers,
+      },
+    });
+    if (!res.ok) {
+      throw await apiError(res, res.statusText || 'API request failed');
+    }
+    return res.json();
+  })();
+
+  if (!canUseCache) {
+    const data = await promise;
+    clearApiCache();
+    return data;
+  }
+
+  apiInFlight.set(cacheKey, promise);
+  try {
+    const data = await promise;
+    apiCache.set(cacheKey, {
+      data,
+      expiresAt: Date.now() + API_CACHE_TTL_MS,
+    });
+    return cloneCachedValue(data);
+  } finally {
+    apiInFlight.delete(cacheKey);
+  }
 }
 
 function toQueryString(params?: object) {
@@ -252,6 +316,7 @@ export async function uploadCSV(file: File, channel?: string) {
   if (!res.ok) {
     throw await apiError(res, res.statusText || 'Upload failed');
   }
+  clearApiCache();
   return res.json();
 }
 
@@ -274,6 +339,7 @@ export async function uploadHistoricalCSV(
   if (!res.ok) {
     throw await apiError(res, res.statusText || 'Historical upload failed');
   }
+  clearApiCache();
   return res.json();
 }
 

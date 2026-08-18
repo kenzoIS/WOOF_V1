@@ -1267,6 +1267,11 @@ export class AnalyticsService {
                 $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
               },
             },
+            prices: {
+              $push: {
+                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+              },
+            },
             avgUnitCost: {
               $avg: {
                 $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
@@ -1289,6 +1294,7 @@ export class AnalyticsService {
             totalQuantity: 1,
             transactionCount: { $size: '$transactions' },
             avgPrice: 1,
+            prices: 1,
             avgUnitCost: 1,
             avgUnitGrossProfit: 1,
             avgMargin: 1,
@@ -1319,7 +1325,30 @@ export class AnalyticsService {
           : index < (totalItems * 2) / 3
             ? 'moderate'
             : 'slow';
-      const price = this.nullableFiniteNumber(row.avgPrice);
+      
+      const rawPrice = this.nullableFiniteNumber(row.avgPrice);
+      let price: number | null = null;
+      if (Array.isArray(row.prices) && row.prices.length > 0) {
+        const priceCounts = new Map<number, number>();
+        row.prices.forEach((p: any) => {
+          const val = Number(p);
+          if (Number.isFinite(val) && val > 0) {
+            const rounded = Math.round(val);
+            priceCounts.set(rounded, (priceCounts.get(rounded) || 0) + 1);
+          }
+        });
+        let maxFreq = 0;
+        for (const [pVal, freq] of priceCounts.entries()) {
+          if (freq > maxFreq) {
+            maxFreq = freq;
+            price = pVal;
+          }
+        }
+      }
+      if (price === null && rawPrice !== null) {
+        price = Math.round(rawPrice);
+      }
+
       const unitCost = this.nullableFiniteNumber(row.avgUnitCost);
       const unitGrossProfit = this.nullableFiniteNumber(row.avgUnitGrossProfit);
       const margin = this.nullableFiniteNumber(row.avgMargin);
@@ -1478,11 +1507,11 @@ export class AnalyticsService {
 
     const dailyVisits = new Map<string, number>();
     const weekdayVisits = new Map<string, number>();
-    
     // For tracking subSectors
     const subSectorDailyVisits = new Map<string, number>();
     const subSectorWeekdayVisits = new Map<string, number>();
 
+    const weekdayDailySamples = new Map<string, number[]>();
     let totalVisits = 0;
 
     rows.forEach((row: any) => {
@@ -1518,15 +1547,38 @@ export class AnalyticsService {
       
       subSectorDailyVisits.set(subDailyKey, (subSectorDailyVisits.get(subDailyKey) || 0) + visits);
       subSectorWeekdayVisits.set(subWeekdayKey, (subSectorWeekdayVisits.get(subWeekdayKey) || 0) + visits);
+
+      if (!weekdayDailySamples.has(weekdayKey)) {
+        weekdayDailySamples.set(weekdayKey, []);
+      }
+      weekdayDailySamples.get(weekdayKey)!.push(visits);
     });
+
+    const filterOutliersIQR = (values: number[]): number[] => {
+      if (values.length < 4) return values;
+      const sorted = [...values].sort((a, b) => a - b);
+      const q1 = sorted[Math.floor(sorted.length * 0.25)];
+      const q3 = sorted[Math.floor(sorted.length * 0.75)];
+      const iqr = q3 - q1;
+      const upperBound = q3 + 1.5 * iqr;
+      const lowerBound = Math.max(0, q1 - 1.5 * iqr);
+      const nonOutliers = sorted.filter((v) => v >= lowerBound && v <= upperBound);
+      if (nonOutliers.length === 0) return values;
+      const median = nonOutliers[Math.floor(nonOutliers.length / 2)];
+      return values.map((v) => (v > upperBound || v < lowerBound ? median : v));
+    };
 
     const sectors = trackedSectors.map((sector) => {
       const buildValues = (sec: string, subSec?: string) => {
         return columns.map((column) => {
+          const samples = subSec ? [] : (weekdayDailySamples.get(`${sec}:${column.weekday}`) || []);
+          const sanitizedSamples = displayMode === 'weekday_average' && !subSec ? filterOutliersIQR(samples) : samples;
           const rawVisits =
             displayMode === 'daily'
               ? (subSec ? subSectorDailyVisits.get(`${sec}::${subSec}:${column.key}`) : dailyVisits.get(`${sec}:${column.key}`)) || 0
-              : (subSec ? subSectorWeekdayVisits.get(`${sec}::${subSec}:${column.weekday}`) : weekdayVisits.get(`${sec}:${column.weekday}`)) || 0;
+              : (subSec 
+                   ? subSectorWeekdayVisits.get(`${sec}::${subSec}:${column.weekday}`) || 0 
+                   : sanitizedSamples.reduce((sum, v) => sum + v, 0));
           const sampleDays =
             displayMode === 'weekday_average'
               ? weekdaySampleDays.get(column.weekday) || 1
@@ -1536,6 +1588,7 @@ export class AnalyticsService {
           return {
             key: column.key,
             visits,
+            cumulativeVisits: Math.round(rawVisits),
             ...(column.date ? { date: column.date } : {}),
             ...(sampleDays ? { sampleDays } : {}),
           };

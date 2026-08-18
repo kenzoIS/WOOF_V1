@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search, Users, CalendarDays, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -289,6 +290,7 @@ function useDebouncedValue<T>(value: T, delayMs = 400): T {
 }
 
 export function AISimulation() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("bundle-simulator");
   const [discountValue, setDiscountValue] = useState([15]);
   const [trafficOptimizerTime, setTrafficOptimizerTime] = useState([14]); // 2 PM (14 in 24h format)
@@ -372,6 +374,23 @@ export function AISimulation() {
     { id: "scenario-builder", label: "Scenario Builder", icon: FlaskConical },
     { id: "activation-layer", label: "Activation Layer", icon: Megaphone },
   ];
+
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    const tab = typeof router.query.tab === "string" ? router.query.tab : "";
+    const knownTabs = [
+      "bundle-simulator",
+      "pricing-lab",
+      "traffic-optimizer",
+      "scenario-builder",
+      "activation-layer",
+    ];
+
+    if (knownTabs.includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [router.isReady, router.query.tab]);
 
   const handleBundleTimeChange = (value: number[]) => {
     setDataTime(value);
@@ -1228,7 +1247,7 @@ export function AISimulation() {
         support: input.support ?? existing?.support ?? 0,
         basketCount: input.basketCount ?? existing?.basketCount ?? 0,
         velocity: input.velocity || existing?.velocity || "moderate",
-        price: input.price ?? existing?.price ?? null,
+        price: input.price !== undefined && input.price !== null ? Math.round(input.price) : (existing?.price !== undefined && existing?.price !== null ? Math.round(existing.price) : null),
         unitCost: input.unitCost ?? existing?.unitCost ?? null,
         unitGrossProfit: input.unitGrossProfit ?? existing?.unitGrossProfit ?? null,
         margin: input.margin ?? existing?.margin ?? null,
@@ -1244,7 +1263,7 @@ export function AISimulation() {
         support: metric.support || 0,
         basketCount: metric.basketCount || 0,
         velocity: metric.velocity,
-        price: metric.price ?? null,
+        price: metric.price !== undefined && metric.price !== null ? Math.round(metric.price) : null,
         unitCost: metric.unitCost ?? null,
         unitGrossProfit: metric.unitGrossProfit ?? null,
         margin: metric.margin ?? null,
@@ -1257,7 +1276,7 @@ export function AISimulation() {
           name: entry.itemA || entry.anchorItem,
           sector: firstSector(entry.antecedentSectors),
           sectors: entry.antecedentSectors || [firstSector(entry.antecedentSectors)],
-          price: entry.itemAPrice ?? null,
+          price: entry.itemAPrice !== undefined && entry.itemAPrice !== null ? Math.round(entry.itemAPrice) : null,
           unitCost: entry.itemACost ?? null,
         });
       }
@@ -1266,7 +1285,7 @@ export function AISimulation() {
           name: entry.itemB || entry.bundleItem,
           sector: firstSector(entry.consequentSectors),
           sectors: entry.consequentSectors || [firstSector(entry.consequentSectors)],
-          price: entry.itemBPrice ?? null,
+          price: entry.itemBPrice !== undefined && entry.itemBPrice !== null ? Math.round(entry.itemBPrice) : null,
           unitCost: entry.itemBCost ?? null,
         });
       }
@@ -1545,7 +1564,10 @@ export function AISimulation() {
       const dayForecasts = trafficColumns.map((column) => {
         const trafficValue = valuesByKey.get(column.key);
         const visits = Number(trafficValue?.visits || 0);
-        const level = getDemandLevelForSector(sector.name, visits);
+        const sampleDays = Number(column.sampleDays || (trafficValue as any)?.sampleDays || 1);
+        const cumulativeVisits = Number((trafficValue as any)?.cumulativeVisits || Math.round(visits * sampleDays));
+        const displayVal = trafficDisplayMode === "weekday_average" ? cumulativeVisits : visits;
+        const level = getDemandLevelForSector(sector.name, displayVal);
         const requiredStaff = getRequiredStaff(sector.name, level);
         const scheduledStaff = getScheduledStaff(sector.name, debouncedTrafficOptimizerTime, staffingDayFilter);
         const staffDelta = requiredStaff - scheduledStaff;
@@ -1556,6 +1578,7 @@ export function AISimulation() {
           key: column.key,
           date: column.date,
           predicted: visits,
+          cumulativeVisits,
           actual: visits,
           level,
           requiredStaff,
@@ -1724,6 +1747,12 @@ export function AISimulation() {
       groomingColor
     };
   }, [debouncedTrafficOptimizerTime, staffingDayFilter, selectedTimeStaffPlan]);
+const maxCumulativeVisits = useMemo(() => {
+    let maxVal = 1;
+    sectorTrafficForecast.forEach((sector) => {
+      sector.forecasts.forEach((f) => {
+        const val = trafficDisplayMode === "weekday_average" ? f.cumulativeVisits : f.predicted;
+        if (val > maxVal) maxVal = val;
 
   const totalPredictedTraffic = Math.round(trafficOptimizerData?.totalVisits ||
     sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0));
@@ -3362,8 +3391,11 @@ export function AISimulation() {
             {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Observed Visits</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Observed Visits (All Hours)</div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalPredictedTraffic}</div>
+                <div className="text-[10px] text-[#223047] opacity-55 mt-0.5">
+                  All operating hours in {selectedHeaderRangeLabel}
+                </div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
                 <div className="text-xs text-[#223047] opacity-60 mb-1">High Demand Sectors</div>
@@ -3393,9 +3425,9 @@ export function AISimulation() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-100 border border-green-200" /> Low</span>
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-100 border border-yellow-200" /> Medium</span>
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-100 border border-red-200" /> High</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-100 border border-green-200" /> Low (1-10)</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-100 border border-yellow-200" /> Medium (11-25)</span>
+                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-100 border border-red-200" /> High (26+)</span>
                 </div>
               </div>
 
@@ -3404,9 +3436,12 @@ export function AISimulation() {
                   <thead>
                     <tr className="border-t border-[#FFD9EC] bg-white text-left text-xs uppercase tracking-wide text-[#223047] opacity-70">
                       <th className="px-4 py-3 font-semibold">Sector</th>
-                      {trafficColumns.map((column) => (
-                        <th key={column.key} className="px-3 py-3 font-semibold text-center">{column.label}</th>
-                      ))}
+                      {trafficColumns.map((column) => {
+                        const headerLabel = (column.dayLabel || column.label.replace(/\s+(avg|total)$/i, "")).toUpperCase();
+                        return (
+                          <th key={column.key} className="px-3 py-3 font-semibold text-center">{headerLabel}</th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
@@ -3642,12 +3677,37 @@ export function AISimulation() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
                 <XAxis dataKey="day" stroke="#223047" style={{ fontSize: "12px" }} />
-                <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
+                <YAxis stroke="#223047" style={{ fontSize: "12px" }} allowDecimals={false} />
                 <RechartsTooltip
-                  contentStyle={{
-                    backgroundColor: "white",
-                    border: "1px solid #FFD9EC",
-                    borderRadius: "12px",
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload || !payload.length) return null;
+                    const data = payload[0].payload;
+                    return (
+                      <div className="rounded-xl border border-[#FFD9EC] bg-white p-3 shadow-lg text-xs space-y-1.5 min-w-[180px]">
+                        <div className="font-bold text-[#223047] border-b border-[#FFD9EC] pb-1 flex items-center justify-between">
+                          <span>{label}</span>
+                          <span className="text-[10px] opacity-60 font-semibold">{formatHour(trafficOptimizerTime[0])}</span>
+                        </div>
+                        <div className="space-y-1 text-[#223047]">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#F53799]" /> Cafe</span>
+                            <span className="font-bold">{data.cafe || 0} visits</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#3AE4FA]" /> Services</span>
+                            <span className="font-bold">{data.services || 0} visits</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#F59E0B]" /> Retail</span>
+                            <span className="font-bold">{data.retail || 0} visits</span>
+                          </div>
+                        </div>
+                        <div className="border-t border-[#FFD9EC] pt-1 flex items-center justify-between font-bold text-[#223047]">
+                          <span>Combined Total:</span>
+                          <span className="text-[#F53799]">{data.visits || 0} visits</span>
+                        </div>
+                      </div>
+                    );
                   }}
                 />
                 <Area

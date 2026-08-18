@@ -1,18 +1,75 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 
+const ANALYTICS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type CacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
 @Controller('analytics')
 export class AnalyticsController {
+  private readonly cache = new Map<string, CacheEntry>();
+  private readonly inFlight = new Map<string, Promise<unknown>>();
+
   constructor(private readonly analyticsService: AnalyticsService) {}
+
+  private cached<T>(
+    key: string,
+    loader: () => Promise<T>,
+    options?: { forceRefresh?: string },
+  ): Promise<T> {
+    if (options?.forceRefresh === 'true') {
+      this.cache.delete(key);
+      return loader();
+    }
+
+    const cached = this.cache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return Promise.resolve(cached.value as T);
+    }
+
+    const active = this.inFlight.get(key);
+    if (active) {
+      return active as Promise<T>;
+    }
+
+    const promise = loader()
+      .then((value) => {
+        this.cache.set(key, {
+          value,
+          expiresAt: Date.now() + ANALYTICS_CACHE_TTL_MS,
+        });
+        return value;
+      })
+      .finally(() => {
+        this.inFlight.delete(key);
+      });
+
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+
+  private key(name: string, params?: Record<string, unknown>) {
+    const query = Object.entries(params || {})
+      .filter(([, value]) => value !== undefined && value !== null)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return `${name}:${JSON.stringify(query)}`;
+  }
 
   @Get('home')
   async getHomeOverview(@Query('range') range?: string) {
-    return this.analyticsService.getHomeOverview(range);
+    return this.cached(this.key('home', { range }), () =>
+      this.analyticsService.getHomeOverview(range),
+    );
   }
 
   @Get('dashboard/:sector')
   async getDashboard(@Param('sector') sector: string) {
-    return this.analyticsService.getDashboard(sector);
+    return this.cached(this.key('dashboard', { sector }), () =>
+      this.analyticsService.getDashboard(sector),
+    );
   }
 
   @Get('data-range')
@@ -43,7 +100,7 @@ export class AnalyticsController {
     @Query('testEndDate') testEndDate?: string,
     @Query('backtestSplit') backtestSplit?: string,
   ) {
-    return this.analyticsService.getForecast(sector, {
+    const params = {
       temp,
       rain,
       holiday,
@@ -58,12 +115,19 @@ export class AnalyticsController {
       testStartDate,
       testEndDate,
       backtestSplit,
-    });
+    };
+    return this.cached(
+      this.key('forecast', { sector, ...params }),
+      () => this.analyticsService.getForecast(sector, params),
+      { forceRefresh },
+    );
   }
 
   @Get('forecast-by-channel/retail')
   async getRetailForecastByChannel() {
-    return this.analyticsService.getRetailForecastByChannel();
+    return this.cached(this.key('forecast-by-channel-retail'), () =>
+      this.analyticsService.getRetailForecastByChannel(),
+    );
   }
 
   @Get('exogenous/status')
@@ -88,7 +152,7 @@ export class AnalyticsController {
     @Query('dateStart') dateStart?: string,
     @Query('dateEnd') dateEnd?: string,
   ) {
-    return this.analyticsService.getCrossSell({
+    const params = {
       minSupport,
       minConfidence,
       minLift,
@@ -98,7 +162,12 @@ export class AnalyticsController {
       forceRefresh,
       dateStart,
       dateEnd,
-    });
+    };
+    return this.cached(
+      this.key('cross-sell', params),
+      () => this.analyticsService.getCrossSell(params),
+      { forceRefresh },
+    );
   }
 
   @Post('cross-sell/campaign-drafts')
@@ -112,11 +181,14 @@ export class AnalyticsController {
     @Query('dateStart') dateStart?: string,
     @Query('dateEnd') dateEnd?: string,
   ) {
-    return this.analyticsService.getPricingCatalog({
+    const params = {
       sector,
       dateStart,
       dateEnd,
-    });
+    };
+    return this.cached(this.key('pricing-catalog', params), () =>
+      this.analyticsService.getPricingCatalog(params),
+    );
   }
 
   @Get('traffic-optimizer')
@@ -125,11 +197,14 @@ export class AnalyticsController {
     @Query('dateStart') dateStart?: string,
     @Query('dateEnd') dateEnd?: string,
   ) {
-    return this.analyticsService.getTrafficOptimizer({
+    const params = {
       hour,
       dateStart,
       dateEnd,
-    });
+    };
+    return this.cached(this.key('traffic-optimizer', params), () =>
+      this.analyticsService.getTrafficOptimizer(params),
+    );
   }
 
   @Get('cross-sell/config')
@@ -143,7 +218,7 @@ export class AnalyticsController {
     @Query('dateStart') dateStart?: string,
     @Query('dateEnd') dateEnd?: string,
   ) {
-    return this.analyticsService.getCrossSellConfig({
+    const params = {
       minSupport,
       minConfidence,
       minLift,
@@ -152,7 +227,10 @@ export class AnalyticsController {
       sector,
       dateStart,
       dateEnd,
-    });
+    };
+    return this.cached(this.key('cross-sell-config', params), () =>
+      this.analyticsService.getCrossSellConfig(params),
+    );
   }
 
   @Get('cross-sell/by-sector')
@@ -167,7 +245,7 @@ export class AnalyticsController {
     @Query('dateStart') dateStart?: string,
     @Query('dateEnd') dateEnd?: string,
   ) {
-    return this.analyticsService.getCrossSellBySector({
+    const params = {
       minSupport,
       minConfidence,
       minLift,
@@ -177,7 +255,12 @@ export class AnalyticsController {
       forceRefresh,
       dateStart,
       dateEnd,
-    });
+    };
+    return this.cached(
+      this.key('cross-sell-by-sector', params),
+      () => this.analyticsService.getCrossSellBySector(params),
+      { forceRefresh },
+    );
   }
 
   @Get('cross-sell/bundles')
@@ -192,7 +275,7 @@ export class AnalyticsController {
     @Query('dateStart') dateStart?: string,
     @Query('dateEnd') dateEnd?: string,
   ) {
-    return this.analyticsService.getCrossSellBundles({
+    const params = {
       minSupport,
       minConfidence,
       minLift,
@@ -202,12 +285,19 @@ export class AnalyticsController {
       forceRefresh,
       dateStart,
       dateEnd,
-    });
+    };
+    return this.cached(
+      this.key('cross-sell-bundles', params),
+      () => this.analyticsService.getCrossSellBundles(params),
+      { forceRefresh },
+    );
   }
 
   @Get('promos/quiet-periods')
   async getNextQuietPeriod() {
-    return this.analyticsService.getNextQuietPeriod();
+    return this.cached(this.key('promos-quiet-periods'), () =>
+      this.analyticsService.getNextQuietPeriod(),
+    );
   }
 
   @Get('promos/history')
