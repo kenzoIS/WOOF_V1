@@ -36,6 +36,24 @@ interface ModelResult {
   rmse?: number;
   mape?: number;
   r2?: number;
+  weeklyMetrics?: {
+    mase: number;
+    smape: number;
+    accuracy: number;
+    mae?: number;
+    rmse?: number;
+    mape?: number;
+    r2?: number;
+  } | null;
+  monthlyMetrics?: {
+    mase: number;
+    smape: number;
+    accuracy: number;
+    mae?: number;
+    rmse?: number;
+    mape?: number;
+    r2?: number;
+  } | null;
   forecast: {
     date: string;
     forecast: number;
@@ -146,6 +164,49 @@ export class AnalyticsService {
       date: { $gte: previousStart, $lte: previousEnd },
     };
 
+    // Determine matched date window across active channels for like-for-like channel balance
+    const digitalBounds = await this.transactionModel.aggregate([
+      {
+        $match: {
+          channel: { $in: ['Shopee', 'TikTok Shop'] },
+        },
+      },
+      {
+        $group: {
+          _id: '$channel',
+          minDate: { $min: '$date' },
+          maxDate: { $max: '$date' },
+        },
+      },
+    ]);
+
+    let matchedChannelDateFilter: any = dateFilter;
+    if (digitalBounds.length > 0) {
+      const shopeeBound = digitalBounds.find((b: any) => b._id === 'Shopee');
+      const tiktokBound = digitalBounds.find((b: any) => b._id === 'TikTok Shop');
+
+      const commonStart = new Date(
+        Math.max(
+          new Date(shopeeBound?.minDate || start).getTime(),
+          new Date(tiktokBound?.minDate || start).getTime(),
+        ),
+      );
+      const commonEnd = new Date(
+        Math.min(
+          new Date(shopeeBound?.maxDate || end).getTime(),
+          new Date(tiktokBound?.maxDate || end).getTime(),
+        ),
+      );
+
+      let mStart = new Date(Math.max(start.getTime(), commonStart.getTime()));
+      let mEnd = new Date(Math.min(end.getTime(), commonEnd.getTime()));
+      if (mStart > mEnd) {
+        mStart = commonStart;
+        mEnd = commonEnd;
+      }
+      matchedChannelDateFilter = { date: { $gte: mStart, $lte: mEnd } };
+    }
+
     const [
       currentTotals,
       previousTotals,
@@ -183,7 +244,7 @@ export class AnalyticsService {
       this.transactionModel.aggregate([
         {
           $match: {
-            ...dateFilter,
+            ...matchedChannelDateFilter,
             channel: { $in: ['POS', 'Shopee', 'TikTok Shop', 'PetHub'] },
           },
         },
@@ -561,7 +622,7 @@ export class AnalyticsService {
       reqMode === 'fixed-window'
         ? this.normalizeDateKey(overrides?.testEndDate) || BACKTEST_TEST_END_DATE
         : undefined;
-    const reqSplit = reqMode === 'production' ? '80-20' : '80-10-10';
+    const reqSplit = '90-5-5';
 
     // Caching check
     const { data: cachedForecast } = await this.supabaseService.client
@@ -754,6 +815,14 @@ export class AnalyticsService {
       mase: finalModel.mase,
       smape: finalModel.smape,
       accuracy: finalModel.accuracy,
+      mae: finalModel.mae,
+      rmse: finalModel.rmse,
+      mape: finalModel.mape,
+      r2: finalModel.r2,
+      weeklyMetrics: finalModel.weeklyMetrics ?? null,
+      monthlyMetrics: finalModel.monthlyMetrics ?? null,
+      weekly_metrics: finalModel.weeklyMetrics ?? null,
+      monthly_metrics: finalModel.monthlyMetrics ?? null,
       is_fallback: useFallback,
       rejection_reason: useFallback ? rejectionReason : null,
       historical: this.buildAnchoredHistoricalPayload(
@@ -2219,7 +2288,7 @@ export class AnalyticsService {
     return {
       mode: 'production',
       isBacktest: false,
-      splitRatio: '80-20',
+      splitRatio: '90-5-5',
       trainingHistorical: this.filterObservedDemand(historical),
       evaluationHistorical: [],
       forecastDays: requestedForecastDays,
@@ -2254,7 +2323,7 @@ export class AnalyticsService {
     return {
       mode: 'latest-holdout',
       isBacktest: evaluationHistorical.length > 0,
-      splitRatio: '80-10-10',
+      splitRatio: '90-5-5',
       trainingHistorical,
       evaluationHistorical,
       forecastDays: evaluationWindow.length + requestedForecastDays,
@@ -2295,7 +2364,7 @@ export class AnalyticsService {
     return {
       mode: 'fixed-window',
       isBacktest: true,
-      splitRatio: '80-10-10',
+      splitRatio: '90-5-5',
       trainingHistorical,
       evaluationHistorical,
       forecastDays: Math.max(0, overlapForecastDays) + requestedForecastDays,
@@ -2344,7 +2413,7 @@ export class AnalyticsService {
     return this.runPython<ModelResult>(scriptName, {
       data: historical,
       forecastDays,
-      splitRatio: splitRatio || '80-20',
+      splitRatio: splitRatio || '90-5-5',
       ...extraPayload,
     });
   }

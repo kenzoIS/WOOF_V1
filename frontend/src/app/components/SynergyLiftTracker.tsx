@@ -161,7 +161,7 @@ export function SynergyLiftTracker() {
               <TrendingUp className="w-5 h-5 text-emerald-600" />
             </div>
             <div>
-              <h5 className="text-sm font-semibold text-slate-900 mb-1">AI Insight</h5>
+              <h5 className="text-sm font-semibold text-slate-900 mb-1">WOOF Insight</h5>
               <p className="text-sm text-slate-700">
                 Physical placement outperformed digital bundles by <span className="font-bold text-emerald-600">{difference}%</span> this week. 
                 Consider reallocating promotional budget to in-store merchandising for optimal ROI.

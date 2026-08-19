@@ -97,6 +97,47 @@ export interface ForecastRun {
   mase: number;
   smape: number;
   accuracy: number;
+  mae?: number;
+  rmse?: number;
+  mape?: number;
+  wape?: number;
+  mpe?: number;
+  weeklyMetrics?: {
+    mase: number;
+    smape: number;
+    accuracy: number;
+    mae?: number;
+    rmse?: number;
+    mape?: number;
+    r2?: number;
+  } | null;
+  monthlyMetrics?: {
+    mase: number;
+    smape: number;
+    accuracy: number;
+    mae?: number;
+    rmse?: number;
+    mape?: number;
+    r2?: number;
+  } | null;
+  weekly_metrics?: {
+    mase: number;
+    smape: number;
+    accuracy: number;
+    mae?: number;
+    rmse?: number;
+    mape?: number;
+    r2?: number;
+  } | null;
+  monthly_metrics?: {
+    mase: number;
+    smape: number;
+    accuracy: number;
+    mae?: number;
+    rmse?: number;
+    mape?: number;
+    r2?: number;
+  } | null;
   isFallback: boolean;
   rejectionReason?: string;
   historical: Array<{

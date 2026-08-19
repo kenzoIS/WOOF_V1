@@ -1,21 +1,65 @@
 import { AlertTriangle, TrendingUp, Sparkles } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics } from "../components/ThreeZoneForecastChart";
+import { getForecast, ForecastRun } from "../lib/api";
 import { SpatialMerchandisingPanel } from "../components/SpatialMerchandisingPanel";
 
 export function DemandForecasts() {
   const [timeValue, setTimeValue] = useState(15); // 3:00 PM
+  const [forecastSector, setForecastSector] = useState<'cafe' | 'services'>('cafe');
+  const [forecastRun, setForecastRun] = useState<ForecastRun | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
 
-  // Mock Prophet forecast data
-  const forecastData = [
-    { day: "Day 1", predicted: 142, lower: 128, upper: 156 },
-    { day: "Day 5", predicted: 156, lower: 140, upper: 172 },
-    { day: "Day 10", predicted: 168, lower: 150, upper: 186 },
-    { day: "Day 15", predicted: 182, lower: 162, upper: 202 },
-    { day: "Day 20", predicted: 195, lower: 173, upper: 217 },
-    { day: "Day 25", predicted: 208, lower: 184, upper: 232 },
-    { day: "Day 30", predicted: 223, lower: 197, upper: 249 },
-  ];
+  useEffect(() => {
+    setForecastLoading(true);
+    setForecastRun(null);
+    getForecast(forecastSector, { days: "90", splitRatio: "90-5-5" })
+      .then(setForecastRun)
+      .catch(console.error)
+      .finally(() => setForecastLoading(false));
+  }, [forecastSector]);
+
+  const rawThreeZoneData = useMemo<ThreeZonePoint[]>(() => {
+    if (!forecastRun?.historical?.length) return [];
+    const rows: ThreeZonePoint[] = forecastRun.historical.map((d) => {
+      const rev = Number(d.revenue) > 0 ? Number(d.revenue) : Number(d.actual) || 0;
+      return {
+        date: d.date,
+        actual: rev,
+        predicted: d.fitted != null ? d.fitted : null,
+        forecast: null,
+      };
+    });
+    if (forecastRun.forecast?.length) {
+      for (const fp of forecastRun.forecast) {
+        const rev = Number(fp.projectedNetSales) > 0 ? Number(fp.projectedNetSales) : Number(fp.forecast) || 0;
+        rows.push({ date: fp.date, actual: null, predicted: null, forecast: rev });
+      }
+    }
+    return rows;
+  }, [forecastRun]);
+
+  const academicSplitDate = useMemo(() => {
+    if (!forecastRun?.historical?.length) return "2025-11-15";
+    return forecastRun.historical[Math.floor(forecastRun.historical.length * 0.90) - 1]?.date ?? "2025-11-15";
+  }, [forecastRun]);
+
+  const academicForecastHorizon = useMemo(() => {
+    if (!forecastRun?.historical?.length) return "2026-02-20";
+    return forecastRun.historical[Math.floor(forecastRun.historical.length * 0.95) - 1]?.date ?? "2026-02-20";
+  }, [forecastRun]);
+
+  const academicMetrics = useMemo<BacktestMetrics | null>(() => {
+    if (!forecastRun) return null;
+    return {
+      mae: forecastRun.mae ?? 0,
+      rmse: forecastRun.rmse ?? 0,
+      mape: forecastRun.mape ?? 0,
+      mase: forecastRun.mase ?? 0,
+      wape: (forecastRun as any).wape ?? 0,
+      mpe: (forecastRun as any).mpe ?? 0,
+    };
+  }, [forecastRun]);
 
   const occupancyAlerts = [
     { time: "Tomorrow, 2:00 PM", capacity: "94%", risk: "high", services: "3 groomings queued" },
@@ -319,60 +363,57 @@ export function DemandForecasts() {
             </div>
           </div>
 
-          {/* Prophet Forecast Chart */}
-          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp className="w-5 h-5 text-blue-600" />
-              <h3 className="font-semibold text-slate-900">30-Day Forecast</h3>
+          {/* 90-5-5 Multi-Zone Evaluation Chart */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-blue-600" />
+                <h3 className="font-semibold text-slate-900 text-sm">90-5-5 Multi-Zone Time Series Evaluation</h3>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setForecastSector('cafe')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    forecastSector === 'cafe'
+                      ? 'bg-[#F53799] text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Cafe
+                </button>
+                <button
+                  onClick={() => setForecastSector('services')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    forecastSector === 'services'
+                      ? 'bg-[#06B6D4] text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Services
+                </button>
+              </div>
             </div>
 
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={forecastData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="day" stroke="#94a3b8" style={{ fontSize: '10px' }} />
-                  <YAxis stroke="#94a3b8" style={{ fontSize: '10px' }} />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: 'white', 
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '6px',
-                      fontSize: '12px'
-                    }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="predicted" 
-                    stroke="#3b82f6" 
-                    strokeWidth={2}
-                    dot={{ fill: '#3b82f6', r: 3 }}
-                    name="Predicted"
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="upper" 
-                    stroke="#94a3b8" 
-                    strokeWidth={1}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    name="Upper Bound"
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="lower" 
-                    stroke="#94a3b8" 
-                    strokeWidth={1}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    name="Lower Bound"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-
-            <p className="text-xs text-slate-600 mt-3">
-              Prophet model • 30-day seasonal prediction
-            </p>
+            {forecastLoading ? (
+              <div className="flex items-center justify-center h-48 text-sm text-slate-500">
+                <span className="animate-pulse">Loading live multi-zone data…</span>
+              </div>
+            ) : rawThreeZoneData.length > 0 ? (
+              <ThreeZoneForecastChart
+                rawData={rawThreeZoneData}
+                initialSplitDate={academicSplitDate}
+                initialForecastHorizon={academicForecastHorizon}
+                metrics={academicMetrics}
+                modelName={forecastRun?.modelName ?? (forecastSector === 'cafe' ? 'Prophet' : 'SARIMAX')}
+                sector={forecastSector === 'cafe' ? 'Cafe' : 'Services'}
+                currencyPrefix="₱"
+                themeColor={forecastSector === 'cafe' ? '#F53799' : '#06B6D4'}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-48 text-sm text-slate-500">
+                No data available. Upload {forecastSector === 'cafe' ? 'Cafe' : 'Services'} history to view forecast.
+              </div>
+            )}
           </div>
         </div>
       </div>

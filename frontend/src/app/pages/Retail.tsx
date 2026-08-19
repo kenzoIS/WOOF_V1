@@ -595,7 +595,11 @@ export function Retail() {
             </Badge>
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "Premium Dog Food at critical spoilage risk (6 days left). Activate 25% flash sale to move 12 units and prevent ₱15,000 loss."
+            {dashboardData?.topItems?.[0]
+              ? `${dashboardData.topItems[0].name} leads Retail sales at ₱${dashboardData.topItems[0].revenue.toLocaleString()} across ${dashboardData.topItems[0].orderCount || dashboardData.topItems[0].quantity || 0} units.`
+              : aggregatedKpis.totalRevenue > 0
+                ? `Retail revenue generated ₱${aggregatedKpis.totalRevenue.toLocaleString()} across physical and digital channels.`
+                : "Upload Retail POS or e-commerce transaction data to activate live item insights."}
           </p>
         </div>
         <img

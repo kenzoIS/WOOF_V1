@@ -1,7 +1,8 @@
 import math
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 
 try:
     from sklearn.metrics import (
@@ -162,3 +163,87 @@ def _manual_regression_metrics(actual: np.ndarray, predicted: np.ndarray) -> Tup
     ss_tot = float(np.sum((actual - np.mean(actual)) ** 2))
     r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0.0
     return mae, rmse, mape, r2
+
+
+def resample_and_evaluate(
+    dates: Iterable[str],
+    actual: Iterable[float],
+    predicted: Iterable[float],
+    train_actual: Iterable[float],
+    train_dates: Iterable[str],
+    freq: str = "W",
+    seasonal_period: Optional[int] = None,
+) -> Dict[str, object]:
+    """
+    Resamples holdout predictions and actuals to a target frequency (e.g. Weekly 'W' or Monthly 'ME'/'M')
+    using .sum() to aggregate total period demand, and calculates authentic backtest evaluation metrics
+    against an appropriately resampled seasonal-naive baseline.
+    """
+    test_df = pd.DataFrame({
+        "ds": pd.to_datetime(list(dates), errors="coerce"),
+        "actual": list(actual),
+        "predicted": list(predicted),
+    }).dropna(subset=["ds"]).sort_values("ds").set_index("ds")
+
+    train_df = pd.DataFrame({
+        "ds": pd.to_datetime(list(train_dates), errors="coerce"),
+        "actual": list(train_actual),
+    }).dropna(subset=["ds"]).sort_values("ds").set_index("ds")
+
+    if len(test_df) == 0 or len(train_df) == 0:
+        return {
+            "mase": 0.0,
+            "smape": 0.0,
+            "accuracy": 0.0,
+            "mae": 0.0,
+            "rmse": 0.0,
+            "mape": 0.0,
+            "r2": 0.0,
+        }
+
+    # Aggregate using .sum() because demand is volume/count, so period total = sum(daily)
+    # Support pandas frequency aliases (e.g. 'W', 'ME', 'M')
+    resample_freq = freq
+    if freq == "M":
+        resample_freq = "ME" if hasattr(pd.Series, "resample") else "M"
+
+    try:
+        resampled_test = test_df.resample(resample_freq).sum().dropna()
+        resampled_train = train_df.resample(resample_freq).sum().dropna()
+    except ValueError:
+        # Fallback if frequency alias differs by pandas version
+        resampled_test = test_df.resample("W" if "W" in freq else "M").sum().dropna()
+        resampled_train = train_df.resample("W" if "W" in freq else "M").sum().dropna()
+
+    if len(resampled_test) == 0 or len(resampled_train) == 0:
+        return {
+            "mase": 0.0,
+            "smape": 0.0,
+            "accuracy": 0.0,
+            "mae": 0.0,
+            "rmse": 0.0,
+            "mape": 0.0,
+            "r2": 0.0,
+        }
+
+    # Determine seasonal period for the naive baseline
+    if seasonal_period is not None:
+        sp = seasonal_period
+    elif "W" in freq:
+        # For weekly series, day-of-week seasonality is already aggregated out.
+        # Use week-over-week naive baseline (lag-1).
+        sp = 1
+    elif freq in ("M", "ME", "MS"):
+        # For monthly series, use year-over-year (12 months) if sufficient history exists (>=24 months),
+        # otherwise fall back to month-over-month lag-1 naive baseline.
+        sp = 12 if len(resampled_train) >= 24 else 1
+    else:
+        sp = 1
+
+    return evaluate_forecast_metrics(
+        actual=resampled_test["actual"].to_numpy(),
+        predicted=resampled_test["predicted"].to_numpy(),
+        training=resampled_train["actual"].to_numpy(),
+        seasonal_period=sp,
+    )
+

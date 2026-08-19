@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from prophet import Prophet
 
-from model_metrics import evaluate_forecast_metrics
+from model_metrics import evaluate_forecast_metrics, resample_and_evaluate
 from model_preprocessing import (
     ExogenousStandardizer,
     build_target_transformer,
@@ -68,14 +68,19 @@ def normalize_forecast_days(value):
     return max(1, min(days, MAX_FORECAST_DAYS))
 
 
-def parse_splits(length, ratio_str):
-    # Lock strictly to 80-10-10 split
-    train_idx = int(np.floor(length * 0.80))
-    val_idx = int(np.floor(length * 0.90))
-    has_test = True
+def parse_splits(length, ratio_str="90-5-5"):
+    # 90-5-5 Chronological Split (90% train, 5% validation, 5% test)
+    if length < 30:
+        raise ValueError(
+            f"Cafe Prophet requires at least 30 observations for a valid 90-5-5 split (received {length})"
+        )
+    train_idx = int(np.floor(length * 0.90))
+    val_idx = int(np.floor(length * 0.95))
     
-    train_idx = min(max(1, train_idx), length - 2)
-    val_idx = min(max(train_idx + 1, val_idx), length)
+    # Guards to ensure at least 2 points in each of validation and test
+    train_idx = min(max(10, train_idx), length - 4)
+    val_idx = min(max(train_idx + 2, val_idx), length - 2)
+    has_test = True
     return train_idx, val_idx, has_test
 
 
@@ -87,12 +92,12 @@ def run(payload):
     forecast_days = normalize_forecast_days(
         payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
     )
-    split_ratio = payload.get("splitRatio", "80-20")
+    split_ratio = payload.get("splitRatio", "90-5-5")
 
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
-    if len(data) < 21:
-        raise ValueError("Cafe Prophet requires at least 21 daily observations")
+    if len(data) < 30:
+        raise ValueError("Cafe Prophet requires at least 30 daily observations")
 
     frame = pd.DataFrame(data)
     frame["_input_order"] = np.arange(len(frame))
@@ -103,8 +108,8 @@ def run(payload):
 
     frame["ds"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
     frame = frame.dropna(subset=["ds"]).sort_values("ds").reset_index(drop=True)
-    if len(frame) < 21:
-        raise ValueError("Cafe Prophet requires at least 21 valid dated observations")
+    if len(frame) < 30:
+        raise ValueError("Cafe Prophet requires at least 30 valid dated observations")
     frame["ds"] = frame["ds"].dt.tz_localize(None)
     target_transformer = build_target_transformer(frame)
     demand_target = target_values(frame, target_transformer)
@@ -129,8 +134,8 @@ def run(payload):
 
     if "isObservedDemand" in frame.columns:
         frame = frame[frame["isObservedDemand"].astype(bool)].reset_index(drop=True)
-        if len(frame) < 21:
-            raise ValueError("Cafe Prophet requires at least 21 observed demand days")
+        if len(frame) < 30:
+            raise ValueError("Cafe Prophet requires at least 30 observed demand days for a valid 90-5-5 split")
         demand_target = target_values(frame, target_transformer)
         frame["y"] = target_transformer.transform(demand_target)
 
@@ -187,7 +192,9 @@ def run(payload):
     if best is None:
         raise RuntimeError("Prophet could not fit any changepoint prior candidate")
 
-    # Step 2: Test Evaluation
+    # Step 2: Test Evaluation & Resampled Multi-Horizon Backtests
+    weekly_metrics = None
+    monthly_metrics = None
     if has_test:
         try:
             test_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
@@ -210,12 +217,37 @@ def run(payload):
             test_pred = target_transformer.inverse(
                 test_model.predict(test_dates)["yhat"].to_numpy()
             )
+            test_actual = actual[val_idx:]
+            train_actual = actual[:val_idx]
+            test_date_strings = [d.strftime("%Y-%m-%d") for d in frame.iloc[val_idx:]["ds"]]
+            train_date_strings = [d.strftime("%Y-%m-%d") for d in frame.iloc[:val_idx]["ds"]]
+
             test_metrics = evaluate_forecast_metrics(
-                actual[val_idx:], test_pred, actual[:train_idx]
+                test_actual, test_pred, actual[:train_idx]
             )
             eval_metrics = test_metrics
+
+            # Compute genuine resampled backtests for Weekly and Monthly horizons
+            weekly_metrics = resample_and_evaluate(
+                dates=test_date_strings,
+                actual=test_actual,
+                predicted=test_pred,
+                train_actual=train_actual,
+                train_dates=train_date_strings,
+                freq="W",
+            )
+            monthly_metrics = resample_and_evaluate(
+                dates=test_date_strings,
+                actual=test_actual,
+                predicted=test_pred,
+                train_actual=train_actual,
+                train_dates=train_date_strings,
+                freq="ME",
+            )
         except Exception:
             eval_metrics = best["metrics"]
+            weekly_metrics = None
+            monthly_metrics = None
     else:
         eval_metrics = best["metrics"]
 
@@ -289,6 +321,8 @@ def run(payload):
         "rmse": eval_metrics.get("rmse", 0),
         "mape": eval_metrics.get("mape", 0),
         "r2": eval_metrics.get("r2", 0),
+        "weeklyMetrics": weekly_metrics,
+        "monthlyMetrics": monthly_metrics,
         "forecast": forecast,
         "fittedValues": fitted_values,
         "modelMetadata": {

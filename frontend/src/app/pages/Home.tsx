@@ -609,7 +609,7 @@ export function Home() {
             Offline vs. Online Channel Balance
           </h2>
           <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            POS compared against Shopee, TikTok, and PetHub revenue streams
+            POS compared like-for-like against Shopee, TikTok Shop, and PetHub revenue streams over matched active period
           </p>
         </div>
 

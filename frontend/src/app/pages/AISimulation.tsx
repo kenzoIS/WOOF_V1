@@ -307,6 +307,7 @@ export function AISimulation() {
   const [bundleDiscountOverrides, setBundleDiscountOverrides] = useState<Record<string, number>>({});
   const [bundleCategoryFilter, setBundleCategoryFilter] = useState("all");
   const [onlySignificant, setOnlySignificant] = useState(false);
+  const [bundlePage, setBundlePage] = useState(1);
   const [selectedCandidateForDrawer, setSelectedCandidateForDrawer] = useState<DrawerBundleCandidate | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
@@ -1021,9 +1022,17 @@ export function AISimulation() {
     return filtered;
   }, [allBundlePredictions, bundleCategoryFilter]);
 
+  const bundlesPerPage = 5;
+  const totalBundlePages = Math.ceil(filteredBundlePredictions.length / bundlesPerPage) || 1;
+
   const bundlePredictions = useMemo(() => {
-    return filteredBundlePredictions.slice(0, 8);
-  }, [filteredBundlePredictions]);
+    const startIndex = (bundlePage - 1) * bundlesPerPage;
+    return filteredBundlePredictions.slice(startIndex, startIndex + bundlesPerPage);
+  }, [filteredBundlePredictions, bundlePage]);
+
+  useEffect(() => {
+    setBundlePage(1);
+  }, [bundleCategoryFilter, onlySignificant, debouncedDataTime, selectedHeaderRange]);
 
   useEffect(() => {
     if (
@@ -1747,12 +1756,16 @@ export function AISimulation() {
       groomingColor
     };
   }, [debouncedTrafficOptimizerTime, staffingDayFilter, selectedTimeStaffPlan]);
-const maxCumulativeVisits = useMemo(() => {
+  const maxCumulativeVisits = useMemo(() => {
     let maxVal = 1;
     sectorTrafficForecast.forEach((sector) => {
       sector.forecasts.forEach((f) => {
         const val = trafficDisplayMode === "weekday_average" ? f.cumulativeVisits : f.predicted;
         if (val > maxVal) maxVal = val;
+      });
+    });
+    return maxVal;
+  }, [sectorTrafficForecast, trafficDisplayMode]);
 
   const totalPredictedTraffic = Math.round(trafficOptimizerData?.totalVisits ||
     sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0));
@@ -2480,19 +2493,35 @@ const maxCumulativeVisits = useMemo(() => {
 
                     <div className="grid grid-cols-3 gap-2 mb-5">
                       {[
-                        { label: "Explore", support: 1, confidence: 60 },
-                        { label: "Balanced", support: 3, confidence: 70 },
-                        { label: "Strict", support: 5, confidence: 85 },
+                        {
+                          label: "Explore",
+                          support: 1,
+                          confidence: 60,
+                          tooltip: "Explore Mode: Low 1% support & 60% confidence to uncover emerging, rare, and novel cross-sell ideas.",
+                        },
+                        {
+                          label: "Balanced",
+                          support: 3,
+                          confidence: 70,
+                          tooltip: "Balanced Mode (Recommended): 3% support & 70% confidence for reliable, steady commercial bundle patterns.",
+                        },
+                        {
+                          label: "Strict",
+                          support: 5,
+                          confidence: 85,
+                          tooltip: "Strict Mode: High 5% support & 85% confidence to display only the most established, high-volume checkout pairings.",
+                        },
                       ].map((preset) => (
                         <button
                           key={preset.label}
                           type="button"
+                          title={preset.tooltip}
                           onClick={() => {
                             setSupportThreshold([preset.support]);
                             setConfidenceLevel([preset.confidence]);
                           }}
-                          className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition ${supportThreshold[0] === preset.support && confidenceLevel[0] === preset.confidence
-                              ? "bg-white text-[#D42A7D] border-white"
+                          className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition cursor-help ${supportThreshold[0] === preset.support && confidenceLevel[0] === preset.confidence
+                              ? "bg-white text-[#D42A7D] border-white shadow-sm"
                               : "bg-white/10 text-white border-white/30 hover:bg-white/20"
                             }`}
                         >
@@ -2504,14 +2533,17 @@ const maxCumulativeVisits = useMemo(() => {
                     {/* Product Appearance Slider */}
                     <div className="space-y-3 mb-6">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide">
-                          <span>ITEM APPEARANCE FLOOR</span>
+                        <div
+                          className="flex items-center gap-1.5 text-xs font-semibold tracking-wide cursor-help"
+                          title="Item Appearance Floor (Minimum Support %): The percentage of total receipts that must contain an item or pair before the AI considers it a significant buying pattern. (E.g. 1% means it appears in at least 1 out of every 100 customer receipts)."
+                        >
+                          <span className="underline decoration-dotted decoration-white/70">ITEM APPEARANCE FLOOR</span>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <HelpCircle className="w-3.5 h-3.5 text-white/80 cursor-pointer" />
                             </TooltipTrigger>
-                            <TooltipContent className="max-w-[220px]">
-                              The smallest basket share an item or pair must reach before it appears in the graph.
+                            <TooltipContent className="max-w-[240px] text-xs">
+                              <strong>Minimum Support (%):</strong> The smallest basket share an item or pair must reach in customer receipts before it appears in the pattern graph.
                             </TooltipContent>
                           </Tooltip>
                         </div>
@@ -2528,23 +2560,26 @@ const maxCumulativeVisits = useMemo(() => {
                         className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
                       />
                       <div className="flex justify-between text-[10px] opacity-75">
-                        <span>1%</span>
+                        <span>1% (Broad discovery)</span>
                         <span>50%</span>
-                        <span>100%</span>
+                        <span>100% (Strict)</span>
                       </div>
                     </div>
 
                     {/* Connection Strength Slider */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide">
-                          <span>CONNECTION STRENGTH FLOOR</span>
+                        <div
+                          className="flex items-center gap-1.5 text-xs font-semibold tracking-wide cursor-help"
+                          title="Connection Strength Floor (Minimum Confidence %): The minimum historical probability that a customer buying Item A will also buy Item B. (E.g. 60% means at least 6 out of 10 times Item A was bought, Item B was added)."
+                        >
+                          <span className="underline decoration-dotted decoration-white/70">CONNECTION STRENGTH FLOOR</span>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <HelpCircle className="w-3.5 h-3.5 text-white/80 cursor-pointer" />
                             </TooltipTrigger>
-                            <TooltipContent className="max-w-[220px]">
-                              The minimum historical chance that the second item appears when the first item is purchased.
+                            <TooltipContent className="max-w-[240px] text-xs">
+                              <strong>Minimum Confidence (%):</strong> The historical probability that the second item is added to the cart when the first item is purchased.
                             </TooltipContent>
                           </Tooltip>
                         </div>
@@ -2561,30 +2596,44 @@ const maxCumulativeVisits = useMemo(() => {
                         className="[&_[role=slider]]:bg-white [&_[role=slider]]:w-5 [&_[role=slider]]:h-5 [&_[role=slider]]:shadow-xl [&_[role=slider]]:border-2 [&_[role=slider]]:border-[#F53799]"
                       />
                       <div className="flex justify-between text-[10px] opacity-75">
-                        <span>60%</span>
+                        <span>60% (Moderate link)</span>
                         <span>80%</span>
-                        <span>100%</span>
+                        <span>100% (Guaranteed link)</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Real-time Metrics */}
-                  <div className="bg-gradient-to-br from-[#FFF7FB] to-white border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-5 space-y-3 md:space-y-4">
-                    <div className="text-xs font-bold text-[#223047] tracking-wider mb-2 md:mb-3">VISIBLE PATTERNS</div>
+                  <div className="bg-gradient-to-br from-[#FFF7FB] to-white border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-5 space-y-3 md:space-y-4 shadow-xs">
+                    <div
+                      className="text-xs font-bold text-[#223047] tracking-wider mb-2 md:mb-3 cursor-help underline decoration-dotted decoration-slate-400"
+                      title="Visible Graph Patterns: Real-time summary of active rules and product nodes currently matching your filter criteria."
+                    >
+                      VISIBLE PATTERNS
+                    </div>
 
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between p-3 bg-[#F53799]/5 rounded-lg">
-                        <span className="text-xs text-[#223047]">Active Rules</span>
+                      <div
+                        className="flex items-center justify-between p-3 bg-[#F53799]/5 rounded-lg cursor-help group hover:bg-[#F53799]/10 transition-all"
+                        title="Active Association Rules: The total number of statistically validated product connections currently meeting your support and confidence thresholds."
+                      >
+                        <span className="text-xs text-[#223047] underline decoration-dotted decoration-slate-400 group-hover:opacity-100">Active Rules</span>
                         <span className="text-lg font-bold text-[#F53799]">{networkConnections.length}</span>
                       </div>
 
-                      <div className="flex items-center justify-between p-3 bg-[#06B6D4]/5 rounded-lg">
-                        <span className="text-xs text-[#223047]">Pattern Nodes</span>
+                      <div
+                        className="flex items-center justify-between p-3 bg-[#06B6D4]/5 rounded-lg cursor-help group hover:bg-[#06B6D4]/10 transition-all"
+                        title="Pattern Nodes: Unique individual menu items and retail products currently participating in active bundle rules."
+                      >
+                        <span className="text-xs text-[#223047] underline decoration-dotted decoration-slate-400 group-hover:opacity-100">Pattern Nodes</span>
                         <span className="text-lg font-bold text-[#06B6D4]">{networkNodes.length}</span>
                       </div>
 
-                      <div className="flex items-center justify-between p-3 bg-[#D42A7D]/5 rounded-lg">
-                        <span className="text-xs text-[#223047]">Avg Historical Confidence</span>
+                      <div
+                        className="flex items-center justify-between p-3 bg-[#D42A7D]/5 rounded-lg cursor-help group hover:bg-[#D42A7D]/10 transition-all"
+                        title="Average Historical Confidence: The mean co-purchase probability across all currently active association rules in the graph."
+                      >
+                        <span className="text-xs text-[#223047] underline decoration-dotted decoration-slate-400 group-hover:opacity-100">Avg Historical Confidence</span>
                         <span className="text-lg font-bold text-[#D42A7D]">
                           {networkConnections.length > 0
                             ? Math.round(networkConnections.reduce((sum, c) => sum + c.confidence, 0) / networkConnections.length)
@@ -2599,54 +2648,90 @@ const maxCumulativeVisits = useMemo(() => {
 
             {/* SECTION 3: AI-Detected Patterns & Top Insights */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 lg:gap-6">
-              <div className="bg-gradient-to-br from-[#F53799]/5 to-[#FFF7FB] border-2 border-[#F53799]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#F53799] transition-all cursor-pointer">
+              <div
+                className="bg-gradient-to-br from-[#F53799]/5 to-[#FFF7FB] border-2 border-[#F53799]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#F53799] transition-all cursor-pointer"
+                title="Top Recommended Bundle: The overall #1 highest-ranked bundle combining high customer purchase affinity, strong sales lift, and protected profit margins."
+              >
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-8 h-8 rounded-lg bg-[#F53799] flex items-center justify-center">
                     <Sparkles className="w-4 h-4 text-white" />
                   </div>
-                  <div className="text-xs font-bold text-[#F53799] tracking-wider">TOP BUNDLE RECOMMENDATION</div>
+                  <div
+                    className="text-xs font-bold text-[#F53799] tracking-wider cursor-help underline decoration-dotted decoration-[#F53799]/50"
+                    title="Top AI Recommendation: Selected as the most commercially viable bundle across all active store departments."
+                  >
+                    TOP BUNDLE RECOMMENDATION
+                  </div>
                 </div>
                 <div className="text-lg font-bold text-[#223047] mb-2 capitalize">
                   {topInsights.topBundle}
                 </div>
-                <div className="flex items-center gap-4 text-sm">
-                  <div>
-                    <span className="text-[#223047] opacity-60">Historical Confidence:</span>
-                    <span className="ml-1 font-bold text-[#F53799]">{topInsights.bundleConfidence}%</span>
+                <div className="flex flex-wrap items-center gap-4 text-sm">
+                  <div
+                    className="cursor-help"
+                    title={`Historical Confidence (${topInsights.bundleConfidence}%): Probability that customers who bought the first item also bought the rest of the items in the same transaction.`}
+                  >
+                    <span className="text-[#223047] opacity-60 underline decoration-dotted decoration-slate-400">Historical Confidence:</span>
+                    <span className="ml-1.5 font-bold text-[#F53799]">{topInsights.bundleConfidence}%</span>
                   </div>
-                  <div>
-                    <span className="text-[#223047] opacity-60">Lift:</span>
-                    <span className="ml-1 font-bold text-[#F53799]">{topInsights.bundleLift.toFixed(2)}x</span>
+                  <div
+                    className="cursor-help"
+                    title={`Sales Lift Multiplier (${topInsights.bundleLift.toFixed(2)}x): Measures how much more likely customers buy these items together compared to random chance. ${topInsights.bundleLift.toFixed(2)}x means customers are ${topInsights.bundleLift.toFixed(1)} times more likely to purchase them together.`}
+                  >
+                    <span className="text-[#223047] opacity-60 underline decoration-dotted decoration-slate-400">Lift:</span>
+                    <span className="ml-1.5 font-bold text-[#F53799]">{topInsights.bundleLift.toFixed(2)}x</span>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-[#06B6D4]/5 to-[#FFF7FB] border-2 border-[#06B6D4]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#06B6D4] transition-all cursor-pointer">
+              <div
+                className="bg-gradient-to-br from-[#06B6D4]/5 to-[#FFF7FB] border-2 border-[#06B6D4]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#06B6D4] transition-all cursor-pointer"
+                title="Emerging Trend: A fast-rising product combination showing accelerating customer purchase velocity in recent transaction cycles."
+              >
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-8 h-8 rounded-lg bg-[#06B6D4] flex items-center justify-center">
                     <TrendingUp className="w-4 h-4 text-white" />
                   </div>
-                  <div className="text-xs font-bold text-[#06B6D4] tracking-wider">EMERGING TREND</div>
+                  <div
+                    className="text-xs font-bold text-[#06B6D4] tracking-wider cursor-help underline decoration-dotted decoration-[#06B6D4]/50"
+                    title="Emerging Trend: Products whose joint purchase frequency is trending upward significantly."
+                  >
+                    EMERGING TREND
+                  </div>
                 </div>
                 <div className="text-lg font-bold text-[#223047] mb-2">
                   {topInsights.emergingTrend}
                 </div>
-                <div className="text-sm text-[#223047] opacity-60">
+                <div
+                  className="text-sm text-[#223047] opacity-60 cursor-help"
+                  title="Highest-ranked model recommendation: Ideal combo for upcoming marketing campaigns or featured menu displays."
+                >
                   Highest-ranked model recommendation
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-[#D42A7D]/5 to-[#FFF7FB] border-2 border-[#D42A7D]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#D42A7D] transition-all cursor-pointer">
+              <div
+                className="bg-gradient-to-br from-[#D42A7D]/5 to-[#FFF7FB] border-2 border-[#D42A7D]/30 rounded-xl md:rounded-2xl p-4 md:p-6 hover:border-[#D42A7D] transition-all cursor-pointer"
+                title="Cross-Sell Opportunity: Discovers multi-department pathways (combining Pet Supplies, Cafe Drinks, and Pet Grooming/Hotel) to expand average basket size."
+              >
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-8 h-8 rounded-lg bg-[#D42A7D] flex items-center justify-center">
                     <Target className="w-4 h-4 text-white" />
                   </div>
-                  <div className="text-xs font-bold text-[#D42A7D] tracking-wider">CROSS-SELL OPPORTUNITY</div>
+                  <div
+                    className="text-xs font-bold text-[#D42A7D] tracking-wider cursor-help underline decoration-dotted decoration-[#D42A7D]/50"
+                    title="Cross-Sector Cross-Sell: Connects different business units to encourage customers to spend across multiple departments."
+                  >
+                    CROSS-SELL OPPORTUNITY
+                  </div>
                 </div>
                 <div className="text-lg font-bold text-[#223047] mb-2">
                   {topInsights.crossSell}
                 </div>
-                <div className="text-sm text-[#223047] opacity-60">
+                <div
+                  className="text-sm text-[#223047] opacity-60 cursor-help"
+                  title="Cross-sector pathway: Customers buying in one category (e.g. Pet Food) show strong willingness to purchase from another (e.g. Cafe or Hotel)."
+                >
                   Cross-sector or cross-category pathway detected
                 </div>
               </div>
@@ -2698,11 +2783,18 @@ const maxCumulativeVisits = useMemo(() => {
                   AI-Predicted Bundle Opportunities
                 </h2>
                 <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Generated from FP-Growth analysis of {formatHour(dataTime[0])} transaction patterns for {selectedHeaderRangeLabel}
+                  Generated from{" "}
+                  <span
+                    className="cursor-help font-semibold text-[#223047] underline decoration-dotted decoration-[#F53799]"
+                    title="FP-Growth (Frequent Pattern Growth): An advanced AI data-mining algorithm that analyzes thousands of customer receipts to identify items frequently bought together."
+                  >
+                    FP-Growth AI pattern analysis
+                  </span>{" "}
+                  of {formatHour(dataTime[0])} transaction patterns for {selectedHeaderRangeLabel}
                 </p>
               </div>
-              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm">
-                {bundlePredictions.length} of {allBundlePredictions.length} Bundles Shown
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm font-semibold">
+                Showing {filteredBundlePredictions.length > 0 ? (bundlePage - 1) * bundlesPerPage + 1 : 0}–{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {allBundlePredictions.length} Bundles
               </Badge>
             </div>
 
@@ -2734,6 +2826,7 @@ const maxCumulativeVisits = useMemo(() => {
               <button
                 type="button"
                 onClick={() => setOnlySignificant(!onlySignificant)}
+                title="Filter to show only bundles with at least 5% support across customer receipts."
                 className={`rounded-lg border px-3 py-2 text-xs font-bold transition flex items-center gap-1 ${onlySignificant
                     ? "bg-[#06B6D4] text-white border-[#06B6D4]"
                     : "bg-white text-[#223047] border-slate-200 hover:border-[#06B6D4]"
@@ -2758,39 +2851,71 @@ const maxCumulativeVisits = useMemo(() => {
                     <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
                       <h3 className="text-base md:text-lg font-bold text-[#223047]">{bundle.bundle}</h3>
                       {bundle.bundleArchetype && (
-                        <Badge className="bg-[#F53799]/10 text-[#F53799] border border-[#F53799]/30 text-xs font-semibold">
+                        <Badge
+                          className="bg-[#F53799]/10 text-[#F53799] border border-[#F53799]/30 text-xs font-semibold cursor-help"
+                          title={`Merchandising Strategy Archetype (${bundle.bundleArchetype}): The customer behavioral intent and psychology behind this product bundle.`}
+                        >
                           {bundle.bundleArchetype}
                         </Badge>
                       )}
                       {bundle.isEmergingTrend && (
-                        <Badge className="bg-amber-500 text-white font-bold text-xs shadow-xs animate-pulse">
+                        <Badge
+                          className="bg-amber-500 text-white font-bold text-xs shadow-xs animate-pulse cursor-help"
+                          title="Emerging Trend: A fast-growing product combination with accelerating sales momentum in recent transaction cycles."
+                        >
                           🔥 Emerging Trend
                         </Badge>
                       )}
-                      <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs">
+                      <Badge
+                        className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs cursor-help font-medium"
+                        title={`Historical Confidence (${bundle.confidence}%): Probability that a customer purchasing '${bundle.itemA}' will also buy '${bundle.itemB}' in the same checkout.`}
+                      >
                         {bundle.confidence}% Historical Confidence
                       </Badge>
-                      <Badge variant="outline" className="text-xs border-[#F53799] text-[#F53799]">
+                      <Badge
+                        variant="outline"
+                        className="text-xs border-[#F53799] text-[#F53799] cursor-help font-medium"
+                        title="Sector Pairing: Cross-department synergy showing which business units (Cafe, Retail, Grooming Services) are combined in this bundle."
+                      >
                         {bundle.sectorPair}
                       </Badge>
                       {bundle.businessFitScore !== null && (
-                        <Badge variant="outline" className="text-xs border-emerald-500 text-emerald-700">
+                        <Badge
+                          variant="outline"
+                          className="text-xs border-emerald-500 text-emerald-700 cursor-help font-medium"
+                          title={`Business Feasibility Fit (${Math.round((bundle.businessFitScore || 0) * 100)}%): Ensures the bundled items make sense together operationally in-store without overloading kitchen or grooming staff.`}
+                        >
                           Business Fit {Math.round((bundle.businessFitScore || 0) * 100)}%
                         </Badge>
                       )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-6 text-xs md:text-sm mb-2">
-                      <div>
-                        <span className="text-[#223047] opacity-60">Lift:</span>
+                      <div
+                        className="cursor-help group"
+                        title={`Sales Lift Multiplier (${bundle.lift.toFixed(2)}x): Measures how much more likely customers buy these items together compared to chance. ${bundle.lift.toFixed(2)}x means customers are ${bundle.lift.toFixed(1)} times more likely to purchase them together.`}
+                      >
+                        <span className="text-[#223047] opacity-60 underline decoration-dotted decoration-slate-400 group-hover:opacity-100">
+                          Lift:
+                        </span>
                         <span className="ml-2 font-bold text-[#F53799]">{bundle.lift.toFixed(2)}x</span>
                       </div>
-                      <div>
-                        <span className="text-[#223047] opacity-60">Model Score:</span>
+                      <div
+                        className="cursor-help group"
+                        title={`AI Model Composite Score (${bundle.score}/100): Combines sales lift strength, profitability, customer demand volume, and cross-sector catalog fit.`}
+                      >
+                        <span className="text-[#223047] opacity-60 underline decoration-dotted decoration-slate-400 group-hover:opacity-100">
+                          Model Score:
+                        </span>
                         <span className="ml-2 font-semibold text-[#223047]">{bundle.score}</span>
                       </div>
-                      <div>
-                        <span className="text-[#223047] opacity-60">Co-occurrence:</span>
+                      <div
+                        className="cursor-help group"
+                        title={`Receipt Co-occurrence (${bundle.frequency} times): The exact number of historical customer checkout transactions where these items were bought in the same basket.`}
+                      >
+                        <span className="text-[#223047] opacity-60 underline decoration-dotted decoration-slate-400 group-hover:opacity-100">
+                          Co-occurrence:
+                        </span>
                         <span className="ml-2 font-semibold text-[#223047]">{bundle.frequency} times</span>
                       </div>
                     </div>
@@ -2806,8 +2931,8 @@ const maxCumulativeVisits = useMemo(() => {
                             <span>{bundle.itemB}: {formatCurrency(bundle.itemBPrice)}</span>
                           </div>
                           <div className="flex items-center gap-2.5 ml-auto">
-                            <span className="line-through text-gray-400 text-xs font-medium">{formatCurrency(bundle.regularPrice)}</span>
-                            <span className="font-extrabold text-[#F53799] text-base">{formatCurrency(bundle.bundlePrice)}</span>
+                            <span className="line-through text-gray-400 text-xs font-medium" title="Combined individual menu/retail prices">{formatCurrency(bundle.regularPrice)}</span>
+                            <span className="font-extrabold text-[#F53799] text-base" title="Discounted bundle selling price">{formatCurrency(bundle.bundlePrice)}</span>
                             <Badge className="bg-emerald-500 text-white text-[11px] px-2.5 py-0.5 font-bold">
                               Save {formatCurrency(bundle.savings)} ({bundle.selectedDiscountPercent}% OFF)
                             </Badge>
@@ -2816,10 +2941,16 @@ const maxCumulativeVisits = useMemo(() => {
 
                         <div className="grid gap-2">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                            <div className="text-xs font-semibold text-[#223047]">
+                            <div
+                              className="text-xs font-semibold text-[#223047] cursor-help underline decoration-dotted decoration-slate-400"
+                              title="AI Recommended Discount: Calculated to maximize sales volume while strictly safeguarding store profit margins."
+                            >
                               Suggested Discount: {bundle.suggestedDiscountPercent}%
                             </div>
-                            <div className="text-xs text-[#223047] opacity-70">
+                            <div
+                              className="text-xs text-[#223047] opacity-70 cursor-help underline decoration-dotted decoration-slate-400"
+                              title="Selected Discount: The promotional discount level you choose to simulate or submit for owner review."
+                            >
                               Selected: {bundle.selectedDiscountPercent}%
                             </div>
                           </div>
@@ -2852,19 +2983,28 @@ const maxCumulativeVisits = useMemo(() => {
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-[#223047]">
-                          <div className="bg-white/70 rounded-lg p-2">
-                            <div className="opacity-60">Projected Gross Profit</div>
-                            <div className="font-bold">{formatCurrency(bundle.projectedGrossProfit)}</div>
+                          <div
+                            className="bg-white/70 rounded-lg p-2 cursor-help group hover:bg-white transition-all"
+                            title="Projected Gross Profit: Estimated profit generated per bundle sold after deducting individual product costs and promotion discounts."
+                          >
+                            <div className="opacity-60 underline decoration-dotted decoration-slate-400 group-hover:opacity-100">Projected Gross Profit</div>
+                            <div className="font-bold text-[#223047]">{formatCurrency(bundle.projectedGrossProfit)}</div>
                           </div>
-                          <div className="bg-white/70 rounded-lg p-2">
-                            <div className="opacity-60">Projected Margin</div>
+                          <div
+                            className="bg-white/70 rounded-lg p-2 cursor-help group hover:bg-white transition-all"
+                            title={`Projected Profit Margin (${bundle.projectedMarginPercent !== null ? `${bundle.projectedMarginPercent}%` : "N/A"}): The percentage of bundle revenue remaining as gross profit after inventory & preparation costs.`}
+                          >
+                            <div className="opacity-60 underline decoration-dotted decoration-slate-400 group-hover:opacity-100">Projected Margin</div>
                             <div className={`font-bold ${bundle.marginIsSafe ? "text-emerald-700" : "text-red-600"}`}>
                               {bundle.projectedMarginPercent !== null ? `${bundle.projectedMarginPercent}%` : "Unavailable"}
                             </div>
                           </div>
-                          <div className="bg-white/70 rounded-lg p-2">
-                            <div className="opacity-60">Safe Discount Ceiling</div>
-                            <div className="font-bold">
+                          <div
+                            className="bg-white/70 rounded-lg p-2 cursor-help group hover:bg-white transition-all"
+                            title={`Safe Discount Ceiling (${bundle.maxSafeDiscountPercent !== null ? `${bundle.maxSafeDiscountPercent}%` : "N/A"}): The maximum allowable discount percentage before the bundle violates your store's minimum 30% profit margin safety guardrail.`}
+                          >
+                            <div className="opacity-60 underline decoration-dotted decoration-slate-400 group-hover:opacity-100">Safe Discount Ceiling</div>
+                            <div className="font-bold text-[#223047]">
                               {bundle.maxSafeDiscountPercent !== null ? `${bundle.maxSafeDiscountPercent}%` : "Unavailable"}
                             </div>
                           </div>
@@ -2875,8 +3015,12 @@ const maxCumulativeVisits = useMemo(() => {
                         Price or cost data is incomplete, so the owner must set promotion terms manually before approval.
                       </div>
                     )}
-                    <div className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
-                      {bundle.type}: {bundle.reason}
+                    <div
+                      className="text-xs md:text-sm text-[#223047] opacity-70 cursor-help"
+                      style={{ lineHeight: "1.5" }}
+                      title="Pattern Rationale: Plain-language explanation detailing why this AI bundle pairing was formed based on historical basket habits."
+                    >
+                      <span className="font-semibold text-[#223047]">{bundle.type}:</span> {bundle.reason}
                     </div>
                   </div>
 
@@ -2899,6 +3043,61 @@ const maxCumulativeVisits = useMemo(() => {
                 </div>
               ))}
             </div>
+
+            {/* Pagination Controls for Bundles */}
+            {totalBundlePages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#FFD9EC]/70">
+                <div className="text-xs text-[#223047] opacity-70 font-medium">
+                  Showing {(bundlePage - 1) * bundlesPerPage + 1}–{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {filteredBundlePredictions.length} bundle opportunities (Page {bundlePage} of {totalBundlePages})
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={bundlePage <= 1}
+                    onClick={() => setBundlePage((p) => Math.max(1, p - 1))}
+                    className="border-[#FFD9EC] text-xs h-8 px-3 hover:bg-[#FFF2FA]"
+                  >
+                    Previous
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(totalBundlePages, 7) }, (_, i) => {
+                      let pageNum = i + 1;
+                      if (totalBundlePages > 7) {
+                        if (bundlePage > 4) {
+                          pageNum = bundlePage - 3 + i;
+                          if (pageNum > totalBundlePages) {
+                            pageNum = totalBundlePages - 6 + i;
+                          }
+                        }
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setBundlePage(pageNum)}
+                          className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
+                            bundlePage === pageNum
+                              ? "bg-[#F53799] text-white shadow-sm"
+                              : "bg-white border border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={bundlePage >= totalBundlePages}
+                    onClick={() => setBundlePage((p) => Math.min(totalBundlePages, p + 1))}
+                    className="border-[#FFD9EC] text-xs h-8 px-3 hover:bg-[#FFF2FA]"
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Strategic Proximity Recommendations */}
