@@ -634,14 +634,14 @@ export function AISimulation() {
     let cancelled = false;
     const fetchErlang = async () => {
       const getDemandLevelForSector = (sectorName: string, value: number) => {
-        const normalized = sectorName.toLowerCase();
+        const normalized = sectorName.toLowerCase().trim();
+        if (normalized === 'grooming') return value >= 4 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+        if (normalized === 'pet hotel') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+        if (normalized === 'bday pawty' || normalized === 'birthday party') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
         if (normalized === 'cafe') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
         if (normalized === 'retail') return value >= 10 ? 'High' : value >= 5 ? 'Medium' : 'Low';
         if (normalized === 'services') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
-        if (normalized === 'grooming') return value >= 4 ? 'High' : value >= 3 ? 'Medium' : 'Low';
-        if (normalized === 'pet hotel') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
-        if (normalized === 'bday pawty') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
-        return value >= 42 ? 'High' : value >= 28 ? 'Medium' : 'Low';
+        return value >= 26 ? 'High' : value >= 11 ? 'Medium' : 'Low';
       };
 
       const getFallbackStaff = (sector: string, level: string) => {
@@ -1502,14 +1502,14 @@ export function AISimulation() {
   };
 
   const getDemandLevelForSector = (sectorName: string, value: number): DemandLevel => {
-    const normalized = sectorName.toLowerCase();
+    const normalized = sectorName.toLowerCase().trim();
+    if (normalized === 'grooming') return value >= 4 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+    if (normalized === 'pet hotel') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+    if (normalized === 'bday pawty' || normalized === 'birthday party') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
     if (normalized === 'cafe') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
     if (normalized === 'retail') return value >= 10 ? 'High' : value >= 5 ? 'Medium' : 'Low';
     if (normalized === 'services') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
-    if (normalized === 'grooming') return value >= 4 ? 'High' : value >= 2 ? 'Medium' : 'Low';
-    if (normalized === 'pet hotel') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
-    if (normalized === 'bday pawty') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
-    return value >= 42 ? 'High' : value >= 28 ? 'Medium' : 'Low';
+    return value >= 26 ? 'High' : value >= 11 ? 'Medium' : 'Low';
   };
 
   const getRequiredStaff = (sector: string, level: string) => {
@@ -1781,10 +1781,24 @@ export function AISimulation() {
   const trafficPrediction = useMemo(() => {
     if (!trafficOptimizerDataAllDay) return [];
     return (trafficOptimizerDataAllDay.columns || []).map((column: any, columnIndex: number) => {
-      const sectorTotals = (trafficOptimizerDataAllDay.sectors || []).map((sector: any) => sector.values[columnIndex]);
+      const cafeRow = (trafficOptimizerDataAllDay.sectors || []).find((s: any) => s.sector === 'Cafe');
+      const servicesRow = (trafficOptimizerDataAllDay.sectors || []).find((s: any) => s.sector === 'Services');
+      const retailRow = (trafficOptimizerDataAllDay.sectors || []).find((s: any) => s.sector === 'Retail');
+
+      const cafeVisits = Number(cafeRow?.values?.[columnIndex]?.visits || 0);
+      const servicesVisits = Number(servicesRow?.values?.[columnIndex]?.visits || 0);
+      const retailVisits = Number(retailRow?.values?.[columnIndex]?.visits || 0);
+      const totalVisits = cafeVisits + servicesVisits + retailVisits;
+
+      const dayLabel = (column.dayLabel || column.label.replace(/\s+(avg|total)$/i, "")).toUpperCase();
+
       return {
-        day: column.label,
-        visits: sectorTotals.reduce((sum: number, val: any) => sum + Number(val?.visits || 0), 0)
+        day: dayLabel,
+        fullDayLabel: column.label,
+        visits: totalVisits,
+        cafe: cafeVisits,
+        services: servicesVisits,
+        retail: retailVisits,
       };
     });
   }, [trafficOptimizerDataAllDay]);
@@ -3624,9 +3638,9 @@ export function AISimulation() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-100 border border-green-200" /> Low (1-10)</span>
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-yellow-100 border border-yellow-200" /> Medium (11-25)</span>
-                  <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-100 border border-red-200" /> High (26+)</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Low</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" /> Medium</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-400" /> High</span>
                 </div>
               </div>
 
@@ -3884,8 +3898,8 @@ export function AISimulation() {
                     return (
                       <div className="rounded-xl border border-[#FFD9EC] bg-white p-3 shadow-lg text-xs space-y-1.5 min-w-[180px]">
                         <div className="font-bold text-[#223047] border-b border-[#FFD9EC] pb-1 flex items-center justify-between">
-                          <span>{label}</span>
-                          <span className="text-[10px] opacity-60 font-semibold">{formatHour(trafficOptimizerTime[0])}</span>
+                          <span>{data.fullDayLabel || label}</span>
+                          <span className="text-[10px] text-[#06B6D4] font-semibold">Total Volume (All Hours)</span>
                         </div>
                         <div className="space-y-1 text-[#223047]">
                           <div className="flex items-center justify-between gap-3">
