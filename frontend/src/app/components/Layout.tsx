@@ -4,6 +4,7 @@ import { Header } from "./Header";
 import { WOOFChatbot } from "./WOOFChatbot";
 import { NotificationCenter } from "./NotificationCenter";
 import { ConnectionBanner } from "./ConnectionBanner";
+import { RealtimeListener } from "./RealtimeListener";
 import { Toaster } from "./ui/sonner";
 import { ErrorModal } from "./ErrorModal";
 
@@ -125,6 +126,7 @@ export function Layout({ children }: LayoutProps) {
       </div>
 
       {/* Global Components */}
+      <RealtimeListener />
       <WOOFChatbot />
       <NotificationCenter />
       <Toaster />

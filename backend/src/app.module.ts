@@ -7,6 +7,7 @@ import { SmartReportsModule } from './smart-reports/smart-reports.module';
 import { SupabaseModule } from './common/supabase/supabase.module';
 import { ActivationModule } from './activation/activation.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
@@ -56,6 +57,7 @@ import { ContextModule } from './context/context.module';
     SupabaseModule,
     ActivationModule,
     ChatbotModule,
+    RealtimeModule,
   ],
 })
 export class AppModule {}

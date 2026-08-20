@@ -6,7 +6,6 @@ import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { toast } from "sonner";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
-import { DataIngestion } from "../components/DataIngestion";
 import { getHomeOverview } from "../lib/api";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
@@ -207,6 +206,11 @@ export function Home() {
   );
   const displayHeatmapDays = clientHeatmapDays;
   const suggestions = homeOverview?.suggestions || [];
+  const carouselSuggestions = useMemo(
+    () => (suggestions.length > 2 ? [...suggestions, ...suggestions] : suggestions),
+    [suggestions],
+  );
+  const shouldAnimateSuggestions = suggestions.length > 2;
   const heroDate = homeOverview?.anchorDate
     ? new Date(homeOverview.anchorDate).toLocaleDateString("en-PH", {
         weekday: "long",
@@ -390,8 +394,6 @@ export function Home() {
         </div>
       </div>
 
-      {/* SECTION 1.5 — DATA INGESTION CENTER */}
-      <DataIngestion />
       {homeError && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {homeError}
@@ -666,8 +668,8 @@ export function Home() {
         </ResponsiveContainer>
       </div>
 
-      {/* SECTION 6 — AUTONOMOUS SUGGESTIONS & SALES INTENSITY HEATMAP */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+      {/* SECTION 6 — SALES INTENSITY HEATMAP & AUTONOMOUS SUGGESTIONS */}
+      <div className="space-y-4 md:space-y-6">
         
         {/* Sales Intensity Heatmap */}
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7">
@@ -702,15 +704,15 @@ export function Home() {
 
           <div className="space-y-3">
             {heatmapHours.map((hour) => (
-              <div key={hour} className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3">
+              <div key={hour} className="grid grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 md:gap-4">
                 <div className="text-xs text-[#223047] opacity-60">{hour}</div>
-                <div className="grid grid-cols-7 gap-1.5 md:gap-2">
+                <div className="grid grid-cols-7 gap-1.5 md:gap-2 lg:gap-3">
                   {displayHeatmapDays.map((day) => {
                     const value = getHeatmapValue(day, hour);
                     return (
                       <div
                         key={`${hour}-${day.date || day.dayLabel}`}
-                        className="h-8 md:h-10 lg:h-12 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
+                        className="h-8 md:h-11 lg:h-14 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
                         style={{ backgroundColor: getHeatmapColor(value) }}
                         title={`${day.label} ${hour}: ${value.toFixed(0)}% sales intensity`}
                       />
@@ -719,9 +721,9 @@ export function Home() {
                 </div>
               </div>
             ))}
-            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 pt-1">
+            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[5.5rem_minmax(0,1fr)] gap-3 md:gap-4 pt-1">
               <div aria-hidden="true" />
-              <div className="grid grid-cols-7 gap-1.5 md:gap-2">
+              <div className="grid grid-cols-7 gap-1.5 md:gap-2 lg:gap-3">
                 {displayHeatmapDays.map((day) => (
                   <div key={day.date || day.dayLabel} className="text-center text-[10px] md:text-xs text-[#223047] opacity-60">
                     {day.label}
@@ -752,16 +754,35 @@ export function Home() {
             </p>
           </div>
 
-          <div className="flex gap-4 md:gap-6 overflow-x-auto pb-2">
+          <div
+            className="woof-suggestions-carousel overflow-hidden"
+            onMouseEnter={(event) => event.currentTarget.classList.add("is-paused")}
+            onMouseLeave={(event) => event.currentTarget.classList.remove("is-paused")}
+            onFocus={(event) => event.currentTarget.classList.add("is-paused")}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                event.currentTarget.classList.remove("is-paused");
+              }
+            }}
+          >
             {suggestions.length === 0 && (
-              <div className="w-full rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
+              <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
                 Upload transaction data to generate live WOOF recommendations.
               </div>
             )}
-            {suggestions.map((suggestion) => (
+            {suggestions.length > 0 && (
               <div
-                key={suggestion.id}
-                className={`flex-shrink-0 w-[280px] md:w-[320px] lg:w-[360px] bg-white border border-[#FFD9EC] rounded-2xl md:rounded-[20px] p-4 md:p-6 lg:p-7 space-y-3 md:space-y-4 transition-all ${
+                className={`flex gap-4 md:gap-6 ${
+                  shouldAnimateSuggestions
+                    ? "w-max animate-woof-suggestion-carousel"
+                    : "flex-wrap"
+                }`}
+              >
+            {carouselSuggestions.map((suggestion, index) => (
+              <div
+                key={`${suggestion.id}-${index}`}
+                aria-hidden={index >= suggestions.length}
+                className={`w-[280px] md:w-[340px] lg:w-[380px] shrink-0 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-[20px] p-4 md:p-6 lg:p-7 space-y-3 md:space-y-4 transition-all ${
                   approvedSuggestions.includes(suggestion.id)
                     ? "bg-green-50 border-green-300"
                     : dismissedSuggestions.includes(suggestion.id)
@@ -844,6 +865,8 @@ export function Home() {
                 )}
               </div>
             ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

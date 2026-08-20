@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { SupabaseModule } from '../common/supabase/supabase.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { ActivationController } from './activation.controller';
 import { ActivationService } from './activation.service';
 import {
@@ -13,6 +14,7 @@ import {
   imports: [
     AnalyticsModule,
     SupabaseModule,
+    RealtimeModule,
     MongooseModule.forFeature([
       { name: CampaignActivation.name, schema: CampaignActivationSchema },
     ]),

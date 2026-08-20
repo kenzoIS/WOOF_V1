@@ -2,3 +2,21 @@
 @source '../**/*.{js,ts,jsx,tsx}';
 
 @import 'tw-animate-css';
+
+@keyframes woof-suggestion-carousel {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(-50% - 0.75rem));
+  }
+}
+
+.animate-woof-suggestion-carousel {
+  animation: woof-suggestion-carousel 32s linear infinite;
+}
+
+.woof-suggestions-carousel.is-paused .animate-woof-suggestion-carousel {
+  animation-play-state: paused;
+}

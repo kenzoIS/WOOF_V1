@@ -57,7 +57,12 @@ const formatNumber = (value: unknown) => toNumber(value).toLocaleString();
 
 const formatCurrency = (value: unknown) => `₱${formatNumber(value)}`;
 
-export function DataIngestion() {
+interface DataIngestionProps {
+  surface?: "card" | "drawer";
+}
+
+export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
+  const isDrawer = surface === "drawer";
   const [uploads, setUploads] = useState<CsvUploadRecord[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -149,13 +154,21 @@ export function DataIngestion() {
   };
 
   return (
-    <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5">
+    <div
+      className={
+        isDrawer
+          ? "bg-white space-y-4"
+          : "bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5"
+      }
+    >
       <div>
-        <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-          Data Ingestion Center
+        <h2 className={isDrawer ? "text-xl font-extrabold text-[#223047]" : "text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]"}>
+          {isDrawer ? "Upload Data" : "Data Ingestion Center"}
         </h2>
-        <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-          Upload CSV/Excel files from POS, Shopee, TikTok, or PetHub to power your analytics. Totals below cover all uploaded data.
+        <p className={isDrawer ? "text-xs text-[#223047] opacity-60 mt-1" : "text-xs md:text-sm text-[#223047] opacity-60 mt-1"} style={{ lineHeight: "1.6" }}>
+          {isDrawer
+            ? "Upload CSV/Excel files and monitor recent staging activity."
+            : "Upload CSV/Excel files from POS, Shopee, TikTok, or PetHub to power your analytics. Totals below cover all uploaded data."}
         </p>
       </div>
 
@@ -167,22 +180,29 @@ export function DataIngestion() {
       )}
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className={isDrawer ? "grid grid-cols-2 gap-2.5" : "grid grid-cols-2 lg:grid-cols-5 gap-3"}>
         {[
-          { label: "All Records", value: formatNumber(metrics?.totalRecords), icon: Database, color: "#F53799" },
-          { label: "All Transactions", value: formatNumber(metrics?.totalTransactions), icon: Hash, color: "#06B6D4" },
-          { label: "All Quantity Sold", value: formatNumber(metrics?.totalQuantity), icon: ShoppingCart, color: "#0EA5E9" },
-          { label: "All Revenue", value: formatCurrency(metrics?.totalRevenue), icon: DollarSign, color: "#F53799" },
+          { label: isDrawer ? "Records" : "All Records", value: formatNumber(metrics?.totalRecords), icon: Database, color: "#F53799" },
+          { label: isDrawer ? "Transactions" : "All Transactions", value: formatNumber(metrics?.totalTransactions), icon: Hash, color: "#06B6D4" },
+          { label: isDrawer ? "Quantity" : "All Quantity Sold", value: formatNumber(metrics?.totalQuantity), icon: ShoppingCart, color: "#0EA5E9" },
+          { label: isDrawer ? "Revenue" : "All Revenue", value: formatCurrency(metrics?.totalRevenue), icon: DollarSign, color: "#F53799" },
           { label: "Channels", value: Object.keys(metrics?.channels || {}).length.toString(), icon: Radio, color: "#7C3AED" },
         ].map((card) => (
-          <div key={card.label} className="flex items-center gap-2 bg-[#FFF2FA] border border-[#FFD9EC] rounded-xl px-3 py-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          <div
+            key={card.label}
+            className={
+              isDrawer
+                ? "flex items-center gap-2 min-w-0 bg-[#FFF2FA] border border-[#FFD9EC] rounded-xl px-3 py-2.5"
+                : "flex items-center gap-2 bg-[#FFF2FA] border border-[#FFD9EC] rounded-xl px-3 py-2.5"
+            }
+          >
+            <div className={isDrawer ? "w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" : "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"}
               style={{ background: `linear-gradient(135deg, ${card.color}, ${card.color}dd)` }}>
-              <card.icon className="w-4 h-4 text-white" />
+              <card.icon className={isDrawer ? "w-3.5 h-3.5 text-white" : "w-4 h-4 text-white"} />
             </div>
             <div className="min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate">{card.label}</div>
-              <div className="text-sm font-bold text-[#223047]">{card.value}</div>
+              <div className={isDrawer ? "text-sm font-bold text-[#223047] truncate" : "text-sm font-bold text-[#223047]"}>{card.value}</div>
             </div>
           </div>
         ))}
@@ -190,60 +210,72 @@ export function DataIngestion() {
 
       {/* Channel Breakdown */}
       {metrics?.channels && Object.keys(metrics.channels).length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className={isDrawer ? "space-y-2" : "flex flex-wrap gap-2"}>
           {Object.entries(metrics.channels).map(([ch, data]) => (
-            <Badge key={ch} className="text-xs px-3 py-1" style={{ backgroundColor: channelColor[ch] || "#666", color: "#fff" }}>
-              {ch}: {formatNumber(data?.count)} records • {formatCurrency(data?.revenue)}
-            </Badge>
+            isDrawer ? (
+              <div key={ch} className="flex items-center justify-between gap-3 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] px-3 py-2 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: channelColor[ch] || "#666" }} />
+                  <span className="font-semibold text-[#223047] truncate">{ch}</span>
+                </div>
+                <div className="text-right text-[#223047] opacity-70 flex-shrink-0">
+                  {formatNumber(data?.count)} • {formatCurrency(data?.revenue)}
+                </div>
+              </div>
+            ) : (
+              <Badge key={ch} className="text-xs px-3 py-1" style={{ backgroundColor: channelColor[ch] || "#666", color: "#fff" }}>
+                {ch}: {formatNumber(data?.count)} records • {formatCurrency(data?.revenue)}
+              </Badge>
+            )
           ))}
         </div>
       )}
 
       {/* Channel Selector + Upload Dropzone */}
       <div className="space-y-3">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-          <label className="text-sm font-semibold text-[#223047]">CSV Category:</label>
-          <div className="flex flex-wrap gap-2">
+        <div className={isDrawer ? "space-y-2" : "flex flex-col sm:flex-row items-start sm:items-center gap-3"}>
+          <label className="text-sm font-semibold text-[#223047]">CSV Category</label>
+          <div className={isDrawer ? "grid grid-cols-2 gap-2" : "flex flex-wrap gap-2"}>
             {CHANNEL_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setSelectedChannel(opt.value)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all text-sm font-medium ${
+                className={`flex items-center gap-2 rounded-xl border-2 transition-all font-medium min-w-0 ${
                   selectedChannel === opt.value
                     ? "border-[#F53799] bg-[#FFF2FA] text-[#223047]"
                     : "border-[#FFD9EC] bg-white text-[#223047] opacity-70 hover:border-[#F53799] hover:opacity-100"
-                }`}
+                } ${isDrawer ? "px-3 py-2 text-xs" : "px-4 py-2 text-sm"}`}
               >
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: opt.color }} />
-                <span>{opt.label}</span>
-                <span className="text-xs opacity-50">({opt.description})</span>
+                <span className="truncate">{opt.label}</span>
+                {!isDrawer && <span className="text-xs opacity-50">({opt.description})</span>}
               </button>
             ))}
           </div>
         </div>
 
         <div
-          className={`border-2 border-dashed rounded-2xl p-6 md:p-8 text-center transition-all cursor-pointer ${
+          className={`border-2 border-dashed rounded-2xl text-center transition-all cursor-pointer ${
             dragActive ? "border-[#F53799] bg-[#FFF2FA]" : "border-[#FFD9EC] hover:border-[#F53799] hover:bg-[#FFF7FB]"
-          }`}
+          } ${isDrawer ? "p-5" : "p-6 md:p-8"}`}
           onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
           onDrop={handleDrop}
           onClick={() => document.getElementById("csv-upload-input")?.click()}
         >
           <input id="csv-upload-input" type="file" accept=".csv,.xlsx,.xls" onChange={handleFileInput} className="hidden" />
-          <Upload className={`w-8 h-8 mx-auto mb-3 ${uploading ? "animate-bounce text-[#F53799]" : "text-[#223047] opacity-40"}`} />
-          <p className="text-sm font-semibold text-[#223047]">
-            {uploading ? "Processing..." : "Drop CSV/Excel file here or click to browse"}
+          <Upload className={`${isDrawer ? "w-7 h-7 mb-2" : "w-8 h-8 mb-3"} mx-auto ${uploading ? "animate-bounce text-[#F53799]" : "text-[#223047] opacity-40"}`} />
+          <p className={isDrawer ? "text-sm font-semibold text-[#223047]" : "text-sm font-semibold text-[#223047]"}>
+            {uploading ? "Processing..." : isDrawer ? "Drop file or click to browse" : "Drop CSV/Excel file here or click to browse"}
           </p>
           <p className="text-xs text-[#223047] opacity-50 mt-1">
             Maximum upload size: 100 MB
           </p>
-          <p className="text-xs text-[#223047] opacity-50 mt-1">
+          <p className="text-xs text-[#223047] opacity-50 mt-1 max-w-[320px] mx-auto">
             Uploading as <span className="font-bold text-[#F53799]">{selectedChannel}</span>
-            {selectedChannel === "POS" || selectedChannel === "PetHub"
+            {!isDrawer && (selectedChannel === "POS" || selectedChannel === "PetHub"
               ? " -> rows split into Cafe, Services & Retail by category"
-              : " -> all rows go to Retail"}
+              : " -> all rows go to Retail")}
           </p>
         </div>
       </div>
@@ -288,7 +320,7 @@ export function DataIngestion() {
       {uploads.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-sm font-bold text-[#223047]">Upload History</h3>
-          <div className="space-y-2 max-h-[250px] overflow-y-auto">
+          <div className={isDrawer ? "space-y-2 max-h-[360px] overflow-y-auto pr-1" : "space-y-2 max-h-[250px] overflow-y-auto"}>
             {uploads.map((upload, index) => {
               const uploadId = upload._id || upload.id || upload.filename || upload.file_name || `upload-${index}`;
               const filename = upload.filename || upload.file_name || "Uploaded file";
@@ -297,14 +329,31 @@ export function DataIngestion() {
               const uploadedAt = upload.uploadedAt || upload.uploaded_at || upload.created_at;
 
               return (
-              <div key={uploadId} className="flex items-center justify-between p-3 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <FileSpreadsheet className="w-5 h-5 text-[#F53799] flex-shrink-0" />
+              <div
+                key={uploadId}
+                className={
+                  isDrawer
+                    ? "flex items-start justify-between gap-2 p-3 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl"
+                    : "flex items-center justify-between p-3 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl"
+                }
+              >
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  <FileSpreadsheet className="w-5 h-5 text-[#F53799] flex-shrink-0 mt-0.5" />
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-[#223047] truncate">{filename}</div>
-                    <div className="text-xs text-[#223047] opacity-50">
-                      {formatNumber(recordCount)} records • {formatCurrency(totalRevenue)} • {upload.channel || "Unknown"}
-                      {" • "}{formatUploadDate(uploadedAt)}
+                    <div className="text-xs text-[#223047] opacity-50 leading-relaxed">
+                      {isDrawer ? (
+                        <>
+                          <span>{upload.channel || "Unknown"} • {formatUploadDate(uploadedAt)}</span>
+                          <br />
+                          <span>{formatNumber(recordCount)} records • {formatCurrency(totalRevenue)}</span>
+                        </>
+                      ) : (
+                        <>
+                          {formatNumber(recordCount)} records • {formatCurrency(totalRevenue)} • {upload.channel || "Unknown"}
+                          {" • "}{formatUploadDate(uploadedAt)}
+                        </>
+                      )}
                     </div>
                     {upload.etlReport && (
                       <div className={`text-[10px] mt-1 ${(upload.etlReport.stage1_droppedCount || 0) > 0 || (upload.etlReport.stage1_duplicateCount || 0) > 0 ? "text-orange-500" : "text-green-500"}`}>
@@ -316,7 +365,7 @@ export function DataIngestion() {
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2 ml-2">
+                <div className={isDrawer ? "flex flex-col gap-2 flex-shrink-0" : "flex gap-2 ml-2"}>
                   {upload.etlReport && (
                     <Dialog>
                       <DialogTrigger asChild>

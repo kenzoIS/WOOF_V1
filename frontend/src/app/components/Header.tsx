@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
-import { Bell, Calendar, Clock, Cloud, CloudRain, Sun, X, LogOut, User, Mail, Menu } from "lucide-react";
+import { Bell, Calendar, Clock, Cloud, CloudRain, Sun, X, LogOut, User, Mail, Menu, Database } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Button } from "./ui/button";
+import { DataIngestion } from "./DataIngestion";
 import { ChannelStatus, DataRange, getChannelStatus, getCurrentWeather, getDataRange } from "../lib/api";
 import {
   HISTORY_START_DATE,
@@ -101,6 +102,8 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [ingestionOpen, setIngestionOpen] = useState(false);
+  const ingestionCloseTimer = useRef<number | null>(null);
   const [notifTab, setNotifTab] = useState<"all" | "alert" | "suggestion" | "system">("all");
   const [currentWeather, setCurrentWeather] = useState<{
     tempCelsius: number;
@@ -305,6 +308,31 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  const cancelIngestionClose = () => {
+    if (ingestionCloseTimer.current) {
+      window.clearTimeout(ingestionCloseTimer.current);
+      ingestionCloseTimer.current = null;
+    }
+  };
+
+  const openIngestionDrawer = () => {
+    cancelIngestionClose();
+    setNotificationOpen(false);
+    setProfileOpen(false);
+    setIngestionOpen(true);
+  };
+
+  const scheduleIngestionClose = () => {
+    cancelIngestionClose();
+    ingestionCloseTimer.current = window.setTimeout(() => {
+      setIngestionOpen(false);
+    }, 220);
+  };
+
+  useEffect(() => {
+    return () => cancelIngestionClose();
+  }, []);
+
   const getChannelIndicator = (channel: string) => {
     const status = channelStatus?.channels.find((item) => item.channel === channel);
     return {
@@ -443,6 +471,31 @@ export function Header({ onMenuClick }: HeaderProps) {
             <span className="text-xs">{currentTimeLabel}</span>
           </Badge>
 
+          {/* Data Ingestion Drawer Trigger */}
+          <div
+            onMouseEnter={openIngestionDrawer}
+            onMouseLeave={scheduleIngestionClose}
+            className="relative"
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (ingestionOpen) {
+                  setIngestionOpen(false);
+                } else {
+                  openIngestionDrawer();
+                }
+              }}
+              className={`relative p-2 rounded-lg transition-colors flex-shrink-0 ${
+                ingestionOpen ? "bg-[#FFF2FA] text-[#F53799]" : "hover:bg-[#FFF2FA] text-[#223047]"
+              }`}
+              aria-label="Open Data Ingestion Center"
+            >
+              <Database className="w-5 h-5" />
+              <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#06B6D4] ring-2 ring-white" />
+            </button>
+          </div>
+
           {/* Notification Bell */}
           <button
             onClick={(e) => {
@@ -477,6 +530,35 @@ export function Header({ onMenuClick }: HeaderProps) {
           </button>
         </div>
       </header>
+
+      {/* Data Ingestion Slide Panel */}
+      <div
+        onMouseEnter={openIngestionDrawer}
+        onMouseLeave={scheduleIngestionClose}
+        className={`fixed top-16 right-0 bottom-0 z-50 w-[min(94vw,500px)] border-l border-[#FFD9EC] bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          ingestionOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+        aria-hidden={!ingestionOpen}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-[#FFD9EC] bg-[#FFF7FB] px-4 py-3">
+            <div>
+              <div className="text-base font-extrabold text-[#223047]">Data Ingestion</div>
+              <div className="text-xs text-[#223047] opacity-55">Upload, validate, and stage records</div>
+            </div>
+            <button
+              onClick={() => setIngestionOpen(false)}
+              className="rounded-lg p-2 text-[#223047] hover:bg-[#FFF2FA]"
+              aria-label="Close Data Ingestion Center"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <DataIngestion surface="drawer" />
+          </div>
+        </div>
+      </div>
 
       {/* Profile Dropdown */}
       {profileOpen && (
