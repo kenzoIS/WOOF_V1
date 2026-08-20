@@ -432,7 +432,7 @@ export function ThreeZoneForecastChart({
 
         {/* Responsive Recharts Composed Chart with Shaded Backgrounds */}
         <ResponsiveContainer width="100%" height={380}>
-          <ComposedChart data={chartData} margin={{ top: 20, right: 20, bottom: 8, left: 10 }}>
+          <ComposedChart data={chartData} margin={{ top: 20, right: 45, bottom: 8, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
 
             {/* ── 1. PAST (Train) Zone Background ── */}
@@ -562,9 +562,11 @@ export function ThreeZoneForecastChart({
             {/* Draggable Range Brush / Slider */}
             <Brush
               dataKey="date"
-              height={26}
-              stroke="#FFD9EC"
+              height={30}
+              stroke={themeColor}
               fill="#FFF7FB"
+              travellerWidth={10}
+              gap={1}
               tickFormatter={(val) => formatDateLabel(val, timeGrain)}
             />
           </ComposedChart>
