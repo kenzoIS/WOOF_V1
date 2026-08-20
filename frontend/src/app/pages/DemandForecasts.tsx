@@ -1,10 +1,12 @@
-import { AlertTriangle, TrendingUp, Sparkles } from "lucide-react";
+import { AlertTriangle, TrendingUp, Sparkles, ArrowRight } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/router";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics } from "../components/ThreeZoneForecastChart";
 import { getForecast, ForecastRun } from "../lib/api";
 import { SpatialMerchandisingPanel } from "../components/SpatialMerchandisingPanel";
 
 export function DemandForecasts() {
+  const router = useRouter();
   const [timeValue, setTimeValue] = useState(15); // 3:00 PM
   const [forecastSector, setForecastSector] = useState<'cafe' | 'services'>('cafe');
   const [forecastRun, setForecastRun] = useState<ForecastRun | null>(null);
@@ -370,7 +372,7 @@ export function DemandForecasts() {
                 <TrendingUp className="w-5 h-5 text-blue-600" />
                 <h3 className="font-semibold text-slate-900 text-sm">90-5-5 Multi-Zone Time Series Evaluation</h3>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setForecastSector('cafe')}
                   className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
@@ -390,6 +392,14 @@ export function DemandForecasts() {
                   }`}
                 >
                   Services
+                </button>
+                <button
+                  onClick={() => router.push(forecastSector === 'cafe' ? '/cafe' : '/services')}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 flex items-center gap-1"
+                  title="Open full sector page"
+                >
+                  <span>Open {forecastSector === 'cafe' ? 'Cafe' : 'Services'}</span>
+                  <ArrowRight className="w-3 h-3 text-slate-500" />
                 </button>
               </div>
             </div>

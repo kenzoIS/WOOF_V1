@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
-import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2 } from "lucide-react";
+import { useRouter } from "next/router";
+import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight } from "lucide-react";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -155,6 +156,7 @@ const formatGrowth = (current: number, previous: number) => {
 };
 
 export function Services() {
+  const router = useRouter();
   const [viewMode, setViewMode] = useState("next30days");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -1340,7 +1342,15 @@ export function Services() {
                   <div className="text-sm md:text-base font-bold text-[#223047]">{alert.service}</div>
                   <div className="text-xs text-[#223047] opacity-70 mt-1">Relative demand: {alert.capacity}% • Projected revenue: ₱{alert.projectedRevenue.toLocaleString()}</div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={() => router.push("/ai-simulation?tab=traffic")}
+                    className="bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs md:text-sm flex items-center gap-1.5"
+                    size="sm"
+                  >
+                    <span>Optimize Staff</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Button>
                   <Button onClick={() => handleResolveAlert(alert.time)} className="bg-[#06B6D4] hover:bg-[#06B6D4] text-xs md:text-sm" size="sm">Resolve</Button>
                   <Button variant="outline" className="border-[#FFD9EC] text-xs md:text-sm" size="sm">Snooze</Button>
                 </div>

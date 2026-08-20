@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
-import { Coffee, DollarSign, TrendingUp, PieChart, Download, Info, ChevronDown, ChevronUp, BarChart2 } from "lucide-react";
+import { useRouter } from "next/router";
+import { Coffee, DollarSign, TrendingUp, PieChart, Download, Info, ChevronDown, ChevronUp, BarChart2, ArrowRight } from "lucide-react";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -180,6 +181,7 @@ const formatGrowth = (current: number, previous: number) => {
 };
 
 export function Cafe() {
+  const router = useRouter();
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -1359,8 +1361,13 @@ export function Cafe() {
                                 />
                               </LineChart>
                             </ResponsiveContainer>
-                            <Button size="sm" className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm">
-                              Promote This Item
+                            <Button
+                              size="sm"
+                              onClick={() => router.push(`/ai-simulation?tab=bundle&itemA=${encodeURIComponent(item.name)}`)}
+                              className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm flex items-center gap-1.5"
+                            >
+                              <span>Promote in Bundle Simulator</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
                             </Button>
                           </div>
                         </TableCell>
@@ -1493,9 +1500,19 @@ export function Cafe() {
               </div>
             </div>
 
-            <Button onClick={handleActivateHappyHour} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
-              Activate Happy Hour
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button onClick={handleActivateHappyHour} className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
+                Activate Happy Hour
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push("/ai-simulation?tab=traffic")}
+                className="border-white/30 text-white hover:bg-white/10 text-xs md:text-sm flex items-center justify-center gap-1.5"
+              >
+                <span>Traffic Optimizer</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>

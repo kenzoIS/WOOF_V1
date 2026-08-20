@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
 import {
   FileText,
   TrendingUp,
@@ -11,7 +12,8 @@ import {
   Activity,
   Award,
   Sparkles,
-  Download
+  Download,
+  ArrowRight
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
@@ -35,6 +37,7 @@ import {
 } from "recharts";
 
 export function SmartReports() {
+  const router = useRouter();
   const [reports, setReports] = useState<SmartReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<SmartReport | null>(null);
   const [title, setTitle] = useState("Executive Business Performance Report");
@@ -467,6 +470,43 @@ export function SmartReports() {
                       </span>
                     </div>
                   </div>
+                </div>
+
+                {/* Quick Navigation to Live Analytical Dashboards */}
+                <div className="flex flex-wrap items-center gap-2 p-3 bg-[#FFF7FB] border border-[#FFD9EC] rounded-2xl text-xs">
+                  <span className="font-bold text-[#223047] opacity-60">Explore Live Dashboards:</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/cafe")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-[#F53799] font-semibold"
+                  >
+                    ☕ Cafe Dashboard <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/services")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-[#06B6D4] font-semibold"
+                  >
+                    ✂️ Services Dashboard <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/retail")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-amber-600 font-semibold"
+                  >
+                    🛍️ Retail Dashboard <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/ai-simulation")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-purple-600 font-semibold"
+                  >
+                    🤖 AI Simulation Hub <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
                 </div>
 
                 {/* KPI metrics row */}

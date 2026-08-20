@@ -379,19 +379,28 @@ export function AISimulation() {
   useEffect(() => {
     if (!router.isReady) return;
 
-    const tab = typeof router.query.tab === "string" ? router.query.tab : "";
-    const knownTabs = [
-      "bundle-simulator",
-      "pricing-lab",
-      "traffic-optimizer",
-      "scenario-builder",
-      "activation-layer",
-    ];
+    const rawTab = typeof router.query.tab === "string" ? router.query.tab.toLowerCase() : "";
+    const tabMap: Record<string, string> = {
+      traffic: "traffic-optimizer",
+      "traffic-optimizer": "traffic-optimizer",
+      bundle: "bundle-simulator",
+      "bundle-simulator": "bundle-simulator",
+      pricing: "pricing-lab",
+      "pricing-lab": "pricing-lab",
+      scenario: "scenario-builder",
+      "scenario-builder": "scenario-builder",
+      activation: "activation-layer",
+      "activation-layer": "activation-layer",
+    };
 
-    if (knownTabs.includes(tab)) {
-      setActiveTab(tab);
+    if (tabMap[rawTab]) {
+      setActiveTab(tabMap[rawTab]);
     }
-  }, [router.isReady, router.query.tab]);
+
+    if (typeof router.query.itemA === "string") {
+      setPricingSearch(router.query.itemA);
+    }
+  }, [router.isReady, router.query.tab, router.query.itemA]);
 
   const handleBundleTimeChange = (value: number[]) => {
     setDataTime(value);

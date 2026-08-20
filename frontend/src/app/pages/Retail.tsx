@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { DollarSign, TrendingUp, Package, AlertCircle, Target } from "lucide-react";
+import { useRouter } from "next/router";
+import { DollarSign, TrendingUp, Package, AlertCircle, Target, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
@@ -124,6 +125,7 @@ const formatGrowth = (current: number, previous: number) => {
 };
 
 export function Retail() {
+  const router = useRouter();
   const [filterVelocity, setFilterVelocity] = useState("all");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -684,19 +686,31 @@ export function Retail() {
                       </span>
                     </TableCell>
                     <TableCell className="text-center">
-                      {item.stock < item.reorderPoint ? (
+                      <div className="flex items-center justify-center gap-1.5">
+                        {item.stock < item.reorderPoint ? (
+                          <Button
+                            onClick={() => handleReorderNow(item.sku, item.name)}
+                            size="sm"
+                            className="bg-[#D42A7D] hover:bg-[#F53799] text-xs"
+                          >
+                            Reorder
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline" className="border-[#FFD9EC] text-xs">
+                            View
+                          </Button>
+                        )}
                         <Button
-                          onClick={() => handleReorderNow(item.sku, item.name)}
                           size="sm"
-                          className="bg-[#D42A7D] hover:bg-[#F53799] text-xs"
+                          variant="ghost"
+                          onClick={() => router.push(`/ai-simulation?tab=bundle&itemA=${encodeURIComponent(item.name)}`)}
+                          className="text-[#F53799] hover:bg-[#FFF2FA] text-xs px-2"
+                          title="Simulate Bundle with this product"
                         >
-                          Reorder
+                          <span>Bundle</span>
+                          <ArrowRight className="w-3 h-3 ml-1" />
                         </Button>
-                      ) : (
-                        <Button size="sm" variant="outline" className="border-[#FFD9EC] text-xs">
-                          View
-                        </Button>
-                      )}
+                      </div>
                     </TableCell>
                   </TableRow>
                   {expandedSKU === item.sku && (

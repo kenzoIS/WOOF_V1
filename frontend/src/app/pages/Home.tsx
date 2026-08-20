@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown } from "lucide-react";
+import { useRouter } from "next/router";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -98,6 +99,7 @@ const toNumber = (value: unknown, fallback = 0) => {
 };
 
 export function Home() {
+  const router = useRouter();
   const [timeRange, setTimeRange] = useState("today");
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [expandedSuggestions, setExpandedSuggestions] = useState<number[]>([]);
@@ -403,40 +405,58 @@ export function Home() {
       {/* SECTION 2 — PRIMARY KPI ROW */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="mb-3 text-xs md:text-sm text-[#223047] opacity-60">
-          Selected-period KPIs from uploaded transaction data
+          Selected-period KPIs from uploaded transaction data (Click to deep dive)
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Total Revenue Today */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+          <div
+            onClick={() => router.push("/demand-forecasts")}
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Total Revenue</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+                <span>Total Revenue</span>
+                <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
               <div className={`text-xs ${scaledKPIs.revenueColorClass} font-medium hidden md:block`}>{scaledKPIs.revenuePercent}</div>
             </div>
           </div>
 
           {/* Omnichannel Orders */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
+          <div
+            onClick={() => router.push("/smart-reports")}
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#06B6D4] hover:shadow-sm transition-all group"
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
               <ShoppingCart className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Orders</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+                <span>Orders</span>
+                <ArrowRight className="w-3 h-3 text-[#06B6D4] opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
               <div className={`text-xs ${scaledKPIs.ordersColorClass} font-medium hidden md:block`}>{scaledKPIs.ordersPercent}</div>
             </div>
           </div>
 
           {/* Retail Revenue */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+          <div
+            onClick={() => router.push("/retail")}
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
               <PawPrint className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Retail</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+                <span>Retail</span>
+                <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.retail}</div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs mt-1 hidden md:inline-flex">
                 {scaledKPIs.retailPercent}
@@ -561,25 +581,39 @@ export function Home() {
         {/* Legend Row */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-4 pt-4 border-t border-[#FFD9EC]">
           {legendData.map((sector) => (
-            <button
+            <div
               key={sector.key}
-              onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
-              className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg transition-all ${
+              className={`flex items-center justify-between gap-2 md:gap-3 p-2 md:p-3 rounded-lg border border-transparent transition-all ${
                 visibleSeries[sector.key as keyof typeof visibleSeries]
-                  ? "bg-[#FFF2FA]"
+                  ? "bg-[#FFF2FA] border-[#FFD9EC]"
                   : "opacity-40 hover:opacity-60"
               }`}
             >
-              <div
-                className="w-3 h-3 rounded-full flex-shrink-0"
-                style={{ backgroundColor: sector.color }}
-              />
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-xs text-[#223047] opacity-60">{sector.label}</div>
-                <div className="text-sm font-bold text-[#223047]">{sector.total}</div>
-                <div className="text-xs text-[#223047] opacity-50">{sector.percent}</div>
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
+                className="flex items-center gap-2 md:gap-3 flex-1 text-left min-w-0"
+              >
+                <div
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: sector.color }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-[#223047] opacity-60">{sector.label}</div>
+                  <div className="text-sm font-bold text-[#223047]">{sector.total}</div>
+                  <div className="text-xs text-[#223047] opacity-50">{sector.percent}</div>
+                </div>
+              </button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => router.push(sector.key === "cafe" ? "/cafe" : sector.key === "services" ? "/services" : "/retail")}
+                className="text-[11px] font-semibold text-[#F53799] hover:bg-white/80 h-7 px-2"
+                title={`Deep dive into ${sector.label}`}
+              >
+                Deep Dive <ArrowRight className="w-3 h-3 ml-1" />
+              </Button>
+            </div>
           ))}
         </div>
       </div>
