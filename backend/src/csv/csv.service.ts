@@ -12,6 +12,7 @@ import { EtlService } from './etl.service';
 import { DataValidationService } from './data-validation.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AwsService } from '../aws/aws.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import {
@@ -95,6 +96,7 @@ export class CsvService {
     private dataValidationService: DataValidationService,
     private analyticsService: AnalyticsService,
     private awsService: AwsService,
+    private realtimeService: RealtimeService,
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
@@ -207,11 +209,46 @@ export class CsvService {
       }).eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
+      this.realtimeService.emit({
+        type: 'upload_processed',
+        title: 'Upload processed',
+        message: `${cleanedTransactions.length} ${channel} records were saved to staging.`,
+        uploadId: uploadId.toString(),
+        data: {
+          channel,
+          recordCount: cleanedTransactions.length,
+        },
+      });
       
       // Run ETL to Supabase in the background
-      this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
-        this.logger.error('Background ETL process failed for upload ' + uploadId, err.stack);
+      this.realtimeService.emit({
+        type: 'etl_started',
+        title: 'Warehouse sync started',
+        message: `${channel} upload is syncing to Supabase warehouse.`,
+        uploadId: uploadId.toString(),
       });
+      this.etlService
+        .processTransactions(
+          cleanedTransactions as Transaction[],
+          uploadId.toString(),
+        )
+        .then(() => {
+          this.realtimeService.emit({
+            type: 'etl_completed',
+            title: 'Warehouse sync complete',
+            message: `${channel} upload is ready in Supabase warehouse.`,
+            uploadId: uploadId.toString(),
+          });
+        })
+        .catch(err => {
+          this.logger.error('Background ETL process failed for upload ' + uploadId, err.stack);
+          this.realtimeService.emit({
+            type: 'etl_failed',
+            title: 'Warehouse sync failed',
+            message: err instanceof Error ? err.message : String(err),
+            uploadId: uploadId.toString(),
+          });
+        });
       this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions);
 
       // Archive raw CSV to AWS S3 Data Lake (fire-and-forget)
@@ -323,11 +360,50 @@ export class CsvService {
       }).eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
+      this.realtimeService.emit({
+        type: 'upload_processed',
+        title: 'Historical upload processed',
+        message: `${cleanedTransactions.length} ${module} forecast records were saved to staging.`,
+        module,
+        uploadId: uploadId.toString(),
+        data: {
+          channel: 'POS',
+          recordCount: cleanedTransactions.length,
+        },
+      });
       
       // Run ETL to Supabase in the background
-      this.etlService.processTransactions(cleanedTransactions as Transaction[], uploadId.toString()).catch(err => {
-        this.logger.error('Background ETL process failed for historical upload ' + uploadId, err.stack);
+      this.realtimeService.emit({
+        type: 'etl_started',
+        title: 'Historical warehouse sync started',
+        message: `${module} historical upload is syncing to Supabase warehouse.`,
+        module,
+        uploadId: uploadId.toString(),
       });
+      this.etlService
+        .processTransactions(
+          cleanedTransactions as Transaction[],
+          uploadId.toString(),
+        )
+        .then(() => {
+          this.realtimeService.emit({
+            type: 'etl_completed',
+            title: 'Historical warehouse sync complete',
+            message: `${module} historical data is ready in Supabase warehouse.`,
+            module,
+            uploadId: uploadId.toString(),
+          });
+        })
+        .catch(err => {
+          this.logger.error('Background ETL process failed for historical upload ' + uploadId, err.stack);
+          this.realtimeService.emit({
+            type: 'etl_failed',
+            title: 'Historical warehouse sync failed',
+            message: err instanceof Error ? err.message : String(err),
+            module,
+            uploadId: uploadId.toString(),
+          });
+        });
       this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions, [module]);
     } catch (error) {
       await this.rollbackUpload(uploadId);
@@ -388,6 +464,16 @@ export class CsvService {
 
     if (modules.length === 0) return;
 
+    modules.forEach((module) => {
+      this.realtimeService.emit({
+        type: 'forecast_warmup_started',
+        title: 'Forecast precompute started',
+        message: `${module} forecast cache is being refreshed from the new upload.`,
+        module,
+        uploadId,
+      });
+    });
+
     setTimeout(() => {
       Promise.allSettled(
         modules.map((module) =>
@@ -407,10 +493,27 @@ export class CsvService {
                   : String(result.reason)
               }`,
             );
+            this.realtimeService.emit({
+              type: 'forecast_failed',
+              title: 'Forecast precompute failed',
+              message:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(result.reason),
+              module,
+              uploadId,
+            });
           } else {
             this.logger.log(
               `Forecast cache warmed for ${module} after upload ${uploadId}.`,
             );
+            this.realtimeService.emit({
+              type: 'forecast_ready',
+              title: 'Forecast ready',
+              message: `${module} forecast has been precomputed and cached.`,
+              module,
+              uploadId,
+            });
           }
         });
       });

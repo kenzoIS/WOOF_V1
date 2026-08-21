@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { DollarSign, TrendingUp, Package, AlertCircle, Target } from "lucide-react";
+import { useRouter } from "next/router";
+import { DollarSign, TrendingUp, Package, AlertCircle, Target, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
@@ -57,7 +58,7 @@ const spoilageRiskItems = [
 // Fallback data for velocity / forecast
 
 const retailSentimentData = [
-  { name: "Positive", value: 72, color: "#3AE4FA" },
+  { name: "Positive", value: 72, color: "#06B6D4" },
   { name: "Neutral", value: 18, color: "#CCCCCC" },
   { name: "Negative", value: 10, color: "#F53799" },
 ];
@@ -124,12 +125,13 @@ const formatGrowth = (current: number, previous: number) => {
 };
 
 export function Retail() {
+  const router = useRouter();
   const [filterVelocity, setFilterVelocity] = useState("all");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedSKU, setExpandedSKU] = useState<string | null>(null);
   const [discountSlider, setDiscountSlider] = useState([25]);
-  const [selectedChannel, setSelectedChannel] = useState("all");
+  const [omnichannelMode, setOmnichannelMode] = useState<"overall" | "header">("overall");
   const [keywords, setKeywords] = useState(["missing", "misleading", "incorrect", "slow", "damaged"]);
   const [newKeyword, setNewKeyword] = useState("");
   const [errorModal, setErrorModal] = useState<{ isOpen: boolean; type: ErrorType | null }>({
@@ -271,23 +273,55 @@ export function Retail() {
   const retailRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
   const activeSKUs = dashboardData?.topItems?.length || 0;
   const retailChannelPerformance = useMemo(() => {
-    const revenueFor = (channel: string) => {
+    const getBaseRevenue = (channel: string) => {
       const row = dashboardData?.channelBreakdown?.find(
         (item: any) => item.channel === channel,
       );
       return Number(row?.revenue) || 0;
     };
 
+    const basePos = getBaseRevenue("POS");
+    const baseShopee = getBaseRevenue("Shopee");
+    const baseTikTok = getBaseRevenue("TikTok Shop");
+    const basePetHub = getBaseRevenue("PetHub");
+
+    if (omnichannelMode === "header" && channelForecast?.physical?.historical) {
+      const latestHistoryDate =
+        channelForecast.physical.historical[channelForecast.physical.historical.length - 1]?.date ||
+        INGESTED_HISTORY_END_DATE;
+      const range = parseGlobalRange(globalDateRange, latestHistoryDate);
+      const physSliced = filterByDateRange(channelForecast.physical.historical, range);
+      const onlineSliced = filterByDateRange(channelForecast.online?.historical || [], range);
+
+      const totalPhys = physSliced.reduce((sum: number, item: any) => sum + Number(item.revenue || 0), 0);
+      const totalOnline = onlineSliced.reduce((sum: number, item: any) => sum + Number(item.revenue || 0), 0);
+
+      const totalOnlineBase = baseShopee + baseTikTok + basePetHub;
+      const shopeeRatio = totalOnlineBase ? baseShopee / totalOnlineBase : 0.33;
+      const tiktokRatio = totalOnlineBase ? baseTikTok / totalOnlineBase : 0.33;
+      const pethubRatio = totalOnlineBase ? basePetHub / totalOnlineBase : 0.34;
+
+      return [
+        {
+          sector: "Retail",
+          pos: Math.round(totalPhys),
+          shopee: Math.round(totalOnline * shopeeRatio),
+          tiktok: Math.round(totalOnline * tiktokRatio),
+          pethub: Math.round(totalOnline * pethubRatio),
+        },
+      ];
+    }
+
     return [
       {
         sector: "Retail",
-        pos: revenueFor("POS"),
-        shopee: revenueFor("Shopee"),
-        tiktok: revenueFor("TikTok Shop"),
-        pethub: revenueFor("PetHub"),
+        pos: basePos,
+        shopee: baseShopee,
+        tiktok: baseTikTok,
+        pethub: basePetHub,
       },
     ];
-  }, [dashboardData]);
+  }, [dashboardData, omnichannelMode, channelForecast, globalDateRange]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -408,7 +442,7 @@ export function Retail() {
 
           {/* Active SKUs */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <Package className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
@@ -419,7 +453,7 @@ export function Retail() {
 
           {/* Stockout Alerts */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <AlertCircle className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
@@ -531,7 +565,7 @@ export function Retail() {
               key="line-online-wide"
               type="monotone"
               dataKey="online"
-              stroke="#3AE4FA"
+              stroke="#06B6D4"
               strokeWidth={2.5}
               dot={false}
               animationDuration={800}
@@ -546,18 +580,8 @@ export function Retail() {
             <span className="text-xs">Physical (POS)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-[#3AE4FA] rounded-full" />
+            <div className="w-3 h-3 bg-[#06B6D4] rounded-full" />
             <span className="text-xs">Digital (Shopee/TikTok/PetHub)</span>
-          </div>
-        </div>
-
-        {/* Descriptive Analysis */}
-        <div className="grid grid-cols-1 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
-          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
-            <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Retail Analysis</h3>
-            <p className="text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-              This panel tracks the daily net sales contribution of physical in-store purchases (POS) versus digital channels (Shopee, TikTok, and PetHub). Managing cross-channel retail metrics descriptively allows Happy Tails to compare retail channels, analyze trends, and coordinate inventory levels without forecasting.
-            </p>
           </div>
         </div>
       </div>
@@ -569,11 +593,15 @@ export function Retail() {
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
             <Badge variant="outline" className="text-xs">
-              WOOF AI Insight
+              WOOF Insight
             </Badge>
           </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "Premium Dog Food at critical spoilage risk (6 days left). Activate 25% flash sale to move 12 units and prevent ₱15,000 loss."
+            {dashboardData?.topItems?.[0]
+              ? `${dashboardData.topItems[0].name} leads Retail sales at ₱${dashboardData.topItems[0].revenue.toLocaleString()} across ${dashboardData.topItems[0].orderCount || dashboardData.topItems[0].quantity || 0} units.`
+              : aggregatedKpis.totalRevenue > 0
+                ? `Retail revenue generated ₱${aggregatedKpis.totalRevenue.toLocaleString()} across physical and digital channels.`
+                : "Upload Retail POS or e-commerce transaction data to activate live item insights."}
           </p>
         </div>
         <img
@@ -658,19 +686,31 @@ export function Retail() {
                       </span>
                     </TableCell>
                     <TableCell className="text-center">
-                      {item.stock < item.reorderPoint ? (
+                      <div className="flex items-center justify-center gap-1.5">
+                        {item.stock < item.reorderPoint ? (
+                          <Button
+                            onClick={() => handleReorderNow(item.sku, item.name)}
+                            size="sm"
+                            className="bg-[#D42A7D] hover:bg-[#F53799] text-xs"
+                          >
+                            Reorder
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline" className="border-[#FFD9EC] text-xs">
+                            View
+                          </Button>
+                        )}
                         <Button
-                          onClick={() => handleReorderNow(item.sku, item.name)}
                           size="sm"
-                          className="bg-[#D42A7D] hover:bg-[#F53799] text-xs"
+                          variant="ghost"
+                          onClick={() => router.push(`/ai-simulation?tab=bundle&itemA=${encodeURIComponent(item.name)}`)}
+                          className="text-[#F53799] hover:bg-[#FFF2FA] text-xs px-2"
+                          title="Simulate Bundle with this product"
                         >
-                          Reorder
+                          <span>Bundle</span>
+                          <ArrowRight className="w-3 h-3 ml-1" />
                         </Button>
-                      ) : (
-                        <Button size="sm" variant="outline" className="border-[#FFD9EC] text-xs">
-                          View
-                        </Button>
-                      )}
+                      </div>
                     </TableCell>
                   </TableRow>
                   {expandedSKU === item.sku && (
@@ -728,33 +768,30 @@ export function Retail() {
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2 w-full md:w-auto">
+          <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
             {[
-              { label: "All", value: "all" },
-              { label: "POS", value: "pos" },
-              { label: "Shopee", value: "shopee" },
-              { label: "TikTok", value: "tiktok" },
-              { label: "PetHub", value: "pethub" },
-            ].map((channel) => (
+              ["overall", "Overall"],
+              ["header", "Header Filter"],
+            ].map(([value, label]) => (
               <Button
-                key={channel.value}
+                key={value}
                 size="sm"
-                variant={selectedChannel === channel.value ? "default" : "outline"}
-                onClick={() => setSelectedChannel(channel.value)}
-                className={`text-xs ${
-                  selectedChannel === channel.value
-                    ? "bg-[#D42A7D] hover:bg-[#F53799]"
-                    : "border-[#FFD9EC] hover:bg-[#FFF2FA]"
-                }`}
+                variant={omnichannelMode === value ? "default" : "ghost"}
+                onClick={() => setOmnichannelMode(value as "overall" | "header")}
+                className={
+                  omnichannelMode === value
+                    ? "h-8 bg-[#D42A7D] hover:bg-[#D42A7D] text-xs text-white"
+                    : "h-8 text-xs hover:bg-[#FFF2FA]"
+                }
               >
-                {channel.label}
+                {label}
               </Button>
             ))}
           </div>
         </div>
 
         <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
-          <BarChart key={`chart-${selectedChannel}`} data={retailChannelPerformance}>
+          <BarChart data={retailChannelPerformance}>
             <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
             <XAxis dataKey="sector" stroke="#223047" style={{ fontSize: "10px" }} />
             <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
@@ -767,18 +804,10 @@ export function Retail() {
                 padding: "12px",
               }}
             />
-            {(selectedChannel === "all" || selectedChannel === "pos") && (
-              <Bar key="pos-bar" dataKey="pos" name="POS" fill="#F53799" radius={[6, 6, 0, 0]} animationDuration={800} />
-            )}
-            {(selectedChannel === "all" || selectedChannel === "shopee") && (
-              <Bar key="shopee-bar" dataKey="shopee" name="Shopee" fill="#FBBF24" radius={[6, 6, 0, 0]} animationDuration={800} />
-            )}
-            {(selectedChannel === "all" || selectedChannel === "tiktok") && (
-              <Bar key="tiktok-bar" dataKey="tiktok" name="TikTok" fill="#8B5CF6" radius={[6, 6, 0, 0]} animationDuration={800} />
-            )}
-            {(selectedChannel === "all" || selectedChannel === "pethub") && (
-              <Bar key="pethub-bar" dataKey="pethub" name="PetHub" fill="#3AE4FA" radius={[6, 6, 0, 0]} animationDuration={800} />
-            )}
+            <Bar key="pos-bar" dataKey="pos" name="POS" fill="#F53799" radius={[6, 6, 0, 0]} animationDuration={800} />
+            <Bar key="shopee-bar" dataKey="shopee" name="Shopee" fill="#FBBF24" radius={[6, 6, 0, 0]} animationDuration={800} />
+            <Bar key="tiktok-bar" dataKey="tiktok" name="TikTok" fill="#8B5CF6" radius={[6, 6, 0, 0]} animationDuration={800} />
+            <Bar key="pethub-bar" dataKey="pethub" name="PetHub" fill="#06B6D4" radius={[6, 6, 0, 0]} animationDuration={800} />
           </BarChart>
         </ResponsiveContainer>
 
@@ -787,126 +816,13 @@ export function Retail() {
             { label: "POS", color: "#F53799" },
             { label: "Shopee", color: "#FBBF24" },
             { label: "TikTok", color: "#8B5CF6" },
-            { label: "PetHub", color: "#3AE4FA" },
+            { label: "PetHub", color: "#06B6D4" },
           ].map((channel) => (
             <div key={channel.label} className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: channel.color }} />
               <span className="text-xs md:text-sm text-[#223047]">{channel.label}</span>
             </div>
           ))}
-        </div>
-      </div>
-
-      {/* RETAIL REVIEW SENTIMENT MONITOR */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div>
-          <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-            Retail Review Sentiment Monitor
-          </h2>
-          <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            NLP analysis of Shopee and in-store retail feedback
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-          {/* Sentiment Donut */}
-          <div className="flex flex-col items-center justify-center py-4 md:py-0">
-            <div className="relative w-full max-w-[240px] md:max-w-[280px] mx-auto">
-              <ResponsiveContainer width="100%" height={200}>
-                <RePieChart>
-                  <Pie
-                    data={retailSentimentData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={2}
-                    dataKey="value"
-                    animationDuration={800}
-                  >
-                    {retailSentimentData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                </RePieChart>
-              </ResponsiveContainer>
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-                <div className="text-2xl md:text-3xl font-extrabold text-[#223047]">72%</div>
-                <div className="text-xs text-[#223047] opacity-60">Positive</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Flagged Review Feed */}
-          <div className="md:col-span-2 space-y-3 max-h-[300px] overflow-y-auto overflow-x-hidden">
-            {flaggedRetailReviews.map((review, idx) => (
-              <div key={idx} className="p-3 md:p-4 bg-[#FFF7FB] border border-[#FFD9EC] rounded-lg md:rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <Badge variant="outline" className="text-xs">{review.platform}</Badge>
-                  <span className="text-xs text-[#223047] opacity-50">{review.date}</span>
-                </div>
-                <p className="text-xs md:text-sm text-[#223047]" style={{ lineHeight: "1.6" }}>
-                  {review.text.split(" ").map((word, i) =>
-                    review.keywords.some((kw) => word.toLowerCase().includes(kw)) ? (
-                      <span key={`word-${idx}-${i}`} className="font-bold text-[#F53799]">
-                        {word}{" "}
-                      </span>
-                    ) : (
-                      <span key={`word-${idx}-${i}`}>{word} </span>
-                    )
-                  )}
-                </p>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-[#223047] opacity-60">{review.product}</span>
-                  <Button size="sm" variant="outline" className="border-[#F53799] text-[#F53799] text-xs">
-                    <span className="hidden sm:inline">Flag for Inspection</span>
-                    <span className="sm:hidden">Flag</span>
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-        </div>
-
-        {/* Keyword Management */}
-        <div className="pt-4 md:pt-6 border-t border-[#FFD9EC] space-y-3">
-          <h3 className="text-xs md:text-sm font-semibold text-[#223047]">Negative Keywords</h3>
-          <div className="flex flex-wrap gap-2">
-            {keywords.map((keyword) => (
-              <Badge
-                key={keyword}
-                variant="outline"
-                className="gap-2 border-[#FFD9EC] bg-[#FFF2FA] text-xs"
-              >
-                {keyword}
-                <button
-                  onClick={() => handleRemoveKeyword(keyword)}
-                  className="hover:text-[#F53799]"
-                >
-                  ×
-                </button>
-              </Badge>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newKeyword}
-              onChange={(e) => setNewKeyword(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === "Enter") {
-                  handleAddKeyword();
-                }
-              }}
-              placeholder="Add new keyword..."
-              className="flex-1 px-3 md:px-4 py-2 border border-[#FFD9EC] rounded-lg text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-            />
-            <Button onClick={handleAddKeyword} className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm px-3 md:px-4">
-              <span className="hidden sm:inline">Add Keyword</span>
-              <span className="sm:hidden">Add</span>
-            </Button>
-          </div>
         </div>
       </div>
 

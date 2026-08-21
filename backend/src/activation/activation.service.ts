@@ -9,6 +9,7 @@ import axios from 'axios';
 import { Model } from 'mongoose';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { SupabaseService } from '../common/supabase/supabase.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import {
   CampaignActivation,
   CampaignActivationDocument,
@@ -61,6 +62,7 @@ export class ActivationService {
   constructor(
     private readonly analyticsService: AnalyticsService,
     private readonly supabaseService: SupabaseService,
+    private readonly realtimeService: RealtimeService,
     @InjectModel(CampaignActivation.name)
     private readonly campaignModel: Model<CampaignActivationDocument>,
   ) {}
@@ -215,21 +217,46 @@ export class ActivationService {
         'Campaign must be approved and queued before publishing',
       );
     }
+    const campaignTitle = String(campaign.title || 'Campaign');
 
-    campaign = await this.ensureCampaignHasImage(campaign);
-    const payload = this.buildPublishPayload(campaign);
-    const token = process.env.PETHUB_API_TOKEN;
-    const response = await this.postPetHubCampaign(endpoint, payload, token);
+    this.realtimeService.emit({
+      type: 'campaign_publish_started',
+      title: 'PetHub publish started',
+      message: `${campaignTitle} is being sent to PetHub.`,
+      campaignId,
+    });
 
-    const updated = await this.campaignModel
-      .findOneAndUpdate({ campaignId }, { status: 'published' }, { new: true })
-      .lean()
-      .exec();
+    try {
+      campaign = await this.ensureCampaignHasImage(campaign);
+      const payload = this.buildPublishPayload(campaign);
+      const token = process.env.PETHUB_API_TOKEN;
+      const response = await this.postPetHubCampaign(endpoint, payload, token);
 
-    return {
-      campaign: updated,
-      pethubResponse: response.data,
-    };
+      const updated = await this.campaignModel
+        .findOneAndUpdate({ campaignId }, { status: 'published' }, { new: true })
+        .lean()
+        .exec();
+
+      this.realtimeService.emit({
+        type: 'campaign_published',
+        title: 'Campaign published',
+        message: `${campaignTitle} is now live in PetHub.`,
+        campaignId,
+      });
+
+      return {
+        campaign: updated,
+        pethubResponse: response.data,
+      };
+    } catch (error) {
+      this.realtimeService.emit({
+        type: 'campaign_publish_failed',
+        title: 'PetHub publish failed',
+        message: error instanceof Error ? error.message : String(error),
+        campaignId,
+      });
+      throw error;
+    }
   }
 
   private async ensureCampaignHasImage(campaign: any) {

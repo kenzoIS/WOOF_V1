@@ -1,14 +1,13 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, Loader2 } from "lucide-react";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { toast } from "sonner";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
-import { DataIngestion } from "../components/DataIngestion";
-import { generateActivationCampaign, getHomeOverview } from "../lib/api";
+import { getHomeOverview } from "../lib/api";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
 
@@ -94,47 +93,6 @@ interface HomeOverview {
   nextAction: HomeSuggestion | null;
 }
 
-const inferActionSector = (action: HomeSuggestion) => {
-  const text = `${action.title} ${action.trigger} ${action.reason}`.toLowerCase();
-  if (text.includes("service") || text.includes("groom")) return "Services";
-  if (text.includes("cafe") || text.includes("food") || text.includes("drink")) return "Cafe";
-  if (text.includes("retail") || text.includes("product") || text.includes("stock")) return "Retail";
-  return "Retail";
-};
-
-const getFeaturedItemName = (title: string) => {
-  const cleaned = title
-    .replace(/^promote\s+/i, "")
-    .replace(/\s*\([^)]*\)\s*$/g, "")
-    .trim();
-  return cleaned || title;
-};
-
-const buildActivationRecommendation = (action: HomeSuggestion) => {
-  const sector = inferActionSector(action);
-  const itemName = getFeaturedItemName(action.title);
-
-  return {
-    id: `home-next-action-${action.id}`,
-    source: "home_next_scheduled_action",
-    title: action.title,
-    reason: action.reason || action.detailedExplanation || "Generated from WOOF Home analytics.",
-    confidence: action.confidence || "Live recommendation",
-    promoMechanic: action.discount || "Featured PetHub placement",
-    expectedLift: action.expectedLift || "Projected lift unavailable",
-    targetSegment: `PetHub customers interested in ${sector.toLowerCase()}`,
-    triggerMetric: action.trigger || "Home next scheduled action",
-    featuredItems: [itemName],
-    analyticsContext: {
-      sector,
-      sourcePage: "Home",
-      recommendationType: "Next Scheduled Action",
-      trigger: action.trigger,
-      detailedExplanation: action.detailedExplanation,
-    },
-  };
-};
-
 const toNumber = (value: unknown, fallback = 0) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -148,7 +106,6 @@ export function Home() {
   const [homeOverview, setHomeOverview] = useState<HomeOverview | null>(null);
   const [homeLoading, setHomeLoading] = useState(false);
   const [homeError, setHomeError] = useState<string | null>(null);
-  const [isExecutingAction, setIsExecutingAction] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -251,6 +208,11 @@ export function Home() {
   );
   const displayHeatmapDays = clientHeatmapDays;
   const suggestions = homeOverview?.suggestions || [];
+  const carouselSuggestions = useMemo(
+    () => (suggestions.length > 2 ? [...suggestions, ...suggestions] : suggestions),
+    [suggestions],
+  );
+  const shouldAnimateSuggestions = suggestions.length > 2;
   const heroDate = homeOverview?.anchorDate
     ? new Date(homeOverview.anchorDate).toLocaleDateString("en-PH", {
         weekday: "long",
@@ -319,7 +281,7 @@ export function Home() {
     window.dispatchEvent(new Event("simulateOffline"));
   };
 
-  const handleExecuteNow = async () => {
+  const handleExecuteNow = () => {
     const nextAction = homeOverview?.nextAction;
     if (!nextAction) {
       toast.info("No live action is currently queued.", {
@@ -327,23 +289,7 @@ export function Home() {
       });
       return;
     }
-
-    setIsExecutingAction(true);
-    try {
-      await generateActivationCampaign(buildActivationRecommendation(nextAction));
-      setApprovedSuggestions((prev) => (prev.includes(nextAction.id) ? prev : [...prev, nextAction.id]));
-      toast.success("Campaign draft created for PetHub.", {
-        description: "Review, queue, and publish it in the Activation Layer.",
-      });
-      router.push("/ai-simulation?tab=activation-layer");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to create campaign draft.";
-      toast.error("PetHub activation draft failed", {
-        description: message,
-      });
-    } finally {
-      setIsExecutingAction(false);
-    }
+    handleApprove(nextAction.id);
   };
 
   const handleRefreshData = () => {
@@ -370,10 +316,10 @@ export function Home() {
 
   const getHeatmapColor = (value: number) => {
     if (value <= 0) return "#FFFFFF";
-    if (value > 80) return "#F53799";
-    if (value > 60) return "#FFD9EC";
-    if (value > 40) return "#FFF2FA";
-    return "#FFF7FB";
+    if (value <= 40) return "#10B981";
+    if (value <= 60) return "#F59E0B";
+    if (value <= 80) return "#FFD9EC";
+    return "#F53799";
   };
 
   const getHeatmapValue = (day: { date: string; dayLabel: string }, hourLabel: string) => {
@@ -450,8 +396,6 @@ export function Home() {
         </div>
       </div>
 
-      {/* SECTION 1.5 — DATA INGESTION CENTER */}
-      <DataIngestion />
       {homeError && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {homeError}
@@ -461,42 +405,60 @@ export function Home() {
       {/* SECTION 2 — PRIMARY KPI ROW */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="mb-3 text-xs md:text-sm text-[#223047] opacity-60">
-          Selected-period KPIs from uploaded transaction data
+          Selected-period KPIs from uploaded transaction data (Click to deep dive)
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Total Revenue Today */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+          <div
+            onClick={() => router.push("/demand-forecasts")}
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Total Revenue</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+                <span>Total Revenue</span>
+                <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
               <div className={`text-xs ${scaledKPIs.revenueColorClass} font-medium hidden md:block`}>{scaledKPIs.revenuePercent}</div>
             </div>
           </div>
 
           {/* Omnichannel Orders */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+          <div
+            onClick={() => router.push("/smart-reports")}
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#06B6D4] hover:shadow-sm transition-all group"
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
               <ShoppingCart className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Orders</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+                <span>Orders</span>
+                <ArrowRight className="w-3 h-3 text-[#06B6D4] opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
               <div className={`text-xs ${scaledKPIs.ordersColorClass} font-medium hidden md:block`}>{scaledKPIs.ordersPercent}</div>
             </div>
           </div>
 
           {/* Retail Revenue */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+          <div
+            onClick={() => router.push("/retail")}
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
               <PawPrint className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Retail</div>
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+                <span>Retail</span>
+                <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.retail}</div>
-              <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs mt-1 hidden md:inline-flex">
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs mt-1 hidden md:inline-flex">
                 {scaledKPIs.retailPercent}
               </Badge>
             </div>
@@ -504,7 +466,7 @@ export function Home() {
 
           {/* WOOF Suggestions */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#3AE4FA] to-[#5CE1E6] flex items-center justify-center flex-shrink-0">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
@@ -520,26 +482,6 @@ export function Home() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* SECTION 3 — VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
-      <div
-        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
-        style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
-      >
-        <div className="flex-1">
-          <Badge variant="outline" className="text-xs mb-2">
-            WOOF AI Insight
-          </Badge>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "{homeLoading ? "Loading live Home analytics..." : homeOverview?.insight || "Upload transaction data to activate live Home insights."}"
-          </p>
-        </div>
-        <img
-          src={homeInsightImg.src}
-          alt="Home Insight"
-          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-6"
-        />
       </div>
 
       {/* SECTION 4 — OMNICHANNEL REVENUE STREAM */}
@@ -639,94 +581,130 @@ export function Home() {
         {/* Legend Row */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-4 pt-4 border-t border-[#FFD9EC]">
           {legendData.map((sector) => (
-            <button
+            <div
               key={sector.key}
-              onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
-              className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg transition-all ${
+              className={`flex items-center justify-between gap-2 md:gap-3 p-2 md:p-3 rounded-lg border border-transparent transition-all ${
                 visibleSeries[sector.key as keyof typeof visibleSeries]
-                  ? "bg-[#FFF2FA]"
+                  ? "bg-[#FFF2FA] border-[#FFD9EC]"
                   : "opacity-40 hover:opacity-60"
               }`}
             >
-              <div
-                className="w-3 h-3 rounded-full flex-shrink-0"
-                style={{ backgroundColor: sector.color }}
-              />
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-xs text-[#223047] opacity-60">{sector.label}</div>
-                <div className="text-sm font-bold text-[#223047]">{sector.total}</div>
-                <div className="text-xs text-[#223047] opacity-50">{sector.percent}</div>
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
+                className="flex items-center gap-2 md:gap-3 flex-1 text-left min-w-0"
+              >
+                <div
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: sector.color }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-[#223047] opacity-60">{sector.label}</div>
+                  <div className="text-sm font-bold text-[#223047]">{sector.total}</div>
+                  <div className="text-xs text-[#223047] opacity-50">{sector.percent}</div>
+                </div>
+              </button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => router.push(sector.key === "cafe" ? "/cafe" : sector.key === "services" ? "/services" : "/retail")}
+                className="text-[11px] font-semibold text-[#F53799] hover:bg-white/80 h-7 px-2"
+                title={`Deep dive into ${sector.label}`}
+              >
+                Deep Dive <ArrowRight className="w-3 h-3 ml-1" />
+              </Button>
+            </div>
           ))}
         </div>
       </div>
 
-      {/* SECTION 5 — CHANNEL EQUILIBRIUM + SALES INTENSITY HEATMAP */}
-      <div className="flex flex-col gap-4 md:gap-6">
-        {/* Channel Equilibrium Monitor */}
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7">
-          <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Offline vs. Online Channel Balance
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              POS compared against Shopee, TikTok, and PetHub revenue streams
-            </p>
-          </div>
+      {/* SECTION 3 — VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
+      <div
+        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden mb-4 md:mb-6"
+        style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
+      >
+        <div className="flex-1">
+          <Badge variant="outline" className="text-xs mb-2">
+            WOOF Insight
+          </Badge>
+          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+            "{homeLoading ? "Loading live Home analytics..." : homeOverview?.insight || "Upload transaction data to activate live Home insights."}"
+          </p>
+        </div>
+        <img
+          src={homeInsightImg.src}
+          alt="Home Insight"
+          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-6"
+        />
+      </div>
 
-          {equilibriumData.length === 0 && (
-            <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
-              Upload POS, Shopee, TikTok, or PetHub transactions to compare channel revenue.
-            </div>
-          )}
-          <ResponsiveContainer width="100%" height={250} className="md:!h-[300px]">
-            <BarChart
-              data={equilibriumData}
-              layout="vertical"
-              margin={{ top: 8, right: 40, bottom: 8, left: 32 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
-              <XAxis type="number" stroke="#223047" style={{ fontSize: "12px" }} />
-              <YAxis
-                type="category"
-                dataKey="category"
-                stroke="#223047"
-                width={160}
-                style={{ fontSize: "12px" }}
-              />
-              <Tooltip
-                formatter={(value: number, name: string) => [
-                  formatCurrency(Number(value) || 0),
-                  name === "physical" ? "Offline Channel (POS)" : "Digital Channels (Shopee + TikTok + PetHub)",
-                ]}
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #FFD9EC",
-                  borderRadius: "12px",
-                }}
-              />
-              <Legend
-                formatter={(value) =>
-                  value === "physical" ? "Offline Channel (POS)" : "Digital Channels (Shopee + TikTok + PetHub)"
-                }
-              />
-              <Bar
-                dataKey="physical"
-                fill="#D42A7D"
-                radius={[0, 6, 6, 0]}
-                animationDuration={800}
-              />
-              <Bar
-                dataKey="online"
-                fill="#5CE1E6"
-                radius={[0, 6, 6, 0]}
-                animationDuration={800}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+      {/* SECTION 5 — CHANNEL EQUILIBRIUM */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7 mb-4 md:mb-6">
+        <div>
+          <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+            Offline vs. Online Channel Balance
+          </h2>
+          <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+            POS compared like-for-like against Shopee, TikTok Shop, and PetHub revenue streams over matched active period
+          </p>
         </div>
 
+        {equilibriumData.length === 0 && (
+          <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
+            Upload POS, Shopee, TikTok, or PetHub transactions to compare channel revenue.
+          </div>
+        )}
+        <ResponsiveContainer width="100%" height={160} className="md:!h-[200px]">
+          <BarChart
+            data={equilibriumData}
+            layout="vertical"
+            margin={{ top: 8, right: 40, bottom: 8, left: 32 }}
+            barSize={32}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
+            <XAxis type="number" stroke="#223047" style={{ fontSize: "12px" }} />
+            <YAxis
+              type="category"
+              dataKey="category"
+              stroke="#223047"
+              width={160}
+              style={{ fontSize: "12px" }}
+            />
+            <Tooltip
+              formatter={(value: number, name: string) => {
+                let label = name;
+                if (name === "pos") label = "Offline Channel (POS)";
+                if (name === "shopee") label = "Shopee";
+                if (name === "tiktok") label = "TikTok Shop";
+                if (name === "pethub") label = "PetHub";
+                return [formatCurrency(Number(value) || 0), label];
+              }}
+              contentStyle={{
+                backgroundColor: "white",
+                border: "1px solid #FFD9EC",
+                borderRadius: "12px",
+              }}
+            />
+            <Legend
+              formatter={(value) => {
+                if (value === "pos") return "POS (Offline)";
+                if (value === "shopee") return "Shopee";
+                if (value === "tiktok") return "TikTok Shop";
+                if (value === "pethub") return "PetHub";
+                return value;
+              }}
+            />
+            <Bar dataKey="pos" stackId="a" fill="#D42A7D" radius={[0, 4, 4, 0]} animationDuration={800} />
+            <Bar dataKey="shopee" stackId="a" fill="#06B6D4" animationDuration={800} />
+            <Bar dataKey="tiktok" stackId="a" fill="#06B6D4" animationDuration={800} />
+            <Bar dataKey="pethub" stackId="a" fill="#06B6D4" radius={[0, 4, 4, 0]} animationDuration={800} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* SECTION 6 — SALES INTENSITY HEATMAP & AUTONOMOUS SUGGESTIONS */}
+      <div className="space-y-4 md:space-y-6">
+        
         {/* Sales Intensity Heatmap */}
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 md:gap-6">
@@ -760,15 +738,15 @@ export function Home() {
 
           <div className="space-y-3">
             {heatmapHours.map((hour) => (
-              <div key={hour} className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3">
+              <div key={hour} className="grid grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 md:gap-4">
                 <div className="text-xs text-[#223047] opacity-60">{hour}</div>
-                <div className="grid grid-cols-7 gap-1.5 md:gap-2">
+                <div className="grid grid-cols-7 gap-1.5 md:gap-2 lg:gap-3">
                   {displayHeatmapDays.map((day) => {
                     const value = getHeatmapValue(day, hour);
                     return (
                       <div
                         key={`${hour}-${day.date || day.dayLabel}`}
-                        className="h-8 md:h-10 lg:h-12 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
+                        className="h-8 md:h-11 lg:h-14 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
                         style={{ backgroundColor: getHeatmapColor(value) }}
                         title={`${day.label} ${hour}: ${value.toFixed(0)}% sales intensity`}
                       />
@@ -777,9 +755,9 @@ export function Home() {
                 </div>
               </div>
             ))}
-            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 pt-1">
+            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[5.5rem_minmax(0,1fr)] gap-3 md:gap-4 pt-1">
               <div aria-hidden="true" />
-              <div className="grid grid-cols-7 gap-1.5 md:gap-2">
+              <div className="grid grid-cols-7 gap-1.5 md:gap-2 lg:gap-3">
                 {displayHeatmapDays.map((day) => (
                   <div key={day.date || day.dayLabel} className="text-center text-[10px] md:text-xs text-[#223047] opacity-60">
                     {day.label}
@@ -788,248 +766,146 @@ export function Home() {
               </div>
             </div>
           </div>
-
-          {/* Sales Intensity Legend */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#FFD9EC]/70">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-[#223047]">
-                Sales Intensity Legend:
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2.5 sm:gap-4 text-xs text-[#223047]">
-              <div className="flex items-center gap-1.5">
-                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-white shadow-xs" />
-                <span className="opacity-70">None (0%)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#FFF7FB] shadow-xs" />
-                <span className="opacity-70">Low (1–40%)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#FFF2FA] shadow-xs" />
-                <span className="opacity-70">Moderate (41–60%)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#FFD9EC] shadow-xs" />
-                <span className="opacity-70">High (61–80%)</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3.5 h-3.5 rounded border border-[#FFD9EC] bg-[#F53799] shadow-xs" />
-                <span className="font-semibold text-[#F53799]">Peak (&gt;80%)</span>
-              </div>
-            </div>
+          
+          {/* Legend */}
+          <div className="flex flex-wrap items-center justify-center gap-4 mt-6 text-[10px] sm:text-xs text-[#223047] opacity-80">
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 border border-[#FFD9EC] rounded bg-[#FFFFFF]"></div><span>None (0%)</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-[#10B981]"></div><span>Low (1-40%)</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-[#F59E0B]"></div><span>Moderate (41-60%)</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-[#FFD9EC]"></div><span>High (61-80%)</span></div>
+            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-[#F53799]"></div><span>Peak (&gt;80%)</span></div>
           </div>
         </div>
-      </div>
 
-      {/* SECTION 6 — ACTIVE WOOF SUGGESTIONS PREVIEW */}
-      <div ref={suggestionsRef} className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div>
-          <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-            WOOF Autonomous Suggestions — Pending Review
-          </h2>
-          <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            AI-generated promotion recommendations based on real-time pattern analysis
-          </p>
-        </div>
-
-        <div className="flex gap-4 md:gap-6 overflow-x-auto pb-2">
-          {suggestions.length === 0 && (
-            <div className="w-full rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
-              Upload transaction data to generate live WOOF recommendations.
-            </div>
-          )}
-          {suggestions.map((suggestion) => (
-            <div
-              key={suggestion.id}
-              className={`flex-shrink-0 w-[280px] md:w-[320px] lg:w-[360px] bg-white border border-[#FFD9EC] rounded-2xl md:rounded-[20px] p-4 md:p-6 lg:p-7 space-y-3 md:space-y-4 transition-all ${
-                approvedSuggestions.includes(suggestion.id)
-                  ? "bg-green-50 border-green-300"
-                  : dismissedSuggestions.includes(suggestion.id)
-                  ? "opacity-40 line-through"
-                  : ""
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <h3 className="text-base font-bold text-[#223047] flex-1">
-                  {suggestion.title}
-                </h3>
-                <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA] text-xs">
-                  {suggestion.confidence}
-                </Badge>
-              </div>
-
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2 text-[#223047] opacity-60">
-                  <span className="font-medium">Trigger:</span>
-                  <span>{suggestion.trigger}</span>
-                </div>
-                <div className="flex items-center gap-2 text-[#223047] opacity-60">
-                  <span className="font-medium">Discount:</span>
-                  <span>{suggestion.discount}</span>
-                </div>
-              </div>
-
-              <div className="text-3xl font-extrabold text-[#F53799]">
-                {suggestion.expectedLift}
-              </div>
-
-              <p className="text-xs text-[#223047] opacity-50" style={{ lineHeight: "1.6" }}>
-                {suggestion.reason}
-              </p>
-
-              {/* Collapsible Dropdown Explanation */}
-              <div className="pt-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => toggleSuggestionExplanation(suggestion.id)}
-                  className="w-full justify-between text-xs text-[#F53799] hover:bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg py-1 px-3 h-8"
-                >
-                  <span className="font-semibold">Explanation</span>
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${expandedSuggestions.includes(suggestion.id) ? "rotate-180" : ""}`} />
-                </Button>
-                {expandedSuggestions.includes(suggestion.id) && (
-                  <div className="mt-2 p-2 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC] text-xs text-[#223047] opacity-80 animate-in fade-in slide-in-from-top-1 duration-200" style={{ lineHeight: "1.6" }}>
-                    {suggestion.detailedExplanation}
-                  </div>
-                )}
-              </div>
-
-              {!approvedSuggestions.includes(suggestion.id) &&
-                !dismissedSuggestions.includes(suggestion.id) && (
-                  <div className="flex gap-2 pt-2">
-                    <Button
-                      onClick={() => handleApprove(suggestion.id)}
-                      className="flex-1 bg-[#F53799] hover:bg-[#D42A7D]"
-                    >
-                      <Check className="w-4 h-4 mr-2" />
-                      Approve
-                    </Button>
-                    <Button
-                      onClick={() => handleDismiss(suggestion.id)}
-                      variant="outline"
-                      className="flex-1 border-[#FFD9EC]"
-                    >
-                      <X className="w-4 h-4 mr-2" />
-                      Dismiss
-                    </Button>
-                  </div>
-                )}
-
-              {approvedSuggestions.includes(suggestion.id) && (
-                <div className="flex items-center justify-center gap-2 py-2 text-green-600 font-semibold">
-                  <Check className="w-5 h-5" />
-                  <span>Approved & Scheduled</span>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* SECTION 7 — NEXT SCHEDULED ACTION + WOOF AI ENTRY */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-        {/* Next Scheduled Action */}
-        <div className="bg-[#223047] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        {/* WOOF Autonomous Suggestions */}
+        <div ref={suggestionsRef} className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold">Next Scheduled Action</h2>
-            <p className="text-xs md:text-sm opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Automated promotion deployment
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              WOOF Autonomous Suggestions — Pending Review
+            </h2>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              AI-generated promotion recommendations based on real-time pattern analysis
             </p>
           </div>
 
-          <div className="text-3xl md:text-4xl lg:text-[48px] font-mono font-bold tracking-tight">
-            {homeOverview?.nextAction ? "Ready" : "--:--"}
-          </div>
-
-          <div>
-            <div className="text-lg font-semibold mb-1">
-              {homeOverview?.nextAction?.title || "No live action queued"}
-            </div>
-            <p className="text-sm opacity-70" style={{ lineHeight: "1.6" }}>
-              {homeOverview?.nextAction?.reason || "Upload transaction data to generate recommended actions."}
-            </p>
-          </div>
-
-          <Badge className="bg-[#3AE4FA] text-white hover:bg-[#3AE4FA]">
-            {homeOverview?.nextAction ? "Queued from live data" : "Waiting for data"}
-          </Badge>
-
-          <Button
-            onClick={handleExecuteNow}
-            disabled={isExecutingAction}
-            className="w-full bg-[#F53799] hover:bg-[#D42A7D]"
+          <div
+            className="woof-suggestions-carousel overflow-hidden"
+            onMouseEnter={(event) => event.currentTarget.classList.add("is-paused")}
+            onMouseLeave={(event) => event.currentTarget.classList.remove("is-paused")}
+            onFocus={(event) => event.currentTarget.classList.add("is-paused")}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                event.currentTarget.classList.remove("is-paused");
+              }
+            }}
           >
-            {isExecutingAction ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4 mr-2" />
+            {suggestions.length === 0 && (
+              <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
+                Upload transaction data to generate live WOOF recommendations.
+              </div>
             )}
-            {isExecutingAction ? "Creating Draft..." : "Execute Now"}
-          </Button>
-        </div>
+            {suggestions.length > 0 && (
+              <div
+                className={`flex gap-4 md:gap-6 ${
+                  shouldAnimateSuggestions
+                    ? "w-max animate-woof-suggestion-carousel"
+                    : "flex-wrap"
+                }`}
+              >
+            {carouselSuggestions.map((suggestion, index) => (
+              <div
+                key={`${suggestion.id}-${index}`}
+                aria-hidden={index >= suggestions.length}
+                className={`w-[280px] md:w-[340px] lg:w-[380px] shrink-0 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-[20px] p-4 md:p-6 lg:p-7 space-y-3 md:space-y-4 transition-all ${
+                  approvedSuggestions.includes(suggestion.id)
+                    ? "bg-green-50 border-green-300"
+                    : dismissedSuggestions.includes(suggestion.id)
+                    ? "opacity-40 line-through"
+                    : ""
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <h3 className="text-base font-bold text-[#223047] flex-1">
+                    {suggestion.title}
+                  </h3>
+                  <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs">
+                    {suggestion.confidence}
+                  </Badge>
+                </div>
 
-        {/* Ask WOOF AI */}
-        <div
-          className="rounded-2xl md:rounded-3xl overflow-hidden"
-          style={{
-            background: "linear-gradient(to bottom right, #FFF7FB, #FFF2FA)",
-          }}
-        >
-          {/* AI Business Partner Header */}
-          <div className="flex items-center justify-between px-4 md:px-6 lg:px-8 py-4 relative">
-            <div className="flex-1">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047] mb-1">
-                Your AI Business Partner
-              </h2>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60">
-                Ask WOOF anything about your business
-              </p>
-            </div>
-            <img
-              src={homeAiImg.src}
-              alt="AI Business Partner"
-              className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-6"
-            />
-          </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-[#223047] opacity-60">
+                    <span className="font-medium">Trigger:</span>
+                    <span>{suggestion.trigger}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[#223047] opacity-60">
+                    <span className="font-medium">Discount:</span>
+                    <span>{suggestion.discount}</span>
+                  </div>
+                </div>
 
-          {/* AI Content */}
-          <div className="px-4 md:px-6 lg:px-8 pb-4 md:pb-6 lg:pb-8 space-y-4">
-            <div className="bg-white/60 border border-[#FFD9EC] rounded-xl p-4">
-              <p className="text-sm text-[#223047] italic" style={{ lineHeight: "1.6" }}>
-                "{homeOverview?.insight || "Upload transaction data and I can summarize what is happening across sectors."}"
-              </p>
-            </div>
+                <div className="text-3xl font-extrabold text-[#F53799]">
+                  {suggestion.expectedLift}
+                </div>
 
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Type your question..."
-                className="flex-1 px-4 py-2 border border-[#FFD9EC] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F53799] bg-white"
-              />
-              <Button className="bg-[#F53799] hover:bg-[#D42A7D]">
-                Ask
-              </Button>
-            </div>
+                <p className="text-xs text-[#223047] opacity-50" style={{ lineHeight: "1.6" }}>
+                  {suggestion.reason}
+                </p>
 
-            <div className="flex flex-wrap gap-2">
-              {[
-                "Explain today's forecast",
-                "Best bundle right now",
-                "Which channel is underperforming?",
-              ].map((prompt) => (
-                <button
-                  key={prompt}
-                  className="px-3 py-1.5 bg-white border border-[#FFD9EC] rounded-full text-xs text-[#223047] hover:bg-[#FFF2FA] hover:border-[#F53799] transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
+                {/* Collapsible Dropdown Explanation */}
+                <div className="pt-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => toggleSuggestionExplanation(suggestion.id)}
+                    className="w-full justify-between text-xs text-[#F53799] hover:bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg py-1 px-3 h-8"
+                  >
+                    <span className="font-semibold">Explanation</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${expandedSuggestions.includes(suggestion.id) ? "rotate-180" : ""}`} />
+                  </Button>
+                  {expandedSuggestions.includes(suggestion.id) && (
+                    <div className="mt-2 p-2 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC] text-xs text-[#223047] opacity-80 animate-in fade-in slide-in-from-top-1 duration-200" style={{ lineHeight: "1.6" }}>
+                      {suggestion.detailedExplanation}
+                    </div>
+                  )}
+                </div>
+
+                {!approvedSuggestions.includes(suggestion.id) &&
+                  !dismissedSuggestions.includes(suggestion.id) && (
+                    <div className="flex gap-2 pt-2">
+                      <Button
+                        onClick={() => handleApprove(suggestion.id)}
+                        className="flex-1 bg-[#F53799] hover:bg-[#D42A7D]"
+                      >
+                        <Check className="w-4 h-4 mr-2" />
+                        Approve
+                      </Button>
+                      <Button
+                        onClick={() => handleDismiss(suggestion.id)}
+                        variant="outline"
+                        className="flex-1 border-[#FFD9EC]"
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Dismiss
+                      </Button>
+                    </div>
+                  )}
+
+                {approvedSuggestions.includes(suggestion.id) && (
+                  <div className="flex items-center justify-center gap-2 py-2 text-green-600 font-semibold">
+                    <Check className="w-5 h-5" />
+                    <span>Approved & Scheduled</span>
+                  </div>
+                )}
+              </div>
+            ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+
 
       {/* Error Modal */}
       {errorModal.type && (

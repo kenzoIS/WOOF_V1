@@ -120,7 +120,7 @@ export function Settings() {
       {/* AI & MODEL SETTINGS */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex items-center gap-2 md:gap-3">
-          <Database className="w-5 h-5 md:w-6 md:h-6 text-[#3AE4FA]" />
+          <Database className="w-5 h-5 md:w-6 md:h-6 text-[#06B6D4]" />
           <div>
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               AI & Model Configuration
@@ -167,7 +167,7 @@ export function Settings() {
           </div>
 
           <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl">
-            <Button onClick={handleRetrainModels} className="w-full bg-[#3AE4FA] hover:bg-[#5CE1E6] text-sm md:text-base">
+            <Button onClick={handleRetrainModels} className="w-full bg-[#06B6D4] hover:bg-[#06B6D4] text-sm md:text-base">
               Retrain All Models Now
             </Button>
           </div>
@@ -351,8 +351,8 @@ export function Settings() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 pt-2 md:pt-4">
           {[
-            { name: "Pink Fusion (Default)", primary: "#F53799", secondary: "#3AE4FA" },
-            { name: "Ocean Breeze", primary: "#3AE4FA", secondary: "#5CE1E6" },
+            { name: "Pink Fusion (Default)", primary: "#F53799", secondary: "#06B6D4" },
+            { name: "Ocean Breeze", primary: "#06B6D4", secondary: "#06B6D4" },
             { name: "Sunset Glow", primary: "#F53799", secondary: "#D42A7D" },
             { name: "Minimal Gray", primary: "#223047", secondary: "#FFD9EC" },
           ].map((theme) => (

@@ -180,7 +180,7 @@ export function CampaignActivationLayer() {
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#F53799] to-[#3AE4FA] flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#F53799] to-[#06B6D4] flex items-center justify-center">
               <Megaphone className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -203,7 +203,7 @@ export function CampaignActivationLayer() {
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-base md:text-lg font-bold text-[#223047]">Promo Inputs</h3>
-            <Badge className="bg-[#3AE4FA] text-white">{recommendations.length} Ready</Badge>
+            <Badge className="bg-[#06B6D4] text-white">{recommendations.length} Ready</Badge>
           </div>
 
           {recommendations.length === 0 && (
@@ -269,7 +269,7 @@ export function CampaignActivationLayer() {
                   <Badge className={statusColor[selectedCampaign.status] || statusColor.draft}>
                     {selectedCampaign.status.toUpperCase()}
                   </Badge>
-                  <Badge variant="outline" className="border-[#3AE4FA] text-[#0D9488]">
+                  <Badge variant="outline" className="border-[#06B6D4] text-[#0D9488]">
                     {selectedCampaign.source.replace(/_/g, " ")}
                   </Badge>
                 </div>

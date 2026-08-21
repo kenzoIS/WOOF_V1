@@ -160,7 +160,7 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-[#FFD9EC] shadow-xs">
                 <span className="text-[11px] font-medium text-[#223047] opacity-60 block mb-1">Hist. Confidence</span>
-                <span className="text-lg font-bold text-[#3AE4FA] font-mono">
+                <span className="text-lg font-bold text-[#06B6D4] font-mono">
                   {candidate.confidence !== undefined && candidate.confidence !== null
                     ? `${(candidate.confidence * (candidate.confidence <= 1 ? 100 : 1)).toFixed(1)}%`
                     : "0.0%"}
@@ -228,7 +228,7 @@ export const BundleExplanationDrawer: React.FC<BundleExplanationDrawerProps> = (
             {/* Progress bar */}
             <div className="w-full bg-white rounded-full h-2.5 overflow-hidden border border-[#FFD9EC]">
               <div
-                className="bg-gradient-to-r from-[#F53799] to-[#3AE4FA] h-full rounded-full transition-all duration-500"
+                className="bg-gradient-to-r from-[#F53799] to-[#06B6D4] h-full rounded-full transition-all duration-500"
                 style={{ width: `${fitScorePercent}%` }}
               />
             </div>

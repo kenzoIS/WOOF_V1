@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
-import { Bell, Calendar, Clock, Cloud, CloudRain, Sun, X, LogOut, User, Mail, Menu } from "lucide-react";
+import { Bell, Calendar, Clock, Cloud, CloudRain, Sun, X, LogOut, User, Mail, Menu, Database } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { Button } from "./ui/button";
+import { DataIngestion } from "./DataIngestion";
 import { ChannelStatus, DataRange, getChannelStatus, getCurrentWeather, getDataRange } from "../lib/api";
 import {
   HISTORY_START_DATE,
@@ -101,6 +102,8 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [ingestionOpen, setIngestionOpen] = useState(false);
+  const ingestionCloseTimer = useRef<number | null>(null);
   const [notifTab, setNotifTab] = useState<"all" | "alert" | "suggestion" | "system">("all");
   const [currentWeather, setCurrentWeather] = useState<{
     tempCelsius: number;
@@ -131,16 +134,37 @@ export function Header({ onMenuClick }: HeaderProps) {
   useEffect(() => {
     let cancelled = false;
 
-    function relativeTime(isoString: string | null | undefined): string {
-      if (!isoString) return "Unknown time";
-      const diffMs = Date.now() - new Date(isoString).getTime();
-      const diffMin = Math.floor(diffMs / 60_000);
-      const diffHr = Math.floor(diffMin / 60);
-      const diffDays = Math.floor(diffHr / 24);
-      if (diffMin < 2) return "Just now";
-      if (diffMin < 60) return `${diffMin} min ago`;
-      if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
-      return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
+  const handleSignOut = () => {
+    localStorage.removeItem("woofAuth");
+    localStorage.removeItem("userType");
+    localStorage.removeItem("userEmail");
+    toast.success("Signed out successfully");
+    router.push("/login");
+  };
+
+  const getNotificationColor = (type: string) => {
+    switch (type) {
+      case "alert":
+        return "border-l-[#F53799]";
+      case "suggestion":
+        return "border-l-[#06B6D4]";
+      case "system":
+        return "border-l-[#06B6D4]";
+      default:
+        return "border-l-[#FFD9EC]";
+    }
+  };
+
+  function relativeTime(isoString: string | null | undefined): string {
+    if (!isoString) return "Unknown time";
+    const diffMs = Date.now() - new Date(isoString).getTime();
+    const diffMin = Math.floor(diffMs / 60_000);
+    const diffHr = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHr / 24);
+    if (diffMin < 2) return "Just now";
+    if (diffMin < 60) return `${diffMin} min ago`;
+    if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
+    return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
     }
 
     async function buildNotifications() {
@@ -284,6 +308,31 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  const cancelIngestionClose = () => {
+    if (ingestionCloseTimer.current) {
+      window.clearTimeout(ingestionCloseTimer.current);
+      ingestionCloseTimer.current = null;
+    }
+  };
+
+  const openIngestionDrawer = () => {
+    cancelIngestionClose();
+    setNotificationOpen(false);
+    setProfileOpen(false);
+    setIngestionOpen(true);
+  };
+
+  const scheduleIngestionClose = () => {
+    cancelIngestionClose();
+    ingestionCloseTimer.current = window.setTimeout(() => {
+      setIngestionOpen(false);
+    }, 220);
+  };
+
+  useEffect(() => {
+    return () => cancelIngestionClose();
+  }, []);
+
   const getChannelIndicator = (channel: string) => {
     const status = channelStatus?.channels.find((item) => item.channel === channel);
     return {
@@ -337,50 +386,59 @@ export function Header({ onMenuClick }: HeaderProps) {
         </div>
 
         {/* Center: Global Date Range */}
-        <div className="hidden md:flex items-center gap-2 flex-shrink-0 absolute left-1/2 -translate-x-1/2">
-          <Calendar className="w-4 h-4 text-[#223047] opacity-50" />
-          <Select
-            value={dateRange.startsWith("custom:") ? "custom" : dateRange}
-            onValueChange={handleDateRangeChange}
-          >
-            <SelectTrigger className="w-[160px] lg:w-[200px] border-[#FFD9EC] focus:ring-[#F53799]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="center">
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="yesterday">Yesterday</SelectItem>
-              <SelectItem value="last-7-days">Last 7 Days</SelectItem>
-              <SelectItem value="last-30-days">Last 30 Days</SelectItem>
-              <SelectItem value="last-90-days">Last 90 Days</SelectItem>
-              <SelectItem value="last-12-months">Last 12 Months</SelectItem>
-              <SelectItem value="custom">Custom Range</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="hidden md:flex flex-col items-center absolute left-1/2 -translate-x-1/2 z-50">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Calendar className="w-4 h-4 text-[#223047] opacity-50" />
+            <Select
+              value={dateRange.startsWith("custom:") ? "custom" : dateRange}
+              onValueChange={handleDateRangeChange}
+            >
+              <SelectTrigger className="w-[160px] lg:w-[200px] border-[#FFD9EC] focus:ring-[#F53799]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="center">
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="yesterday">Yesterday</SelectItem>
+                <SelectItem value="last-7-days">Last 7 Days</SelectItem>
+                <SelectItem value="last-30-days">Last 30 Days</SelectItem>
+                <SelectItem value="last-90-days">Last 90 Days</SelectItem>
+                <SelectItem value="last-12-months">Last 12 Months</SelectItem>
+                <SelectItem value="custom">Custom Range</SelectItem>
+              </SelectContent>
+            </Select>
         </div>
 
-        {(dateRange === "custom" || dateRange.startsWith("custom:")) && (
-          <div className="hidden lg:flex items-center gap-2 absolute left-1/2 translate-x-[110px]">
-            <input
-              type="date"
-              min={historyStartDate}
-              max={historyEndDate}
-              value={customStartDate}
-              onChange={(e) => setCustomStartDate(e.target.value)}
-              className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-            />
-            <input
-              type="date"
-              min={customStartDate || historyStartDate}
-              max={historyEndDate}
-              value={customEndDate}
-              onChange={(e) => setCustomEndDate(e.target.value)}
-              className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
-            />
-            <Button size="sm" onClick={applyCustomDateRange} className="h-9 bg-[#F53799] hover:bg-[#D42A7D] text-xs">
-              Apply
-            </Button>
-          </div>
-        )}
+
+          {(dateRange === "custom" || dateRange.startsWith("custom:")) && (
+            <div className="hidden lg:flex items-center gap-2 absolute top-[115%] bg-white p-2 rounded-lg border border-[#FFD9EC] shadow-lg">
+              <input
+                type="date"
+                min={historyStartDate}
+                max={historyEndDate}
+                value={customStartDate}
+                onChange={(event) => setCustomStartDate(event.target.value)}
+                className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+                title={`Historical data starts on ${historyStartDate}`}
+              />
+              <input
+                type="date"
+                min={customStartDate || historyStartDate}
+                max={historyEndDate}
+                value={customEndDate}
+                onChange={(event) => setCustomEndDate(event.target.value)}
+                className="h-9 w-[130px] rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+                title={`Historical data is available through ${historyEndDate}`}
+              />
+              <Button
+                size="sm"
+                onClick={applyCustomDateRange}
+                className="h-9 bg-[#F53799] hover:bg-[#D42A7D] text-xs"
+              >
+                Apply
+              </Button>
+            </div>
+          )}
+        </div>
 
         {/* Right: Status Pills, Weather, Notifications, Avatar */}
         <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
@@ -412,6 +470,31 @@ export function Header({ onMenuClick }: HeaderProps) {
             <Clock className="w-3.5 h-3.5" />
             <span className="text-xs">{currentTimeLabel}</span>
           </Badge>
+
+          {/* Data Ingestion Drawer Trigger */}
+          <div
+            onMouseEnter={openIngestionDrawer}
+            onMouseLeave={scheduleIngestionClose}
+            className="relative"
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (ingestionOpen) {
+                  setIngestionOpen(false);
+                } else {
+                  openIngestionDrawer();
+                }
+              }}
+              className={`relative p-2 rounded-lg transition-colors flex-shrink-0 ${
+                ingestionOpen ? "bg-[#FFF2FA] text-[#F53799]" : "hover:bg-[#FFF2FA] text-[#223047]"
+              }`}
+              aria-label="Open Data Ingestion Center"
+            >
+              <Database className="w-5 h-5" />
+              <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#06B6D4] ring-2 ring-white" />
+            </button>
+          </div>
 
           {/* Notification Bell */}
           <button
@@ -447,6 +530,35 @@ export function Header({ onMenuClick }: HeaderProps) {
           </button>
         </div>
       </header>
+
+      {/* Data Ingestion Slide Panel */}
+      <div
+        onMouseEnter={openIngestionDrawer}
+        onMouseLeave={scheduleIngestionClose}
+        className={`fixed top-16 right-0 bottom-0 z-50 w-[min(94vw,500px)] border-l border-[#FFD9EC] bg-white shadow-2xl transition-transform duration-300 ease-out ${
+          ingestionOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+        aria-hidden={!ingestionOpen}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-[#FFD9EC] bg-[#FFF7FB] px-4 py-3">
+            <div>
+              <div className="text-base font-extrabold text-[#223047]">Data Ingestion</div>
+              <div className="text-xs text-[#223047] opacity-55">Upload, validate, and stage records</div>
+            </div>
+            <button
+              onClick={() => setIngestionOpen(false)}
+              className="rounded-lg p-2 text-[#223047] hover:bg-[#FFF2FA]"
+              aria-label="Close Data Ingestion Center"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <DataIngestion surface="drawer" />
+          </div>
+        </div>
+      </div>
 
       {/* Profile Dropdown */}
       {profileOpen && (

@@ -91,7 +91,7 @@ export function WOOFChatbot() {
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 w-16 h-16 rounded-full shadow-xl hover:shadow-2xl transition-all z-50 flex items-center justify-center"
           style={{
-            background: "linear-gradient(135deg, #F53799 0%, #3AE4FA 100%)",
+            background: "linear-gradient(135deg, #F53799 0%, #06B6D4 100%)",
           }}
         >
           <MessageCircle className="w-8 h-8 text-white" strokeWidth={2} />
@@ -105,7 +105,7 @@ export function WOOFChatbot() {
           <div
             className="p-5 flex items-center justify-between"
             style={{
-              background: "linear-gradient(135deg, #F53799 0%, #3AE4FA 100%)",
+              background: "linear-gradient(135deg, #F53799 0%, #06B6D4 100%)",
             }}
           >
             <div className="flex items-center gap-3">
@@ -189,7 +189,7 @@ export function WOOFChatbot() {
               />
               <Button
                 onClick={() => handleSendMessage(message)}
-                className="bg-gradient-to-r from-[#F53799] to-[#3AE4FA] hover:opacity-90 rounded-full"
+                className="bg-gradient-to-r from-[#F53799] to-[#06B6D4] hover:opacity-90 rounded-full"
                 size="icon"
               >
                 <svg

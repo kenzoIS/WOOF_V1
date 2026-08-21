@@ -8,6 +8,7 @@ import { DataValidationService } from './data-validation.service';
 import { ContextModule } from '../context/context.module';
 import { CommonModule } from '../common/common.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AnalyticsModule } from '../analytics/analytics.module';
     ContextModule,
     CommonModule,
     AnalyticsModule,
+    RealtimeModule,
   ],
   controllers: [CsvController],
   providers: [CsvService, EtlService, DataValidationService],

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/router";
 import {
   FileText,
   TrendingUp,
@@ -11,7 +12,8 @@ import {
   Activity,
   Award,
   Sparkles,
-  Download
+  Download,
+  ArrowRight
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
@@ -35,6 +37,7 @@ import {
 } from "recharts";
 
 export function SmartReports() {
+  const router = useRouter();
   const [reports, setReports] = useState<SmartReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<SmartReport | null>(null);
   const [title, setTitle] = useState("Executive Business Performance Report");
@@ -366,7 +369,7 @@ export function SmartReports() {
           {/* Historical Log list */}
           <div className="bg-white border-2 border-[#FFD9EC] rounded-2xl p-5 shadow-sm space-y-4">
             <h2 className="text-base font-extrabold text-[#223047] flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-[#3AE4FA]" />
+              <Calendar className="w-5 h-5 text-[#06B6D4]" />
               Reports Log
             </h2>
 
@@ -469,6 +472,43 @@ export function SmartReports() {
                   </div>
                 </div>
 
+                {/* Quick Navigation to Live Analytical Dashboards */}
+                <div className="flex flex-wrap items-center gap-2 p-3 bg-[#FFF7FB] border border-[#FFD9EC] rounded-2xl text-xs">
+                  <span className="font-bold text-[#223047] opacity-60">Explore Live Dashboards:</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/cafe")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-[#F53799] font-semibold"
+                  >
+                    ☕ Cafe Dashboard <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/services")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-[#06B6D4] font-semibold"
+                  >
+                    ✂️ Services Dashboard <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/retail")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-amber-600 font-semibold"
+                  >
+                    🛍️ Retail Dashboard <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => router.push("/ai-simulation")}
+                    className="border-[#FFD9EC] hover:bg-white text-xs h-7 text-purple-600 font-semibold"
+                  >
+                    🤖 AI Simulation Hub <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+                </div>
+
                 {/* KPI metrics row */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                   <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3">
@@ -491,7 +531,7 @@ export function SmartReports() {
                   </div>
                   <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3">
                     <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block">Completeness</span>
-                    <span className="text-base font-black text-[#3AE4FA] block mt-1">
+                    <span className="text-base font-black text-[#06B6D4] block mt-1">
                       {selectedReport.dataCompleteness ?? 100}%
                     </span>
                   </div>
@@ -519,8 +559,8 @@ export function SmartReports() {
                       <AreaChart data={chartData}>
                         <defs>
                           <linearGradient id="colorProjected" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3AE4FA" stopOpacity={0.2}/>
-                            <stop offset="95%" stopColor="#3AE4FA" stopOpacity={0}/>
+                            <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.2}/>
+                            <stop offset="95%" stopColor="#06B6D4" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -531,7 +571,7 @@ export function SmartReports() {
                         <Area
                           type="monotone"
                           dataKey="projected"
-                          stroke="#3AE4FA"
+                          stroke="#06B6D4"
                           strokeWidth={2}
                           fillOpacity={1}
                           fill="url(#colorProjected)"
@@ -555,7 +595,7 @@ export function SmartReports() {
                       
                       if (idx === 1) {
                         titleStr = "Trend Analysis & Forecasts";
-                        icon = <TrendingUp className="w-4.5 h-4.5 text-[#3AE4FA]" />;
+                        icon = <TrendingUp className="w-4.5 h-4.5 text-[#06B6D4]" />;
                       } else if (idx === 2) {
                         titleStr = "Customer Sentiment Analysis";
                         icon = <Sparkles className="w-4.5 h-4.5 text-[#F53799]" />;
@@ -645,8 +685,8 @@ export function SmartReports() {
                                 onClick={() => setUsefulnessRating(val)}
                                 className={`w-8 h-8 rounded-lg font-bold text-xs transition-all border ${
                                   usefulnessRating === val
-                                    ? "bg-[#3AE4FA] border-[#3AE4FA] text-white"
-                                    : "bg-white border-[#FFD9EC] text-[#223047] hover:border-[#3AE4FA]/50"
+                                    ? "bg-[#06B6D4] border-[#06B6D4] text-white"
+                                    : "bg-white border-[#FFD9EC] text-[#223047] hover:border-[#06B6D4]/50"
                                 }`}
                               >
                                 {val}

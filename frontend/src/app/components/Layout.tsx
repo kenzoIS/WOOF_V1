@@ -4,6 +4,7 @@ import { Header } from "./Header";
 import { WOOFChatbot } from "./WOOFChatbot";
 import { NotificationCenter } from "./NotificationCenter";
 import { ConnectionBanner } from "./ConnectionBanner";
+import { RealtimeListener } from "./RealtimeListener";
 import { Toaster } from "./ui/sonner";
 import { ErrorModal } from "./ErrorModal";
 
@@ -16,7 +17,31 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const [showSessionExpired, setShowSessionExpired] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("woofSidebarCollapsed");
+      if (saved !== null) {
+        setIsSidebarCollapsed(saved === "true");
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  const handleToggleSidebarCollapse = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("woofSidebarCollapsed", String(next));
+      } catch {
+        // Ignore
+      }
+      return next;
+    });
+  };
 
   const resetInactivityTimer = () => {
     if (timeoutRef.current) {
@@ -70,13 +95,17 @@ export function Layout({ children }: LayoutProps) {
         />
       )}
 
-      {/* Left Sidebar - Fixed 240px on desktop, overlay on mobile */}
+      {/* Left Sidebar - Dynamic width on desktop, overlay on mobile */}
       <div className={`
         fixed lg:relative inset-y-0 left-0 z-50 lg:z-auto
-        transform transition-transform duration-300 ease-in-out
+        transform transition-all duration-300 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <Sidebar onClose={() => setSidebarOpen(false)} />
+        <Sidebar
+          onClose={() => setSidebarOpen(false)}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={handleToggleSidebarCollapse}
+        />
       </div>
 
       {/* Main Content Area */}
@@ -84,15 +113,20 @@ export function Layout({ children }: LayoutProps) {
         {/* Top Header Bar - Fixed 64px */}
         <Header onMenuClick={() => setSidebarOpen(true)} />
 
-        {/* Page Content - Scrollable */}
+        {/* Page Content - Scrollable & Responsive to Sidebar State */}
         <main className="flex-1 overflow-y-auto bg-[#FFF2FA]">
-          <div className="max-w-[1440px] mx-auto px-4 md:px-6 lg:px-8 py-4 md:py-6 lg:py-8">
+          <div className={`w-full mx-auto py-4 md:py-6 lg:py-8 transition-all duration-300 ease-in-out ${
+            isSidebarCollapsed
+              ? "max-w-none px-4 sm:px-6 md:px-8 lg:px-10"
+              : "max-w-[1440px] px-4 md:px-6 lg:px-8"
+          }`}>
             {children}
           </div>
         </main>
       </div>
 
       {/* Global Components */}
+      <RealtimeListener />
       <WOOFChatbot />
       <NotificationCenter />
       <Toaster />

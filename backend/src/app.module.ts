@@ -8,6 +8,8 @@ import { SupabaseModule } from './common/supabase/supabase.module';
 import { ActivationModule } from './activation/activation.module';
 import { AwsModule } from './aws/aws.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
+import { RealtimeModule } from './realtime/realtime.module';
+import { PetHubWebhookModule } from './pethub-webhook/pethub-webhook.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
@@ -58,6 +60,8 @@ import { ContextModule } from './context/context.module';
     ActivationModule,
     ChatbotModule,
     AwsModule,
+    RealtimeModule,
+    PetHubWebhookModule,
   ],
 })
 export class AppModule {}
