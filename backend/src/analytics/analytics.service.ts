@@ -17,6 +17,7 @@ import {
 } from '../common/time-series';
 import { ExogenousDataService } from '../common/exogenous-data.service';
 import { SupabaseService } from '../common/supabase/supabase.service';
+import { AwsService } from '../aws/aws.service';
 
 
 /**
@@ -121,6 +122,7 @@ export class AnalyticsService {
     private supabaseService: SupabaseService,
     private readonly configService: ConfigService,
     private readonly exogenousDataService: ExogenousDataService,
+    private readonly awsService: AwsService,
   ) {}
 
   /**
@@ -842,6 +844,11 @@ export class AnalyticsService {
 
     const { data: savedRun } = await this.supabaseService.client.from('forecast_runs').insert(payload).select().single();
 
+    // Archive forecast to AWS S3 Data Lake (fire-and-forget)
+      this.awsService.uploadAnalyticsArchive('forecast', module, payload).catch(err => {
+      console.warn(`S3 forecast archive failed for ${module}: ${err}`);
+    });
+
     // Map snake_case back to camelCase for the frontend (withForecastStartAnchor uses camelCase)
     const runSource = savedRun || payload;
     const normalizedRun = {
@@ -1165,6 +1172,11 @@ export class AnalyticsService {
         message: payload.message,
         cleaned_items: payload.cleanedItems,
         sector_breakdown: payload.sectorBreakdown,
+      });
+
+      // Archive cross-sell results to AWS S3 Data Lake (fire-and-forget)
+      this.awsService.uploadAnalyticsArchive('cross-sell', 'retail', payload).catch(err => {
+        console.warn(`S3 cross-sell archive failed: ${err}`);
       });
 
       return payload;

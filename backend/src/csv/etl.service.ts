@@ -8,6 +8,7 @@ import { Transaction } from './schemas/transaction.schema';
 import { HolidayCache, HolidayCacheDocument } from '../context/schemas/holiday-cache.schema';
 import { WeatherLog, WeatherLogDocument } from '../context/schemas/weather-log.schema';
 import { ExogenousDataService } from '../common/exogenous-data.service';
+import { AwsService } from '../aws/aws.service';
 
 @Injectable()
 export class EtlService {
@@ -19,6 +20,7 @@ export class EtlService {
     @InjectModel(HolidayCache.name) private holidayCacheModel: Model<HolidayCacheDocument>,
     @InjectModel(WeatherLog.name) private weatherLogModel: Model<WeatherLogDocument>,
     private exogenousDataService: ExogenousDataService,
+    private awsService: AwsService,
   ) {
     const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
     const supabaseKey = this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY');
@@ -366,6 +368,16 @@ export class EtlService {
       await upsertTable('fact_cross_channel_transactions', factRows, 'transaction_line_id');
 
       this.logger.log(`ETL Process completed successfully for ${transactions.length} transactions.`);
+
+      // Archive processed fact rows to AWS S3 Data Lake (fire-and-forget)
+      if (uploadId) {
+        const channel = transactions[0]?.channel || 'unknown';
+        this.awsService.uploadProcessedArchive(
+          uploadId, factRows, channel,
+        ).catch(err => {
+          this.logger.warn(`S3 processed archive failed for upload ${uploadId}: ${err}`);
+        });
+      }
 
       if (uploadId) {
         await this.supabase.from('csv_uploads').update({

@@ -11,6 +11,7 @@ import { Transaction, TransactionDocument } from './schemas/transaction.schema';
 import { EtlService } from './etl.service';
 import { DataValidationService } from './data-validation.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { AwsService } from '../aws/aws.service';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import {
@@ -93,6 +94,7 @@ export class CsvService {
     private etlService: EtlService,
     private dataValidationService: DataValidationService,
     private analyticsService: AnalyticsService,
+    private awsService: AwsService,
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
@@ -211,6 +213,13 @@ export class CsvService {
         this.logger.error('Background ETL process failed for upload ' + uploadId, err.stack);
       });
       this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions);
+
+      // Archive raw CSV to AWS S3 Data Lake (fire-and-forget)
+      this.awsService.uploadRawArchive(
+        file.originalname, file.buffer, channel, uploadId.toString(),
+      ).catch(err => {
+        this.logger.warn(`S3 raw archive failed for upload ${uploadId}: ${err}`);
+      });
     } catch (error) {
       await this.rollbackUpload(uploadId);
       if (error instanceof BadRequestException) {

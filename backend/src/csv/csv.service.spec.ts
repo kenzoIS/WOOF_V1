@@ -43,6 +43,8 @@ describe('CsvService flexible uploads', () => {
     { insertMany, find, deleteMany } as any,
     { processTransactions, deleteTransactions } as any,
     { validateBatch } as any,
+    { getForecast: jest.fn() } as any,
+    { uploadRawArchive: jest.fn().mockResolvedValue(null) } as any,
   );
 
   beforeEach(() => {
