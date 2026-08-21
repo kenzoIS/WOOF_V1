@@ -370,9 +370,9 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   return (
     <>
-      <header className="h-16 bg-white border-b border-[#FFD9EC] flex items-center justify-between px-3 md:px-6 shrink-0">
+      <header className="h-16 bg-white border-b border-[#FFD9EC] flex items-center justify-between px-3 md:px-6 shrink-0 gap-2">
         {/* Left: Menu button (mobile) + Branding */}
-        <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+        <div className="flex items-center gap-2 md:gap-3 flex-shrink-0 min-w-0">
           <button
             onClick={onMenuClick}
             className="lg:hidden p-2 hover:bg-[#FFF2FA] rounded-lg transition-colors flex-shrink-0"
@@ -386,14 +386,14 @@ export function Header({ onMenuClick }: HeaderProps) {
         </div>
 
         {/* Center: Global Date Range */}
-        <div className="hidden md:flex flex-col items-center absolute left-1/2 -translate-x-1/2 z-50">
+        <div className="hidden md:flex flex-col items-center relative flex-shrink-0">
           <div className="flex items-center gap-2 flex-shrink-0">
             <Calendar className="w-4 h-4 text-[#223047] opacity-50" />
             <Select
               value={dateRange.startsWith("custom:") ? "custom" : dateRange}
               onValueChange={handleDateRangeChange}
             >
-              <SelectTrigger className="w-[160px] lg:w-[200px] border-[#FFD9EC] focus:ring-[#F53799]">
+              <SelectTrigger className="w-[140px] lg:w-[170px] border-[#FFD9EC] focus:ring-[#F53799]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent align="center">
@@ -410,7 +410,7 @@ export function Header({ onMenuClick }: HeaderProps) {
 
 
           {(dateRange === "custom" || dateRange.startsWith("custom:")) && (
-            <div className="hidden lg:flex items-center gap-2 absolute top-[115%] bg-white p-2 rounded-lg border border-[#FFD9EC] shadow-lg">
+            <div className="hidden lg:flex items-center gap-2 absolute top-[115%] bg-white p-2 rounded-lg border border-[#FFD9EC] shadow-lg z-50">
               <input
                 type="date"
                 min={historyStartDate}
@@ -443,7 +443,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         {/* Right: Status Pills, Weather, Notifications, Avatar */}
         <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
           {/* Channel Status Pills */}
-          <div className="hidden xl:flex items-center gap-2">
+          <div className="hidden xl:flex items-center gap-1.5">
             {[
               { channel: "POS", label: "POS" },
               { channel: "Shopee", label: "Shopee" },

@@ -72,6 +72,7 @@ export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
 
   const [lastReport, setLastReport] = useState<any>(null);
+  const [lastWebhookEvent, setLastWebhookEvent] = useState<{ transactionId: string; recordCount: number; timestamp: string } | null>(null);
 
   const numberOrZero = (value: unknown) => {
     const parsed = Number(value);
@@ -98,6 +99,29 @@ export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
   }, []);
 
   useEffect(() => { refreshData(); }, [refreshData]);
+
+  useEffect(() => {
+    const handleRealtime = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { type, data, timestamp } = customEvent.detail;
+      
+      if (type === 'upload_processed' || type === 'etl_completed' || type === 'etl_started') {
+        refreshData();
+      }
+
+      if (type === 'upload_processed' && data?.channel === 'PetHub' && data?.transactionId) {
+        setLastWebhookEvent({
+          transactionId: data.transactionId,
+          recordCount: data.recordCount || 0,
+          timestamp: timestamp || new Date().toISOString()
+        });
+        setLastReport(null);
+      }
+    };
+
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => window.removeEventListener("woof:realtime", handleRealtime);
+  }, [refreshData]);
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -311,6 +335,26 @@ export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
                   </ul>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Latest Webhook Report */}
+      {lastWebhookEvent && !lastReport && (
+        <div className="p-4 rounded-xl border bg-[#ECFEFF] border-[#A5F3FC]">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-[#06B6D4] flex-shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-bold text-[#164E63]">
+                Ingested PetHub data via Webhook: {lastWebhookEvent.transactionId}
+              </h4>
+              <p className="text-xs mt-1 text-[#155E75]">
+                Successfully staged {lastWebhookEvent.recordCount} records. They will appear in analytics shortly.
+              </p>
+              <div className="text-[10px] mt-1 text-[#164E63] opacity-80">
+                Received at: {new Date(lastWebhookEvent.timestamp).toLocaleTimeString()}
+              </div>
             </div>
           </div>
         </div>
