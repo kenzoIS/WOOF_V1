@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
+import { InfoTooltip } from "../components/InfoTooltip";
 
 interface AuditEvent {
   id: string;
@@ -264,7 +265,10 @@ export function Audit() {
               <Activity className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Pending Approvals</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Pending Approvals</span>
+                <InfoTooltip label="Actions or recommendations waiting for owner review before final approval." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{pendingApprovals}</div>
             </div>
           </div>
@@ -275,7 +279,10 @@ export function Audit() {
               <Clock className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Avg. Turnaround Time</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Avg. Turnaround Time</span>
+                <InfoTooltip label="Average time needed to complete an approval, feedback, or operational workflow." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{avgTurnaroundTime}</div>
               <div className="text-xs text-green-600 font-medium hidden md:flex items-center gap-1">
                 <TrendingDown className="w-3 h-3" />
@@ -290,7 +297,10 @@ export function Audit() {
               <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">System Bottlenecks</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>System Bottlenecks</span>
+                <InfoTooltip label="Workflow points that may slow down approvals, automation, or data processing." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{systemBottlenecks} alerts</div>
             </div>
           </div>
@@ -301,7 +311,10 @@ export function Audit() {
               <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Automated Triggers</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Automated Triggers</span>
+                <InfoTooltip label="System actions that were started automatically by WOOF rules, data changes, or integrations." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{totalAutomatedTriggers}</div>
             </div>
           </div>

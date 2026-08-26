@@ -26,6 +26,8 @@ export function Layout({ children }: LayoutProps) {
       if (saved !== null) {
         setIsSidebarCollapsed(saved === "true");
       }
+      const savedTheme = localStorage.getItem("woofTheme") || "light";
+      document.documentElement.classList.toggle("woof-dark", savedTheme === "dark");
     } catch {
       // Ignore localStorage errors
     }
@@ -114,7 +116,7 @@ export function Layout({ children }: LayoutProps) {
         <Header onMenuClick={() => setSidebarOpen(true)} />
 
         {/* Page Content - Scrollable & Responsive to Sidebar State */}
-        <main className="flex-1 overflow-y-auto bg-[#FFF2FA]">
+        <main className="woof-main flex-1 overflow-y-auto bg-[#FFF2FA]">
           <div className={`w-full mx-auto py-4 md:py-6 lg:py-8 transition-all duration-300 ease-in-out ${
             isSidebarCollapsed
               ? "max-w-none px-4 sm:px-6 md:px-8 lg:px-10"

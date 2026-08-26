@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
+import { InfoTooltip } from "../components/InfoTooltip";
 import { getDashboard, getRetailForecastByChannel } from "../lib/api";
 import {
   HISTORY_START_DATE,
@@ -434,7 +435,10 @@ export function Retail() {
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Historical Retail Revenue</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Historical Retail Revenue</span>
+                <InfoTooltip label="Total retail product revenue from POS, online, and PetHub transaction history for the selected period." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{retailRevenue}</div>
               <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
             </div>
@@ -446,7 +450,10 @@ export function Retail() {
               <Package className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Active SKUs</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Active SKUs</span>
+                <InfoTooltip label="SKU means stock keeping unit: a unique product identifier used for inventory tracking." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeSKUs}</div>
             </div>
           </div>
@@ -457,7 +464,10 @@ export function Retail() {
               <AlertCircle className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Stockout Alerts</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Stockout Alerts</span>
+                <InfoTooltip label="Items that may run out soon based on available stock and sales movement." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">5</div>
               <Button size="sm" className="bg-[#D42A7D] hover:bg-[#F53799] text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex">
                 Review
@@ -472,7 +482,10 @@ export function Retail() {
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           <div>
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Retail Revenue by Channel
+              <span className="inline-flex items-center gap-2">
+                Retail Revenue by Channel
+                <InfoTooltip label="A channel is where the sale came from, such as POS, Shopee, TikTok, or PetHub." />
+              </span>
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Physical POS and digital channel history. Shows the distribution of in-store sales versus Shopee, TikTok, and PetHub orders.

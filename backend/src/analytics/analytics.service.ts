@@ -134,6 +134,8 @@ const BACKTEST_TEST_END_DATE = '2026-05-31';
 
 @Injectable()
 export class AnalyticsService {
+  private readonly backgroundForecastRefreshes = new Set<string>();
+
   constructor(
     @InjectModel(Transaction.name)
     private transactionModel: Model<TransactionDocument>,
@@ -635,32 +637,23 @@ export class AnalyticsService {
       .limit(1)
       .maybeSingle();
 
-    const { data: latestUpload } = await this.supabaseService.client
-      .from('csv_uploads')
-      .select('*')
-      .order('uploaded_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const { count: uploadCount } = await this.supabaseService.client
-      .from('csv_uploads')
-      .select('*', { count: 'exact', head: true });
-
-    const latestUploadStamp = this.getUploadStamp(latestUpload);
+    const moduleTransactionStamp = await this.getForecastModuleTransactionStamp(
+      module,
+    );
 
     if (cachedForecast) {
       const metadata = cachedForecast.model_metadata || {};
-      const cacheUploadCount = metadata.csvUploadCount;
-      const cacheLatestUploadId = metadata.latestCsvUploadId;
-      const cacheLatestUploadTime = metadata.latestCsvUploadTime;
+      const cacheModuleTransactionCount =
+        metadata.moduleTransactionCount !== undefined
+          ? Number(metadata.moduleTransactionCount)
+          : undefined;
+      const cacheLatestModuleTransactionTime =
+        metadata.latestModuleTransactionTime || undefined;
 
-      const currentLatestUploadId = latestUploadStamp.latestUploadId;
-      const currentLatestUploadTime = latestUploadStamp.latestUploadTime;
-
-      const isCsvStateMatch =
-        cacheUploadCount === uploadCount &&
-        cacheLatestUploadId === currentLatestUploadId &&
-        cacheLatestUploadTime === currentLatestUploadTime;
+      const isModuleDataStateMatch =
+        cacheModuleTransactionCount === moduleTransactionStamp.count &&
+        cacheLatestModuleTransactionTime ===
+          moduleTransactionStamp.latestTransactionTime;
 
       // Check overrides match
       const cacheTemp = metadata.tempOverride !== undefined ? Number(metadata.tempOverride) : undefined;
@@ -668,7 +661,7 @@ export class AnalyticsService {
       const cacheHumidity = metadata.humidityOverride !== undefined ? Number(metadata.humidityOverride) : undefined;
       const cacheHoliday = metadata.holidayOverride !== undefined ? Number(metadata.holidayOverride) : undefined;
       const cacheDays = metadata.daysRequested !== undefined ? Number(metadata.daysRequested) : DEFAULT_FORECAST_DAYS;
-      const cacheSplit = metadata.splitRatio || '80-20';
+      const cacheSplit = metadata.splitRatio || '90-5-5';
       const cacheMode = metadata.forecastMode || 'production';
       const cacheHoldoutDays =
         metadata.holdoutDays !== undefined ? Number(metadata.holdoutDays) : undefined;
@@ -696,12 +689,27 @@ export class AnalyticsService {
 
       const isForceRefresh = overrides?.forceRefresh === 'true';
 
-      if (isCsvStateMatch && isOverridesMatch && hasRevenuePayload && !isForceRefresh) {
+      if (isOverridesMatch && hasRevenuePayload && !isForceRefresh) {
         const cachedPayload = await this.withAdaptiveForecastMetadata(
           cachedForecast.toObject(),
           module,
         );
-        return this.withForecastStartAnchor(cachedPayload);
+        const anchoredPayload = this.withForecastStartAnchor(cachedPayload);
+
+        if (isModuleDataStateMatch) {
+          return anchoredPayload;
+        }
+
+        this.refreshForecastInBackground(module, overrides);
+        return {
+          ...anchoredPayload,
+          isStale: true,
+          modelMetadata: {
+            ...(anchoredPayload.modelMetadata || {}),
+            staleReason:
+              'Serving saved forecast while a newer upload/webhook refresh is computed in the background.',
+          },
+        };
       }
     }
     const dailyData = await this.getPreprocessedDailyData(module);
@@ -811,6 +819,16 @@ export class AnalyticsService {
       priceCostMatrix,
     );
     const volumeForecast = this.buildVolumeForecast(finalModel.forecast);
+    const { data: latestUpload } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('*')
+      .order('uploaded_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const { count: uploadCount } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('*', { count: 'exact', head: true });
+    const latestUploadStamp = this.getUploadStamp(latestUpload);
     const payload = {
       module,
       model_name: finalModel.modelName,
@@ -903,6 +921,9 @@ export class AnalyticsService {
         csvUploadCount: uploadCount,
         latestCsvUploadId: latestUploadStamp.latestUploadId,
         latestCsvUploadTime: latestUploadStamp.latestUploadTime,
+        moduleTransactionCount: moduleTransactionStamp.count,
+        latestModuleTransactionTime:
+          moduleTransactionStamp.latestTransactionTime,
         daysRequested: forecastDays,
       },
       generated_at: new Date().toISOString(),
@@ -2703,6 +2724,70 @@ export class AnalyticsService {
       latestUploadId: latestUploadStamp.latestUploadId,
       latestUploadTime: latestUploadStamp.latestUploadTime,
     };
+  }
+
+  private async getForecastModuleTransactionStamp(
+    module: ForecastModule,
+  ): Promise<{ count: number; latestTransactionTime: number | null }> {
+    const rows = await this.transactionModel.aggregate([
+      { $match: { sector: module } },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          latestTransactionTime: {
+            $max: {
+              $ifNull: ['$updatedAt', '$createdAt'],
+            },
+          },
+        },
+      },
+    ]);
+    const row = rows[0] || {};
+    const latest = row.latestTransactionTime
+      ? new Date(row.latestTransactionTime).getTime()
+      : null;
+
+    return {
+      count: Number(row.count) || 0,
+      latestTransactionTime: Number.isFinite(latest) ? latest : null,
+    };
+  }
+
+  private refreshForecastInBackground(
+    module: ForecastModule,
+    overrides?: ForecastOverrides,
+  ) {
+    const refreshKey = JSON.stringify({
+      module,
+      days: overrides?.days || DEFAULT_FORECAST_DAYS,
+      forecastMode: overrides?.forecastMode || 'production',
+      temp: overrides?.temp,
+      rain: overrides?.rain,
+      humidity: overrides?.humidity,
+      holiday: overrides?.holiday,
+      holdoutDays: overrides?.holdoutDays,
+      trainEndDate: overrides?.trainEndDate,
+      testStartDate: overrides?.testStartDate,
+      testEndDate: overrides?.testEndDate,
+      backtestSplit: overrides?.backtestSplit,
+    });
+
+    if (this.backgroundForecastRefreshes.has(refreshKey)) {
+      return;
+    }
+    this.backgroundForecastRefreshes.add(refreshKey);
+
+    setTimeout(() => {
+      this.getForecast(module, {
+        ...overrides,
+        forceRefresh: 'true',
+      })
+        .catch(() => undefined)
+        .finally(() => {
+          this.backgroundForecastRefreshes.delete(refreshKey);
+        });
+    }, 0);
   }
 
   private buildCrossSellRawAnalysis(

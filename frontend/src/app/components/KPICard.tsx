@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { LucideIcon, TrendingUp, TrendingDown } from "lucide-react";
 import { Badge } from "./ui/badge";
+import { InfoTooltip } from "./InfoTooltip";
 
 interface KPICardProps {
   title: string;
@@ -14,6 +15,7 @@ interface KPICardProps {
   badge?: string;
   sparkline?: boolean;
   children?: ReactNode;
+  description?: ReactNode;
 }
 
 export function KPICard({
@@ -25,6 +27,7 @@ export function KPICard({
   badge,
   sparkline = false,
   children,
+  description,
 }: KPICardProps) {
   const valueStr = String(value);
   const valueLength = valueStr.length;
@@ -36,6 +39,9 @@ export function KPICard({
     if (valueLength <= 15) return "text-[24px]";
     return "text-[20px]";
   };
+  const infoText =
+    description ||
+    `${title} is a key performance indicator that summarizes one important part of the selected dashboard view.`;
 
   return (
     <div className="bg-white border border-[#FFD9EC] rounded-[20px] p-8 space-y-4">
@@ -74,8 +80,9 @@ export function KPICard({
       </div>
 
       {/* Title */}
-      <div className="text-sm font-medium text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-        {title}
+      <div className="flex items-center gap-2 text-sm font-medium text-[#223047] opacity-80" style={{ lineHeight: "1.6" }}>
+        <span>{title}</span>
+        <InfoTooltip label={infoText} />
       </div>
 
       {/* Value */}

@@ -8,6 +8,7 @@ import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDiagnostics } from "../components/ModelDiagnostics";
+import { InfoTooltip } from "../components/InfoTooltip";
 import servicesMascot from "../../imports/no_bg_Services-1.png";
 import { ForecastRun, getForecast } from "../lib/api";
 import {
@@ -849,7 +850,10 @@ export function Services() {
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Historical Services Revenue</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Historical Services Revenue</span>
+                <InfoTooltip label="Total grooming, boarding, and service revenue from uploaded history for the selected period." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{servicesRevenue}</div>
               <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
             </div>
@@ -861,7 +865,10 @@ export function Services() {
               <Calendar className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Active Bookings</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Active Bookings</span>
+                <InfoTooltip label="Service bookings counted from the selected uploaded transaction history." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeBookings}</div>
             </div>
           </div>
@@ -872,7 +879,10 @@ export function Services() {
               <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Booking Value</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Avg Booking Value</span>
+                <InfoTooltip label="Average revenue earned per service booking." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">₱{aggregatedKpis.avgOrderValue.toLocaleString()}</div>
             </div>
           </div>
@@ -883,7 +893,10 @@ export function Services() {
               <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Peak Forecast Date</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Peak Forecast Date</span>
+                <InfoTooltip label="The date WOOF expects the highest service demand based on the current forecast." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{peakForecast?.time || "—"}</div>
               <Button size="sm" className="bg-[#06B6D4] hover:bg-[#06B6D4] text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex">
                 View Alerts
@@ -901,7 +914,7 @@ export function Services() {
               Services Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Active model: <span className="font-semibold text-[#06B6D4]">{forecastRun?.modelName || "Waiting for uploaded Services history"}</span>
+              Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Services demand prediction." />: <span className="font-semibold text-[#06B6D4]">{forecastRun?.modelName || "Waiting for uploaded Services history"}</span>
               {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, Accuracy: ${forecastRun.accuracy.toFixed(1)}%)`}
             </p>
             {forecastRun?.isFallback && (

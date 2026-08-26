@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight } from "lucide-react";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { toast } from "sonner";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
-import { getHomeOverview } from "../lib/api";
+import { getCurrentWeather, getHomeOverview } from "../lib/api";
+import { InfoTooltip } from "../components/InfoTooltip";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
 
@@ -93,6 +94,16 @@ interface HomeOverview {
   nextAction: HomeSuggestion | null;
 }
 
+interface CurrentWeather {
+  tempCelsius: number;
+  rainfallMm: number;
+  humidityPercent: number;
+  windSpeedKph?: number;
+  source?: string;
+  isSynthetic?: boolean;
+  observedAt?: string;
+}
+
 const toNumber = (value: unknown, fallback = 0) => {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -106,6 +117,7 @@ export function Home() {
   const [homeOverview, setHomeOverview] = useState<HomeOverview | null>(null);
   const [homeLoading, setHomeLoading] = useState(false);
   const [homeError, setHomeError] = useState<string | null>(null);
+  const [currentWeather, setCurrentWeather] = useState<CurrentWeather | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -167,6 +179,20 @@ export function Home() {
     };
   }, [globalDateRange]);
 
+  useEffect(() => {
+    let active = true;
+    getCurrentWeather()
+      .then((data) => {
+        if (active) setCurrentWeather(data);
+      })
+      .catch(() => {
+        if (active) setCurrentWeather(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const formatCurrency = (value: unknown) =>
     `PHP ${Math.round(toNumber(value)).toLocaleString()}`;
 
@@ -221,6 +247,19 @@ export function Home() {
         day: "numeric",
       })
     : "Waiting for uploaded transactions";
+  const weatherIcon =
+    currentWeather && toNumber(currentWeather.rainfallMm) > 0.5
+      ? CloudRain
+      : currentWeather && toNumber(currentWeather.tempCelsius) >= 30
+        ? Sun
+        : CloudSun;
+  const WeatherIcon = weatherIcon;
+  const weatherSummary = currentWeather
+    ? `${Math.round(toNumber(currentWeather.tempCelsius))}°C · ${Math.round(toNumber(currentWeather.humidityPercent))}% humidity`
+    : "Weather unavailable";
+  const rainfallSummary = currentWeather
+    ? `${toNumber(currentWeather.rainfallMm).toFixed(1)} mm rain`
+    : "No live reading";
   const legendData = useMemo(() => {
     const sectorTotal = (sector: string) =>
       toNumber(homeOverview?.sectorSummary.find((item) => item.sector === sector)?.revenue);
@@ -360,6 +399,7 @@ export function Home() {
         </div>
 
         <div className="relative z-10 p-5 md:p-8 lg:p-10">
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
           <div className="space-y-4 md:space-y-6">
             <div>
               <div className="text-sm md:text-base text-white/80 mb-1 md:mb-2">
@@ -393,6 +433,36 @@ export function Home() {
               </Button>
             </div>
           </div>
+
+          <div className="rounded-2xl border border-white/20 bg-white/12 p-4 text-white shadow-2xl backdrop-blur-md">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-white/70">
+                  Today's Weather
+                  <InfoTooltip
+                    label="Weather is shown because WOOF can use local conditions as context for demand forecasts and sales scenarios."
+                    side="left"
+                  />
+                </div>
+                <div className="mt-2 text-2xl font-extrabold">{weatherSummary}</div>
+                <div className="mt-1 text-sm text-white/75">{rainfallSummary}</div>
+              </div>
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-[#F53799]">
+                <WeatherIcon className="h-6 w-6" />
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-white/75">
+              <div className="rounded-lg bg-white/10 px-3 py-2">
+                <div className="text-white/55">Source</div>
+                <div className="font-semibold text-white">{currentWeather?.isSynthetic ? "Fallback" : currentWeather?.source || "Live API"}</div>
+              </div>
+              <div className="rounded-lg bg-white/10 px-3 py-2">
+                <div className="text-white/55">Location</div>
+                <div className="font-semibold text-white">Lucena City</div>
+              </div>
+            </div>
+          </div>
+          </div>
         </div>
       </div>
 
@@ -404,8 +474,9 @@ export function Home() {
 
       {/* SECTION 2 — PRIMARY KPI ROW */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
-        <div className="mb-3 text-xs md:text-sm text-[#223047] opacity-60">
-          Selected-period KPIs from uploaded transaction data (Click to deep dive)
+        <div className="mb-3 flex items-center gap-2 text-xs md:text-sm text-[#223047] opacity-80">
+          <span>Selected-period KPIs from uploaded transaction data</span>
+          <InfoTooltip label="KPIs are the key numbers WOOF uses to summarize business performance for the selected date range." />
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Total Revenue Today */}
@@ -418,7 +489,10 @@ export function Home() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
-                <span>Total Revenue</span>
+                <span className="flex items-center gap-1">
+                  Total Revenue
+                  <InfoTooltip label="Total money earned from uploaded transactions in the selected period." />
+                </span>
                 <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
@@ -436,7 +510,10 @@ export function Home() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
-                <span>Orders</span>
+                <span className="flex items-center gap-1">
+                  Orders
+                  <InfoTooltip label="Number of completed transactions or receipts counted by WOOF for the selected period." />
+                </span>
                 <ArrowRight className="w-3 h-3 text-[#06B6D4] opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
@@ -454,7 +531,10 @@ export function Home() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
-                <span>Retail</span>
+                <span className="flex items-center gap-1">
+                  Retail
+                  <InfoTooltip label="Revenue from pet shop, product, and retail transactions." />
+                </span>
                 <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.retail}</div>
@@ -470,7 +550,10 @@ export function Home() {
               <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">WOOF Suggestions</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>WOOF Suggestions</span>
+                <InfoTooltip label="AI-assisted recommendations generated from sales, demand, and pattern analysis. These still need owner review." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.pending}</div>
               <Button
                 onClick={scrollToSuggestions}
@@ -489,7 +572,10 @@ export function Home() {
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
           <div className="flex-1 min-w-0">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Omnichannel Revenue Accumulation
+              <span className="inline-flex items-center gap-2">
+                Omnichannel Revenue Accumulation
+                <InfoTooltip label="Omnichannel means WOOF combines sales from different channels such as POS, Shopee, TikTok, and PetHub." />
+              </span>
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Real-time revenue buildup across all sectors today

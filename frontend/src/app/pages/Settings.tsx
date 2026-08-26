@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert } from "lucide-react";
+import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert, Moon, Sun } from "lucide-react";
 import { getExogenousStatus, getForecast } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
 import { Slider } from "../components/ui/slider";
 import { toast } from "sonner";
+import { InfoTooltip } from "../components/InfoTooltip";
 
 export function Settings() {
   const [notifications, setNotifications] = useState({
@@ -26,6 +27,29 @@ export function Settings() {
   const [autoRetrain, setAutoRetrain] = useState(true);
   const [confidenceThreshold, setConfidenceThreshold] = useState([80]);
   const [dataRetention, setDataRetention] = useState([90]);
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem("woofTheme") || "light";
+      const isDark = savedTheme === "dark";
+      setDarkMode(isDark);
+      document.documentElement.classList.toggle("woof-dark", isDark);
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  const handleThemeChange = (checked: boolean) => {
+    setDarkMode(checked);
+    document.documentElement.classList.toggle("woof-dark", checked);
+    try {
+      localStorage.setItem("woofTheme", checked ? "dark" : "light");
+    } catch {
+      // Ignore localStorage errors
+    }
+    toast.success(`${checked ? "Dark" : "Light"} mode enabled`);
+  };
 
   const handleSaveSettings = () => {
     toast.success("Settings saved!", {
@@ -122,9 +146,12 @@ export function Settings() {
         <div className="flex items-center gap-2 md:gap-3">
           <Database className="w-5 h-5 md:w-6 md:h-6 text-[#06B6D4]" />
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              AI & Model Configuration
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                AI & Model Configuration
+              </h2>
+              <InfoTooltip label="Controls how WOOF retrains forecasting models and when AI recommendations should be shown for owner review." />
+            </div>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Control model behavior and prediction thresholds
             </p>
@@ -135,7 +162,10 @@ export function Settings() {
           <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm md:text-base text-[#223047]">Automatic Model Retraining</div>
+                <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                  <span>Automatic Model Retraining</span>
+                  <InfoTooltip label="When enabled, WOOF can refresh forecasting models after new upload or webhook data is processed." />
+                </div>
                 <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
                   Automatically retrain models when new data is available
                 </div>
@@ -146,7 +176,10 @@ export function Settings() {
 
           <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4">
             <div>
-              <div className="font-semibold text-sm md:text-base text-[#223047] mb-1">Confidence Threshold</div>
+              <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                <span>Confidence Threshold</span>
+                <InfoTooltip label="The minimum confidence level a recommendation needs before WOOF presents it as worth reviewing." />
+              </div>
               <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-3 md:mb-4">
                 Minimum confidence level for AI suggestions: {confidenceThreshold[0]}%
               </div>
@@ -193,7 +226,10 @@ export function Settings() {
           <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="font-bold text-sm md:text-base text-[#223047]">OpenWeatherMap Integration</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm md:text-base text-[#223047]">OpenWeatherMap Integration</h3>
+                  <InfoTooltip label="Weather data is used as outside context for demand forecasting, especially Cafe and Services demand." />
+                </div>
                 <p className="text-xs text-[#223047] opacity-60 mt-1">Exogenous weather feed for Cafe & Services</p>
               </div>
               {exogenousStatus?.weatherCache?.lastSource && exogenousStatus.weatherCache.lastSource !== "synthetic" ? (
@@ -227,11 +263,17 @@ export function Settings() {
                   <span className="font-semibold">13.9397, 121.6145</span>
                 </div>
                 <div>
-                  <span className="opacity-60 block">Cached Records</span>
+                  <span className="opacity-60 flex items-center gap-1">
+                    Cached Records
+                    <InfoTooltip label="Saved weather rows reused by WOOF so forecasts do not need to call the weather provider every time." />
+                  </span>
                   <span className="font-semibold">{exogenousStatus?.weatherCache?.count ?? "—"} daily rows</span>
                 </div>
                 <div>
-                  <span className="opacity-60 block">Last Active Source</span>
+                  <span className="opacity-60 flex items-center gap-1">
+                    Last Active Source
+                    <InfoTooltip label="Shows whether the latest weather data came from the live API or a fallback source." />
+                  </span>
                   <span className="font-semibold uppercase text-xs">{exogenousStatus?.weatherCache?.lastSource ?? "—"}</span>
                 </div>
               </div>
@@ -242,7 +284,10 @@ export function Settings() {
           <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="font-bold text-sm md:text-base text-[#223047]">Abstract Holidays Calendar</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm md:text-base text-[#223047]">Abstract Holidays Calendar</h3>
+                  <InfoTooltip label="Holiday context helps WOOF adjust demand expectations for dates that may affect customer behavior." />
+                </div>
                 <p className="text-xs text-[#223047] opacity-60 mt-1">Philippine national holiday catalog provider</p>
               </div>
               {exogenousStatus?.holidayCache?.lastSource && exogenousStatus.holidayCache.lastSource !== "hardcoded" ? (
@@ -272,7 +317,10 @@ export function Settings() {
                   <span className="font-semibold">Philippines (PH)</span>
                 </div>
                 <div>
-                  <span className="opacity-60 block">Cached Years</span>
+                  <span className="opacity-60 flex items-center gap-1">
+                    Cached Years
+                    <InfoTooltip label="Saved holiday calendars available to the forecasting engine." />
+                  </span>
                   <span className="font-semibold">{exogenousStatus?.holidayCache?.count ?? "—"} years</span>
                 </div>
                 <div>
@@ -306,7 +354,10 @@ export function Settings() {
         <div className="grid gap-4 md:gap-6 pt-2 md:pt-4">
           <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4">
             <div>
-              <div className="font-semibold text-sm md:text-base text-[#223047] mb-1">Data Retention Period</div>
+              <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                <span>Data Retention Period</span>
+                <InfoTooltip label="How long WOOF should keep historical records available for analysis, reports, and audit checks." />
+              </div>
               <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-3 md:mb-4">
                 Keep historical data for {dataRetention[0]} days
               </div>
@@ -350,6 +401,30 @@ export function Settings() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 pt-2 md:pt-4">
+          <div className="p-4 md:p-6 bg-[#FFF7FB] border-2 border-[#FFD9EC] rounded-xl md:rounded-2xl sm:col-span-2">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                  {darkMode ? (
+                    <Moon className="h-5 w-5 text-[#F53799]" />
+                  ) : (
+                    <Sun className="h-5 w-5 text-[#F53799]" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                    <span>Light / Dark Mode</span>
+                    <InfoTooltip label="Changes the dashboard display mode for easier viewing in bright or low-light environments. Your choice is saved on this browser." />
+                  </div>
+                  <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
+                    Current mode: {darkMode ? "Dark" : "Light"}
+                  </div>
+                </div>
+              </div>
+              <Switch checked={darkMode} onCheckedChange={handleThemeChange} />
+            </div>
+          </div>
+
           {[
             { name: "Pink Fusion (Default)", primary: "#F53799", secondary: "#06B6D4" },
             { name: "Ocean Breeze", primary: "#06B6D4", secondary: "#06B6D4" },

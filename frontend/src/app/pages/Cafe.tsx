@@ -9,6 +9,7 @@ import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
 import { ModelDiagnostics } from "../components/ModelDiagnostics";
+import { InfoTooltip } from "../components/InfoTooltip";
 import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour } from "../lib/api";
 import {
   HISTORY_START_DATE,
@@ -960,7 +961,10 @@ export function Cafe() {
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Historical Cafe Revenue</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Historical Cafe Revenue</span>
+                <InfoTooltip label="Total Cafe revenue from uploaded transaction history for the selected period." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{cafeRevenue}</div>
               <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
             </div>
@@ -972,7 +976,10 @@ export function Cafe() {
               <Coffee className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Total Orders</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Total Orders</span>
+                <InfoTooltip label="Number of Cafe transactions counted in the selected period." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{totalOrders}</div>
               <div className={aggregatedKpis.ordersGrowth.className}>{aggregatedKpis.ordersGrowth.text}</div>
             </div>
@@ -984,7 +991,10 @@ export function Cafe() {
               <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Avg Check Size</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Avg Check Size</span>
+                <InfoTooltip label="Average Cafe spend per order. It is computed as revenue divided by orders." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{avgCheck}</div>
               <div className={aggregatedKpis.checkGrowth.className}>{aggregatedKpis.checkGrowth.text}</div>
             </div>
@@ -996,7 +1006,10 @@ export function Cafe() {
               <PieChart className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate">Active Menu Items</div>
+              <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+                <span>Active Menu Items</span>
+                <InfoTooltip label="Menu items currently represented in the uploaded Cafe transaction data." />
+              </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeItems}</div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs mt-1 hidden md:inline-flex">
                 All Active
@@ -1014,7 +1027,7 @@ export function Cafe() {
               Cafe Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Active model: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
+              Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Cafe demand prediction." />: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
               {forecastRun && <span className="hidden sm:inline"> (MASE: {formatFixed(forecastRun.mase, 2)}, Accuracy: {formatFixed(forecastRun.accuracy, 1)}%)</span>}
             </p>
             {forecastRun?.isFallback && (
