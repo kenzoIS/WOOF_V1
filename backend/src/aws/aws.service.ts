@@ -27,9 +27,22 @@ export class AwsService {
   private readonly s3: S3Client;
 
   constructor() {
+    let credentialsProvider: any;
+
+    // Check if long-lived IAM keys are present in .env
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      credentialsProvider = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
+    } else {
+      // Fallback to the SSO profile which expires every 12 hours
+      credentialsProvider = fromIni({ profile: 'woof-prod' });
+    }
+
     this.s3 = new S3Client({
       region: REGION,
-      credentials: fromIni({ profile: 'woof-prod' }),
+      credentials: credentialsProvider,
     });
   }
 
