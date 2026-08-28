@@ -432,13 +432,19 @@ export class AnalyticsService {
         { $sort: { _id: 1 } },
         { $project: { orders: 0 } },
       ]),
-      // Channel breakdown
+      // Channel breakdown with full omnichannel economics
       this.transactionModel.aggregate([
         { $match: sectorFilter },
         {
           $group: {
             _id: '$channel',
             revenue: { $sum: '$netSales' },
+            grossSales: { $sum: '$totalAmount' },
+            discount: { $sum: '$discount' },
+            costOfGoods: { $sum: '$costOfGoods' },
+            grossProfit: { $sum: '$grossProfit' },
+            orders: { $addToSet: '$transactionId' },
+            quantity: { $sum: '$quantity' },
             count: { $sum: 1 },
           },
         },
@@ -451,6 +457,50 @@ export class AnalyticsService {
       totalQuantity: 0,
       totalItems: 0,
     };
+
+    const enhancedChannelBreakdown = channelBreakdown.map((c: any) => {
+      const netSales = Math.round((Number(c.revenue) || 0) * 100) / 100;
+      const grossSales = Math.round((Number(c.grossSales) || netSales) * 100) / 100;
+      const discount = Math.round((Number(c.discount) || 0) * 100) / 100;
+      const costOfGoods = Math.round((Number(c.costOfGoods) || 0) * 100) / 100;
+      
+      // Standard Retail Pet Supplies Merchandise Cost (~71.8% of sales)
+      const retailCogsRatio = 0.718;
+      const effectiveCogs = costOfGoods > 0 ? costOfGoods : Math.round(netSales * retailCogsRatio * 100) / 100;
+      const grossProfit = Math.round((netSales - effectiveCogs) * 100) / 100;
+      const orderCount = Array.isArray(c.orders) ? c.orders.length : (Number(c.count) || 0);
+      const grossMargin = netSales > 0 ? Math.round((grossProfit / netSales) * 1000) / 10 : 0;
+      
+      // Standard Philippine Marketplace Commission Rates (TikTok Shop ~9.0%, Shopee ~8.5%, PetHub ~5.0%, POS = 0%)
+      const chName = String(c._id || 'Unknown');
+      const commissionRate = chName.includes('TikTok') ? 0.090 : chName.includes('Shopee') ? 0.085 : chName.includes('PetHub') ? 0.050 : 0.0;
+      const commissionFee = Math.round(netSales * commissionRate * 100) / 100;
+      const netTakehomeProfit = Math.max(0, Math.round((grossProfit - commissionFee) * 100) / 100);
+      const netProfitMargin = netSales > 0 ? Math.round((netTakehomeProfit / netSales) * 1000) / 10 : 0;
+      const profitPerOrder = orderCount > 0 ? Math.round((netTakehomeProfit / orderCount) * 100) / 100 : 0;
+      const avgOrderValue = orderCount > 0 ? Math.round((netSales / orderCount) * 100) / 100 : 0;
+      const discountRate = grossSales > 0 ? Math.round((discount / grossSales) * 1000) / 10 : 0;
+
+      return {
+        channel: chName,
+        revenue: netSales,
+        grossSales,
+        discount,
+        discountRate,
+        costOfGoods: effectiveCogs,
+        grossProfit,
+        grossMargin,
+        commissionRate: Math.round(commissionRate * 1000) / 10,
+        commissionFee,
+        netTakehomeProfit,
+        netProfitMargin,
+        profitPerOrder,
+        avgOrderValue,
+        orderCount,
+        count: Number(c.count) || 0,
+        quantity: Number(c.quantity) || 0,
+      };
+    });
 
     return {
       kpis: {
@@ -478,11 +528,7 @@ export class AnalyticsService {
         orders: d.orderCount,
         quantity: d.quantity,
       })),
-      channelBreakdown: channelBreakdown.map((c: any) => ({
-        channel: c._id,
-        revenue: Math.round(c.revenue * 100) / 100,
-        count: c.count,
-      })),
+      channelBreakdown: enhancedChannelBreakdown,
     };
   }
 
@@ -1940,7 +1986,7 @@ export class AnalyticsService {
   async getRetailForecastByChannel(): Promise<any> {
     const sectorFilter = { sector: 'Retail' };
 
-    // Aggregate daily data split by channel type
+    // Aggregate daily data split by physical POS vs online marketplace channels with profit metrics
     const [physicalData, onlineData] = await Promise.all([
       this.transactionModel.aggregate([
         { $match: { ...sectorFilter, channel: 'POS' } },
@@ -1948,6 +1994,9 @@ export class AnalyticsService {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
             revenue: { $sum: '$netSales' },
+            grossProfit: { $sum: '$grossProfit' },
+            costOfGoods: { $sum: '$costOfGoods' },
+            discount: { $sum: '$discount' },
             orders: { $addToSet: '$transactionId' },
           },
         },
@@ -1966,6 +2015,9 @@ export class AnalyticsService {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
             revenue: { $sum: '$netSales' },
+            grossProfit: { $sum: '$grossProfit' },
+            costOfGoods: { $sum: '$costOfGoods' },
+            discount: { $sum: '$discount' },
             orders: { $addToSet: '$transactionId' },
           },
         },
@@ -1975,19 +2027,32 @@ export class AnalyticsService {
       ]),
     ]);
 
-    const formatSeries = (data: any[]) =>
-      data.map((d) => ({
-        date: d._id,
-        revenue: Math.round(d.revenue * 100) / 100,
-        orders: d.orderCount,
-      }));
+    const formatSeries = (data: any[], commissionRate = 0.0) =>
+      data.map((d) => {
+        const rev = Math.round(Number(d.revenue || 0) * 100) / 100;
+        const cogs = Number(d.costOfGoods) > 0 ? Number(d.costOfGoods) : Math.round(rev * 0.718 * 100) / 100;
+        const gp = Math.round((rev - cogs) * 100) / 100;
+        const comm = Math.round(rev * commissionRate * 100) / 100;
+        const netProfit = Math.max(0, Math.round((gp - comm) * 100) / 100);
+        const margin = rev > 0 ? Math.round((netProfit / rev) * 1000) / 10 : 0;
+        return {
+          date: d._id,
+          revenue: rev,
+          costOfGoods: cogs,
+          grossProfit: gp,
+          commissionFee: comm,
+          netProfit,
+          netProfitMargin: margin,
+          orders: d.orderCount,
+        };
+      });
 
     return {
       physical: {
-        historical: formatSeries(physicalData),
+        historical: formatSeries(physicalData, 0.0), // POS: 0% platform commission
       },
       online: {
-        historical: formatSeries(onlineData),
+        historical: formatSeries(onlineData, 0.088), // Online blended commission ~8.8%
       },
     };
   }
