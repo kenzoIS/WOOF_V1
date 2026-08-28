@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { useRouter } from "next/router";
-import { Coffee, DollarSign, TrendingUp, PieChart, Download, Info, ChevronDown, ChevronUp, BarChart2, ArrowRight } from "lucide-react";
+import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart } from "lucide-react";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -10,7 +10,7 @@ import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
 import { ModelDiagnostics } from "../components/ModelDiagnostics";
 import { InfoTooltip } from "../components/InfoTooltip";
-import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour } from "../lib/api";
+import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour, getWeatherImpact, getCafeCoAttachment } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -27,6 +27,12 @@ import {
   Line,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  ComposedChart,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -237,11 +243,52 @@ export function Cafe() {
   
   const [quietPeriod, setQuietPeriod] = useState<any>(null);
   const [pastHappyHours, setPastHappyHours] = useState<any[]>([]);
+  const [weatherImpactData, setWeatherImpactData] = useState<any>(null);
+  const [weatherDays, setWeatherDays] = useState(30);
+  const [forecastViewMode, setForecastViewMode] = useState<"forecast" | "weather">("forecast");
+  const [coAttachmentData, setCoAttachmentData] = useState<any>(null);
+  const [realtimeRefresh, setRealtimeRefresh] = useState(0);
+  const [hoveredDonutIndex, setHoveredDonutIndex] = useState<number | null>(null);
+
+  const donutSegments = useMemo(() => {
+    return (
+      coAttachmentData?.segments || [
+        { name: "Dual-Diner (Human + Pet)", share: 22.8, color: "#F53799", aov: 270, baskets: 8100, revenue: 2185568 },
+        { name: "Solo Human Dine-in", share: 70.2, color: "#06B6D4", aov: 253, baskets: 24974, revenue: 6310454 },
+        { name: "Solo Pet Treat Only", share: 7.0, color: "#F59E0B", aov: 89, baskets: 2483, revenue: 221537 },
+      ]
+    );
+  }, [coAttachmentData]);
+
+  const activeDonutSeg = hoveredDonutIndex !== null ? donutSegments[hoveredDonutIndex] : null;
+
+  // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
+      const eventType = customEvent.detail?.type;
+      if (
+        !eventType ||
+        eventType === "upload_processed" ||
+        eventType === "etl_completed" ||
+        eventType === "forecast_ready"
+      ) {
+        setRealtimeRefresh((prev) => prev + 1);
+      }
+    };
+
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => {
+      window.removeEventListener("woof:realtime", handleRealtime);
+    };
+  }, []);
 
   useEffect(() => {
     getNextQuietPeriod().then(setQuietPeriod).catch(console.error);
     getPastHappyHours().then(setPastHappyHours).catch(console.error);
-  }, []);
+    getWeatherImpact("cafe", weatherDays).then(setWeatherImpactData).catch(console.error);
+    getCafeCoAttachment().then(setCoAttachmentData).catch(console.error);
+  }, [weatherDays, realtimeRefresh]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -385,7 +432,7 @@ export function Cafe() {
     }
 
     getForecast("cafe", params).then(setForecastRun).catch(() => {});
-  }, [forecastRangeMode, customForecastStart, customForecastEnd, forecastMode]);
+  }, [forecastRangeMode, customForecastStart, customForecastEnd, forecastMode, realtimeRefresh]);
 
   useEffect(() => {
     if (forecastRangeMode === "custom") return;
@@ -459,6 +506,31 @@ export function Cafe() {
       };
     });
   }, [forecastRun, globalDateRange, menuPerformanceMode]);
+
+  // Aggregate Category Revenue Contribution from backend or fallback to items
+  const cafeCategoryRevenueData = useMemo(() => {
+    if (coAttachmentData?.categoryContribution?.length) {
+      return coAttachmentData.categoryContribution;
+    }
+    const items = forecastRun?.topItems?.length ? forecastRun.topItems : (menuItems || []);
+    if (!items.length) return [];
+    const map = new Map<string, { category: string; revenue: number; quantity: number }>();
+    items.forEach((item: any) => {
+      const cat = item.category && item.category !== "Uncategorized" ? item.category : (item.category || "General Cafe");
+      if (cat === "Uncategorized") return;
+      const existing = map.get(cat) || { category: cat, revenue: 0, quantity: 0 };
+      existing.revenue += Number(item.revenue || 0);
+      existing.quantity += Number(item.qtySold || item.quantity || 0);
+      map.set(cat, existing);
+    });
+    const totalRev = Array.from(map.values()).reduce((sum, c) => sum + c.revenue, 0);
+    return Array.from(map.values())
+      .map((c) => ({
+        ...c,
+        share: totalRev > 0 ? Math.round((c.revenue / totalRev) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [coAttachmentData, forecastRun, menuItems]);
 
   // Aggregated KPI values dynamically calculated from API history based on globalDateRange
   const aggregatedKpis = useMemo(() => {
@@ -1019,7 +1091,7 @@ export function Cafe() {
         </div>
       </div>
 
-      {/* REVENUE FORECAST PANEL - Best Model Only */}
+      {/* REVENUE FORECAST & WEATHER OVERLAY PANEL */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
           <div className="flex-1">
@@ -1027,233 +1099,659 @@ export function Cafe() {
               Cafe Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Cafe demand prediction." />: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
-              {forecastRun && <span className="hidden sm:inline"> (MASE: {formatFixed(forecastRun.mase, 2)}, Accuracy: {formatFixed(forecastRun.accuracy, 1)}%)</span>}
+              {forecastViewMode === "forecast" ? (
+                <>
+                  Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Cafe demand prediction." />: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
+                  {forecastRun && <span className="hidden sm:inline"> (MASE: {formatFixed(forecastRun.mase, 2)}, Accuracy: {formatFixed(forecastRun.accuracy, 1)}%)</span>}
+                </>
+              ) : (
+                <>
+                  Exogenous context <InfoTooltip label="Exogenous Weather Impact from Ch 1: Overlays daily rainfall (mm) and temperature against Cafe revenue to measure foot-traffic sensitivity to weather." />: <span className="font-semibold text-[#06B6D4]">Live Open-Meteo Weather vs Daily Net Sales</span>
+                </>
+              )}
             </p>
-            {forecastRun?.isFallback && (
+            {forecastViewMode === "forecast" && forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
                 SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
               </Badge>
             )}
-            <ModelDiagnostics forecastRun={forecastRun} />
+            {forecastViewMode === "forecast" && <ModelDiagnostics forecastRun={forecastRun} />}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs px-2.5 py-1 bg-slate-100 text-[#223047] rounded-lg font-semibold">
-              90-5-5 Multi-Zone Active
-            </span>
+          <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
+            <Button
+              size="sm"
+              variant={forecastViewMode === "forecast" ? "default" : "ghost"}
+              onClick={() => setForecastViewMode("forecast")}
+              className={
+                forecastViewMode === "forecast"
+                  ? "h-8 bg-[#F53799] hover:bg-[#F53799] text-xs text-white"
+                  : "h-8 text-xs hover:bg-[#FFF2FA] text-[#223047]"
+              }
+            >
+              Demand Forecast
+            </Button>
+            <Button
+              size="sm"
+              variant={forecastViewMode === "weather" ? "default" : "ghost"}
+              onClick={() => setForecastViewMode("weather")}
+              className={
+                forecastViewMode === "weather"
+                  ? "h-8 bg-[#F53799] hover:bg-[#F53799] text-xs text-white"
+                  : "h-8 text-xs hover:bg-[#FFF2FA] text-[#223047]"
+              }
+            >
+              Weather Overlay
+            </Button>
           </div>
         </div>
 
-        {/* ══ 90-5-5 MULTI-ZONE FORECAST CHART ════════════════════════════ */}
-        {rawThreeZoneData.length > 0 ? (
-          <ThreeZoneForecastChart
-            rawData={rawThreeZoneData}
-            initialSplitDate={academicSplitDate}
-            initialForecastHorizon={academicForecastHorizon}
-            metrics={academicMetrics}
-            modelName={forecastRun?.modelName ?? "Prophet"}
-            sector="Cafe"
-            currencyPrefix="₱"
-            themeColor="#F53799"
-            timeGrain={chartGranularity}
-            onTimeGrainChange={(g) => setChartGranularity(g)}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-48 text-sm text-[#223047] opacity-50">
-            Upload Cafe history to generate the 90-5-5 multi-zone forecast.
-          </div>
-        )}
-
-        {/* Model Info, Recommendation, and Exogenous Info */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
-          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
-                <span className="text-[11px] text-[#F53799] font-semibold capitalize">
-                  {chartGranularity} Horizon Evaluation
-                </span>
-              </div>
-              <button
-                onClick={() => setShowInfoModal(true)}
-                className="p-1 hover:bg-[#FFF2FA] rounded-full transition-colors text-[#F53799]"
-                title="Explain metrics"
-              >
-                <Info className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3 md:gap-4">
-              <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#F53799]">
-                  {dynamicPerformanceMetrics.mase}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
-              </div>
-              <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.smape}</div>
-              </div>
-              <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
-              </div>
-            </div>
-            {forecastRun?.modelMetadata && (
-              <div className="text-[10px] text-[#223047] opacity-50 mt-2 border-t pt-2 space-y-1">
-                <div>Weather Source: {String(forecastRun.modelMetadata.weatherDataSource || "N/A")}</div>
-                <div>Holiday Source: {String(forecastRun.modelMetadata.holidayDataSource || "N/A")}</div>
-                {!!forecastRun.modelMetadata.exogenousVariables && (
-                  <div>Exogenous: {Array.isArray(forecastRun.modelMetadata.exogenousVariables) ? (forecastRun.modelMetadata.exogenousVariables as any).join(", ") : String(forecastRun.modelMetadata.exogenousVariables)}</div>
-                )}
+        {forecastViewMode === "forecast" ? (
+          <>
+            {/* ══ 90-5-5 MULTI-ZONE FORECAST CHART ════════════════════════════ */}
+            {rawThreeZoneData.length > 0 ? (
+              <ThreeZoneForecastChart
+                rawData={rawThreeZoneData}
+                initialSplitDate={academicSplitDate}
+                initialForecastHorizon={academicForecastHorizon}
+                metrics={academicMetrics}
+                modelName={forecastRun?.modelName ?? "Prophet"}
+                sector="Cafe"
+                currencyPrefix="₱"
+                themeColor="#F53799"
+                timeGrain={chartGranularity}
+                onTimeGrainChange={(g) => setChartGranularity(g)}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-48 text-sm text-[#223047] opacity-50">
+                Upload Cafe history to generate the 90-5-5 multi-zone forecast.
               </div>
             )}
-          </div>
 
-          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 flex flex-col justify-between">
-            <div className="space-y-3">
-              <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
-              
-              <div>
-                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Forecast Mode</label>
-                <select
-                  value={forecastMode}
-                  onChange={(e) => setForecastMode(e.target.value)}
-                  className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
-                >
-                  <option value="production">Production forecast</option>
-                  <option value="latest-holdout">Latest holdout backtest</option>
-                  <option value="fixed-window">Thesis fixed-window backtest</option>
-                </select>
+            {/* Model Info, Recommendation, and Exogenous Info */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+                    <span className="text-[11px] text-[#F53799] font-semibold capitalize">
+                      {chartGranularity} Horizon Evaluation
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowInfoModal(true)}
+                    className="p-1 hover:bg-[#FFF2FA] rounded-full transition-colors text-[#F53799]"
+                    title="Explain metrics"
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
+                    <div className="text-xl md:text-2xl font-bold text-[#F53799]">
+                      {dynamicPerformanceMetrics.mase}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
+                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
+                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.smape}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
+                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
+                  </div>
+                </div>
+                {forecastRun?.modelMetadata && (
+                  <div className="text-[10px] text-[#223047] opacity-50 mt-2 border-t pt-2 space-y-1">
+                    <div>Weather Source: {String(forecastRun.modelMetadata.weatherDataSource || "N/A")}</div>
+                    <div>Holiday Source: {String(forecastRun.modelMetadata.holidayDataSource || "N/A")}</div>
+                    {!!forecastRun.modelMetadata.exogenousVariables && (
+                      <div>Exogenous: {Array.isArray(forecastRun.modelMetadata.exogenousVariables) ? (forecastRun.modelMetadata.exogenousVariables as any).join(", ") : String(forecastRun.modelMetadata.exogenousVariables)}</div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-                {forecastMode === "fixed-window"
-                  ? "Thesis backtest mode uses the April-May 2026 overlap for reproducible defense metrics."
-                  : forecastMode === "latest-holdout"
-                    ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
-                  : (forecastRun
-                      ? `${forecastRun.modelName} was evaluated on held-out uploaded Cafe history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
-                      : "Upload Cafe history from POS or PetHub to generate a validated forecast.")}
-              </p>
-            </div>
-            
-            <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm mt-2" size="sm">
-              Retrain Model
-            </Button>
-          </div>
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 flex flex-col justify-between">
+                <div className="space-y-3">
+                  <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
+                  
+                  <div>
+                    <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Forecast Mode</label>
+                    <select
+                      value={forecastMode}
+                      onChange={(e) => setForecastMode(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                    >
+                      <option value="production">Production forecast</option>
+                      <option value="latest-holdout">Latest holdout backtest</option>
+                      <option value="fixed-window">Thesis fixed-window backtest</option>
+                    </select>
+                  </div>
 
-          {/* EXOGENOUS FACTORS OVERRIDE & SIMULATOR */}
-          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 flex flex-col justify-between">
-            <div>
-              <h3 className="text-sm md:text-base font-bold text-[#223047]">Sales Simulator (What-If?)</h3>
-              <p className="text-xs text-[#223047] opacity-60 mb-2">
-                Simulate weather conditions and calendar holidays to forecast Cafe sales.
-              </p>
-
-              <div className="space-y-3">
-                {/* Weather Select */}
-                <div>
-                  <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Weather Conditions</label>
-                  <select
-                    value={weatherScenario}
-                    onChange={(e) => setWeatherScenario(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
-                  >
-                    <option value="default">Current Live Weather</option>
-                    <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
-                    <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
-                    <option value="custom">Custom Climate (Sliders)...</option>
-                  </select>
+                  <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+                    {forecastMode === "fixed-window"
+                      ? "Thesis backtest mode uses the April-May 2026 overlap for reproducible defense metrics."
+                      : forecastMode === "latest-holdout"
+                        ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
+                      : (forecastRun
+                          ? `${forecastRun.modelName} was evaluated on held-out uploaded Cafe history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
+                          : "Upload Cafe history from POS or PetHub to generate a validated forecast.")}
+                  </p>
                 </div>
+                
+                <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm mt-2" size="sm">
+                  Retrain Model
+                </Button>
+              </div>
 
-                {weatherScenario === "custom" && (
-                  <div className="space-y-2 border border-[#FFD9EC] bg-[#FFF2FA]/50 p-2.5 rounded-lg mt-2">
+              {/* EXOGENOUS FACTORS OVERRIDE & SIMULATOR */}
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 flex flex-col justify-between">
+                <div>
+                  <h3 className="text-sm md:text-base font-bold text-[#223047]">Sales Simulator (What-If?)</h3>
+                  <p className="text-xs text-[#223047] opacity-60 mb-2">
+                    Simulate weather conditions and calendar holidays to forecast Cafe sales.
+                  </p>
+
+                  <div className="space-y-3">
                     <div>
-                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
-                        <span>Temperature</span>
-                        <span>{tempOverride}°C</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="15"
-                        max="40"
-                        value={tempOverride}
-                        onChange={(e) => setTempOverride(Number(e.target.value))}
-                        className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
-                      />
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
-                        <span>Relative Humidity</span>
-                        <span>{humidityOverride}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="20"
-                        max="100"
-                        value={humidityOverride}
-                        onChange={(e) => setHumidityOverride(Number(e.target.value))}
-                        className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
-                      />
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
-                        <span>Rain Chance / Intensity</span>
-                        <span>{rainChanceOverride === 1 ? "Rainy" : "No Rain"}</span>
-                      </div>
+                      <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Weather Conditions</label>
                       <select
-                        value={rainChanceOverride}
-                        onChange={(e) => setRainChanceOverride(Number(e.target.value))}
-                        className="w-full px-2 py-1 bg-white border border-[#FFD9EC] rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                        value={weatherScenario}
+                        onChange={(e) => setWeatherScenario(e.target.value)}
+                        className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
                       >
-                        <option value="0">No Rain</option>
-                        <option value="1">Rainy</option>
+                        <option value="default">Current Live Weather</option>
+                        <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
+                        <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
+                        <option value="custom">Custom Climate (Sliders)...</option>
+                      </select>
+                    </div>
+
+                    {weatherScenario === "custom" && (
+                      <div className="space-y-2 border border-[#FFD9EC] bg-[#FFF2FA]/50 p-2.5 rounded-lg mt-2">
+                        <div>
+                          <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                            <span>Temperature</span>
+                            <span>{tempOverride}°C</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="15"
+                            max="40"
+                            value={tempOverride}
+                            onChange={(e) => setTempOverride(Number(e.target.value))}
+                            className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                            <span>Relative Humidity</span>
+                            <span>{humidityOverride}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="20"
+                            max="100"
+                            value={humidityOverride}
+                            onChange={(e) => setHumidityOverride(Number(e.target.value))}
+                            className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                            <span>Rain Chance / Intensity</span>
+                            <span>{rainChanceOverride === 1 ? "Rainy" : "No Rain"}</span>
+                          </div>
+                          <select
+                            value={rainChanceOverride}
+                            onChange={(e) => setRainChanceOverride(Number(e.target.value))}
+                            className="w-full px-2 py-1 bg-white border border-[#FFD9EC] rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                          >
+                            <option value="0">No Rain</option>
+                            <option value="1">Rainy</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Holiday Schedule</label>
+                      <select
+                        value={holidayScenario}
+                        onChange={(e) => setHolidayScenario(e.target.value)}
+                        className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                      >
+                        <option value="default">Live Calendar Holidays</option>
+                        <option value="force">Treat Everyday as a Holiday</option>
+                        <option value="ignore">Treat Everyday as a Workday</option>
                       </select>
                     </div>
                   </div>
-                )}
+                </div>
 
-                {/* Holiday Select */}
-                <div>
-                  <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Holiday Schedule</label>
-                  <select
-                    value={holidayScenario}
-                    onChange={(e) => setHolidayScenario(e.target.value)}
-                    className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                <div className="flex gap-2 mt-4 pt-2 border-t border-[#FFD9EC]">
+                  <Button
+                    disabled={isSimulating}
+                    onClick={handleApplySimulation}
+                    className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs py-1"
+                    size="sm"
                   >
-                    <option value="default">Live Calendar Holidays</option>
-                    <option value="force">Treat Everyday as a Holiday</option>
-                    <option value="ignore">Treat Everyday as a Workday</option>
-                  </select>
+                    {isSimulating ? "Simulating..." : "Run Simulator"}
+                  </Button>
+                  <Button
+                    disabled={isSimulating}
+                    onClick={handleResetSimulation}
+                    variant="outline"
+                    className="border-[#FFD9EC] text-xs py-1 px-2"
+                    size="sm"
+                  >
+                    Reset to Live
+                  </Button>
                 </div>
               </div>
             </div>
+          </>
+        ) : (
+          /* ══ WEATHER OVERLAY VIEW ════════════════════════════════════════ */
+          <div className="space-y-4 md:space-y-6">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="text-xs text-[#223047] opacity-70">
+                Comparing Daily Net Sales against live precipitation and temperature in Lucena City
+              </div>
+              <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
+                {[
+                  [14, "Last 14 Days"],
+                  [30, "Last 30 Days"],
+                  [60, "Last 60 Days"],
+                ].map(([days, label]) => (
+                  <Button
+                    key={days}
+                    size="sm"
+                    variant={weatherDays === days ? "default" : "ghost"}
+                    onClick={() => setWeatherDays(Number(days))}
+                    className={
+                      weatherDays === days
+                        ? "h-7 bg-[#F53799] hover:bg-[#F53799] text-xs text-white"
+                        : "h-7 text-xs hover:bg-[#FFF2FA] text-[#223047]"
+                    }
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
 
-            <div className="flex gap-2 mt-4 pt-2 border-t border-[#FFD9EC]">
-              <Button
-                disabled={isSimulating}
-                onClick={handleApplySimulation}
-                className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs py-1"
-                size="sm"
+            {/* SUMMARY CARDS: RAINY VS DRY PERFORMANCE */}
+            {weatherImpactData?.summary && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+                <div className="p-3.5 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl flex flex-col justify-between">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs text-[#223047] opacity-60">Rainy Days Avg Revenue</span>
+                    <InfoTooltip label="Average daily Cafe revenue on days with recorded precipitation ≥ 2.0 mm (moderate to heavy rain) in Lucena City via Open-Meteo API." />
+                  </div>
+                  <div className="text-base md:text-xl font-bold text-[#223047] my-0.5">
+                    ₱{Number(weatherImpactData.summary.avgRainyRevenue || 0).toLocaleString()}
+                  </div>
+                  <div className="text-[10px] text-cyan-600 font-semibold">
+                    {weatherImpactData.summary.rainyDaysCount} rainy days recorded
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl flex flex-col justify-between">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs text-[#223047] opacity-60">Clear / Dry Days Avg Revenue</span>
+                    <InfoTooltip label="Average daily Cafe revenue on clear or light-dry days with precipitation < 2.0 mm in Lucena City." />
+                  </div>
+                  <div className="text-base md:text-xl font-bold text-[#223047] my-0.5">
+                    ₱{Number(weatherImpactData.summary.avgDryRevenue || 0).toLocaleString()}
+                  </div>
+                  <div className="text-[10px] text-amber-600 font-semibold">
+                    {weatherImpactData.summary.dryDaysCount} dry days recorded
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl flex flex-col justify-between">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-xs text-[#223047] opacity-60">Rain Elasticity Impact</span>
+                    <InfoTooltip label="Percentage difference in revenue between rainy days and clear days: ((Rainy Avg - Dry Avg) / Dry Avg) × 100. Fed as an exogenous regressor into SARIMAX & Prophet models." />
+                  </div>
+                  <div className="text-base md:text-xl font-bold text-[#D42A7D] my-0.5">
+                    {weatherImpactData.summary.rainDipPercent > 0
+                      ? `-${weatherImpactData.summary.rainDipPercent}% on rainy days`
+                      : `+${Math.abs(weatherImpactData.summary.rainDipPercent)}% surge`}
+                  </div>
+                  <div className="text-[10px] text-[#223047] opacity-50">
+                    Exogenous SARIMAX feature
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* DUAL-AXIS TIME SERIES CHART */}
+            {!weatherImpactData?.series?.length ? (
+              <div className="py-8 text-center text-sm text-slate-400">
+                Loading exogenous weather impact data...
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <ResponsiveContainer width="100%" height={300} className="md:!h-[360px]">
+                  <ComposedChart data={weatherImpactData.series} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      stroke="#223047"
+                      tickFormatter={formatChartDate}
+                      style={{ fontSize: "10px" }}
+                    />
+                    <YAxis
+                      yAxisId="left"
+                      stroke="#223047"
+                      style={{ fontSize: "10px" }}
+                      tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      stroke="#06B6D4"
+                      style={{ fontSize: "10px" }}
+                      tickFormatter={(val) => `${val} mm`}
+                    />
+                    <Tooltip
+                      formatter={(value: any, name: any) => {
+                        if (name === "Daily Net Sales") return [`₱${Number(value).toLocaleString()}`, name];
+                        if (name === "Rainfall (mm)") return [`${Number(value)} mm`, name];
+                        if (name === "Temperature (°C)") return [`${Number(value)}°C`, name];
+                        return [value, name];
+                      }}
+                      labelFormatter={(label) => formatChartDate(String(label))}
+                      contentStyle={{
+                        backgroundColor: "white",
+                        border: "1px solid #FFD9EC",
+                        borderRadius: "12px",
+                        padding: "12px",
+                        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                      }}
+                    />
+                    <Bar
+                      yAxisId="right"
+                      dataKey="rainfallMm"
+                      name="Rainfall (mm)"
+                      fill="#06B6D4"
+                      opacity={0.65}
+                      radius={[4, 4, 0, 0]}
+                      barSize={14}
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="revenue"
+                      name="Daily Net Sales"
+                      stroke="#F53799"
+                      strokeWidth={2.5}
+                      dot={{ r: 3, fill: "#F53799" }}
+                      activeDot={{ r: 6 }}
+                      animationDuration={800}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+
+                <div className="flex flex-wrap justify-center gap-4 md:gap-8 pt-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-[#F53799] rounded-full" />
+                    <span className="text-xs text-[#223047]">Daily Net Sales (Left Y-Axis, ₱)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-[#06B6D4] opacity-70 rounded" />
+                    <span className="text-xs text-[#223047]">Rainfall Volume (Right Y-Axis, mm)</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ══ 2-COLUMN SIDE-BY-SIDE: CO-ATTACHMENT INDEX + CATEGORY REVENUE CONTRIBUTION ══ */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
+        {/* 1. DUAL-DINER CO-ATTACHMENT INDEX (5 cols) */}
+        <div className="lg:col-span-5 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 flex flex-col justify-between space-y-4">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl font-bold text-[#223047]">
+                  Human vs. Pet Co-Attachment
+                </h2>
+                <InfoTooltip label="Cross-Species Basket Analysis: Measures how frequently pet parents purchase food for both themselves and their pets in a single ticket, and tracks AOV lift." />
+              </div>
+              <Badge className="bg-[#F53799] text-white hover:bg-[#F53799] px-2 py-0.5 text-[11px]">
+                +{coAttachmentData?.aovLiftPercent ?? 7}% AOV Lift
+              </Badge>
+            </div>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              Basket composition: Dual-Diner vs Solo Human vs Solo Pet dining
+            </p>
+          </div>
+
+          {/* DONUT CHART + LEFT TOOLTIP PANEL */}
+          <div className="relative my-1" style={{ height: 190 }}>
+            {/* Custom left-side tooltip – white card, no overlap */}
+            <div
+              className="absolute left-0 top-0 bottom-0 flex flex-col justify-center"
+              style={{ width: "38%", pointerEvents: "none" }}
+            >
+              {hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex] ? (
+                <div
+                  className="bg-white rounded-2xl shadow-lg border px-3 py-2.5 text-left text-[11px] transition-all duration-200"
+                  style={{ borderColor: donutSegments[hoveredDonutIndex].color + "55" }}
+                >
+                  <div className="flex items-center gap-1.5 font-bold text-[#223047] mb-1.5">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: donutSegments[hoveredDonutIndex].color }}
+                    />
+                    <span className="leading-tight">{donutSegments[hoveredDonutIndex].name.split(" (")[0]}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between gap-1">
+                      <span className="text-[10px] text-[#223047]/50">Share</span>
+                      <span className="font-extrabold" style={{ color: donutSegments[hoveredDonutIndex].color }}>
+                        {donutSegments[hoveredDonutIndex].share}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-1">
+                      <span className="text-[10px] text-[#223047]/50">Orders</span>
+                      <span className="font-bold text-[#223047]">
+                        {Number(donutSegments[hoveredDonutIndex].baskets || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-1">
+                      <span className="text-[10px] text-[#223047]/50">Revenue</span>
+                      <span className="font-bold text-[#06B6D4]">
+                        ₱{Number(donutSegments[hoveredDonutIndex].revenue || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-1 pt-1 border-t border-[#FFD9EC]">
+                      <span className="text-[10px] text-[#223047]/50">AOV</span>
+                      <span className="font-extrabold text-[#F53799]">₱{donutSegments[hoveredDonutIndex].aov}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-[#223047]/30 text-center italic leading-snug px-1">
+                  Hover a slice
+                  <br />to see details
+                </div>
+              )}
+            </div>
+
+            {/* Pie pushed to right side */}
+            <ResponsiveContainer width="100%" height={190}>
+              <PieChart>
+                <Pie
+                  data={donutSegments}
+                  dataKey="share"
+                  nameKey="name"
+                  cx="68%"
+                  cy="50%"
+                  innerRadius={52}
+                  outerRadius={78}
+                  strokeWidth={2}
+                  stroke="#FFFFFF"
+                  paddingAngle={3}
+                  onMouseEnter={(_, index) => setHoveredDonutIndex(index)}
+                  onMouseLeave={() => setHoveredDonutIndex(null)}
+                >
+                  {donutSegments.map((entry: any, index: number) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.color}
+                      className="cursor-pointer transition-all duration-200"
+                      opacity={hoveredDonutIndex === null || hoveredDonutIndex === index ? 1 : 0.45}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+
+            {/* Center Label – reactive to hover */}
+            <div
+              className="absolute top-0 bottom-0 flex flex-col items-center justify-center pointer-events-none transition-all duration-200"
+              style={{ left: "68%", transform: "translateX(-50%)" }}
+            >
+              <span
+                className="text-2xl font-black leading-none tracking-tight transition-colors duration-200"
+                style={{
+                  color: hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex]
+                    ? donutSegments[hoveredDonutIndex].color
+                    : "#223047",
+                }}
               >
-                {isSimulating ? "Simulating..." : "Run Simulator"}
-              </Button>
-              <Button
-                disabled={isSimulating}
-                onClick={handleResetSimulation}
-                variant="outline"
-                className="border-[#FFD9EC] text-xs py-1 px-2"
-                size="sm"
+                {hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex]
+                  ? `${donutSegments[hoveredDonutIndex].share}%`
+                  : `${coAttachmentData?.coAttachmentRate ?? 22.8}%`}
+              </span>
+              <span
+                className="text-[10px] font-bold mt-1 leading-tight text-center max-w-[80px] transition-colors duration-200"
+                style={{
+                  color: hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex]
+                    ? donutSegments[hoveredDonutIndex].color
+                    : "#F53799",
+                }}
               >
-                Reset to Live
-              </Button>
+                {hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex]
+                  ? donutSegments[hoveredDonutIndex].name.split(" (")[0]
+                  : "Co-Attach"}
+              </span>
+              <span className="text-[9px] font-semibold text-[#223047] opacity-60 mt-0.5 text-center">
+                {hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex]
+                  ? `${Number(donutSegments[hoveredDonutIndex].baskets || 0).toLocaleString()} orders`
+                  : `${Number(coAttachmentData?.segments?.[0]?.baskets || 8100).toLocaleString()} dual`}
+              </span>
             </div>
           </div>
+
+          {/* SEGMENT ROWS & AOV COMPARISON */}
+          <div className="space-y-2 pt-2 border-t border-[#FFD9EC]">
+            {donutSegments.map((seg: any, index: number) => (
+              <div
+                key={seg.name}
+                className={`flex items-center justify-between p-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
+                  hoveredDonutIndex === index
+                    ? "bg-[#FFF0F8] border border-[#F53799] shadow-sm scale-[1.01]"
+                    : "bg-[#FFF7FB] border border-[#FFD9EC] hover:bg-[#FFF2FA]"
+                }`}
+                onMouseEnter={() => setHoveredDonutIndex(index)}
+                onMouseLeave={() => setHoveredDonutIndex(null)}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: seg.color }} />
+                  <span className="font-semibold text-[#223047] truncate">{seg.name}</span>
+                </div>
+                <div className="flex items-center gap-2.5 flex-shrink-0">
+                  <span className="font-extrabold text-[#223047]">{seg.share}%</span>
+                  <span className="text-[11px] font-bold text-[#223047] bg-white px-2 py-0.5 rounded-md border border-[#FFD9EC] shadow-xs">
+                    ₱{seg.aov} AOV
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 2. CATEGORY REVENUE CONTRIBUTION (7 cols) */}
+        <div className="lg:col-span-7 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 flex flex-col justify-between space-y-4">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl font-bold text-[#223047]">
+                  Category Revenue Contribution
+                </h2>
+                <InfoTooltip label="Category Management: Aggregates Cafe sales across beverage, food, and pet bakery categories to evaluate high-level product line performance." />
+              </div>
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-2 py-0.5 text-[11px]">
+                {cafeCategoryRevenueData.length || 5} Categories
+              </Badge>
+            </div>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              Total cafe sales ranked by food, beverage, and pet bakery category
+            </p>
+          </div>
+
+          {cafeCategoryRevenueData.length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-400">
+              No category data available. Upload Cafe transaction data to populate category ranking.
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center">
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart
+                  data={cafeCategoryRevenueData}
+                  layout="vertical"
+                  margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    stroke="#223047"
+                    style={{ fontSize: "10px" }}
+                    tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="category"
+                    stroke="#223047"
+                    width={100}
+                    style={{ fontSize: "11px", fontWeight: 600 }}
+                  />
+                  <Tooltip
+                    formatter={(value: any, name: any, item: any) => [
+                      `₱${Number(value).toLocaleString()} (${item.payload.share}%)`,
+                      "Revenue",
+                    ]}
+                    contentStyle={{
+                      backgroundColor: "white",
+                      border: "1px solid #FFD9EC",
+                      borderRadius: "12px",
+                      padding: "10px",
+                    }}
+                  />
+                  <Bar
+                    dataKey="revenue"
+                    name="Category Revenue"
+                    fill="#F53799"
+                    radius={[0, 6, 6, 0]}
+                    animationDuration={800}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1422,7 +1920,7 @@ export function Cafe() {
               </div>
             </div>
           )}
-        </div>
+      </div>
 
       {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
       <div

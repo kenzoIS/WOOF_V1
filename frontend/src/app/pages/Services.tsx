@@ -199,8 +199,29 @@ export function Services() {
   const [humidityOverride, setHumidityOverride] = useState(60);
   const [forecastMode, setForecastMode] = useState<string>("production");
   const [isSimulating, setIsSimulating] = useState(false);
-  const [showAcademicView, setShowAcademicView] = useState(false);
   const [chartGranularity, setChartGranularity] = useState<TimeGrain>("monthly");
+  const [realtimeRefresh, setRealtimeRefresh] = useState(0);
+
+  // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
+      const eventType = customEvent.detail?.type;
+      if (
+        !eventType ||
+        eventType === "upload_processed" ||
+        eventType === "etl_completed" ||
+        eventType === "forecast_ready"
+      ) {
+        setRealtimeRefresh((prev) => prev + 1);
+      }
+    };
+
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => {
+      window.removeEventListener("woof:realtime", handleRealtime);
+    };
+  }, []);
 
   useEffect(() => {
     let targetDays = 30;
@@ -243,7 +264,7 @@ export function Services() {
       console.error("Forecast fetch failed:", err);
       toast.error(err.message || "Failed to fetch Services forecast. Please try again.");
     });
-  }, [viewMode, customForecastStart, customForecastEnd, forecastMode]);
+  }, [viewMode, customForecastStart, customForecastEnd, forecastMode, realtimeRefresh]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);

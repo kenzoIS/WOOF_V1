@@ -49,7 +49,9 @@ def build_training_examples(history_rows):
     if df.empty:
         return pd.DataFrame()
 
-    df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), errors="coerce")
+    df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="ISO8601", errors="coerce")
+    if df["timestamp"].isna().all():
+        df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="mixed", errors="coerce")
     df = df.dropna(subset=["timestamp"])
     if df.empty:
         return pd.DataFrame()
@@ -259,7 +261,9 @@ def detect_quiet_period(history_rows):
         return 15, 45.0
 
     # Parse hour and sum quantity
-    df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"])
+    df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"], format="ISO8601", errors="coerce")
+    if df["transactionTimestamp"].isna().all():
+        df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"], format="mixed", errors="coerce")
     df["hour"] = df["transactionTimestamp"].dt.hour
     df["quantitySold"] = pd.to_numeric(df["quantitySold"], errors="coerce").fillna(0)
 

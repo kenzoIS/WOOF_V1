@@ -105,10 +105,11 @@ export class ExogenousDataService {
     );
     const results = new Map<string, WeatherRecord>();
     for (const [date, record] of cachedByDate) {
-      results.set(date, record);
+      if (!record.isSynthetic) {
+        results.set(date, record);
+      }
     }
 
-    const apiKey = this.configService.get<string>('OPENWEATHER_API_KEY'); // Kept for backwards compatibility if needed, but not used by Open-Meteo
     let apiFetchCount = 0;
     let syntheticCount = 0;
 
@@ -136,8 +137,8 @@ export class ExogenousDataService {
       await this.upsertWeatherRecord(lat, lng, record);
     }
 
-    this.lastWeatherSource =
-      syntheticCount > 0 ? 'synthetic' : apiFetchCount > 0 ? 'api' : 'cache';
+    const hasRealData = apiFetchCount > 0 || Array.from(results.values()).some((r) => !r.isSynthetic);
+    this.lastWeatherSource = hasRealData ? (apiFetchCount > 0 ? 'api' : 'cache') : 'synthetic';
 
     return dates.map(
       (date) =>

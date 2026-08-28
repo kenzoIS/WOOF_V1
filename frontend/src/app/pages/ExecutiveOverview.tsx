@@ -1,51 +1,158 @@
-import { TrendingUp, Users, DollarSign, ArrowUp, ArrowDown } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { useState, useEffect, useMemo } from "react";
+import { TrendingUp, Users, DollarSign } from "lucide-react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
+import { getDashboard, getForecast, getRetailForecastByChannel } from "../lib/api";
 
 export function ExecutiveOverview() {
-  // Mock data for revenue trends
-  const revenueData = [
-    { year: "2021", cafe: 45000, retail: 32000, services: 28000 },
-    { year: "2022", cafe: 52000, retail: 38000, services: 35000 },
-    { year: "2023", cafe: 61000, retail: 45000, services: 42000 },
-    { year: "2024", cafe: 70000, retail: 52000, services: 51000 },
-    { year: "2025", cafe: 82000, retail: 61000, services: 63000 },
-  ];
+  const [cafeData, setCafeData] = useState<any>(null);
+  const [servicesData, setServicesData] = useState<any>(null);
+  const [retailData, setRetailData] = useState<any>(null);
+  const [cafeForecast, setCafeForecast] = useState<any>(null);
+  const [servicesForecast, setServicesForecast] = useState<any>(null);
+  const [retailForecast, setRetailForecast] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [realtimeRefresh, setRealtimeRefresh] = useState(0);
 
-  const topServices = [
-    { service: "Full Grooming Package", margin: "68%", revenue: "₱45,230", trend: "+12%" },
-    { service: "Paw-dicure + Nail Trim", margin: "62%", revenue: "₱32,150", trend: "+8%" },
-    { service: "Premium Bath & Blowout", margin: "58%", revenue: "₱28,940", trend: "+15%" },
-    { service: "Teeth Cleaning Service", margin: "71%", revenue: "₱18,560", trend: "+5%" },
-    { service: "De-shedding Treatment", margin: "54%", revenue: "₱15,780", trend: "-3%" },
-  ];
+  // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
+      const eventType = customEvent.detail?.type;
+      if (
+        !eventType ||
+        eventType === "upload_processed" ||
+        eventType === "etl_completed" ||
+        eventType === "forecast_ready"
+      ) {
+        setRealtimeRefresh((prev) => prev + 1);
+      }
+    };
+
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => {
+      window.removeEventListener("woof:realtime", handleRealtime);
+    };
+  }, []);
+
+  useEffect(() => {
+    Promise.allSettled([
+      getDashboard("cafe").then(setCafeData).catch(() => {}),
+      getDashboard("services").then(setServicesData).catch(() => {}),
+      getDashboard("retail").then(setRetailData).catch(() => {}),
+      getForecast("cafe", { compact: "true" })
+        .then(setCafeForecast)
+        .catch(() => {}),
+      getForecast("services", { compact: "true" })
+        .then(setServicesForecast)
+        .catch(() => {}),
+      getRetailForecastByChannel().then(setRetailForecast).catch(() => {}),
+    ]).finally(() => setLoading(false));
+  }, [realtimeRefresh]);
+
+  // Sum KPIs across all sectors
+  const totalRevenue = useMemo(
+    () =>
+      (cafeData?.kpis?.totalRevenue || 0) +
+      (servicesData?.kpis?.totalRevenue || 0) +
+      (retailData?.kpis?.totalRevenue || 0),
+    [cafeData, servicesData, retailData],
+  );
+
+  const totalOrders = useMemo(
+    () =>
+      (cafeData?.kpis?.totalOrders || 0) +
+      (servicesData?.kpis?.totalOrders || 0) +
+      (retailData?.kpis?.totalOrders || 0),
+    [cafeData, servicesData, retailData],
+  );
+
+  // Build yearly revenue chart from historical data
+  const revenueData = useMemo(() => {
+    const yearMap: Record<
+      string,
+      { cafe: number; services: number; retail: number }
+    > = {};
+
+    const addRevenue = (
+      historicals: any[],
+      sector: "cafe" | "services" | "retail",
+    ) => {
+      (historicals || []).forEach((point: any) => {
+        const year = String(point.date || "").slice(0, 4);
+        if (!year || year.length !== 4 || isNaN(Number(year))) return;
+        if (!yearMap[year])
+          yearMap[year] = { cafe: 0, services: 0, retail: 0 };
+        yearMap[year][sector] += Number(point.revenue || point.actual || 0);
+      });
+    };
+
+    addRevenue(cafeForecast?.historical || [], "cafe");
+    addRevenue(servicesForecast?.historical || [], "services");
+
+    // Retail: merge physical + online historical
+    const physHistory = retailForecast?.physical?.historical || [];
+    const onlineHistory = retailForecast?.online?.historical || [];
+    [...physHistory, ...onlineHistory].forEach((point: any) => {
+      const year = String(point.date || "").slice(0, 4);
+      if (!year || year.length !== 4 || isNaN(Number(year))) return;
+      if (!yearMap[year])
+        yearMap[year] = { cafe: 0, services: 0, retail: 0 };
+      yearMap[year].retail += Number(point.revenue || 0);
+    });
+
+    return Object.entries(yearMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([year, vals]) => ({
+        year,
+        Cafe: Math.round(vals.cafe),
+        Services: Math.round(vals.services),
+        Retail: Math.round(vals.retail),
+      }));
+  }, [cafeForecast, servicesForecast, retailForecast]);
+
+  // Top services from live dashboard data
+  const topServices = useMemo(() => {
+    const items: any[] = servicesData?.topItems || [];
+    return items.slice(0, 5).map((item: any) => ({
+      service: item.name,
+      revenue: `₱${Number(item.revenue || 0).toLocaleString()}`,
+      orders: Number(item.orderCount || item.quantity || 0).toLocaleString(),
+    }));
+  }, [servicesData]);
 
   const metrics = [
     {
-      title: "Total Revenue",
-      value: "₱206,000",
-      change: "+18.5%",
-      trend: "up",
-      subtitle: "5-Year Trend",
+      title: "Total Revenue (All Sectors)",
+      value: `₱${totalRevenue.toLocaleString()}`,
+      subtitle: "Cafe + Services + Retail combined",
       icon: DollarSign,
-      color: "blue"
+      colorBg: "bg-blue-100",
+      colorIcon: "text-blue-600",
     },
     {
-      title: "Multi-Sector Foot Traffic",
-      value: "3,842",
-      change: "+12.3%",
-      trend: "up",
-      subtitle: "Monthly Visitors",
+      title: "Total Transactions",
+      value: totalOrders.toLocaleString(),
+      subtitle: "Across all channels",
       icon: Users,
-      color: "teal"
+      colorBg: "bg-teal-100",
+      colorIcon: "text-teal-600",
     },
     {
-      title: "Active Unique Customers",
-      value: "1,256",
-      change: "+8.7%",
-      trend: "up",
-      subtitle: "Repeat Rate: 64%",
+      title: "Active SKUs (Retail)",
+      value: String(retailData?.topItems?.length || 0),
+      subtitle: "Retail product catalog",
       icon: TrendingUp,
-      color: "purple"
+      colorBg: "bg-purple-100",
+      colorIcon: "text-purple-600",
     },
   ];
 
@@ -53,134 +160,224 @@ export function ExecutiveOverview() {
     <div className="space-y-6">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Enterprise Health Monitor</h1>
-        <p className="text-sm text-slate-600 mt-1">Comprehensive performance overview across all business sectors</p>
+        <h1 className="text-2xl font-bold text-slate-900">
+          Enterprise Health Monitor
+        </h1>
+        <p className="text-sm text-slate-600 mt-1">
+          Comprehensive performance overview across all business sectors
+        </p>
       </div>
 
-      {/* Large Metric Cards */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-6">
         {metrics.map((metric, idx) => (
-          <div key={idx} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+          <div
+            key={idx}
+            className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow"
+          >
             <div className="flex items-start justify-between mb-4">
-              <div className={`w-12 h-12 rounded-lg bg-${metric.color}-100 flex items-center justify-center`}>
-                <metric.icon className={`w-6 h-6 text-${metric.color}-600`} />
-              </div>
-              <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${
-                metric.trend === "up" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-              }`}>
-                {metric.trend === "up" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                <span className="text-xs font-medium">{metric.change}</span>
+              <div
+                className={`w-12 h-12 rounded-lg ${metric.colorBg} flex items-center justify-center`}
+              >
+                <metric.icon className={`w-6 h-6 ${metric.colorIcon}`} />
               </div>
             </div>
             <h3 className="text-sm text-slate-600 mb-1">{metric.title}</h3>
-            <p className="text-3xl font-bold text-slate-900 mb-1">{metric.value}</p>
+            {loading ? (
+              <div className="h-9 bg-slate-200 rounded animate-pulse w-2/3 mb-2" />
+            ) : (
+              <p className="text-3xl font-bold text-slate-900 mb-1">
+                {metric.value}
+              </p>
+            )}
             <p className="text-xs text-slate-500">{metric.subtitle}</p>
           </div>
         ))}
       </div>
 
-      {/* Main Chart - Revenue Contributions */}
+      {/* Revenue Contributions Area Chart */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
         <div className="mb-6">
-          <h2 className="text-lg font-semibold text-slate-900">Revenue Contributions by Sector</h2>
-          <p className="text-sm text-slate-600 mt-1">5-year historical performance analysis</p>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Revenue Contributions by Sector
+          </h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Historical performance by year from ingested transaction data
+          </p>
         </div>
 
         <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={revenueData}>
-              <defs>
-                <linearGradient key="colorCafe-gradient" id="colorCafe" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                </linearGradient>
-                <linearGradient key="colorRetail-gradient" id="colorRetail" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#14b8a6" stopOpacity={0}/>
-                </linearGradient>
-                <linearGradient key="colorServices-gradient" id="colorServices" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="year" stroke="#64748b" />
-              <YAxis stroke="#64748b" />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'white', 
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                }}
-              />
-              <Legend />
-              <Area 
-                type="monotone" 
-                dataKey="cafe" 
-                stackId="1" 
-                stroke="#3b82f6" 
-                fill="url(#colorCafe)" 
-                name="Cafe"
-              />
-              <Area 
-                type="monotone" 
-                dataKey="retail" 
-                stackId="1" 
-                stroke="#14b8a6" 
-                fill="url(#colorRetail)" 
-                name="Retail"
-              />
-              <Area 
-                type="monotone" 
-                dataKey="services" 
-                stackId="1" 
-                stroke="#a855f7" 
-                fill="url(#colorServices)" 
-                name="Services"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          {loading ? (
+            <div className="h-full bg-slate-100 rounded-xl animate-pulse" />
+          ) : revenueData.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+              No historical data available. Upload transaction CSV files to
+              populate this chart.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={revenueData}>
+                <defs>
+                  <linearGradient
+                    id="colorCafe"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                    <stop
+                      offset="95%"
+                      stopColor="#3b82f6"
+                      stopOpacity={0}
+                    />
+                  </linearGradient>
+                  <linearGradient
+                    id="colorRetail"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3} />
+                    <stop
+                      offset="95%"
+                      stopColor="#14b8a6"
+                      stopOpacity={0}
+                    />
+                  </linearGradient>
+                  <linearGradient
+                    id="colorServices"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3} />
+                    <stop
+                      offset="95%"
+                      stopColor="#a855f7"
+                      stopOpacity={0}
+                    />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="year" stroke="#64748b" />
+                <YAxis
+                  stroke="#64748b"
+                  tickFormatter={(v) =>
+                    `₱${Number(v).toLocaleString()}`
+                  }
+                />
+                <Tooltip
+                  formatter={(value: any, name: any) => [
+                    `₱${Number(value).toLocaleString()}`,
+                    name,
+                  ]}
+                  contentStyle={{
+                    backgroundColor: "white",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                  }}
+                />
+                <Legend />
+                <Area
+                  type="monotone"
+                  dataKey="Cafe"
+                  stackId="1"
+                  stroke="#3b82f6"
+                  fill="url(#colorCafe)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="Retail"
+                  stackId="1"
+                  stroke="#14b8a6"
+                  fill="url(#colorRetail)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="Services"
+                  stackId="1"
+                  stroke="#a855f7"
+                  fill="url(#colorServices)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 
-      {/* Top 5 Services Table */}
+      {/* Top Services Table — live from dashboard/services */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
         <div className="mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">Top 5 Services by Margin</h2>
-          <p className="text-sm text-slate-600 mt-1">Highest performing service offerings</p>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Top Services by Revenue
+          </h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Highest-performing service offerings from transaction history
+          </p>
         </div>
 
         <div className="overflow-hidden">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="text-left py-3 px-4 text-xs font-medium text-slate-600 uppercase tracking-wider">Service</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-slate-600 uppercase tracking-wider">Margin</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-slate-600 uppercase tracking-wider">Revenue</th>
-                <th className="text-left py-3 px-4 text-xs font-medium text-slate-600 uppercase tracking-wider">Trend</th>
+                <th className="text-left py-3 px-4 text-xs font-medium text-slate-600 uppercase tracking-wider">
+                  Service
+                </th>
+                <th className="text-left py-3 px-4 text-xs font-medium text-slate-600 uppercase tracking-wider">
+                  Revenue
+                </th>
+                <th className="text-left py-3 px-4 text-xs font-medium text-slate-600 uppercase tracking-wider">
+                  Orders
+                </th>
               </tr>
             </thead>
             <tbody>
-              {topServices.map((service, idx) => (
-                <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                  <td className="py-4 px-4 text-sm text-slate-900">{service.service}</td>
-                  <td className="py-4 px-4">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                      {service.margin}
-                    </span>
-                  </td>
-                  <td className="py-4 px-4 text-sm font-medium text-slate-900">{service.revenue}</td>
-                  <td className="py-4 px-4">
-                    <span className={`inline-flex items-center gap-1 text-sm font-medium ${
-                      service.trend.startsWith("+") ? "text-green-600" : "text-red-600"
-                    }`}>
-                      {service.trend.startsWith("+") ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                      {service.trend}
-                    </span>
+              {loading ? (
+                [1, 2, 3, 4, 5].map((i) => (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="py-4 px-4">
+                      <div className="h-4 bg-slate-200 rounded animate-pulse w-3/4" />
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="h-4 bg-slate-200 rounded animate-pulse w-1/2" />
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="h-4 bg-slate-200 rounded animate-pulse w-1/4" />
+                    </td>
+                  </tr>
+                ))
+              ) : topServices.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="py-8 text-center text-sm text-slate-400"
+                  >
+                    No services data available. Upload services transaction
+                    data to populate this table.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                topServices.map((service: any, idx: number) => (
+                  <tr
+                    key={idx}
+                    className="border-b border-slate-100 hover:bg-slate-50 transition-colors"
+                  >
+                    <td className="py-4 px-4 text-sm text-slate-900">
+                      {service.service}
+                    </td>
+                    <td className="py-4 px-4 text-sm font-medium text-slate-900">
+                      {service.revenue}
+                    </td>
+                    <td className="py-4 px-4 text-sm text-slate-600">
+                      {service.orders}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

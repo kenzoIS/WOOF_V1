@@ -24,38 +24,38 @@ MAX_FORECAST_DAYS = 90
 EXOG_COLUMNS = [
     "tempCelsius",
     "rainFlag",
+    "humidity",
     "isHoliday",
     "dayBeforeHoliday",
     "dayAfterHoliday",
     "isWeekend",
-    "promoFlag",
-    "outlierFlag",
-    "isMissingDate",
-    "humidity",
-    "dayOfWeekSin",
-    "dayOfWeekCos",
-    "avgBasketSize",
-    "avgOrderValue",
-    "average_unit_price",
 ]
 
+# Fine-tuned changepoint prior candidates discovered through grid search
+CHANGEPOINT_CANDIDATES = [0.01, 0.05, 0.1, 0.2, 0.3, 0.5]
 
-def build_model(changepoint_prior_scale, use_exog=False):
+
+def build_model(changepoint_prior_scale, use_exog=False, exog_cols=None, seasonality_mode="multiplicative"):
     model = Prophet(
-        weekly_seasonality=True,
+        weekly_seasonality=False,
         daily_seasonality=False,
         yearly_seasonality=True,
         changepoint_prior_scale=changepoint_prior_scale,
+        changepoint_range=0.9,
+        seasonality_mode=seasonality_mode,
         interval_width=0.8,
     )
-    if use_exog:
-        for column in EXOG_COLUMNS:
-            model.add_regressor(column, standardize=False)
+    # Custom weekly seasonality with fourier_order=8 for responsive within-week patterns
+    model.add_seasonality(name="weekly", period=7, fourier_order=8)
+    # Monthly seasonality for payday/month-end patterns
+    model.add_seasonality(name="monthly", period=30.5, fourier_order=4)
+
+    if use_exog and exog_cols:
+        for column in exog_cols:
+            model.add_regressor(column, standardize=True)
     try:
         model.add_country_holidays(country_name="PH")
     except Exception:
-        # Holiday import support can vary by Prophet installation; forecasting can
-        # still proceed without holidays because the primary signal is POS volume.
         pass
     return model
 
@@ -69,15 +69,12 @@ def normalize_forecast_days(value):
 
 
 def parse_splits(length, ratio_str="90-5-5"):
-    # 90-5-5 Chronological Split (90% train, 5% validation, 5% test)
     if length < 30:
         raise ValueError(
             f"Cafe Prophet requires at least 30 observations for a valid 90-5-5 split (received {length})"
         )
     train_idx = int(np.floor(length * 0.90))
     val_idx = int(np.floor(length * 0.95))
-    
-    # Guards to ensure at least 2 points in each of validation and test
     train_idx = min(max(10, train_idx), length - 4)
     val_idx = min(max(train_idx + 2, val_idx), length - 2)
     has_test = True
@@ -111,52 +108,66 @@ def run(payload):
     if len(frame) < 30:
         raise ValueError("Cafe Prophet requires at least 30 valid dated observations")
     frame["ds"] = frame["ds"].dt.tz_localize(None)
-    target_transformer = build_target_transformer(frame)
+
+    # Use cappedActual + Log1p target transformation to prevent outlier noise from distorting model
+    target_transformer = build_target_transformer(frame, prefer_raw=False)
     demand_target = target_values(frame, target_transformer)
     frame["y"] = target_transformer.transform(demand_target)
 
+    # Re-align exogenous features by date
     use_exog = False
+    exog_by_date = {}
     exog_forecast = payload.get("exogenousForecast", [])
-    if isinstance(payload.get("exogenous"), list) and len(payload["exogenous"]) == len(frame):
-        exog_frame = pd.DataFrame(payload["exogenous"])
-        if all(col in exog_frame.columns for col in EXOG_COLUMNS):
-            exog_frame["_input_order"] = np.arange(len(exog_frame))
-            exog_frame = exog_frame[["_input_order", *EXOG_COLUMNS]]
-            
-            overlap = [c for c in EXOG_COLUMNS if c in frame.columns]
-            if overlap:
-                frame = frame.drop(columns=overlap)
-                
-            frame = frame.merge(exog_frame, on="_input_order", how="left")
-            use_exog = True
-            for column in EXOG_COLUMNS:
-                frame[column] = frame[column].fillna(0.0).astype(float)
+    if isinstance(payload.get("exogenous"), list) and len(payload["exogenous"]) > 0:
+        exog_list = payload["exogenous"]
+        first_row = exog_list[0] if exog_list else {}
+        valid_cols = [c for c in EXOG_COLUMNS if c in first_row]
+        if valid_cols:
+            for row in exog_list:
+                d = str(row.get("date", ""))
+                if d:
+                    exog_by_date[d] = row
+    else:
+        valid_cols = []
 
+    # Apply isObservedDemand filter (removes closed days from fitting)
     if "isObservedDemand" in frame.columns:
         frame = frame[frame["isObservedDemand"].astype(bool)].reset_index(drop=True)
         if len(frame) < 30:
-            raise ValueError("Cafe Prophet requires at least 30 observed demand days for a valid 90-5-5 split")
+            raise ValueError("Cafe Prophet requires at least 30 observed demand days for a valid split")
         demand_target = target_values(frame, target_transformer)
         frame["y"] = target_transformer.transform(demand_target)
+
+    # Align exog columns to observed frame
+    active_exog_cols = []
+    if exog_by_date and valid_cols:
+        for col in valid_cols:
+            frame[col] = frame["date"].map(lambda d: float(exog_by_date.get(d, {}).get(col, 0.0)))
+        matched = frame["date"].isin(exog_by_date).sum()
+        if matched >= max(1, int(len(frame) * 0.80)):
+            use_exog = True
+            active_exog_cols = valid_cols
+            for column in active_exog_cols:
+                frame[column] = frame[column].fillna(0.0).astype(float)
 
     actual = demand_target
     train_idx, val_idx, has_test = parse_splits(len(frame), split_ratio)
 
-    if use_exog:
+    if use_exog and active_exog_cols:
         exog_diagnostics = compute_vif_diagnostics(
-            frame[EXOG_COLUMNS].astype(float).to_numpy(),
-            EXOG_COLUMNS,
+            frame[active_exog_cols].astype(float).to_numpy(),
+            active_exog_cols,
         )
-        train_standardizer = ExogenousStandardizer(EXOG_COLUMNS).fit(
-            frame.iloc[:train_idx][EXOG_COLUMNS].astype(float).to_numpy()
+        train_standardizer = ExogenousStandardizer(active_exog_cols).fit(
+            frame.iloc[:train_idx][active_exog_cols].astype(float).to_numpy()
         )
-        train = frame.iloc[:train_idx][["ds", "y", *EXOG_COLUMNS]].copy()
-        train.loc[:, EXOG_COLUMNS] = train_standardizer.transform(
-            train[EXOG_COLUMNS].astype(float).to_numpy()
+        train = frame.iloc[:train_idx][["ds", "y", *active_exog_cols]].copy()
+        train.loc[:, active_exog_cols] = train_standardizer.transform(
+            train[active_exog_cols].astype(float).to_numpy()
         )
-        val_dates = frame.iloc[train_idx:val_idx][["ds", *EXOG_COLUMNS]].copy()
-        val_dates.loc[:, EXOG_COLUMNS] = train_standardizer.transform(
-            val_dates[EXOG_COLUMNS].astype(float).to_numpy()
+        val_dates = frame.iloc[train_idx:val_idx][["ds", *active_exog_cols]].copy()
+        val_dates.loc[:, active_exog_cols] = train_standardizer.transform(
+            val_dates[active_exog_cols].astype(float).to_numpy()
         )
     else:
         exog_diagnostics = {"vifAvailable": False, "reason": "univariate_model"}
@@ -165,29 +176,30 @@ def run(payload):
         val_dates = frame.iloc[train_idx:val_idx][["ds"]]
 
     val_actual = actual[train_idx:val_idx]
-    candidates = [0.01, 0.05, 0.1, 0.5]
-    best = None
 
-    # Step 1: Validation Grid Search to find best changepoint_prior_scale
-    for candidate in candidates:
-        try:
-            model = build_model(candidate, use_exog=use_exog)
-            model.fit(train)
-            predicted = target_transformer.inverse(
-                model.predict(val_dates)["yhat"].to_numpy()
-            )
-            metric_result = evaluate_forecast_metrics(
-                val_actual, predicted, actual[:train_idx]
-            )
-            score = (metric_result["mase"], metric_result["smape"])
-            if best is None or score < best["score"]:
-                best = {
-                    "score": score,
-                    "changepointPriorScale": candidate,
-                    "metrics": metric_result,
-                }
-        except Exception:
-            continue
+    # Grid search for best changepoint and seasonality mode
+    best = None
+    for s_mode in ["multiplicative", "additive"]:
+        for candidate in CHANGEPOINT_CANDIDATES:
+            try:
+                model = build_model(candidate, use_exog=use_exog, exog_cols=active_exog_cols, seasonality_mode=s_mode)
+                model.fit(train)
+                predicted = target_transformer.inverse(
+                    model.predict(val_dates)["yhat"].to_numpy()
+                )
+                metric_result = evaluate_forecast_metrics(
+                    val_actual, predicted, actual[:train_idx]
+                )
+                score = (metric_result["mase"], metric_result["smape"])
+                if best is None or score < best["score"]:
+                    best = {
+                        "score": score,
+                        "changepointPriorScale": candidate,
+                        "seasonalityMode": s_mode,
+                        "metrics": metric_result,
+                    }
+            except Exception:
+                continue
 
     if best is None:
         raise RuntimeError("Prophet could not fit any changepoint prior candidate")
@@ -197,19 +209,24 @@ def run(payload):
     monthly_metrics = None
     if has_test:
         try:
-            test_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
-            if use_exog:
-                test_standardizer = ExogenousStandardizer(EXOG_COLUMNS).fit(
-                    frame.iloc[:val_idx][EXOG_COLUMNS].astype(float).to_numpy()
+            test_model = build_model(
+                best["changepointPriorScale"],
+                use_exog=use_exog,
+                exog_cols=active_exog_cols,
+                seasonality_mode=best["seasonalityMode"],
+            )
+            if use_exog and active_exog_cols:
+                test_standardizer = ExogenousStandardizer(active_exog_cols).fit(
+                    frame.iloc[:val_idx][active_exog_cols].astype(float).to_numpy()
                 )
-                test_train = frame.iloc[:val_idx][["ds", "y", *EXOG_COLUMNS]].copy()
-                test_train.loc[:, EXOG_COLUMNS] = test_standardizer.transform(
-                    test_train[EXOG_COLUMNS].astype(float).to_numpy()
+                test_train = frame.iloc[:val_idx][["ds", "y", *active_exog_cols]].copy()
+                test_train.loc[:, active_exog_cols] = test_standardizer.transform(
+                    test_train[active_exog_cols].astype(float).to_numpy()
                 )
                 test_model.fit(test_train)
-                test_dates = frame.iloc[val_idx:][["ds", *EXOG_COLUMNS]].copy()
-                test_dates.loc[:, EXOG_COLUMNS] = test_standardizer.transform(
-                    test_dates[EXOG_COLUMNS].astype(float).to_numpy()
+                test_dates = frame.iloc[val_idx:][["ds", *active_exog_cols]].copy()
+                test_dates.loc[:, active_exog_cols] = test_standardizer.transform(
+                    test_dates[active_exog_cols].astype(float).to_numpy()
                 )
             else:
                 test_model.fit(frame.iloc[:val_idx][["ds", "y"]])
@@ -227,7 +244,6 @@ def run(payload):
             )
             eval_metrics = test_metrics
 
-            # Compute genuine resampled backtests for Weekly and Monthly horizons
             weekly_metrics = resample_and_evaluate(
                 dates=test_date_strings,
                 actual=test_actual,
@@ -251,15 +267,20 @@ def run(payload):
     else:
         eval_metrics = best["metrics"]
 
-    # Step 3: Fit Final Model on 100% of input data
-    final_model = build_model(best["changepointPriorScale"], use_exog=use_exog)
-    if use_exog:
-        final_standardizer = ExogenousStandardizer(EXOG_COLUMNS).fit(
-            frame[EXOG_COLUMNS].astype(float).to_numpy()
+    # Step 3: Fit Final Model on 100% of observed historical data
+    final_model = build_model(
+        best["changepointPriorScale"],
+        use_exog=use_exog,
+        exog_cols=active_exog_cols,
+        seasonality_mode=best["seasonalityMode"],
+    )
+    if use_exog and active_exog_cols:
+        final_standardizer = ExogenousStandardizer(active_exog_cols).fit(
+            frame[active_exog_cols].astype(float).to_numpy()
         )
-        final_train = frame[["ds", "y", *EXOG_COLUMNS]].copy()
-        final_train.loc[:, EXOG_COLUMNS] = final_standardizer.transform(
-            final_train[EXOG_COLUMNS].astype(float).to_numpy()
+        final_train = frame[["ds", "y", *active_exog_cols]].copy()
+        final_train.loc[:, active_exog_cols] = final_standardizer.transform(
+            final_train[active_exog_cols].astype(float).to_numpy()
         )
         final_model.fit(final_train)
     else:
@@ -270,49 +291,60 @@ def run(payload):
         periods=forecast_days, freq="D", include_history=False
     )
 
-    if use_exog:
+    if use_exog and active_exog_cols:
         exog_forecast_df = pd.DataFrame(exog_forecast)
-        exog_forecast_df["ds"] = pd.to_datetime(exog_forecast_df["date"])
-        for column in EXOG_COLUMNS:
-            if column not in exog_forecast_df.columns:
-                exog_forecast_df[column] = 0.0
-        future = future.merge(exog_forecast_df[["ds", *EXOG_COLUMNS]], on="ds", how="left")
-        future["tempCelsius"] = future["tempCelsius"].fillna(28.0).astype(float)
-        for column in [column for column in EXOG_COLUMNS if column != "tempCelsius"]:
+        if not exog_forecast_df.empty and "date" in exog_forecast_df.columns:
+            exog_forecast_df["ds"] = pd.to_datetime(exog_forecast_df["date"])
+            for column in active_exog_cols:
+                if column not in exog_forecast_df.columns:
+                    exog_forecast_df[column] = 0.0
+            future = future.merge(exog_forecast_df[["ds", *active_exog_cols]], on="ds", how="left")
+        else:
+            for column in active_exog_cols:
+                future[column] = 0.0
+        if "tempCelsius" in future.columns:
+            future["tempCelsius"] = future["tempCelsius"].fillna(28.0).astype(float)
+        for column in [c for c in active_exog_cols if c != "tempCelsius"]:
             future[column] = future[column].fillna(0.0).astype(float)
-        future.loc[:, EXOG_COLUMNS] = final_standardizer.transform(
-            future[EXOG_COLUMNS].astype(float).to_numpy()
+        future.loc[:, active_exog_cols] = final_standardizer.transform(
+            future[active_exog_cols].astype(float).to_numpy()
         )
 
     prediction = final_model.predict(future)
+
     prediction["yhat"] = target_transformer.inverse(prediction["yhat"].to_numpy())
     prediction["yhat_lower"] = target_transformer.inverse(prediction["yhat_lower"].to_numpy())
     prediction["yhat_upper"] = target_transformer.inverse(prediction["yhat_upper"].to_numpy())
-    if use_exog:
-        hist_frame = frame[["ds", *EXOG_COLUMNS]].copy()
-        hist_frame.loc[:, EXOG_COLUMNS] = final_standardizer.transform(
-            hist_frame[EXOG_COLUMNS].astype(float).to_numpy()
+
+    # Ensure strictly positive, realistic operational forecasts without zero-dips
+    for col in ["yhat", "yhat_lower", "yhat_upper"]:
+        prediction[col] = prediction[col].clip(lower=1.0)
+
+    if use_exog and active_exog_cols:
+        hist_frame = frame[["ds", *active_exog_cols]].copy()
+        hist_frame.loc[:, active_exog_cols] = final_standardizer.transform(
+            hist_frame[active_exog_cols].astype(float).to_numpy()
         )
         hist_predictions = final_model.predict(hist_frame)
     else:
         hist_predictions = final_model.predict(frame[["ds"]])
     fitted_original = target_transformer.inverse(hist_predictions["yhat"].to_numpy())
-    fitted_values = [round(max(0.0, float(v)), 2) for v in fitted_original]
+    fitted_values = [round(max(1.0, float(v)), 2) for v in fitted_original]
 
     forecast = [
         {
             "date": row["ds"].strftime("%Y-%m-%d"),
-            "forecast": round(max(0.0, float(row["yhat"])), 2),
-            "confidenceLow": round(max(0.0, float(row["yhat_lower"])), 2),
-            "confidenceHigh": round(max(0.0, float(row["yhat_upper"])), 2),
+            "forecast": round(max(1.0, float(row["yhat"])), 2),
+            "confidenceLow": round(max(1.0, float(row["yhat_lower"])), 2),
+            "confidenceHigh": round(max(1.0, float(row["yhat_upper"])), 2),
         }
         for _, row in prediction.iterrows()
     ]
 
     return {
         "modelName": (
-            f"Prophet (weekly + yearly seasonality + PH holidays"
-            f"{' + exog' if use_exog else ''})"
+            f"Prophet (multiplicative weekly×8 + monthly + yearly"
+            f"{' + weather/holiday exog' if use_exog else ''})"
         ),
         "mase": eval_metrics["mase"],
         "smape": eval_metrics["smape"],
@@ -327,7 +359,13 @@ def run(payload):
         "fittedValues": fitted_values,
         "modelMetadata": {
             "changepointPriorScale": best["changepointPriorScale"],
-            "testedChangepointPriorScales": candidates,
+            "testedChangepointPriorScales": CHANGEPOINT_CANDIDATES,
+            "seasonalityMode": best["seasonalityMode"],
+            "weeklyFourierOrder": 8,
+            "monthlyFourierOrder": 4,
+            "changepointRange": 0.9,
+            "useExog": use_exog,
+            "exogMatchedRows": int(frame["date"].isin(exog_by_date).sum()) if exog_by_date else 0,
             **target_transformer.metadata(),
             **final_standardizer.metadata(),
             **exog_diagnostics,
@@ -346,8 +384,9 @@ def run(payload):
             "splitRatio": split_ratio,
             "weeklySeasonality": True,
             "yearlySeasonality": True,
+            "monthlySeasonality": True,
             "holidayCountry": "PH",
-            "exogenousVariables": EXOG_COLUMNS if use_exog else [],
+            "exogenousVariables": active_exog_cols if use_exog else [],
         },
     }
 

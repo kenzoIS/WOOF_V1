@@ -102,13 +102,21 @@ class ExogenousStandardizer:
         }
 
 
-def build_target_transformer(frame: pd.DataFrame) -> Log1pTargetTransformer:
-    source_column = "cappedActual" if "cappedActual" in frame.columns else "normalized"
+def build_target_transformer(frame: pd.DataFrame, prefer_raw: bool = False) -> Log1pTargetTransformer:
+    if prefer_raw:
+        # Use raw 'actual' — Prophet handles outliers natively; skip capped version.
+        source_column = "actual" if "actual" in frame.columns else "normalized"
+    else:
+        source_column = "cappedActual" if "cappedActual" in frame.columns else "normalized"
     return Log1pTargetTransformer(source_column)
 
 
 def target_values(frame: pd.DataFrame, transformer: Log1pTargetTransformer) -> np.ndarray:
-    return frame[transformer.source_column].astype(float).to_numpy()
+    col = transformer.source_column
+    if col not in frame.columns:
+        # Graceful fallback if the requested column is absent
+        col = "actual" if "actual" in frame.columns else "normalized"
+    return frame[col].astype(float).to_numpy()
 
 
 def compute_vif_diagnostics(matrix: Optional[np.ndarray], columns: List[str]) -> Dict[str, object]:

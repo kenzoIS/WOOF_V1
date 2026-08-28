@@ -187,11 +187,33 @@ export function Retail() {
   // API data
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [channelForecast, setChannelForecast] = useState<any>(null);
+  const [realtimeRefresh, setRealtimeRefresh] = useState(0);
+
+  // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
+      const eventType = customEvent.detail?.type;
+      if (
+        !eventType ||
+        eventType === "upload_processed" ||
+        eventType === "etl_completed" ||
+        eventType === "forecast_ready"
+      ) {
+        setRealtimeRefresh((prev) => prev + 1);
+      }
+    };
+
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => {
+      window.removeEventListener("woof:realtime", handleRealtime);
+    };
+  }, []);
 
   useEffect(() => {
     getDashboard("retail").then(setDashboardData).catch(() => {});
     getRetailForecastByChannel().then(setChannelForecast).catch(() => {});
-  }, []);
+  }, [realtimeRefresh]);
 
   const forecastData = useMemo(() => {
     const phys = channelForecast?.physical?.historical || [];
@@ -323,6 +345,51 @@ export function Retail() {
       },
     ];
   }, [dashboardData, omnichannelMode, channelForecast, globalDateRange]);
+
+  // Chart 1: Donut Chart Data for Channel Revenue Mix
+  const channelMixData = useMemo(() => {
+    const raw = dashboardData?.channelBreakdown || [];
+    const channels = [
+      { key: "POS", label: "POS", color: "#F53799" },
+      { key: "Shopee", label: "Shopee", color: "#FBBF24" },
+      { key: "TikTok Shop", label: "TikTok", color: "#8B5CF6" },
+      { key: "PetHub", label: "PetHub", color: "#06B6D4" },
+    ];
+    const totalRev = raw.reduce((sum: number, c: any) => sum + (Number(c.revenue) || 0), 0);
+    return channels.map((ch) => {
+      const match = raw.find((c: any) => c.channel === ch.key || c.channel === ch.label);
+      const rev = Number(match?.revenue || 0);
+      return {
+        name: ch.label,
+        value: Math.round(rev),
+        share: totalRev > 0 ? Number(((rev / totalRev) * 100).toFixed(1)) : 0,
+        count: Number(match?.count || 0),
+        color: ch.color,
+      };
+    });
+  }, [dashboardData]);
+
+  // Chart 2: Category Revenue Contribution Data (Horizontal Bar Chart)
+  const categoryRevenueData = useMemo(() => {
+    const items: any[] = dashboardData?.topItems || [];
+    const map = new Map<string, { category: string; revenue: number; quantity: number }>();
+    items.forEach((item: any) => {
+      const cat = item.category || "General Retail";
+      const existing = map.get(cat) || { category: cat, revenue: 0, quantity: 0 };
+      existing.revenue += Number(item.revenue || 0);
+      existing.quantity += Number(item.quantity || item.orderCount || 0);
+      map.set(cat, existing);
+    });
+    const totalRev = Array.from(map.values()).reduce((sum, c) => sum + c.revenue, 0);
+    return Array.from(map.values())
+      .map((c) => ({
+        category: c.category,
+        revenue: Math.round(c.revenue),
+        quantity: c.quantity,
+        share: totalRev > 0 ? Number(((c.revenue / totalRev) * 100).toFixed(1)) : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [dashboardData]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -624,6 +691,143 @@ export function Retail() {
         />
       </div>
 
+      {/* 2-COLUMN SECTION: CHANNEL REVENUE MIX (DONUT) & CATEGORY REVENUE CONTRIBUTION (HORIZONTAL BAR) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        {/* LEFT COLUMN: CHANNEL REVENUE MIX DONUT CHART (5 Cols) */}
+        <div className="lg:col-span-5 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-7 flex flex-col justify-between space-y-4">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl font-bold text-[#223047]">
+                  Channel Revenue Mix
+                </h2>
+                <InfoTooltip label="Omnichannel Analytics (Ch 1L): Percentage revenue share per sales channel (POS in-store vs Shopee, TikTok Shop, and PetHub digital orders)." />
+              </div>
+              <Badge className="bg-[#D42A7D] text-white text-[10px] px-2 py-0.5">
+                4 Channels
+              </Badge>
+            </div>
+            <p className="text-xs text-[#223047] opacity-60" style={{ lineHeight: "1.6" }}>
+              Revenue distribution across physical POS and online channels
+            </p>
+          </div>
+
+          <div className="relative py-2">
+            <ResponsiveContainer width="100%" height={220}>
+              <RePieChart>
+                <Pie
+                  data={channelMixData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={85}
+                  paddingAngle={3}
+                  dataKey="value"
+                >
+                  {channelMixData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: any, name: any, item: any) => [
+                    `₱${Number(value).toLocaleString()} (${item.payload.share}%)`,
+                    name,
+                  ]}
+                  contentStyle={{
+                    backgroundColor: "white",
+                    border: "1px solid #FFD9EC",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                  }}
+                />
+              </RePieChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#FFD9EC]">
+            {channelMixData.map((c) => (
+              <div key={c.name} className="flex items-center justify-between p-2.5 bg-[#FFF7FB] rounded-xl border border-[#FFD9EC]/70 text-xs">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
+                  <span className="font-semibold text-[#223047] truncate">{c.name}</span>
+                </div>
+                <span className="font-bold text-[#D42A7D] ml-1">{c.share}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: CATEGORY REVENUE CONTRIBUTION (7 Cols) */}
+        <div className="lg:col-span-7 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-7 flex flex-col justify-between space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl font-bold text-[#223047]">
+                  Category Revenue Contribution
+                </h2>
+                <InfoTooltip label="Category Management from Ch 1L: Ranks retail categories by sales volume to identify primary merchandising drivers." />
+              </div>
+              <p className="text-xs text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+                Total retail sales ranked by product category
+              </p>
+            </div>
+            <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-2.5 py-0.5 text-[11px]">
+              {categoryRevenueData.length} Categories
+            </Badge>
+          </div>
+
+          {categoryRevenueData.length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-400">
+              No category data available. Upload retail transaction data to populate category ranking.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <ResponsiveContainer width="100%" height={330}>
+                <BarChart
+                  data={categoryRevenueData.slice(0, 10)}
+                  layout="vertical"
+                  margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
+                  <XAxis
+                    type="number"
+                    stroke="#223047"
+                    style={{ fontSize: "10px" }}
+                    tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="category"
+                    stroke="#223047"
+                    width={135}
+                    style={{ fontSize: "10px", fontWeight: 600 }}
+                  />
+                  <Tooltip
+                    formatter={(value: any, name: any, item: any) => [
+                      `₱${Number(value).toLocaleString()} (${item.payload.share}%)`,
+                      "Revenue",
+                    ]}
+                    contentStyle={{
+                      backgroundColor: "white",
+                      border: "1px solid #FFD9EC",
+                      borderRadius: "12px",
+                      padding: "10px",
+                    }}
+                  />
+                  <Bar
+                    dataKey="revenue"
+                    name="Category Revenue"
+                    fill="#F53799"
+                    radius={[0, 6, 6, 0]}
+                    animationDuration={800}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* INVENTORY HEALTH MONITOR */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
@@ -767,77 +971,6 @@ export function Retail() {
           </Table>
           </div>
         </div>
-
-
-      {/* OMNICHANNEL PERFORMANCE */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-4">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Omnichannel Performance by Sectors
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Retail sector revenue distribution across POS, Shopee, TikTok, and PetHub
-            </p>
-          </div>
-
-          <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
-            {[
-              ["overall", "Overall"],
-              ["header", "Header Filter"],
-            ].map(([value, label]) => (
-              <Button
-                key={value}
-                size="sm"
-                variant={omnichannelMode === value ? "default" : "ghost"}
-                onClick={() => setOmnichannelMode(value as "overall" | "header")}
-                className={
-                  omnichannelMode === value
-                    ? "h-8 bg-[#D42A7D] hover:bg-[#D42A7D] text-xs text-white"
-                    : "h-8 text-xs hover:bg-[#FFF2FA]"
-                }
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
-          <BarChart data={retailChannelPerformance}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-            <XAxis dataKey="sector" stroke="#223047" style={{ fontSize: "10px" }} />
-            <YAxis stroke="#223047" style={{ fontSize: "10px" }} />
-            <Tooltip
-              formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString()}`, name]}
-              contentStyle={{
-                backgroundColor: "white",
-                border: "1px solid #FFD9EC",
-                borderRadius: "12px",
-                padding: "12px",
-              }}
-            />
-            <Bar key="pos-bar" dataKey="pos" name="POS" fill="#F53799" radius={[6, 6, 0, 0]} animationDuration={800} />
-            <Bar key="shopee-bar" dataKey="shopee" name="Shopee" fill="#FBBF24" radius={[6, 6, 0, 0]} animationDuration={800} />
-            <Bar key="tiktok-bar" dataKey="tiktok" name="TikTok" fill="#8B5CF6" radius={[6, 6, 0, 0]} animationDuration={800} />
-            <Bar key="pethub-bar" dataKey="pethub" name="PetHub" fill="#06B6D4" radius={[6, 6, 0, 0]} animationDuration={800} />
-          </BarChart>
-        </ResponsiveContainer>
-
-        <div className="flex flex-wrap justify-center gap-4 md:gap-8 pt-2 md:pt-4">
-          {[
-            { label: "POS", color: "#F53799" },
-            { label: "Shopee", color: "#FBBF24" },
-            { label: "TikTok", color: "#8B5CF6" },
-            { label: "PetHub", color: "#06B6D4" },
-          ].map((channel) => (
-            <div key={channel.label} className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: channel.color }} />
-              <span className="text-xs md:text-sm text-[#223047]">{channel.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
 
       {/* Error Modal */}
       {errorModal.type && (

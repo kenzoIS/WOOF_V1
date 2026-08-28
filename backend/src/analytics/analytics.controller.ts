@@ -140,6 +140,22 @@ export class AnalyticsController {
     return this.analyticsService.getCurrentWeather();
   }
 
+  @Get('weather/impact')
+  async getWeatherImpact(
+    @Query('sector') sector?: string,
+    @Query('days') days?: string,
+  ) {
+    return this.analyticsService.getWeatherImpact(
+      sector || 'cafe',
+      Number(days) || 30,
+    );
+  }
+
+  @Get('cafe/co-attachment')
+  async getCafeCoAttachment() {
+    return this.analyticsService.getCafeCoAttachment();
+  }
+
   @Get('cross-sell')
   async getCrossSell(
     @Query('minSupport') minSupport?: string,

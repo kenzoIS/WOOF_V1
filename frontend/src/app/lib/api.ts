@@ -495,8 +495,16 @@ export async function getCurrentWeather() {
   return fetchApi('/analytics/weather/current');
 }
 
+export async function getWeatherImpact(sector = 'cafe', days = 30) {
+  return fetchApi(`/analytics/weather/impact?sector=${encodeURIComponent(sector)}&days=${encodeURIComponent(String(days))}`);
+}
+
 export async function getExogenousStatus() {
   return fetchApi('/analytics/exogenous/status');
+}
+
+export async function getCafeCoAttachment() {
+  return fetchApi('/analytics/cafe/co-attachment');
 }
 
 export async function getActivationRecommendations() {

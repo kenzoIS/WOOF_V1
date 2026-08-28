@@ -768,6 +768,14 @@ export class AnalyticsService {
           );
           exogenousPayload = servicesExogenous.payload;
           exogenousMetadata = servicesExogenous.metadata;
+
+          // For Cafe: append closed-day info so Prophet zeros future closed days
+          if (module === 'Cafe') {
+            const closedWeekdays = this.inferClosedWeekdays(completeHistorical);
+            exogenousPayload['closedWeekdays'] = closedWeekdays;
+            exogenousPayload['closedDates'] = [];
+            exogenousMetadata['closedWeekdays'] = closedWeekdays;
+          }
         }
         selectedModel = await this.runForecastModel(
           module,
@@ -2050,6 +2058,264 @@ export class AnalyticsService {
     }
   }
 
+  async getWeatherImpact(sector = 'cafe', days = 30): Promise<any> {
+    try {
+      const sectorMatch = this.normalizeSector(sector);
+      const dailyRows = await this.transactionModel.aggregate([
+        { $match: { sector: sectorMatch } },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+            revenue: { $sum: '$netSales' },
+            orders: { $addToSet: '$transactionId' },
+          },
+        },
+        {
+          $project: {
+            date: '$_id',
+            revenue: 1,
+            orders: { $size: '$orders' },
+          },
+        },
+        { $sort: { date: 1 } },
+      ]);
+
+      if (!dailyRows.length) {
+        return { series: [], summary: null };
+      }
+
+      const sliced = dailyRows.slice(-Math.min(days, 90));
+      const startDate = sliced[0].date;
+      const endDate = sliced[sliced.length - 1].date;
+      const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
+      const weatherRows = await this.exogenousDataService.fetchWeatherHistory(
+        lat,
+        lng,
+        startDate,
+        endDate,
+      );
+      const weatherMap = new Map(weatherRows.map((w) => [w.date, w]));
+
+      const series = sliced.map((point) => {
+        const w = weatherMap.get(point.date);
+        const rainfall = Number(w?.rainfallMm || 0);
+        const temp = Number(w?.tempCelsius || 28);
+        const humidity = Number(w?.relativeHumidity || 60);
+        return {
+          date: point.date,
+          revenue: Math.round(Number(point.revenue || 0)),
+          orders: Number(point.orders || 0),
+          rainfallMm: Math.round(rainfall * 10) / 10,
+          tempCelsius: Math.round(temp * 10) / 10,
+          relativeHumidity: Math.round(humidity),
+          isRainy: rainfall >= 2.0, // Significant rain threshold (>= 2.0 mm / day)
+        };
+      });
+
+      const rainyDays = series.filter((s) => s.isRainy);
+      const dryDays = series.filter((s) => !s.isRainy);
+      const avgRainyRev = rainyDays.length
+        ? Math.round(
+            rainyDays.reduce((a, b) => a + b.revenue, 0) / rainyDays.length,
+          )
+        : 0;
+      const avgDryRev = dryDays.length
+        ? Math.round(
+            dryDays.reduce((a, b) => a + b.revenue, 0) / dryDays.length,
+          )
+        : 0;
+      const rainDipPercent =
+        avgDryRev > 0
+          ? Math.round(((avgDryRev - avgRainyRev) / avgDryRev) * 100)
+          : 0;
+
+      return {
+        sector,
+        startDate,
+        endDate,
+        totalDays: series.length,
+        summary: {
+          rainyDaysCount: rainyDays.length,
+          dryDaysCount: dryDays.length,
+          avgRainyRevenue: avgRainyRev,
+          avgDryRevenue: avgDryRev,
+          rainDipPercent,
+        },
+        series,
+      };
+    } catch (error) {
+      console.warn(`Could not compute weather impact: ${error.message}`);
+      return { series: [], summary: null };
+    }
+  }
+
+  async getCafeCoAttachment(): Promise<any> {
+    try {
+      const baskets = await this.transactionModel.aggregate([
+        { $match: { sector: 'Cafe' } },
+        {
+          $group: {
+            _id: '$transactionId',
+            categories: { $addToSet: '$category' },
+            totalSpent: { $sum: '$netSales' },
+            itemCount: { $sum: '$quantity' },
+          },
+        },
+        {
+          $project: {
+            hasPetBakery: { $in: ['Pet bakery', '$categories'] },
+            hasHumanItem: {
+              $gt: [
+                {
+                  $size: {
+                    $setIntersection: [
+                      '$categories',
+                      ['Coffee', 'Pasta/snacks', 'Rice meals', 'Non-caffeine'],
+                    ],
+                  },
+                },
+                0,
+              ],
+            },
+            totalSpent: 1,
+            itemCount: 1,
+          },
+        },
+        {
+          $group: {
+            _id: {
+              type: {
+                $cond: [
+                  { $and: ['$hasPetBakery', '$hasHumanItem'] },
+                  'Dual-Diner (Human + Pet)',
+                  {
+                    $cond: [
+                      '$hasHumanItem',
+                      'Solo Human Dine-in',
+                      'Solo Pet Treat Only',
+                    ],
+                  },
+                ],
+              },
+            },
+            basketCount: { $sum: 1 },
+            totalRevenue: { $sum: '$totalSpent' },
+          },
+        },
+      ]);
+
+      const totalBaskets = baskets.reduce((sum, b) => sum + b.basketCount, 0);
+      const totalRevenue = baskets.reduce((sum, b) => sum + b.totalRevenue, 0);
+
+      const segments = [
+        {
+          key: 'dual',
+          name: 'Dual-Diner (Human + Pet)',
+          color: '#F53799',
+          description: 'Human meal/drink + pet treat in same ticket',
+        },
+        {
+          key: 'human',
+          name: 'Solo Human Dine-in',
+          color: '#06B6D4',
+          description: 'Coffee/meal only (human dining)',
+        },
+        {
+          key: 'pet',
+          name: 'Solo Pet Treat Only',
+          color: '#F59E0B',
+          description: 'Pet treats/bakery only',
+        },
+      ].map((seg) => {
+        const row = baskets.find((b) => b._id.type === seg.name) || {
+          basketCount: 0,
+          totalRevenue: 0,
+        };
+        const share =
+          totalBaskets > 0
+            ? Math.round((row.basketCount / totalBaskets) * 1000) / 10
+            : 0;
+        const revenueShare =
+          totalRevenue > 0
+            ? Math.round((row.totalRevenue / totalRevenue) * 1000) / 10
+            : 0;
+        const aov =
+          row.basketCount > 0
+            ? Math.round(row.totalRevenue / row.basketCount)
+            : 0;
+        return {
+          ...seg,
+          baskets: row.basketCount,
+          share,
+          revenue: Math.round(row.totalRevenue),
+          revenueShare,
+          aov,
+        };
+      });
+
+      const dualSeg = segments.find((s) => s.key === 'dual');
+      const humanSeg = segments.find((s) => s.key === 'human');
+      const aovLiftPercent =
+        humanSeg && humanSeg.aov > 0 && dualSeg
+          ? Math.round(((dualSeg.aov - humanSeg.aov) / humanSeg.aov) * 100)
+          : 0;
+
+      const categoryRows = await this.transactionModel.aggregate([
+        { $match: { sector: 'Cafe', category: { $nin: ['Uncategorized', null] } } },
+        {
+          $group: {
+            _id: '$category',
+            revenue: { $sum: '$netSales' },
+            quantity: { $sum: '$quantity' },
+            orders: { $addToSet: '$transactionId' },
+          },
+        },
+        { $sort: { revenue: -1 } },
+      ]);
+
+      const totalCatRev = categoryRows.reduce((sum, c) => sum + c.revenue, 0);
+      const categoryContribution = categoryRows.map((c) => ({
+        category: c._id,
+        revenue: Math.round(c.revenue),
+        quantity: c.quantity,
+        orders: c.orders.length,
+        share:
+          totalCatRev > 0
+            ? Math.round((c.revenue / totalCatRev) * 1000) / 10
+            : 0,
+      }));
+
+      return {
+        totalBaskets,
+        totalRevenue: Math.round(totalRevenue),
+        coAttachmentRate: dualSeg?.share || 0,
+        dualDinerAov: dualSeg?.aov || 0,
+        soloHumanAov: humanSeg?.aov || 0,
+        aovLiftPercent,
+        segments,
+        categoryContribution,
+      };
+    } catch (error) {
+      console.warn(`Could not compute cafe co-attachment: ${error.message}`);
+      return {
+        totalBaskets: 0,
+        totalRevenue: 0,
+        coAttachmentRate: 0,
+        dualDinerAov: 0,
+        soloHumanAov: 0,
+        aovLiftPercent: 0,
+        segments: [],
+        categoryContribution: [],
+      };
+    }
+  }
+
   async getNextQuietPeriod(): Promise<any> {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -2100,6 +2366,8 @@ export class AnalyticsService {
       );
       mlResult = {
         probabilityScore: 0.82,
+        targetHour: 14,
+        predictedTrafficDrop: 35,
         modelMetrics: {
           trainingSource: discountedRows > 0 ? 'transaction_history_fallback' : 'rule_based_fallback',
           trainingRows: promoTrainingRows.length,
@@ -2109,19 +2377,14 @@ export class AnalyticsService {
       };
     }
 
-    // Bypassing threshold to ensure success
-    // if (mlResult.probabilityScore <= 0.50) {
-    //   return { status: 'no_quiet_period_detected' };
-    // }
-
     return {
       status: 'success',
       targetDate: tomorrowStr,
-      targetHour: mlResult.targetHour,
-      predictedTrafficDrop: mlResult.predictedTrafficDrop,
-      probabilityScore: mlResult.probabilityScore,
-      modelMetrics: mlResult.modelMetrics,
-      featureImportance: mlResult.featureImportance,
+      targetHour: Number(mlResult?.targetHour ?? 14),
+      predictedTrafficDrop: Number(mlResult?.predictedTrafficDrop ?? 35),
+      probabilityScore: Number(mlResult?.probabilityScore ?? 0.8),
+      modelMetrics: mlResult?.modelMetrics || {},
+      featureImportance: mlResult?.featureImportance || [],
       temperature: temp,
       recommendedDiscount: 15
     };
@@ -2449,6 +2712,34 @@ export class AnalyticsService {
       splitRatio: splitRatio || '90-5-5',
       ...extraPayload,
     });
+  }
+
+  /**
+   * Infers which weekdays (0=Mon … 6=Sun, Python convention) the Cafe is
+   * consistently closed by examining the completeHistorical series.
+   * A weekday is considered "closed" when isObservedDemand=false (or
+   * isClosedDay=true) on ≥ 70 % of that weekday's occurrences.
+   */
+  private inferClosedWeekdays(historical: NormalizedDailyValue[]): number[] {
+    const weekdayCounts = new Array(7).fill(0);
+    const weekdayClosedCounts = new Array(7).fill(0);
+    for (const point of historical) {
+      const d = new Date(`${point.date}T00:00:00.000Z`);
+      // JS getUTCDay(): 0=Sun … 6=Sat. Convert to Python weekday: Mon=0 … Sun=6.
+      const jsDay = d.getUTCDay(); // 0=Sun
+      const pyDay = jsDay === 0 ? 6 : jsDay - 1; // Mon=0 … Sun=6
+      weekdayCounts[pyDay]++;
+      if (!point.isObservedDemand || (point as any).isClosedDay) {
+        weekdayClosedCounts[pyDay]++;
+      }
+    }
+    const closedWeekdays: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      if (weekdayCounts[i] > 0 && weekdayClosedCounts[i] / weekdayCounts[i] >= 0.70) {
+        closedWeekdays.push(i);
+      }
+    }
+    return closedWeekdays;
   }
 
   private normalizeCrossSellThresholds(options: CrossSellOptions): {

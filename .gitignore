@@ -25,3 +25,10 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Documents & temporary files
+*.pdf
+scratch/
+.venv/
+__pycache__/
+*.pyc
