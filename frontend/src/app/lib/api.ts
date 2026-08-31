@@ -487,6 +487,94 @@ export async function createCampaignDraft(dto: {
   });
 }
 
+export interface BundleArchiveItem {
+  name: string;
+  sector?: string | null;
+  price?: number | null;
+  cost?: number | null;
+}
+
+export interface BundleArchive {
+  id: string;
+  bundleName: string;
+  source: 'manual' | 'generated';
+  status: 'active' | 'archived' | 'deleted';
+  items: BundleArchiveItem[];
+  bundlePrice?: number | null;
+  regularPrice?: number | null;
+  savings?: number | null;
+  discountPercent?: number | null;
+  availableMonth?: string | null;
+  availabilityStartDate?: string | null;
+  availabilityEndDate?: string | null;
+  promoMechanic?: string | null;
+  notes?: string | null;
+  support?: number | null;
+  confidence?: number | null;
+  lift?: number | null;
+  projectedGrossProfit?: number | null;
+  projectedMarginPercent?: number | null;
+  createdBy?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  archivedAt?: string | null;
+  deletedAt?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export async function getBundleArchives(params?: {
+  status?: string;
+  source?: string;
+  search?: string;
+}): Promise<{
+  bundles: BundleArchive[];
+  total: number;
+  counts: Record<string, number>;
+}> {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/bundles${query}`);
+}
+
+export async function createBundleArchive(dto: {
+  bundleName: string;
+  source: 'manual' | 'generated';
+  status?: 'active' | 'archived' | 'deleted';
+  items: BundleArchiveItem[];
+  bundlePrice?: number | null;
+  regularPrice?: number | null;
+  savings?: number | null;
+  discountPercent?: number | null;
+  availableMonth?: string | null;
+  availabilityStartDate?: string | null;
+  availabilityEndDate?: string | null;
+  promoMechanic?: string | null;
+  notes?: string | null;
+  support?: number | null;
+  confidence?: number | null;
+  lift?: number | null;
+  projectedGrossProfit?: number | null;
+  projectedMarginPercent?: number | null;
+  createdBy?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<BundleArchive> {
+  return fetchApi('/analytics/bundles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
+export async function updateBundleArchiveStatus(
+  id: string,
+  status: 'active' | 'archived' | 'deleted',
+): Promise<BundleArchive> {
+  return fetchApi(`/analytics/bundles/${encodeURIComponent(id)}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}
+
 export async function getRetailForecastByChannel() {
   return fetchApi('/analytics/forecast-by-channel/retail');
 }
@@ -649,3 +737,84 @@ export async function activateHappyHour(dto: {
     body: JSON.stringify(dto),
   });
 }
+
+// ----------------------------------------------------------------
+// Recommendation Feedback Loop & Model Recalibration API Client
+// ----------------------------------------------------------------
+
+export interface FeedbackPromotion {
+  id: string;
+  type: 'bundle' | 'discount' | 'happy-hour' | 'flash-sale' | 'forecast';
+  title: string;
+  deployedDate: string;
+  targetTime: string;
+  discount: string;
+  predictedLift: string;
+  actualLift: string | null;
+  confidence: string;
+  sector: string;
+  status: 'active' | 'completed' | 'failed';
+  feedback: 'helpful' | 'not-helpful' | null;
+  feedbackNotes?: string | null;
+}
+
+export interface FeedbackSummary {
+  totalDeployed: number;
+  activeCount: number;
+  completedCount: number;
+  helpfulCount: number;
+  notHelpfulCount: number;
+  pendingCount: number;
+  avgAccuracy: number;
+  positiveRatio: number;
+  recalibrationsTriggered: number;
+  aiInsight: {
+    title: string;
+    summary: string;
+    lastRecalibration: string;
+  };
+}
+
+export async function getFeedbackPromotions(params?: {
+  status?: string;
+  type?: string;
+}): Promise<FeedbackPromotion[]> {
+  const query = new URLSearchParams();
+  if (params?.status && params.status !== 'all') query.set('status', params.status);
+  if (params?.type && params.type !== 'all') query.set('type', params.type);
+
+  const queryString = query.toString();
+  return fetchApi(`/analytics/feedback/promotions${queryString ? `?${queryString}` : ''}`);
+}
+
+export async function getFeedbackSummary(): Promise<FeedbackSummary> {
+  return fetchApi('/analytics/feedback/summary');
+}
+
+export async function submitFeedbackRating(dto: {
+  id: string;
+  feedback: 'helpful' | 'not-helpful';
+  notes?: string;
+}): Promise<{
+  promotion: FeedbackPromotion;
+  recalibrated: boolean;
+  recalibration?: any;
+}> {
+  return fetchApi('/analytics/feedback/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
+export async function triggerModelRecalibration(params?: {
+  source?: string;
+  reason?: string;
+}): Promise<any> {
+  return fetchApi('/analytics/feedback/recalibrate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params || {}),
+  });
+}
+

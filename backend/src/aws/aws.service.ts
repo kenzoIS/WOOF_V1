@@ -101,7 +101,7 @@ export class AwsService {
   // ----------------------------------------------------------------
 
   async uploadAnalyticsArchive(
-    type: 'forecast' | 'cross-sell' | 'smart-report' | 'dynamic-promo',
+    type: 'forecast' | 'cross-sell' | 'smart-report' | 'dynamic-promo' | 'feedback' | 'recalibration',
     module: string,
     payload: Record<string, unknown>,
   ): Promise<string | null> {
@@ -111,6 +111,20 @@ export class AwsService {
     const key = `analytics/${datePrefix}/${type}/${module}_${timestamp}.json`;
     const body = JSON.stringify(payload, null, 2);
     return this.putObject(key, Buffer.from(body, 'utf-8'), 'application/json');
+  }
+
+  async uploadFeedbackArchive(
+    promotionType: string,
+    payload: Record<string, unknown>,
+  ): Promise<string | null> {
+    return this.uploadAnalyticsArchive('feedback', promotionType || 'general', payload);
+  }
+
+  async uploadRecalibrationArchive(
+    module: string,
+    payload: Record<string, unknown>,
+  ): Promise<string | null> {
+    return this.uploadAnalyticsArchive('recalibration', module || 'system', payload);
   }
 
   // ----------------------------------------------------------------
