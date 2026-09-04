@@ -99,6 +99,7 @@ export class AnalyticsController {
     @Query('testStartDate') testStartDate?: string,
     @Query('testEndDate') testEndDate?: string,
     @Query('backtestSplit') backtestSplit?: string,
+    @Query('segmentedWait') segmentedWait?: string,
   ) {
     const params = {
       temp,
@@ -115,6 +116,7 @@ export class AnalyticsController {
       testStartDate,
       testEndDate,
       backtestSplit,
+      segmentedWait,
     };
     return this.cached(
       this.key('forecast', { sector, ...params }),

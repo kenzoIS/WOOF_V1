@@ -7,7 +7,6 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
-import { ModelDiagnostics } from "../components/ModelDiagnostics";
 import { InfoTooltip } from "../components/InfoTooltip";
 import servicesMascot from "../../imports/no_bg_Services-1.png";
 import { ForecastRun, getForecast } from "../lib/api";
@@ -67,6 +66,23 @@ const getItemHistoryBounds = (forecastRun: ForecastRun | null) => ({
   min: getMetadataDate(forecastRun, "historyStartDate", HISTORY_START_DATE),
   max: getMetadataDate(forecastRun, "historyEndDate", INGESTED_HISTORY_END_DATE),
 });
+
+const formatMetadataCalendar = (
+  metadata: ForecastRun["modelMetadata"] | undefined,
+  startKey: string,
+  endKey: string,
+) => {
+  const start = metadata?.[startKey];
+  const end = metadata?.[endKey];
+  return typeof start === "string" && typeof end === "string" && start && end
+    ? `${start} to ${end}`
+    : "-";
+};
+
+const formatForecastMode = (value: unknown) => {
+  const mode = String(value || "production").replace(/-/g, " ");
+  return mode.charAt(0).toUpperCase() + mode.slice(1);
+};
 
 const minDateString = (...dates: string[]) =>
   dates.filter(Boolean).sort()[0] || "";
@@ -552,6 +568,17 @@ export function Services() {
     if (!forecastRun) {
       return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
     }
+    const baseMetrics = () => {
+      if (typeof forecastRun.mase === "number") {
+        return {
+          mase: Number(forecastRun.mase).toFixed(2),
+          accuracy: `${Number(forecastRun.accuracy).toFixed(1)}%`,
+          smape: `${Number(forecastRun.smape).toFixed(2)}%`,
+          mae: Number(forecastRun.mae ?? 0).toFixed(2),
+        };
+      }
+      return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
+    };
     if (chartGranularity === "monthly") {
       const m = forecastRun.monthlyMetrics ?? (forecastRun as any).monthly_metrics;
       if (m && typeof m.mase === "number") {
@@ -562,7 +589,7 @@ export function Services() {
           mae: Number(m.mae ?? 0).toFixed(2),
         };
       }
-      return { mase: "N/A", accuracy: "N/A", smape: "N/A", mae: "N/A" };
+      return baseMetrics();
     }
     if (chartGranularity === "weekly") {
       const w = forecastRun.weeklyMetrics ?? (forecastRun as any).weekly_metrics;
@@ -574,7 +601,7 @@ export function Services() {
           mae: Number(w.mae ?? 0).toFixed(2),
         };
       }
-      return { mase: "N/A", accuracy: "N/A", smape: "N/A", mae: "N/A" };
+      return baseMetrics();
     }
     // Daily horizon
     if (typeof forecastRun.mase === "number") {
@@ -943,7 +970,6 @@ export function Services() {
                 SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
               </Badge>
             )}
-            <ModelDiagnostics forecastRun={forecastRun} />
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -1012,18 +1038,39 @@ export function Services() {
               </div>
             </div>
             {forecastRun?.modelMetadata && (
-              <div className="text-[10px] text-[#223047] opacity-50 mt-2 border-t pt-2 space-y-1">
-                <div>Weather Source: {String(forecastRun.modelMetadata.weatherDataSource || "N/A")}</div>
-                <div>Holiday Source: {String(forecastRun.modelMetadata.holidayDataSource || "N/A")}</div>
-                {forecastRun.modelMetadata.tempOverride !== undefined && (
-                  <div className="text-[#06B6D4] font-medium">Temp Override: {String(forecastRun.modelMetadata.tempOverride)}°C</div>
-                )}
-                {forecastRun.modelMetadata.rainOverride !== undefined && (
-                  <div className="text-[#06B6D4] font-medium">Rain Override: {forecastRun.modelMetadata.rainOverride === 1 ? "Yes" : "No"}</div>
-                )}
-                {forecastRun.modelMetadata.holidayOverride !== undefined && (
-                  <div className="text-[#06B6D4] font-medium">Holiday Override: {forecastRun.modelMetadata.holidayOverride === 1 ? "Yes" : "No"}</div>
-                )}
+              <div className="mt-2 border-t border-[#FFD9EC] pt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-[#223047]">
+                <div>
+                  <div className="font-semibold opacity-50 uppercase">Forecast Mode</div>
+                  <div className="font-semibold opacity-80">{formatForecastMode(forecastRun.modelMetadata.forecastMode)}</div>
+                </div>
+                <div>
+                  <div className="font-semibold opacity-50 uppercase">Observed Demand Days</div>
+                  <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.observedDemandDays ?? "-")}</div>
+                </div>
+                <div>
+                  <div className="font-semibold opacity-50 uppercase">Training Calendar</div>
+                  <div className="font-semibold opacity-80">
+                    {formatMetadataCalendar(forecastRun.modelMetadata, "trainStartDate", "trainEndDate")}
+                  </div>
+                </div>
+                <div>
+                  <div className="font-semibold opacity-50 uppercase">Test Calendar</div>
+                  <div className="font-semibold opacity-80">
+                    {formatMetadataCalendar(forecastRun.modelMetadata, "testStartDate", "testEndDate")}
+                  </div>
+                </div>
+                <div>
+                  <div className="font-semibold opacity-50 uppercase">Closed Days Excluded</div>
+                  <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.closedDaysExcluded ?? "-")}</div>
+                </div>
+                <div>
+                  <div className="font-semibold opacity-50 uppercase">Status / Fallback Reason</div>
+                  <div className="font-semibold opacity-80">
+                    {forecastRun.isFallback
+                      ? String(forecastRun.rejectionReason || forecastRun.modelMetadata.fallbackReason || "Selected model could not run")
+                      : "Model fit successfully"}
+                  </div>
+                </div>
               </div>
             )}
           </div>

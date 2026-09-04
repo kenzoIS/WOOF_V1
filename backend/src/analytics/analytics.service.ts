@@ -69,7 +69,19 @@ interface ModelResult {
     unitCost?: number;
   }[];
   fittedValues?: number[];
+  backtest?: {
+    dates: string[];
+    actual: number[];
+    predicted: number[];
+    trainActual: number[];
+  };
   modelMetadata?: Record<string, unknown>;
+}
+
+interface CafeForecastSelection {
+  model: ModelResult;
+  pendingSegmentedCandidate?: Promise<ModelResult>;
+  aggregateCandidate?: ModelResult;
 }
 
 interface CrossSellOptions {
@@ -102,6 +114,7 @@ interface ForecastOverrides {
   testStartDate?: string;
   testEndDate?: string;
   backtestSplit?: string;
+  segmentedWait?: string;
 }
 interface ForecastEvaluationPlan {
   mode: ForecastMode;
@@ -801,6 +814,8 @@ export class AnalyticsService {
     let exogenousMetadata: Record<string, unknown> = {};
 
     let selectedModel: ModelResult | null = null;
+    let pendingCafeSegmentedCandidate: Promise<ModelResult> | null = null;
+    let cafeAggregateCandidate: ModelResult | null = null;
     let rejectionReason = '';
     if (trainHistorical.length >= 21) {
       try {
@@ -830,6 +845,22 @@ export class AnalyticsService {
           exogenousPayload,
           splitRatio,
         );
+        if (module === 'Cafe' && selectedModel) {
+          const cafeSelection = await this.selectCafeForecastCandidate(
+            selectedModel,
+            trainHistorical,
+            finalForecastDays,
+            splitRatio,
+            exogenousPayload,
+            (overrides as any)?.segmentedWait === 'background'
+              ? 'background'
+              : 'foreground',
+          );
+          selectedModel = cafeSelection.model;
+          pendingCafeSegmentedCandidate =
+            cafeSelection.pendingSegmentedCandidate || null;
+          cafeAggregateCandidate = cafeSelection.aggregateCandidate || null;
+        }
         if (isBacktest) {
           selectedModel = this.withBacktestEvaluation(
             selectedModel,
@@ -992,6 +1023,27 @@ export class AnalyticsService {
       this.awsService.uploadAnalyticsArchive('forecast', module, payload).catch(err => {
       console.warn(`S3 forecast archive failed for ${module}: ${err}`);
     });
+    if (module === 'Cafe' && pendingCafeSegmentedCandidate && cafeAggregateCandidate) {
+      pendingCafeSegmentedCandidate
+        .then((segmentedModel) =>
+          this.saveCompletedCafeSegmentedCandidate(
+            segmentedModel,
+            cafeAggregateCandidate!,
+            payload,
+            completeHistorical,
+            revenueByDate,
+            trainHistorical,
+            priceCostMatrix,
+          ),
+        )
+        .catch((error) => {
+          console.warn(
+            `Segmented Cafe background forecast failed: ${
+              error instanceof Error ? error.message : error
+            }`,
+          );
+        });
+    }
 
     // Map snake_case back to camelCase for the frontend (withForecastStartAnchor uses camelCase)
     const runSource = savedRun || payload;
@@ -2972,12 +3024,637 @@ export class AnalyticsService {
     });
   }
 
+  private async selectCafeForecastCandidate(
+    aggregateModel: ModelResult,
+    historical: NormalizedDailyValue[],
+    forecastDays: number,
+    splitRatio: string | undefined,
+    exogenousPayload: Record<string, unknown>,
+    waitMode: 'foreground' | 'background' = 'foreground',
+  ): Promise<CafeForecastSelection> {
+    const segmentedPromise = this.buildCafeSegmentedForecastCandidate(
+      historical,
+      forecastDays,
+      splitRatio,
+      exogenousPayload,
+    );
+    try {
+      const segmentedModel =
+        waitMode === 'background'
+          ? await segmentedPromise
+          : await this.withTimeout(
+              segmentedPromise,
+              25000,
+              'Segmented Cafe candidate is still running in the background.',
+            );
+      const aggregateMase = Number(aggregateModel.mase);
+      const segmentedMase = Number(segmentedModel.mase);
+      const candidates = {
+        aggregate: {
+          modelName: aggregateModel.modelName,
+          mase: aggregateModel.mase,
+          smape: aggregateModel.smape,
+          accuracy: aggregateModel.accuracy,
+          weeklyMase: aggregateModel.weeklyMetrics?.mase ?? null,
+          monthlyMase: aggregateModel.monthlyMetrics?.mase ?? null,
+        },
+        segmented: {
+          modelName: segmentedModel.modelName,
+          mase: segmentedModel.mase,
+          smape: segmentedModel.smape,
+          accuracy: segmentedModel.accuracy,
+          weeklyMase: segmentedModel.weeklyMetrics?.mase ?? null,
+          monthlyMase: segmentedModel.monthlyMetrics?.mase ?? null,
+        },
+      };
+
+      if (Number.isFinite(segmentedMase) && segmentedMase < aggregateMase) {
+        return {
+          model: {
+            ...segmentedModel,
+            modelMetadata: {
+              ...(segmentedModel.modelMetadata || {}),
+              forecastSelection: 'segmented_cafe_category',
+              segmentedCafeStatus: 'complete',
+              segmentedCafeAutoRefresh: false,
+              forecastSelectionReason:
+                `Selected segmented Cafe category forecast because MASE ${segmentedMase} beat aggregate MASE ${aggregateMase}.`,
+              forecastCandidates: candidates,
+            },
+          },
+          aggregateCandidate: aggregateModel,
+        };
+      }
+
+      return {
+        model: {
+          ...aggregateModel,
+          modelMetadata: {
+            ...(aggregateModel.modelMetadata || {}),
+            forecastSelection: 'aggregate_cafe',
+            segmentedCafeStatus: 'complete_not_selected',
+            segmentedCafeAutoRefresh: false,
+            forecastSelectionReason:
+              `Kept aggregate Cafe forecast because segmented MASE ${segmentedMase} did not beat aggregate MASE ${aggregateMase}.`,
+            forecastCandidates: candidates,
+          },
+        },
+        aggregateCandidate: aggregateModel,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      const isPending = message.includes('still running in the background');
+      if (isPending) {
+        segmentedPromise.catch(() => undefined);
+      }
+      return {
+        model: {
+          ...aggregateModel,
+          modelMetadata: {
+            ...(aggregateModel.modelMetadata || {}),
+            forecastSelection: 'aggregate_cafe',
+            segmentedCafeStatus: isPending ? 'pending' : 'failed',
+            segmentedCafeAutoRefresh: isPending,
+            segmentedCafeRetryAfterMs: 15000,
+            forecastSelectionReason:
+              isPending
+                ? 'Serving aggregate Cafe Prophet while segmented Cafe category forecasting continues in the background.'
+                : `Kept aggregate Cafe forecast because segmented candidate failed: ${message}`,
+          },
+        },
+        pendingSegmentedCandidate: isPending ? segmentedPromise : undefined,
+        aggregateCandidate: aggregateModel,
+      };
+    }
+  }
+
+  private async buildCafeSegmentedForecastCandidate(
+    historical: NormalizedDailyValue[],
+    forecastDays: number,
+    splitRatio: string | undefined,
+    exogenousPayload: Record<string, unknown>,
+  ): Promise<ModelResult> {
+    const segments = await this.buildCafeSegmentHistories(historical);
+    const modeledSegments: Array<{
+      segment: string;
+      result: ModelResult;
+      history: NormalizedDailyValue[];
+      observedRows: number;
+      totalActual: number;
+    }> = [];
+    const skippedSegments: Array<Record<string, unknown>> = [];
+
+    for (const segment of segments) {
+      if (segment.observedRows < 30) {
+        skippedSegments.push({
+          segment: segment.segment,
+          observedRows: segment.observedRows,
+          totalActual: segment.totalActual,
+          reason: 'below 30 observed rows',
+        });
+        continue;
+      }
+      try {
+        const result = await this.runForecastModel(
+          'Cafe',
+          segment.history,
+          forecastDays,
+          {
+            ...exogenousPayload,
+            includeBacktest: true,
+            experimentConfig: {
+              changepointCandidates: [0.3],
+              seasonalityModes: ['multiplicative'],
+              weeklyFourierOrders: [8],
+              monthlyFourierOrders: [4],
+            },
+          },
+          splitRatio,
+        );
+        modeledSegments.push({
+          segment: segment.segment,
+          result,
+          history: segment.history,
+          observedRows: segment.observedRows,
+          totalActual: segment.totalActual,
+        });
+      } catch (error) {
+        skippedSegments.push({
+          segment: segment.segment,
+          observedRows: segment.observedRows,
+          totalActual: segment.totalActual,
+          reason: error instanceof Error ? error.message : 'segment forecast failed',
+        });
+      }
+    }
+
+    if (modeledSegments.length === 0) {
+      throw new Error('No Cafe category segment had enough data to model');
+    }
+
+    const firstBacktest = modeledSegments.find(
+      (segment) => Array.isArray(segment.result.backtest?.dates),
+    )?.result.backtest;
+    if (!firstBacktest || firstBacktest.dates.length === 0) {
+      throw new Error('Segmented Cafe candidate did not return backtest predictions');
+    }
+
+    const testDates = firstBacktest.dates;
+    const summedActual = testDates.map((date) =>
+      modeledSegments.reduce((sum, segment) => {
+        const index = segment.result.backtest?.dates?.indexOf(date) ?? -1;
+        return sum + (index >= 0 ? Number(segment.result.backtest?.actual[index]) || 0 : 0);
+      }, 0),
+    );
+    const summedPredicted = testDates.map((date) =>
+      modeledSegments.reduce((sum, segment) => {
+        const index = segment.result.backtest?.dates?.indexOf(date) ?? -1;
+        return sum + (index >= 0 ? Number(segment.result.backtest?.predicted[index]) || 0 : 0);
+      }, 0),
+    );
+    const trainActualByDate = new Map<string, number>();
+    modeledSegments.forEach((segment) => {
+      const trainActual = segment.result.backtest?.trainActual || [];
+      segment.history.slice(0, trainActual.length).forEach((point, index) => {
+        trainActualByDate.set(
+          point.date,
+          (trainActualByDate.get(point.date) || 0) + (Number(trainActual[index]) || 0),
+        );
+      });
+    });
+    const summedTrainActual = [...trainActualByDate.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, value]) => value);
+    const trainDates = historical
+      .slice(0, summedTrainActual.length)
+      .map((point) => point.date);
+    const metrics = this.evaluateForecastArrays(
+      summedActual,
+      summedPredicted,
+      summedTrainActual,
+    );
+    const forecastDates = Array.from(
+      new Set(
+        modeledSegments.flatMap((segment) =>
+          (segment.result.forecast || []).map((point) => point.date),
+        ),
+      ),
+    ).sort();
+    const forecast = forecastDates.map((date) => {
+      const matching = modeledSegments
+        .map((segment) =>
+          (segment.result.forecast || []).find((point) => point.date === date),
+        )
+        .filter(Boolean) as ModelResult['forecast'];
+      return {
+        date,
+        forecast: this.round(
+          matching.reduce((sum, point) => sum + (Number(point.forecast) || 0), 0),
+        ),
+        confidenceLow: this.round(
+          matching.reduce(
+            (sum, point) => sum + (Number(point.confidenceLow ?? point.forecast) || 0),
+            0,
+          ),
+        ),
+        confidenceHigh: this.round(
+          matching.reduce(
+            (sum, point) => sum + (Number(point.confidenceHigh ?? point.forecast) || 0),
+            0,
+          ),
+        ),
+      };
+    });
+
+    const fittedByDate = new Map<string, number>();
+    modeledSegments.forEach((segment) => {
+      const fitted = segment.result.fittedValues || [];
+      segment.history.slice(0, fitted.length).forEach((point, index) => {
+        fittedByDate.set(
+          point.date,
+          (fittedByDate.get(point.date) || 0) + (Number(fitted[index]) || 0),
+        );
+      });
+    });
+    const fittedValues = historical.map((point) =>
+      fittedByDate.has(point.date)
+        ? this.round(fittedByDate.get(point.date)!)
+        : point.actual,
+    );
+
+    return {
+      modelName: 'Segmented Cafe Category Prophet (summed category forecasts)',
+      mase: metrics.mase,
+      smape: metrics.smape,
+      accuracy: metrics.accuracy,
+      mae: metrics.mae,
+      rmse: metrics.rmse,
+      mape: metrics.mape,
+      r2: metrics.r2,
+      weeklyMetrics: this.evaluateResampledForecastArrays(
+        testDates,
+        summedActual,
+        summedPredicted,
+        summedTrainActual,
+        trainDates,
+        'week',
+      ),
+      monthlyMetrics: this.evaluateResampledForecastArrays(
+        testDates,
+        summedActual,
+        summedPredicted,
+        summedTrainActual,
+        trainDates,
+        'month',
+      ),
+      forecast,
+      fittedValues,
+      modelMetadata: {
+        useSegmentedCafeForecast: true,
+        segmentationLevel: 'Cafe category',
+        segmentsModeled: modeledSegments.map((segment) => ({
+          segment: segment.segment,
+          observedRows: segment.observedRows,
+          totalActual: segment.totalActual,
+          mase: segment.result.mase,
+          smape: segment.result.smape,
+          accuracy: segment.result.accuracy,
+        })),
+        segmentsSkipped: skippedSegments,
+        segmentForecastPolicy:
+          'Forecast Cafe categories separately, sum category forecasts, and select only when summed holdout MASE beats aggregate Cafe.',
+      },
+    };
+  }
+
   /**
    * Infers which weekdays (0=Mon … 6=Sun, Python convention) the Cafe is
    * consistently closed by examining the completeHistorical series.
    * A weekday is considered "closed" when isObservedDemand=false (or
    * isClosedDay=true) on ≥ 70 % of that weekday's occurrences.
    */
+  private async saveCompletedCafeSegmentedCandidate(
+    segmentedModel: ModelResult,
+    aggregateModel: ModelResult,
+    basePayload: any,
+    completeHistorical: NormalizedDailyValue[],
+    revenueByDate: Map<string, number>,
+    trainHistorical: NormalizedDailyValue[],
+    priceCostMatrix: {
+      unitPrice: number;
+      unitCost: number;
+      grossMarginRate?: number;
+      source: string;
+    },
+  ): Promise<void> {
+    const baseMetadata = basePayload?.model_metadata || {};
+    const { data: currentRun } = await this.supabaseService.client
+      .from('forecast_runs')
+      .select('model_metadata')
+      .eq('module', 'Cafe')
+      .maybeSingle();
+    const currentMetadata = currentRun?.model_metadata || {};
+    if (
+      currentMetadata.serverGeneratedAt !== baseMetadata.serverGeneratedAt ||
+      currentMetadata.segmentedCafeStatus !== 'pending'
+    ) {
+      return;
+    }
+
+    const aggregateMase = Number(aggregateModel.mase);
+    const segmentedMase = Number(segmentedModel.mase);
+    const candidates = {
+      aggregate: {
+        modelName: aggregateModel.modelName,
+        mase: aggregateModel.mase,
+        smape: aggregateModel.smape,
+        accuracy: aggregateModel.accuracy,
+        weeklyMase: aggregateModel.weeklyMetrics?.mase ?? null,
+        monthlyMase: aggregateModel.monthlyMetrics?.mase ?? null,
+      },
+      segmented: {
+        modelName: segmentedModel.modelName,
+        mase: segmentedModel.mase,
+        smape: segmentedModel.smape,
+        accuracy: segmentedModel.accuracy,
+        weeklyMase: segmentedModel.weeklyMetrics?.mase ?? null,
+        monthlyMase: segmentedModel.monthlyMetrics?.mase ?? null,
+      },
+    };
+    const selectedModel =
+      Number.isFinite(segmentedMase) && segmentedMase < aggregateMase
+        ? {
+            ...segmentedModel,
+            modelMetadata: {
+              ...(segmentedModel.modelMetadata || {}),
+              forecastSelection: 'segmented_cafe_category',
+              segmentedCafeStatus: 'complete',
+              segmentedCafeAutoRefresh: false,
+              forecastSelectionReason:
+                `Selected segmented Cafe category forecast because MASE ${segmentedMase} beat aggregate MASE ${aggregateMase}.`,
+              forecastCandidates: candidates,
+            },
+          }
+        : {
+            ...aggregateModel,
+            modelMetadata: {
+              ...(aggregateModel.modelMetadata || {}),
+              forecastSelection: 'aggregate_cafe',
+              segmentedCafeStatus: 'complete_not_selected',
+              segmentedCafeAutoRefresh: false,
+              forecastSelectionReason:
+                `Kept aggregate Cafe forecast because segmented MASE ${segmentedMase} did not beat aggregate MASE ${aggregateMase}.`,
+              forecastCandidates: candidates,
+            },
+          };
+
+    const calibratedForecast = this.applyPriceCalibration(
+      selectedModel.forecast,
+      priceCostMatrix,
+    );
+    const replacementPayload = {
+      ...basePayload,
+      model_name: selectedModel.modelName,
+      mase: selectedModel.mase,
+      smape: selectedModel.smape,
+      accuracy: selectedModel.accuracy,
+      mae: selectedModel.mae,
+      rmse: selectedModel.rmse,
+      mape: selectedModel.mape,
+      r2: selectedModel.r2,
+      weeklyMetrics: selectedModel.weeklyMetrics ?? null,
+      monthlyMetrics: selectedModel.monthlyMetrics ?? null,
+      weekly_metrics: selectedModel.weeklyMetrics ?? null,
+      monthly_metrics: selectedModel.monthlyMetrics ?? null,
+      is_fallback: false,
+      rejection_reason: null,
+      historical: this.buildAnchoredHistoricalPayload(
+        completeHistorical,
+        revenueByDate,
+        selectedModel.fittedValues,
+        trainHistorical,
+      ),
+      forecast: calibratedForecast,
+      volume_forecast: this.buildVolumeForecast(selectedModel.forecast),
+      revenue_forecast: calibratedForecast,
+      model_metadata: {
+        ...baseMetadata,
+        ...(selectedModel.modelMetadata || {}),
+        additionalRegressionMetrics: {
+          mae: selectedModel.mae,
+          rmse: selectedModel.rmse,
+          mape: selectedModel.mape,
+          r2: selectedModel.r2,
+        },
+        priceCalibration: priceCostMatrix,
+        forecastStartDate: calibratedForecast[0]?.date || null,
+        forecastEndDate:
+          calibratedForecast[calibratedForecast.length - 1]?.date || null,
+        annualDemandQuantity: this.round(
+          calibratedForecast.reduce(
+            (sum, point) => sum + (point.forecastQuantity ?? point.forecast),
+            0,
+          ) * (365 / Math.max(calibratedForecast.length, 1)),
+        ),
+        serverGeneratedAt: new Date().toISOString(),
+      },
+      generated_at: new Date().toISOString(),
+    };
+
+    await this.supabaseService.client.from('forecast_runs').delete().eq('module', 'Cafe');
+    await this.supabaseService.client
+      .from('forecast_runs')
+      .insert(replacementPayload)
+      .select()
+      .single();
+    this.awsService
+      .uploadAnalyticsArchive('forecast', 'Cafe', replacementPayload)
+      .catch((error) => {
+        console.warn(`S3 forecast archive failed for Cafe: ${error}`);
+      });
+  }
+
+  private withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    message: string,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+      promise
+        .then((value) => {
+          clearTimeout(timeout);
+          resolve(value);
+        })
+        .catch((error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+    });
+  }
+
+  private async buildCafeSegmentHistories(
+    aggregateHistorical: NormalizedDailyValue[],
+  ): Promise<
+    Array<{
+      segment: string;
+      history: NormalizedDailyValue[];
+      observedRows: number;
+      totalActual: number;
+    }>
+  > {
+    const aggregateDateSet = new Set(aggregateHistorical.map((point) => point.date));
+    const rows = await this.transactionModel.aggregate([
+      { $match: this.buildForecastTransactionMatch('Cafe') },
+      {
+        $project: {
+          dateKey: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$date',
+              timezone: 'Asia/Manila',
+            },
+          },
+          transactionId: { $ifNull: ['$transactionId', { $toString: '$_id' }] },
+          productName: '$productName',
+          category: '$category',
+          quantity: { $ifNull: ['$quantity', 0] },
+          revenue: { $ifNull: ['$netSales', 0] },
+          discount: { $ifNull: ['$discount', 0] },
+          grossProfit: { $ifNull: ['$grossProfit', 0] },
+        },
+      },
+    ]);
+
+    const transactionMap = new Map<string, any>();
+    rows.forEach((row: any, index: number) => {
+      const date = String(row.dateKey || '');
+      if (!date || !aggregateDateSet.has(date)) return;
+
+      const segment = this.classifyCafeForecastSegment(row);
+      const transactionId = String(row.transactionId || `row-${index + 1}`);
+      const key = `${segment}::${date}::${transactionId}`;
+      const current =
+        transactionMap.get(key) ||
+        {
+          segment,
+          date,
+          quantity: 0,
+          revenue: 0,
+          discountAmount: 0,
+          grossProfit: 0,
+          lineItems: 0,
+          items: new Set<string>(),
+        };
+
+      current.quantity += Number(row.quantity) || 0;
+      current.revenue += Number(row.revenue) || 0;
+      current.discountAmount += Number(row.discount) || 0;
+      current.grossProfit += Number(row.grossProfit) || 0;
+      current.lineItems += 1;
+      const productName = String(row.productName || '').trim();
+      if (productName) current.items.add(productName);
+      transactionMap.set(key, current);
+    });
+
+    const dailyBySegment = new Map<string, Map<string, any>>();
+    transactionMap.forEach((transaction) => {
+      if (!dailyBySegment.has(transaction.segment)) {
+        dailyBySegment.set(transaction.segment, new Map());
+      }
+      const segmentMap = dailyBySegment.get(transaction.segment)!;
+      const current =
+        segmentMap.get(transaction.date) ||
+        {
+          date: transaction.date,
+          quantity: 0,
+          revenue: 0,
+          grossProfit: 0,
+          orders: 0,
+          lineItems: 0,
+          basketItems: 0,
+          discountAmount: 0,
+          promoTransactions: 0,
+        };
+
+      current.quantity += transaction.quantity;
+      current.revenue += transaction.revenue;
+      current.grossProfit += transaction.grossProfit;
+      current.orders += 1;
+      current.lineItems += transaction.lineItems;
+      current.basketItems += transaction.items.size || transaction.lineItems;
+      current.discountAmount += transaction.discountAmount;
+      if (transaction.discountAmount > 0) current.promoTransactions += 1;
+      segmentMap.set(transaction.date, current);
+    });
+
+    return [...dailyBySegment.entries()]
+      .map(([segment, byDate]) => {
+        const values = aggregateHistorical.map((point) => {
+          const value = byDate.get(point.date);
+          const quantity = Number(value?.quantity) || 0;
+          const orders = Number(value?.orders) || 0;
+          return {
+            date: point.date,
+            actual: this.round(quantity),
+            orders,
+            revenue: this.round(Number(value?.revenue) || 0),
+            grossProfit: this.round(Number(value?.grossProfit) || 0),
+            lineItems: Number(value?.lineItems) || 0,
+            basketItems: Number(value?.basketItems) || 0,
+            discountAmount: this.round(Number(value?.discountAmount) || 0),
+            promoTransactions: Number(value?.promoTransactions) || 0,
+            avgBasketSize:
+              orders > 0 ? this.round((Number(value?.basketItems) || 0) / orders) : 0,
+            avgOrderValue:
+              orders > 0 ? this.round((Number(value?.revenue) || 0) / orders) : 0,
+            averageUnitPrice:
+              quantity > 0
+                ? this.round((Number(value?.revenue) || 0) / Math.max(quantity, 1))
+                : 0,
+          } satisfies DailyValue;
+        });
+        const history = normalizeDailySeries(values, 'Cafe')
+          .filter((point) => aggregateDateSet.has(point.date))
+          .map((point) => ({
+            ...point,
+            isMissingDate: false,
+            isClosedDay: false,
+            isObservedDemand: true,
+          }));
+        const observedRows = history.filter((point) => Number(point.actual) > 0).length;
+        const totalActual = this.round(
+          history.reduce((sum, point) => sum + (Number(point.actual) || 0), 0),
+        );
+        return { segment, history, observedRows, totalActual };
+      })
+      .filter((segment) => segment.totalActual > 0)
+      .sort((left, right) => right.totalActual - left.totalActual);
+  }
+
+  private classifyCafeForecastSegment(row: {
+    category?: string;
+    productName?: string;
+  }): string {
+    const text = `${row.category || ''} ${row.productName || ''}`.toLowerCase();
+    if (/(pet bakery|pupcake|pup cake|dog cake|barkday cake|pet treat|dog treat|cat treat)/.test(text)) {
+      return 'Pet bakery';
+    }
+    if (/(rice|silog|tapa|tocino|longganisa|cordon|chicken meal|pork meal|beef meal|rice meal)/.test(text)) {
+      return 'Rice meals';
+    }
+    if (/(coffee|espresso|americano|latte|cappuccino|mocha|macchiato|cold brew|brew)/.test(text)) {
+      return 'Coffee';
+    }
+    if (/(waffle|pasta|spaghetti|carbonara|snack|fries|nachos|sandwich|toast|burger|muffin|cookie|pastry)/.test(text)) {
+      return 'Snacks/waffles/pasta';
+    }
+    if (/(non[- ]?caffeine|tea|matcha|chocolate|lemonade|smoothie|shake|juice|soda|frappe|milk tea|cooler)/.test(text)) {
+      return 'Non-caffeine drinks';
+    }
+    return 'Other Cafe';
+  }
+
   private inferClosedWeekdays(historical: NormalizedDailyValue[]): number[] {
     const weekdayCounts = new Array(7).fill(0);
     const weekdayClosedCounts = new Array(7).fill(0);
@@ -3708,6 +4385,9 @@ export class AnalyticsService {
           'tempCelsius',
           'rainFlag',
           'humidity',
+          'isHotDay',
+          'isCoolRainyDay',
+          'comfortIndex',
           'promoFlag',
           'isMissingDate',
           'outlierFlag',
@@ -3743,6 +4423,16 @@ export class AnalyticsService {
             metadata.humidityOverride = humidityVal;
           }
         }
+        exogenousForecast.forEach((row) => {
+          Object.assign(
+            row,
+            this.exogenousDataService.buildWeatherTransformFields(
+              Number(row.tempCelsius),
+              Number(row.rainFlag),
+              Number(row.humidity),
+            ),
+          );
+        });
         if (overrides.holiday !== undefined && overrides.holiday !== '') {
           const holidayVal = overrides.holiday === '1' ? 1 : 0;
           exogenousForecast.forEach((row) => {
@@ -5007,6 +5697,119 @@ export class AnalyticsService {
       source: 'retail_legacy_forecast_scenario_adjustment',
       note: 'Retail uses calibrated business assumptions with scenario multipliers applied to projected net sales.',
     };
+  }
+
+  private evaluateForecastArrays(
+    actual: number[],
+    predicted: number[],
+    training: number[],
+    seasonalPeriod = 7,
+  ): Required<Pick<ModelResult, 'mase' | 'smape' | 'accuracy' | 'mae' | 'rmse' | 'mape' | 'r2'>> {
+    const pairs = actual
+      .map((value, index) => [Number(value), Number(predicted[index])])
+      .filter(([left, right]) => Number.isFinite(left) && Number.isFinite(right));
+    if (pairs.length === 0) {
+      return { mase: 999, smape: 100, accuracy: 0, mae: 0, rmse: 0, mape: 0, r2: 0 };
+    }
+
+    const errors = pairs.map(([left, right]) => left - right);
+    const absoluteErrors = errors.map((value) => Math.abs(value));
+    const mae = this.average(absoluteErrors);
+    const cleanTraining = training
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value));
+    const lag = cleanTraining.length > seasonalPeriod ? seasonalPeriod : 1;
+    const naiveErrors: number[] = [];
+    for (let index = lag; index < cleanTraining.length; index++) {
+      naiveErrors.push(Math.abs(cleanTraining[index] - cleanTraining[index - lag]));
+    }
+    const maseDenominator = this.average(naiveErrors);
+    const smapeTerms = pairs
+      .map(([left, right]) => {
+        const denominator = (Math.abs(left) + Math.abs(right)) / 2;
+        return denominator > 0 ? Math.abs(left - right) / denominator : null;
+      })
+      .filter((value): value is number => value !== null);
+    const smape = this.average(smapeTerms) * 100;
+    const rmse = Math.sqrt(this.average(errors.map((value) => value ** 2)));
+    const mapeTerms = pairs
+      .filter(([left]) => left !== 0)
+      .map(([left, right]) => Math.abs((left - right) / left) * 100);
+    const mape = this.average(mapeTerms);
+    const actualMean = this.average(pairs.map(([left]) => left));
+    const ssRes = pairs.reduce((sum, [left, right]) => sum + (left - right) ** 2, 0);
+    const ssTot = pairs.reduce((sum, [left]) => sum + (left - actualMean) ** 2, 0);
+    const r2 = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+
+    return {
+      mase: this.round(maseDenominator > 0 ? mae / maseDenominator : 999),
+      smape: this.round(Number.isFinite(smape) ? smape : 100),
+      accuracy: this.round(Math.max(0, 100 - (Number.isFinite(smape) ? smape : 100))),
+      mae: this.round(mae),
+      rmse: this.round(rmse),
+      mape: this.round(Number.isFinite(mape) ? mape : 0),
+      r2: Math.round(r2 * 10000) / 10000,
+    };
+  }
+
+  private evaluateResampledForecastArrays(
+    dates: string[],
+    actual: number[],
+    predicted: number[],
+    trainActual: number[],
+    trainDates: string[],
+    bucket: 'week' | 'month',
+  ): ModelResult['weeklyMetrics'] {
+    const testBuckets = this.sumByPeriod(dates, actual, predicted, bucket);
+    const trainBuckets = this.sumTrainingByPeriod(trainDates, trainActual, bucket);
+    return this.evaluateForecastArrays(
+      testBuckets.map((point) => point.actual),
+      testBuckets.map((point) => point.predicted),
+      trainBuckets,
+      1,
+    );
+  }
+
+  private sumByPeriod(
+    dates: string[],
+    actual: number[],
+    predicted: number[],
+    bucket: 'week' | 'month',
+  ): Array<{ key: string; actual: number; predicted: number }> {
+    const grouped = new Map<string, { actual: number; predicted: number }>();
+    dates.forEach((date, index) => {
+      const key = bucket === 'month' ? date.slice(0, 7) : this.weekBucketKey(date);
+      const current = grouped.get(key) || { actual: 0, predicted: 0 };
+      current.actual += Number(actual[index]) || 0;
+      current.predicted += Number(predicted[index]) || 0;
+      grouped.set(key, current);
+    });
+    return [...grouped.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => ({ key, ...value }));
+  }
+
+  private sumTrainingByPeriod(
+    dates: string[],
+    actual: number[],
+    bucket: 'week' | 'month',
+  ): number[] {
+    const grouped = new Map<string, number>();
+    dates.forEach((date, index) => {
+      const key = bucket === 'month' ? date.slice(0, 7) : this.weekBucketKey(date);
+      grouped.set(key, (grouped.get(key) || 0) + (Number(actual[index]) || 0));
+    });
+    return [...grouped.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, value]) => value);
+  }
+
+  private weekBucketKey(date: string): string {
+    const value = new Date(`${date}T00:00:00.000Z`);
+    const day = value.getUTCDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    value.setUTCDate(value.getUTCDate() + diffToMonday);
+    return value.toISOString().slice(0, 10);
   }
 
   private average(values: number[]): number {

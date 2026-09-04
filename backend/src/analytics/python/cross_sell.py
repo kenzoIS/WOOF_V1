@@ -429,6 +429,18 @@ SECTOR_PAIR_FIT = {
 
 KEYWORD_AFFINITIES = [
     (
+        ("coffee", "latte", "cappuccino", "americano", "espresso", "tea", "matcha", "frappe", "juice", "smoothie", "beverage", "drink"),
+        ("coffee", "latte", "cappuccino", "americano", "espresso", "tea", "matcha", "frappe", "juice", "smoothie", "beverage", "drink"),
+        0.82,
+        "Drink + drink bundles are realistic for companion orders, paired beverages, or buy-two cafe occasions.",
+    ),
+    (
+        ("pasta", "snack", "sandwich", "waffle", "fries", "burger", "spaghetti", "carbonara", "bread", "toast", "pancake", "muffin", "rice", "meal", "chicken", "beef", "pork"),
+        ("pasta", "snack", "sandwich", "waffle", "fries", "burger", "spaghetti", "carbonara", "bread", "toast", "pancake", "muffin", "rice", "meal", "chicken", "beef", "pork"),
+        0.80,
+        "Human food bundles are realistic when items fit the same meal or snack occasion.",
+    ),
+    (
         ("groom", "bath", "spa", "trim", "wash", "shampoo"),
         ("coffee", "latte", "cappuccino", "americano", "tea", "drink", "juice", "smoothie"),
         1.0,
@@ -448,9 +460,21 @@ KEYWORD_AFFINITIES = [
     ),
     (
         ("groom", "bath", "spa", "trim", "wash"),
-        ("shampoo", "conditioner", "brush", "comb", "cologne", "spray"),
+        ("shampoo", "conditioner", "brush", "comb", "cologne", "spray", "toy", "leash", "harness", "treat", "chew", "food", "kibble"),
         0.94,
-        "Grooming + grooming-care product is realistic because the product helps maintain the service result at home.",
+        "Pet service + pet product is realistic because the product helps maintain or reward the care outcome at home.",
+    ),
+    (
+        ("groom", "bath", "spa", "trim", "wash", "hotel", "boarding", "daycare", "stay", "kennel", "event", "party", "barkday"),
+        ("pupcake", "puppuccino", "woofle", "cat bento", "bento cake", "pet cake", "dog cake", "cat cake", "treat", "chew"),
+        0.95,
+        "Pet service + treat is realistic as a reward or take-home add-on after the visit.",
+    ),
+    (
+        ("groom", "bath", "spa", "trim", "wash", "hotel", "boarding", "daycare", "stay", "kennel"),
+        ("groom", "bath", "spa", "trim", "wash", "hotel", "boarding", "daycare", "stay", "kennel"),
+        0.84,
+        "Pet service packages are realistic when services can be completed in the same visit or appointment plan.",
     ),
     (
         ("training", "consult", "vet", "checkup", "clinic"),
@@ -582,7 +606,7 @@ def get_high_level_type(category):
 
 def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, offer_sectors=None):
     """
-    Evaluates Strict Guardrails (3 Golden Banning Rules) & Archetype Mapping.
+    Evaluates WOOF business guardrails and maps pairs to practical bundle archetypes.
     """
     anchor_cat = get_item_category(anchor_name, anchor_sectors)
     offer_cat = get_item_category(offer_name, offer_sectors)
@@ -595,23 +619,8 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
 
     # ---------------------------------------------------------
     # ❌ 1. Same-Category / Substitute Exclusion Rule
-    # NO pairing within the same high-level type.
+    # Same-domain pairs are allowed when they map to a practical bundle archetype.
     # ---------------------------------------------------------
-    if anchor_type == offer_type:
-        return {
-            "isValid": False,
-            "exclusionReason": f"Same-type pairing ({anchor_type} + {offer_type}) is strictly excluded.",
-            "categoryCompat": 0.0,
-            "speciesMatch": 1.0 if anchor_sp == offer_sp or anchor_sp == "neutral" or offer_sp == "neutral" else 0.0,
-            "bundleArchetype": "Excluded / Same Category",
-            "anchorCategory": anchor_cat,
-            "offerCategory": offer_cat,
-            "anchorType": anchor_type,
-            "offerType": offer_type,
-            "anchorSpecies": anchor_sp,
-            "offerSpecies": offer_sp,
-        }
-
     # ---------------------------------------------------------
     # ❌ 2. Human Beverage + Utility / Retail Restriction Rule
     # Human Drink + Pet Supplies is BANNED.
@@ -687,7 +696,13 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
     archetype = None
 
     # ☕ Type A: "Human Cafe Combo" (Human Drink + Human Food)
-    if types == {"Human Drink", "Human Food"}:
+    if anchor_type == "Human Drink" and offer_type == "Human Drink":
+        archetype = "Beverage Pair / Companion Drinks"
+
+    elif anchor_type == "Human Food" and offer_type == "Human Food":
+        archetype = "Human Food Combo"
+
+    elif types == {"Human Drink", "Human Food"}:
         archetype = "Human Cafe Combo"
 
     # 🐶 Type B: "Pamper Both / Duo Experience" (Human Drink + Pet Bakery)
@@ -702,17 +717,36 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
     elif "Pet Service" in types and ("Pet Care / Utility" in types or "Pet Treat" in types):
         archetype = "Service + Aftercare / Reward"
 
+    elif anchor_type == "Pet Service" and offer_type == "Pet Service":
+        archetype = "Pet Service Package"
+
     # 🍖 Type E: "Pet Meal + Specialty Treat" (Pet Supplies + Pet Bakery)
     elif cats == {"Pet Supplies", "Pet Bakery"} or types == {"Pet Care / Utility", "Pet Treat"}:
         archetype = "Pet Meal + Specialty Treat"
 
+    elif anchor_type == "Pet Care / Utility" and offer_type == "Pet Care / Utility":
+        archetype = "Pet Care Essentials"
+
     else:
         archetype = "Cross-Category Experience"
+
+    compat_by_archetype = {
+        "Cafe + Service Waiting Combo": 1.0,
+        "Service + Aftercare / Reward": 1.0,
+        "Pamper Both / Duo Experience": 0.96,
+        "Human Cafe Combo": 0.92,
+        "Pet Meal + Specialty Treat": 0.90,
+        "Pet Service Package": 0.86,
+        "Pet Care Essentials": 0.82,
+        "Beverage Pair / Companion Drinks": 0.80,
+        "Human Food Combo": 0.78,
+        "Cross-Category Experience": 0.62,
+    }
 
     return {
         "isValid": True,
         "exclusionReason": None,
-        "categoryCompat": 1.0,
+        "categoryCompat": compat_by_archetype.get(archetype, 0.62),
         "speciesMatch": 1.0,
         "bundleArchetype": archetype,
         "anchorCategory": anchor_cat,
@@ -938,7 +972,7 @@ def build_low_association_bundles(
                 bundle_sectors,
             )
             opportunity_score = base_opportunity_score * (
-                0.85 + (0.35 * business_fit_score)
+                0.65 + (0.75 * business_fit_score)
             )
 
             pricing_fields = build_pricing_fields(
@@ -1272,7 +1306,7 @@ def run_cross_sell(baskets, config=None):
                 max_lift_in_set=5.0,
             )
 
-            biz_fit_score, _, _ = business_fit_for_pair(
+            biz_fit_score, bundle_fit_reason, bundle_category = business_fit_for_pair(
                 item_a, item_b, antecedent_sectors, consequent_sectors
             )
 
@@ -1294,7 +1328,13 @@ def run_cross_sell(baskets, config=None):
             anchor_basket_count = backtest_metrics.get("anchorBasketCount", 0)
             anchor_support = round(anchor_basket_count / len(dataset), 4) if dataset else round(float(row['support']), 4)
             pair_support = round(float(row['support']), 4)
-            score = round(float(row['lift']) * 35, 2)
+            model_score = float(row['lift']) * 35
+            score = round(
+                model_score
+                * (0.70 + (0.30 * biz_fit_score))
+                * (0.85 + (0.15 * (synergy_score / 100))),
+                2,
+            )
 
             rule_cooccurrences = int(row['support'] * len(train_dataset))
             is_emerging_trend = bool(rule_cooccurrences <= 3 and guardrail_res["isValid"] and synergy_score >= 70.0)
@@ -1341,6 +1381,9 @@ def run_cross_sell(baskets, config=None):
                 "synergyBreakdown": synergy_breakdown,
                 "isEmergingTrend": is_emerging_trend,
                 "businessFitScore": round(float(biz_fit_score), 2),
+                "bundleCategory": bundle_category,
+                "bundleFitReason": bundle_fit_reason,
+                "reason": f"[{guardrail_res['bundleArchetype']}] {bundle_fit_reason} Supported by FP-Growth with lift {round(float(row['lift']), 2)} and confidence {round(float(row['confidence']), 4)}.",
                 "isMultiItem": is_multi_item,
                 "crossSector": is_cross_sector(antecedents, consequents, product_sectors),
                 "anchorVelocity": "fast",
@@ -1363,7 +1406,7 @@ def run_cross_sell(baskets, config=None):
 
         rules_output = sorted(
             list(deduped_rules.values()),
-            key=lambda x: (x['lift'], x['confidence']),
+            key=lambda x: (x['opportunityScore'], x['lift'], x['confidence']),
             reverse=True,
         )[:50]
         

@@ -127,14 +127,18 @@ class CrossSellTests(unittest.TestCase):
         self.assertEqual(get_item_category("Dog Pupcake Bakery"), "Pet Bakery")
         self.assertEqual(get_item_category("St Roche Dog Shampoo"), "Pet Supplies")
 
-        # 2. Rule 1: Same High-Level Type Exclusion (Coffee + Non-Caffeine, Grooming + Pet Hotel)
+        # 2. Same-domain logical bundles are valid when they fit a realistic customer occasion.
         res_same_drink = evaluate_bundle_guardrails("Americano Coffee", "Iced Tea Non-Caffeine")
-        self.assertFalse(res_same_drink["isValid"])
-        self.assertEqual(res_same_drink["bundleArchetype"], "Excluded / Same Category")
+        self.assertTrue(res_same_drink["isValid"])
+        self.assertEqual(res_same_drink["bundleArchetype"], "Beverage Pair / Companion Drinks")
 
         res_same_service = evaluate_bundle_guardrails("Dog Grooming", "Pet Hotel Daycare")
-        self.assertFalse(res_same_service["isValid"])
-        self.assertEqual(res_same_service["bundleArchetype"], "Excluded / Same Category")
+        self.assertTrue(res_same_service["isValid"])
+        self.assertEqual(res_same_service["bundleArchetype"], "Pet Service Package")
+
+        res_same_food = evaluate_bundle_guardrails("Chicken Rice Meal", "Waffle Snack")
+        self.assertTrue(res_same_food["isValid"])
+        self.assertEqual(res_same_food["bundleArchetype"], "Human Food Combo")
 
         # 3. Rule 2: Beverage + Utility Restriction (Coffee + Shampoo)
         res_bev_utility = evaluate_bundle_guardrails("Iced Latte", "Dog Shampoo Retail")
@@ -170,6 +174,10 @@ class CrossSellTests(unittest.TestCase):
         res_type_d = evaluate_bundle_guardrails("Dog Grooming", "Dog Shampoo")
         self.assertTrue(res_type_d["isValid"])
         self.assertEqual(res_type_d["bundleArchetype"], "Service + Aftercare / Reward")
+
+        res_service_treat = evaluate_bundle_guardrails("Dog Grooming", "Dog Pupcake Bakery")
+        self.assertTrue(res_service_treat["isValid"])
+        self.assertEqual(res_service_treat["bundleArchetype"], "Service + Aftercare / Reward")
 
         # 10. Type E: Pet Meal + Specialty Treat (Pet Food + Cat Bento Cake)
         res_type_e = evaluate_bundle_guardrails("Cat Dry Pet Food", "Cat Bento Cake Bakery")

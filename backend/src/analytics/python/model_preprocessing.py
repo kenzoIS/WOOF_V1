@@ -26,6 +26,7 @@ CONTINUOUS_EXOG_COLUMNS = {
     "dayOfWeekCos",
     "tempCelsius",
     "humidity",
+    "comfortIndex",
     "avgBasketSize",
     "avgOrderValue",
     "average_unit_price",

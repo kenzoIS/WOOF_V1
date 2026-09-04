@@ -8,7 +8,6 @@ import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
-import { ModelDiagnostics } from "../components/ModelDiagnostics";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour, getWeatherImpact, getCafeCoAttachment, submitFeedbackRating } from "../lib/api";
 import {
@@ -111,6 +110,23 @@ const getItemHistoryBounds = (forecastRun: ForecastRun | null) => ({
   min: getMetadataDate(forecastRun, "historyStartDate", HISTORY_START_DATE),
   max: getMetadataDate(forecastRun, "historyEndDate", INGESTED_HISTORY_END_DATE),
 });
+
+const formatMetadataCalendar = (
+  metadata: ForecastRun["modelMetadata"] | undefined,
+  startKey: string,
+  endKey: string,
+) => {
+  const start = metadata?.[startKey];
+  const end = metadata?.[endKey];
+  return typeof start === "string" && typeof end === "string" && start && end
+    ? `${start} to ${end}`
+    : "-";
+};
+
+const formatForecastMode = (value: unknown) => {
+  const mode = String(value || "production").replace(/-/g, " ");
+  return mode.charAt(0).toUpperCase() + mode.slice(1);
+};
 
 const minDateString = (...dates: string[]) =>
   dates.filter(Boolean).sort()[0] || "";
@@ -306,6 +322,55 @@ export function Cafe() {
     }
   }, [globalDateRange]);
 
+  const buildCafeForecastParams = React.useCallback(() => {
+    let targetDays = 14;
+    if (forecastRangeMode === "next90days") targetDays = 90;
+    else if (forecastRangeMode === "next30days") targetDays = 30;
+    else if (forecastRangeMode === "next7days") targetDays = 7;
+    else if (forecastRangeMode === "custom") {
+      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      targetDays = Math.max(1, Math.min(diffDays, 90));
+    }
+
+    const params: Record<string, string> = { days: String(targetDays) };
+    if (weatherScenario === "sunny") {
+      params.temp = "32";
+      params.rain = "0";
+      params.humidity = "40";
+    } else if (weatherScenario === "rainy") {
+      params.temp = "24";
+      params.rain = "1";
+      params.humidity = "90";
+    } else if (weatherScenario === "custom") {
+      params.temp = String(tempOverride);
+      params.rain = String(rainChanceOverride);
+      params.humidity = String(humidityOverride);
+    }
+
+    if (holidayScenario === "force") {
+      params.holiday = "1";
+    } else if (holidayScenario === "ignore") {
+      params.holiday = "0";
+    }
+
+    if (forecastMode !== "production") {
+      params.forecastMode = forecastMode;
+      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
+    }
+
+    return params;
+  }, [
+    customForecastEnd,
+    customForecastStart,
+    forecastMode,
+    forecastRangeMode,
+    holidayScenario,
+    humidityOverride,
+    rainChanceOverride,
+    tempOverride,
+    weatherScenario,
+  ]);
+
   const handleApplySimulation = async () => {
     setIsSimulating(true);
     toast.info("Running forecast simulation...");
@@ -396,43 +461,48 @@ export function Cafe() {
 
   // API data state
   useEffect(() => {
-    let targetDays = 14;
-    if (forecastRangeMode === "next90days") targetDays = 90;
-    else if (forecastRangeMode === "next30days") targetDays = 30;
-    else if (forecastRangeMode === "next7days") targetDays = 7;
-    else if (forecastRangeMode === "custom") {
-      const diffDays = Math.ceil((new Date(customForecastEnd).getTime() - new Date(customForecastStart).getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      targetDays = Math.max(1, Math.min(diffDays, 90));
+    getForecast("cafe", buildCafeForecastParams()).then(setForecastRun).catch(() => {});
+  }, [buildCafeForecastParams, realtimeRefresh]);
+
+  useEffect(() => {
+    const metadata = forecastRun?.modelMetadata || {};
+    if (!metadata.segmentedCafeAutoRefresh || metadata.segmentedCafeStatus !== "pending") {
+      return;
     }
 
-    const params: Record<string, string> = { days: String(targetDays) };
-    if (weatherScenario === "sunny") {
-      params.temp = "32";
-      params.rain = "0";
-      params.humidity = "40";
-    } else if (weatherScenario === "rainy") {
-      params.temp = "24";
-      params.rain = "1";
-      params.humidity = "90";
-    } else if (weatherScenario === "custom") {
-      params.temp = String(tempOverride);
-      params.rain = String(rainChanceOverride);
-      params.humidity = String(humidityOverride);
-    }
+    let cancelled = false;
+    let attempts = 0;
+    const retryAfter = Number(metadata.segmentedCafeRetryAfterMs) || 15000;
 
-    if (holidayScenario === "force") {
-      params.holiday = "1";
-    } else if (holidayScenario === "ignore") {
-      params.holiday = "0";
-    }
+    const pollForSegmentedCafe = async () => {
+      if (cancelled || attempts >= 8) return;
+      attempts += 1;
+      try {
+        const nextRun = await getForecast("cafe", buildCafeForecastParams());
+        if (cancelled) return;
+        setForecastRun(nextRun);
+        const nextMetadata = nextRun?.modelMetadata || {};
+        if (nextMetadata.segmentedCafeAutoRefresh && nextMetadata.segmentedCafeStatus === "pending") {
+          window.setTimeout(pollForSegmentedCafe, retryAfter);
+        }
+      } catch {
+        if (!cancelled && attempts < 8) {
+          window.setTimeout(pollForSegmentedCafe, retryAfter);
+        }
+      }
+    };
 
-    if (forecastMode !== "production") {
-      params.forecastMode = forecastMode;
-      if (forecastMode === "latest-holdout") params.holdoutDays = "61";
-    }
-
-    getForecast("cafe", params).then(setForecastRun).catch(() => {});
-  }, [forecastRangeMode, customForecastStart, customForecastEnd, forecastMode, realtimeRefresh]);
+    const timer = window.setTimeout(pollForSegmentedCafe, retryAfter);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    buildCafeForecastParams,
+    forecastRun?.generatedAt,
+    forecastRun?.modelMetadata?.segmentedCafeAutoRefresh,
+    forecastRun?.modelMetadata?.segmentedCafeStatus,
+  ]);
 
   useEffect(() => {
     if (forecastRangeMode === "custom") return;
@@ -1149,7 +1219,6 @@ export function Cafe() {
                 SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
               </Badge>
             )}
-            {forecastViewMode === "forecast" && <ModelDiagnostics forecastRun={forecastRun} />}
           </div>
 
           <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
@@ -1241,12 +1310,39 @@ export function Cafe() {
                   </div>
                 </div>
                 {forecastRun?.modelMetadata && (
-                  <div className="text-[10px] text-[#223047] opacity-50 mt-2 border-t pt-2 space-y-1">
-                    <div>Weather Source: {String(forecastRun.modelMetadata.weatherDataSource || "N/A")}</div>
-                    <div>Holiday Source: {String(forecastRun.modelMetadata.holidayDataSource || "N/A")}</div>
-                    {!!forecastRun.modelMetadata.exogenousVariables && (
-                      <div>Exogenous: {Array.isArray(forecastRun.modelMetadata.exogenousVariables) ? (forecastRun.modelMetadata.exogenousVariables as any).join(", ") : String(forecastRun.modelMetadata.exogenousVariables)}</div>
-                    )}
+                  <div className="mt-2 border-t border-[#FFD9EC] pt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-[#223047]">
+                    <div>
+                      <div className="font-semibold opacity-50 uppercase">Forecast Mode</div>
+                      <div className="font-semibold opacity-80">{formatForecastMode(forecastRun.modelMetadata.forecastMode)}</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold opacity-50 uppercase">Observed Demand Days</div>
+                      <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.observedDemandDays ?? "-")}</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold opacity-50 uppercase">Training Calendar</div>
+                      <div className="font-semibold opacity-80">
+                        {formatMetadataCalendar(forecastRun.modelMetadata, "trainStartDate", "trainEndDate")}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold opacity-50 uppercase">Test Calendar</div>
+                      <div className="font-semibold opacity-80">
+                        {formatMetadataCalendar(forecastRun.modelMetadata, "testStartDate", "testEndDate")}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-semibold opacity-50 uppercase">Closed Days Excluded</div>
+                      <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.closedDaysExcluded ?? "-")}</div>
+                    </div>
+                    <div>
+                      <div className="font-semibold opacity-50 uppercase">Status / Fallback Reason</div>
+                      <div className="font-semibold opacity-80">
+                        {forecastRun.isFallback
+                          ? String(forecastRun.rejectionReason || forecastRun.modelMetadata.fallbackReason || "Selected model could not run")
+                          : "Model fit successfully"}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

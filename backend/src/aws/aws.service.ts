@@ -8,6 +8,7 @@ import { fromIni } from '@aws-sdk/credential-providers';
 
 const BUCKET_NAME = 'woof-data-lake-lucena-prod-1786959360';
 const REGION = 'ap-southeast-2';
+const DEFAULT_PROFILE = 'woof-prod';
 
 /**
  * AwsService handles all S3 Data Lake archiving operations.
@@ -24,10 +25,12 @@ const REGION = 'ap-southeast-2';
 @Injectable()
 export class AwsService {
   private readonly logger = new Logger(AwsService.name);
-  private readonly s3: S3Client;
+  private readonly s3?: S3Client;
+  private readonly enabled: boolean;
 
   constructor() {
     let credentialsProvider: any;
+    const profile = process.env.AWS_PROFILE?.trim();
 
     // Check if long-lived IAM keys are present in .env
     if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
@@ -35,9 +38,18 @@ export class AwsService {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       };
-    } else {
-      // Fallback to the SSO profile which expires every 12 hours
-      credentialsProvider = fromIni({ profile: 'woof-prod' });
+    } else if (profile) {
+      // Fallback to the SSO/profile credentials configured by AWS CLI.
+      credentialsProvider = fromIni({ profile });
+    }
+
+    this.enabled = Boolean(credentialsProvider);
+
+    if (!this.enabled) {
+      this.logger.warn(
+        `AWS S3 archiving disabled. Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE=${DEFAULT_PROFILE} to enable it.`,
+      );
+      return;
     }
 
     this.s3 = new S3Client({
@@ -51,6 +63,8 @@ export class AwsService {
   // ----------------------------------------------------------------
 
   async verifyConnection(): Promise<boolean> {
+    if (!this.s3) return false;
+
     try {
       await this.s3.send(new ListBucketsCommand({}));
       this.logger.log('AWS S3 connection verified.');
@@ -136,6 +150,8 @@ export class AwsService {
     body: Buffer,
     contentType: string,
   ): Promise<string | null> {
+    if (!this.s3) return null;
+
     try {
       await this.s3.send(
         new PutObjectCommand({

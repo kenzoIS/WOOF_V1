@@ -100,8 +100,21 @@ describe('ExogenousDataService', () => {
     expect(result[0]).toEqual(
       expect.objectContaining({ tempCelsius: 31, rainFlag: 1 }),
     );
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        isHotDay: 1,
+        isCoolRainyDay: 0,
+        comfortIndex: 26.46,
+      }),
+    );
     expect(result[1]).toEqual(
-      expect.objectContaining({ tempCelsius: 28, rainFlag: 0 }),
+      expect.objectContaining({
+        tempCelsius: 28,
+        rainFlag: 0,
+        isHotDay: 0,
+        isCoolRainyDay: 0,
+        comfortIndex: 25.03,
+      }),
     );
   });
 

@@ -2,6 +2,364 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-04 - Cafe Segmented Forecast Timeout Guard and Auto Refresh
+
+### Requested
+- Keep the aggregate Cafe Prophet model as the backup when segmented Cafe forecasting does not load quickly.
+- Avoid falling back to SMA just because the segmented Cafe candidate is still running.
+- Add an auto-refresh feature for Cafe so the dashboard can pick up the segmented forecast after it finishes.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Changed Cafe forecast selection to return the aggregate Prophet model quickly when the segmented Cafe candidate exceeds the foreground wait window.
+- Marked quick-return aggregate payloads with:
+  - `segmentedCafeStatus: pending`
+  - `segmentedCafeAutoRefresh: true`
+  - `segmentedCafeRetryAfterMs: 15000`
+- Kept the segmented candidate running in the background after the aggregate forecast is saved.
+- When the background segmented candidate finishes:
+  - It overwrites the saved Cafe forecast only if segmented MASE beats aggregate MASE.
+  - It updates the saved Cafe forecast metadata to `complete_not_selected` if segmented finishes but is worse.
+  - It checks the current saved forecast metadata before overwriting so an older background result does not replace a newer forecast run.
+- SMA fallback is now reserved for cases where the main aggregate Cafe model itself fails or is rejected, not when only the segmented improvement path is slow.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Cafe.tsx`.
+- Added a shared Cafe forecast parameter builder so normal forecast loads and auto-refresh use the same selected range/scenario settings.
+- Added Cafe-only auto polling when forecast metadata says the segmented forecast is pending.
+- The auto-refresh checks every `segmentedCafeRetryAfterMs` milliseconds, up to 8 attempts, and stops when segmented completes, fails, or is not selected.
+
+### Tests Updated
+- Updated `backend/src/analytics/analytics.service.spec.ts` for the new selector return shape.
+
+### Verification
+- Passed: `npm test -- --runInBand analytics.service.spec.ts`.
+- Passed: `npm test -- --runInBand exogenous-data.service.spec.ts`.
+- Passed: `python -m py_compile src\analytics\python\cafe_prophet.py src\analytics\python\services_sarima.py src\analytics\python\model_preprocessing.py`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm run build` in `backend`.
+- Ran approved live Cafe force refresh: `GET /api/analytics/forecast/Cafe?days=30&forceRefresh=true&segmentedWait=background`.
+- Live refresh result: aggregate Cafe Prophet was selected, not SMA fallback.
+  - Aggregate Cafe: `MASE 0.57`, `sMAPE 14.27`, `Accuracy 85.73`.
+  - Segmented Cafe candidate: `MASE 0.60`, `sMAPE 15.36`, `Accuracy 84.64`.
+  - Final selection metadata: `forecastSelection=aggregate_cafe`, `segmentedCafeStatus=complete_not_selected`.
+- Confirmed backend archived the approved refreshed Cafe forecast to S3 after saving it.
+- Corrected `backend/scripts/compare-weather-transform-models.js` so summed segmented MASE uses the same weekly seasonal naive denominator as the production/Python model metrics. The earlier `0.40` segmented Cafe diagnostic used a one-step naive denominator and was therefore optimistic compared with production MASE scoring.
+
+## 2026-09-04 - Cafe Segmented Forecast Production Selector
+
+### Requested
+- Implement the category-level segmented forecasting improvement for Cafe only.
+- Do not apply the Services segmentation path because the trial showed it degraded Services performance.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- After the aggregate Cafe Prophet model succeeds, the Cafe forecast path now builds a category-level segmented Prophet candidate.
+- The segmented candidate forecasts Cafe categories separately and sums the category forecasts:
+  - Coffee
+  - Non-caffeine drinks
+  - Snacks/waffles/pasta
+  - Rice meals
+  - Pet bakery
+  - Other Cafe
+- Added a Cafe-only selector:
+  - Selects the segmented Cafe model only when summed holdout MASE is finite and lower than the aggregate Cafe model MASE.
+  - Keeps the aggregate Cafe model when segmentation fails or performs worse.
+  - Stores `forecastSelection`, `forecastSelectionReason`, and `forecastCandidates` in model metadata so the selected path is auditable.
+- Added summed segmented fitted values, forecast confidence bands, daily metrics, weekly metrics, monthly metrics, and segment metadata for the selected segmented Cafe model.
+- Services production forecasting was intentionally not changed.
+
+### Tests Updated
+- Updated `backend/src/analytics/analytics.service.spec.ts`.
+- Added selector tests confirming:
+  - Cafe chooses the segmented candidate when segmented MASE beats aggregate MASE.
+  - Cafe keeps the aggregate candidate when segmented MASE is worse.
+
+### Verification
+- Passed: `npm test -- --runInBand analytics.service.spec.ts`.
+- Passed: `npm test -- --runInBand exogenous-data.service.spec.ts`.
+- Passed: `python -m py_compile src\analytics\python\cafe_prophet.py src\analytics\python\services_sarima.py src\analytics\python\model_preprocessing.py`.
+- Passed: `node --check scripts\compare-weather-transform-models.js`.
+- Passed: `npm run build`.
+- Note: A live Cafe force refresh was not run because no backend was already listening on port `3001`, and starting the real backend plus force-refreshing would write a new `forecast_runs` row and may archive to S3.
+
+## 2026-09-04 - Segmented Forecasting Trial
+
+### Requested
+- Try segmented Services forecasting by service type because grooming, pet hotel, daycare, spa/bath, and events may have different demand rhythms.
+- Try category-level Cafe forecasting because coffee, non-caffeine drinks, snacks/waffles/pasta, rice meals, and pet bakery may have different seasonality.
+- Sum segment forecasts and compare the summed result against the aggregate forecasting model.
+
+### Backend Changes
+- Extended the read-only comparison runner in `backend/scripts/compare-weather-transform-models.js`.
+- Added Cafe segment classification using `category` and `productName`:
+  - Coffee
+  - Non-caffeine drinks
+  - Snacks/waffles/pasta
+  - Rice meals
+  - Pet bakery
+  - Other Cafe
+- Added Services segment classification using `category` and `productName`:
+  - Grooming
+  - Pet hotel
+  - Daycare
+  - Spa/bath
+  - Events
+  - Other Services
+- Added true summed-segment backtest scoring by requesting optional holdout predictions from each segment model, summing those predictions by date, then calculating MASE/sMAPE/Accuracy for the summed forecast.
+- Added optional `includeBacktest` support to `cafe_prophet.py` and `services_sarima.py`; normal production API responses are unchanged unless a diagnostic script requests this field.
+- Added optional Services `experimentConfig.gridSearchTimeoutSeconds` for diagnostic segment runs only; production defaults remain unchanged.
+
+### Comparison Results
+- Cafe aggregate transformed-weather model: `MASE 0.56`, `sMAPE 14.18`, `Accuracy 85.82`, weekly `MASE 0.47`, monthly `MASE 0.27`.
+- Cafe summed category-level backtest: `MASE 0.40`, `sMAPE 20.30`, `Accuracy 79.70`, MAE `8.33`, over `96` holdout days.
+- Cafe segment model MASE values:
+  - Coffee: `0.78`
+  - Pet bakery: `0.77`
+  - Snacks/waffles/pasta: `0.74`
+  - Rice meals: `0.79`
+  - Non-caffeine drinks: `1.18`
+- Services aggregate transformed-weather model: `MASE 1.30`, `sMAPE 52.44`, `Accuracy 47.56`, weekly `MASE 1.40`, monthly `MASE 0.74`.
+- Services summed service-type backtest: `MASE 2.12`, `sMAPE 176.14`, `Accuracy 0`, MAE `16.88`, over `101` holdout days.
+- Services modeled segments:
+  - Grooming: `MASE 3.07`
+  - Pet hotel: `MASE 2.68`
+  - Events skipped because it had only `21` observed rows, below the `30` row minimum.
+
+### Interpretation
+- Cafe category-level segmentation is promising and reached the target range (`MASE 0.40`), so this is a good candidate for production selection in the next implementation step.
+- Services segmentation should not be applied to production as-is because it performed worse than the aggregate Services model.
+- The Services result supports the earlier finding that the problem is recent sparsity/distribution shift, not simply mixed service-type behavior.
+
+### Verification
+- Passed: `node --check scripts\compare-weather-transform-models.js`.
+- Passed: `python -m py_compile src\analytics\python\cafe_prophet.py src\analytics\python\services_sarima.py src\analytics\python\model_preprocessing.py`.
+- Passed: `python src\analytics\python\test_services_sarimax.py`.
+- Passed: `npm run build`.
+- Ran: `node scripts\compare-weather-transform-models.js` with elevated execution because Windows sandbox blocks Python child process spawning.
+
+## 2026-09-04 - Weather Feature Transform Forecasting Trial
+
+### Requested
+- Implement transformed weather variables first for both Cafe and Services forecasting before trying the other model-improvement suggestions.
+- Use factual weather-derived features instead of feeding only raw `tempCelsius`, `rainFlag`, and `humidity` into the forecasting models.
+- Check the resulting model performance metrics before proceeding further.
+
+### Backend Changes
+- Replaced raw weather regressors used by the Cafe Prophet model with transformed weather features:
+  - `isHotDay = tempCelsius >= 31`
+  - `isCoolRainyDay = rainFlag == 1 && tempCelsius <= 26`
+  - `comfortIndex = tempCelsius - (0.55 - 0.0055 * humidity) * (tempCelsius - 14.5)`
+- Applied the same transformed weather feature set to the Services SARIMAX model.
+- Added transformed weather fields to `ExogenousDataService` so historical and forecast exogenous rows are generated consistently.
+- Recomputed transformed weather fields after forecast weather overrides, so simulator/manual override inputs remain aligned with the model features.
+- Added `comfortIndex` to the continuous exogenous preprocessing list so it is scaled like other numeric regressors.
+- Updated exogenous-data and Services SARIMAX tests to include transformed weather fields.
+- Added `backend/scripts/compare-weather-transform-models.js`, a direct MongoDB/Python comparison runner that does not start Nest, write `forecast_runs`, or archive to S3.
+
+### Comparison Results
+- Cafe transformed weather result: `MASE 0.56`, `sMAPE 14.18`, `Accuracy 85.82`, weekly `MASE 0.47`, monthly `MASE 0.27`.
+- Cafe raw-weather reference from the same comparison: `MASE 0.57`, `sMAPE 14.24`, `Accuracy 85.76`, weekly `MASE 0.70`, monthly `MASE 0.42`.
+- Services transformed weather result: `MASE 1.30`, `sMAPE 52.44`, `Accuracy 47.56`, weekly `MASE 1.40`, monthly `MASE 0.74`.
+- Interpretation: transformed weather slightly improved Cafe daily metrics and meaningfully improved Cafe weekly/monthly metrics while preserving weather variables for the paper. Services improved only slightly, so its larger issue is still likely demand sparsity/data pattern shift rather than raw weather encoding alone.
+
+### Verification
+- Passed: `python -m py_compile src\analytics\python\cafe_prophet.py src\analytics\python\services_sarima.py src\analytics\python\model_preprocessing.py`.
+- Passed: `python src\analytics\python\test_services_sarimax.py`.
+- Passed: `npm test -- --runInBand exogenous-data.service.spec.ts`.
+- Passed: `npm run build`.
+
+## 2026-09-04 - Cafe Forecast Backend Model Comparison
+
+### Requested
+- Run a backend model comparison for Cafe before fully implementing, removing, or adding forecasting model changes.
+- Focus on whether Cafe MASE can improve toward the `0.30-0.45` target range.
+
+### Backend Experiment Support
+- Updated `backend/src/analytics/python/cafe_prophet.py`.
+- Added optional `experimentConfig` support for comparison runs only.
+- Production defaults remain unchanged when `experimentConfig` is not provided.
+- Experiment-only controls include:
+  - `exogColumns`
+  - `changepointCandidates`
+  - `seasonalityModes`
+  - `weeklyFourierOrders`
+  - `monthlyFourierOrders`
+  - `yearlySeasonality`
+- Added `backend/scripts/compare-cafe-models.js`.
+- The script pulls the live Cafe forecast history from `GET /api/analytics/forecast/Cafe?days=30`, runs comparison variants through `cafe_prophet.py`, and prints ranked metrics without saving forecast runs.
+
+### Comparison Result
+- Dataset used by comparison:
+  - History rows: `1918`
+  - History range: `2021-03-01` to `2026-05-31`
+  - Endpoint baseline: `http://localhost:3001/api/analytics/forecast/Cafe?days=30`
+- Ranked by daily MASE:
+  - `prophet-weekend-only`: MASE `0.56`, sMAPE `13.98`, Accuracy `86.02`, weekly MASE `0.50`, monthly MASE `0.28`.
+  - `prophet-calendar-basic`: MASE `0.57`, sMAPE `14.15`, Accuracy `85.85`, weekly MASE `0.58`, monthly MASE `0.34`.
+  - `current-live-full-exog`: MASE `0.58`, sMAPE `14.29`, Accuracy `85.71`, weekly MASE `0.71`, monthly MASE `0.43`.
+  - `prophet-no-exog-default-seasonality`: MASE `0.62`, sMAPE `15.46`, Accuracy `84.54`, weekly MASE `0.69`, monthly MASE `0.35`.
+  - `prophet-no-exog-lower-seasonality`: MASE `0.62`, sMAPE `15.46`, Accuracy `84.54`, weekly MASE `0.69`, monthly MASE `0.35`.
+
+### Interpretation
+- Removing all exogenous variables worsened daily MASE from `0.58` to `0.62`.
+- Full weather/holiday exogenous variables are not the best observed configuration in this comparison.
+- `isWeekend` alone gave the best result in this run and improved weekly/monthly MASE substantially.
+- Calendar-only features also improved over full weather exogenous variables, but not as much as weekend-only.
+- The strongest next candidate change is to prune high-multicollinearity weather variables (`tempCelsius`, `rainFlag`, `humidity`) from Cafe production forecasting while retaining the strongest calendar signal.
+
+### Verification
+- Passed: `python -m py_compile src\analytics\python\cafe_prophet.py` in `backend`.
+- Ran: `node scripts\compare-cafe-models.js` with elevated execution because Windows sandbox blocked Python child process spawning.
+- Passed: `npm run build` in `backend`.
+- Note: `python src\analytics\python\test_cafe_prophet.py` was stopped after several minutes because the default Prophet grid fitting did not finish promptly in the local environment; the targeted comparison script completed successfully.
+
+## 2026-09-04 - Services Forecast Data Quality and Metric Generation Audit
+
+### Requested
+- Before changing forecasting models, audit Services data quality and demand sparsity.
+- Verify whether Services weekly/monthly performance metrics are actually generated or whether the UI is showing fallback/base metrics.
+
+### Audit Findings
+- Live endpoint checked: `GET /api/analytics/forecast/Services?days=30`.
+- Forced refresh checked: `GET /api/analytics/forecast/Services?days=30&forceRefresh=true`.
+- Active Services forecast is currently `SMA (7-day fallback)`, not the SARIMAX model.
+- The SARIMAX candidate was rejected because `SARIMAX(1, 1, 1)x(1,1,1,7)+exog` returned `MASE 1.28`, exceeding the backend acceptance threshold of `1.2`.
+- The active fallback model reports `MASE 1.34`, `sMAPE 53.52`, and `Accuracy 46.48`.
+- Active response has `weeklyMetrics: null` and `monthlyMetrics: null`; therefore weekly/monthly metrics are not currently being generated for the accepted Services response because the accepted response is fallback.
+
+### Services Data Quality / Sparsity Summary
+- History range: `2021-03-01` to `2026-09-01`.
+- Total calendar days in history: `2011`.
+- Observed demand days: `1878`.
+- Closed/missing days filled: `133`.
+- Outlier days capped: `14`.
+- Outlier cap: `36` bookings.
+- Total observed service bookings: `24323`.
+- Average observed daily bookings: `12.95`.
+- Standard deviation of daily bookings: `8.54`.
+- Coefficient of variation: `0.66`, indicating high demand variability.
+- Low-volume observed days (`<=2` bookings): `81` days (`4.31%` of observed days).
+- Strong day-of-week pattern:
+  - Monday average: `5.44` bookings.
+  - Tuesday average: `5.28` bookings.
+  - Friday average: `14.93` bookings.
+  - Saturday average: `22.02` bookings.
+  - Sunday average: `22.57` bookings.
+- Recent distribution shift found:
+  - Normal monthly volume through `2026-05` (`537` bookings, `17.9` avg/day).
+  - No observed Services month in the last-18-month summary for `2026-06`.
+  - `2026-07`: only `7` observed days, `13` total bookings, `1.86` avg/day.
+  - `2026-08`: only `16` observed days, `28` total bookings, `1.75` avg/day.
+  - `2026-09`: `1` observed day, `4` bookings.
+
+### Interpretation
+- Services is not globally sparse across the full history, but the most recent data is sparse and distribution-shifted compared with the 2025 to May 2026 baseline.
+- The current poor Services performance is likely caused by a recent structural change, partial/incomplete ingestion, or a channel/sector-routing change rather than a simple lack of historical data.
+- Weekly/monthly metrics are real when the Python model is accepted, but they are absent in the active Services response because the model falls back to SMA after SARIMAX fails the MASE threshold.
+
+### Verification
+- Confirmed forced refresh still returns fallback, so the result is not only a stale-cache issue.
+- No forecasting model code was changed during this audit.
+
+## 2026-09-04 - Services Active Model Performance N/A Fallback Fix
+
+### Requested
+- Explain why MASE, Accuracy, and sMAPE showed `N/A` in the Services Module under Services Revenue & Demand Forecast.
+- Fix the Services Active Model Performance card so it reflects available model metrics instead of displaying `N/A`.
+
+### Root Cause
+- The Services page intentionally switched metric sources based on the active chart granularity.
+- For weekly and monthly chart views, it looked only for `weeklyMetrics` or `monthlyMetrics`.
+- When those aggregate metric objects were missing from the backend response or from older cached forecast payloads, the UI returned `N/A` even though the base forecast run still had valid MASE, Accuracy, and sMAPE.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Services.tsx`.
+- Added a `baseMetrics()` fallback inside `dynamicPerformanceMetrics`.
+- Weekly and monthly views still use their matching aggregate metrics when present.
+- If aggregate metrics are unavailable, Services now falls back to the standard forecast run metrics instead of showing `N/A`.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Confirmed no remaining `N/A` metric fallback returns in `frontend/src/app/pages/Services.tsx`.
+- Passed: `npm run build` in `frontend`.
+
+## 2026-09-03 - Services Forecast Performance Panel Consolidation
+
+### Requested
+- Apply the same forecast panel cleanup from Cafe to the Services module.
+- In Services Revenue & Demand Forecast, remove the separate `Model Diagnostics & Evaluation Details` panel because it duplicates performance metrics shown in `Active Model Performance`.
+- Keep the correct chart-aware values in `Active Model Performance`.
+- Move retained diagnostic fields into `Active Model Performance`, replacing Weather Source / Holiday Source / simulator override footer rows with Forecast Mode, Training Calendar, Closed Days Excluded, Test Calendar, Status / Fallback Reason, and Observed Demand Days.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Services.tsx`.
+- Removed the Services page import and render call for the shared `ModelDiagnostics` component, without changing the shared component itself.
+- Kept `Active Model Performance` as the single source of truth for model metrics because it uses `dynamicPerformanceMetrics`, which reflects the active daily, weekly, or monthly chart horizon.
+- Added compact metadata rows inside the Services `Active Model Performance` card for Forecast Mode, Observed Demand Days, Training Calendar, Test Calendar, Closed Days Excluded, and Status / Fallback Reason.
+- Removed the old Weather Source, Holiday Source, Temp Override, Rain Override, and Holiday Override footer rows from the Services performance card.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm run build` in `frontend`.
+
+## 2026-09-03 - Cafe Forecast Performance Panel Consolidation
+
+### Requested
+- In the Cafe Revenue & Demand Forecast, remove the separate `Model Diagnostics & Evaluation Details` panel because it duplicated performance metrics shown in `Active Model Performance` while sometimes displaying different values.
+- Keep the correct performance metrics in `Active Model Performance`.
+- Move non-performance diagnostic details into `Active Model Performance`, replacing the old Weather Source / Holiday Source / Exogenous Variables footer with:
+  - Forecast Mode
+  - Training Calendar
+  - Closed Days Excluded
+  - Test Calendar
+  - Status / Fallback Reason
+  - Observed Demand Days
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Cafe.tsx`.
+- Removed the Cafe page import and render call for the shared `ModelDiagnostics` component, leaving other modules that use it untouched.
+- Retained `Active Model Performance` as the single source of truth for model metrics because it uses the chart-aware `dynamicPerformanceMetrics` values for the active daily, weekly, or monthly horizon.
+- Added compact metadata rows inside `Active Model Performance` for Forecast Mode, Observed Demand Days, Training Calendar, Test Calendar, Closed Days Excluded, and Status / Fallback Reason.
+- Removed Weather Source, Holiday Source, and Exogenous Variables from the Cafe Active Model Performance footer as requested.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm run build` in `frontend`.
+
+## 2026-09-03 - Bundle Simulator Logical Bundle Guardrails
+
+### Requested
+- In the AI Simulation Bundle Simulator, revise AI-Predicted Bundle Opportunities so bundle suggestions are not ranked purely by FP-Growth/statistical output.
+- Keep FP-Growth and the bundling engine, but add real-world WOOF bundling logic based on the ingested dataset and practical combinations such as:
+  - drinks + drinks
+  - human cafe items + human cafe items
+  - pet services + drinks
+  - pet services + treats
+  - pet services + pet products
+
+### Backend Changes
+- Updated `backend/src/analytics/python/cross_sell.py`.
+- Removed the strict same-high-level-type exclusion that previously rejected logical same-domain bundles such as drink + drink and service + service.
+- Added practical bundle archetypes:
+  - `Beverage Pair / Companion Drinks`
+  - `Human Food Combo`
+  - `Pet Service Package`
+  - `Pet Care Essentials`
+- Kept important hard guardrails intact, including species mismatch prevention and human main meal + pet item exclusions.
+- Expanded keyword affinity rules so the engine recognizes practical WOOF pairings from item names when dataset sector labels are incomplete or noisy.
+- Adjusted opportunity scoring so bundle ranking blends FP-Growth evidence with business-fit and synergy, making logical pairings rank better without discarding support, confidence, lift, or co-occurrence signals.
+- Added `bundleCategory`, `bundleFitReason`, and clearer reason text to FP-Growth rule outputs so the frontend explanation drawer can show the business rationale behind each recommendation.
+
+### Tests Updated
+- Updated `backend/src/analytics/python/test_cross_sell.py`.
+- Replaced old assertions that treated drink + drink and service + service as invalid.
+- Added coverage for logical same-domain and service-adjacent pairings, including drink pairs, human food combos, pet service packages, and service + treat bundles.
+
+### Verification
+- Passed: `python src\analytics\python\test_cross_sell.py` in `backend` (`7` tests passed).
+- Passed: `npm run build` in `backend`.
+
 ## 2026-08-08 - Final AI Simulation Manuscript Alignment (Sweep 4)
 
 ### Requested

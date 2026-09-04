@@ -31,9 +31,9 @@ EXOG_COLUMNS = [
     "isHoliday",
     "dayBeforeHoliday",
     "dayAfterHoliday",
-    "tempCelsius",
-    "rainFlag",
-    "humidity",
+    "isHotDay",
+    "isCoolRainyDay",
+    "comfortIndex",
     "promoFlag",
     "average_unit_price",
 ]
@@ -83,10 +83,8 @@ def ordered_unique(values):
 
 
 def default_exog_value(column):
-    if column == "tempCelsius":
+    if column == "comfortIndex":
         return 28.0
-    if column == "humidity":
-        return 70.0
     return 0.0
 
 
@@ -219,8 +217,7 @@ def build_forecast_exog(payload, forecast_days):
     if matrix is not None:
         return matrix
     fallback_row = [0.0 for _ in EXOG_COLUMNS]
-    fallback_row[EXOG_COLUMNS.index("tempCelsius")] = 28.0
-    fallback_row[EXOG_COLUMNS.index("humidity")] = 70.0
+    fallback_row[EXOG_COLUMNS.index("comfortIndex")] = 28.0
     return np.asarray(
         [fallback_row for _ in range(forecast_days)],
         dtype=float,
@@ -232,10 +229,17 @@ def run(payload):
         raise ValueError("Input payload must be a JSON object")
 
     data = payload.get("data", [])
+    include_backtest = bool(payload.get("includeBacktest", False))
     forecast_days = normalize_forecast_days(
         payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
     )
     split_ratio = payload.get("splitRatio", "90-5-5")
+    experiment_config = payload.get("experimentConfig", {})
+    if not isinstance(experiment_config, dict):
+        experiment_config = {}
+    grid_search_timeout_seconds = int(
+        experiment_config.get("gridSearchTimeoutSeconds", GRID_SEARCH_TIMEOUT_SECONDS)
+    )
 
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
@@ -296,6 +300,7 @@ def run(payload):
         validation_exog,
         actual[:train_idx],
         target_transformer,
+        timeout_seconds=grid_search_timeout_seconds,
     )
     validation_forecast = validation_fit.get_forecast(
         steps=val_idx - train_idx, exog=validation_exog
@@ -308,6 +313,7 @@ def run(payload):
     # Step 2: Test Evaluation & Resampled Multi-Horizon Backtests
     weekly_metrics = None
     monthly_metrics = None
+    backtest_payload = None
     if has_test:
         try:
             test_standardizer = (
@@ -335,6 +341,13 @@ def run(payload):
                 test_actual, test_forecast, actual[:train_idx]
             )
             eval_metrics = test_metrics
+            if include_backtest:
+                backtest_payload = {
+                    "dates": test_date_strings,
+                    "actual": [round(float(value), 4) for value in test_actual],
+                    "predicted": [round(max(0.0, float(value)), 4) for value in test_forecast],
+                    "trainActual": [round(float(value), 4) for value in train_actual],
+                }
 
             # Compute genuine resampled backtests for Weekly and Monthly horizons
             weekly_metrics = resample_and_evaluate(
@@ -400,7 +413,7 @@ def run(payload):
             }
         )
 
-    return {
+    result = {
         "modelName": (
             f"{'SARIMAX' if use_exog else 'SARIMA'}{order}x"
             f"({seasonal_order[0]},{seasonal_order[1]},{seasonal_order[2]},7)"
@@ -445,6 +458,9 @@ def run(payload):
             **search_metadata,
         },
     }
+    if include_backtest and backtest_payload:
+        result["backtest"] = backtest_payload
+    return result
 
 
 if __name__ == "__main__":

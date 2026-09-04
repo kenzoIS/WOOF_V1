@@ -22,9 +22,9 @@ logging.getLogger("prophet").setLevel(logging.ERROR)
 DEFAULT_FORECAST_DAYS = 30
 MAX_FORECAST_DAYS = 90
 EXOG_COLUMNS = [
-    "tempCelsius",
-    "rainFlag",
-    "humidity",
+    "isHotDay",
+    "isCoolRainyDay",
+    "comfortIndex",
     "isHoliday",
     "dayBeforeHoliday",
     "dayAfterHoliday",
@@ -35,20 +35,28 @@ EXOG_COLUMNS = [
 CHANGEPOINT_CANDIDATES = [0.01, 0.05, 0.1, 0.2, 0.3, 0.5]
 
 
-def build_model(changepoint_prior_scale, use_exog=False, exog_cols=None, seasonality_mode="multiplicative"):
+def build_model(
+    changepoint_prior_scale,
+    use_exog=False,
+    exog_cols=None,
+    seasonality_mode="multiplicative",
+    weekly_fourier_order=8,
+    monthly_fourier_order=4,
+    yearly_seasonality=True,
+):
     model = Prophet(
         weekly_seasonality=False,
         daily_seasonality=False,
-        yearly_seasonality=True,
+        yearly_seasonality=yearly_seasonality,
         changepoint_prior_scale=changepoint_prior_scale,
         changepoint_range=0.9,
         seasonality_mode=seasonality_mode,
         interval_width=0.8,
     )
-    # Custom weekly seasonality with fourier_order=8 for responsive within-week patterns
-    model.add_seasonality(name="weekly", period=7, fourier_order=8)
-    # Monthly seasonality for payday/month-end patterns
-    model.add_seasonality(name="monthly", period=30.5, fourier_order=4)
+    if weekly_fourier_order and weekly_fourier_order > 0:
+        model.add_seasonality(name="weekly", period=7, fourier_order=int(weekly_fourier_order))
+    if monthly_fourier_order and monthly_fourier_order > 0:
+        model.add_seasonality(name="monthly", period=30.5, fourier_order=int(monthly_fourier_order))
 
     if use_exog and exog_cols:
         for column in exog_cols:
@@ -66,6 +74,13 @@ def normalize_forecast_days(value):
     except Exception:
         days = DEFAULT_FORECAST_DAYS
     return max(1, min(days, MAX_FORECAST_DAYS))
+
+
+def config_list(config, key, fallback):
+    value = config.get(key) if isinstance(config, dict) else None
+    if isinstance(value, list) and len(value) > 0:
+        return value
+    return fallback
 
 
 def parse_splits(length, ratio_str="90-5-5"):
@@ -86,10 +101,40 @@ def run(payload):
         raise ValueError("Input payload must be a JSON object")
 
     data = payload.get("data", [])
+    include_backtest = bool(payload.get("includeBacktest", False))
     forecast_days = normalize_forecast_days(
         payload.get("forecastDays", DEFAULT_FORECAST_DAYS)
     )
     split_ratio = payload.get("splitRatio", "90-5-5")
+    experiment_config = payload.get("experimentConfig", {})
+    if not isinstance(experiment_config, dict):
+        experiment_config = {}
+    changepoint_candidates = [
+        float(value)
+        for value in config_list(
+            experiment_config,
+            "changepointCandidates",
+            CHANGEPOINT_CANDIDATES,
+        )
+    ]
+    seasonality_modes = [
+        str(value)
+        for value in config_list(
+            experiment_config,
+            "seasonalityModes",
+            ["multiplicative", "additive"],
+        )
+        if str(value) in ("multiplicative", "additive")
+    ] or ["multiplicative", "additive"]
+    weekly_fourier_orders = [
+        int(value)
+        for value in config_list(experiment_config, "weeklyFourierOrders", [8])
+    ]
+    monthly_fourier_orders = [
+        int(value)
+        for value in config_list(experiment_config, "monthlyFourierOrders", [4])
+    ]
+    yearly_seasonality = bool(experiment_config.get("yearlySeasonality", True))
 
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
@@ -121,7 +166,10 @@ def run(payload):
     if isinstance(payload.get("exogenous"), list) and len(payload["exogenous"]) > 0:
         exog_list = payload["exogenous"]
         first_row = exog_list[0] if exog_list else {}
-        valid_cols = [c for c in EXOG_COLUMNS if c in first_row]
+        requested_exog_cols = experiment_config.get("exogColumns", EXOG_COLUMNS)
+        if not isinstance(requested_exog_cols, list):
+            requested_exog_cols = EXOG_COLUMNS
+        valid_cols = [c for c in requested_exog_cols if c in first_row]
         if valid_cols:
             for row in exog_list:
                 d = str(row.get("date", ""))
@@ -179,27 +227,40 @@ def run(payload):
 
     # Grid search for best changepoint and seasonality mode
     best = None
-    for s_mode in ["multiplicative", "additive"]:
-        for candidate in CHANGEPOINT_CANDIDATES:
-            try:
-                model = build_model(candidate, use_exog=use_exog, exog_cols=active_exog_cols, seasonality_mode=s_mode)
-                model.fit(train)
-                predicted = target_transformer.inverse(
-                    model.predict(val_dates)["yhat"].to_numpy()
-                )
-                metric_result = evaluate_forecast_metrics(
-                    val_actual, predicted, actual[:train_idx]
-                )
-                score = (metric_result["mase"], metric_result["smape"])
-                if best is None or score < best["score"]:
-                    best = {
-                        "score": score,
-                        "changepointPriorScale": candidate,
-                        "seasonalityMode": s_mode,
-                        "metrics": metric_result,
-                    }
-            except Exception:
-                continue
+    for s_mode in seasonality_modes:
+        for weekly_order in weekly_fourier_orders:
+            for monthly_order in monthly_fourier_orders:
+                for candidate in changepoint_candidates:
+                    try:
+                        model = build_model(
+                            candidate,
+                            use_exog=use_exog,
+                            exog_cols=active_exog_cols,
+                            seasonality_mode=s_mode,
+                            weekly_fourier_order=weekly_order,
+                            monthly_fourier_order=monthly_order,
+                            yearly_seasonality=yearly_seasonality,
+                        )
+                        model.fit(train)
+                        predicted = target_transformer.inverse(
+                            model.predict(val_dates)["yhat"].to_numpy()
+                        )
+                        metric_result = evaluate_forecast_metrics(
+                            val_actual, predicted, actual[:train_idx]
+                        )
+                        score = (metric_result["mase"], metric_result["smape"])
+                        if best is None or score < best["score"]:
+                            best = {
+                                "score": score,
+                                "changepointPriorScale": candidate,
+                                "seasonalityMode": s_mode,
+                                "weeklyFourierOrder": weekly_order,
+                                "monthlyFourierOrder": monthly_order,
+                                "yearlySeasonality": yearly_seasonality,
+                                "metrics": metric_result,
+                            }
+                    except Exception:
+                        continue
 
     if best is None:
         raise RuntimeError("Prophet could not fit any changepoint prior candidate")
@@ -207,6 +268,7 @@ def run(payload):
     # Step 2: Test Evaluation & Resampled Multi-Horizon Backtests
     weekly_metrics = None
     monthly_metrics = None
+    backtest_payload = None
     if has_test:
         try:
             test_model = build_model(
@@ -214,6 +276,9 @@ def run(payload):
                 use_exog=use_exog,
                 exog_cols=active_exog_cols,
                 seasonality_mode=best["seasonalityMode"],
+                weekly_fourier_order=best["weeklyFourierOrder"],
+                monthly_fourier_order=best["monthlyFourierOrder"],
+                yearly_seasonality=best["yearlySeasonality"],
             )
             if use_exog and active_exog_cols:
                 test_standardizer = ExogenousStandardizer(active_exog_cols).fit(
@@ -243,6 +308,13 @@ def run(payload):
                 test_actual, test_pred, actual[:train_idx]
             )
             eval_metrics = test_metrics
+            if include_backtest:
+                backtest_payload = {
+                    "dates": test_date_strings,
+                    "actual": [round(float(value), 4) for value in test_actual],
+                    "predicted": [round(max(0.0, float(value)), 4) for value in test_pred],
+                    "trainActual": [round(float(value), 4) for value in train_actual],
+                }
 
             weekly_metrics = resample_and_evaluate(
                 dates=test_date_strings,
@@ -273,6 +345,9 @@ def run(payload):
         use_exog=use_exog,
         exog_cols=active_exog_cols,
         seasonality_mode=best["seasonalityMode"],
+        weekly_fourier_order=best["weeklyFourierOrder"],
+        monthly_fourier_order=best["monthlyFourierOrder"],
+        yearly_seasonality=best["yearlySeasonality"],
     )
     if use_exog and active_exog_cols:
         final_standardizer = ExogenousStandardizer(active_exog_cols).fit(
@@ -302,10 +377,9 @@ def run(payload):
         else:
             for column in active_exog_cols:
                 future[column] = 0.0
-        if "tempCelsius" in future.columns:
-            future["tempCelsius"] = future["tempCelsius"].fillna(28.0).astype(float)
-        for column in [c for c in active_exog_cols if c != "tempCelsius"]:
-            future[column] = future[column].fillna(0.0).astype(float)
+        for column in active_exog_cols:
+            fallback_value = 28.0 if column == "comfortIndex" else 0.0
+            future[column] = future[column].fillna(fallback_value).astype(float)
         future.loc[:, active_exog_cols] = final_standardizer.transform(
             future[active_exog_cols].astype(float).to_numpy()
         )
@@ -341,7 +415,7 @@ def run(payload):
         for _, row in prediction.iterrows()
     ]
 
-    return {
+    result = {
         "modelName": (
             f"Prophet (multiplicative weekly×8 + monthly + yearly"
             f"{' + weather/holiday exog' if use_exog else ''})"
@@ -359,10 +433,10 @@ def run(payload):
         "fittedValues": fitted_values,
         "modelMetadata": {
             "changepointPriorScale": best["changepointPriorScale"],
-            "testedChangepointPriorScales": CHANGEPOINT_CANDIDATES,
+            "testedChangepointPriorScales": changepoint_candidates,
             "seasonalityMode": best["seasonalityMode"],
-            "weeklyFourierOrder": 8,
-            "monthlyFourierOrder": 4,
+            "weeklyFourierOrder": best["weeklyFourierOrder"],
+            "monthlyFourierOrder": best["monthlyFourierOrder"],
             "changepointRange": 0.9,
             "useExog": use_exog,
             "exogMatchedRows": int(frame["date"].isin(exog_by_date).sum()) if exog_by_date else 0,
@@ -389,6 +463,9 @@ def run(payload):
             "exogenousVariables": active_exog_cols if use_exog else [],
         },
     }
+    if include_backtest and backtest_payload:
+        result["backtest"] = backtest_payload
+    return result
 
 
 if __name__ == "__main__":

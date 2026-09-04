@@ -31,11 +31,19 @@ def build_exogenous(days):
     rows = []
     for index in range(days):
         day = start + timedelta(days=index)
+        temp = round(rng.uniform(25, 35), 2)
+        humidity = round(rng.uniform(55, 85), 2)
+        rain_flag = index % 2
+        comfort_index = temp - (0.55 - 0.0055 * humidity) * (temp - 14.5)
         rows.append(
             {
                 "date": day.isoformat(),
-                "tempCelsius": round(rng.uniform(25, 35), 2),
-                "rainFlag": index % 2,
+                "tempCelsius": temp,
+                "rainFlag": rain_flag,
+                "humidity": humidity,
+                "isHotDay": 1 if temp >= 31 else 0,
+                "isCoolRainyDay": 1 if rain_flag == 1 and temp <= 26 else 0,
+                "comfortIndex": round(comfort_index, 2),
                 "isHoliday": 1 if index in (4, 18) else 0,
                 "dayBeforeHoliday": 1 if index in (3, 17) else 0,
                 "dayAfterHoliday": 1 if index in (5, 19) else 0,

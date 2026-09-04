@@ -30,6 +30,9 @@ export interface ExogenousRow {
   tempCelsius: number;
   rainFlag: number;
   humidity: number;
+  isHotDay: number;
+  isCoolRainyDay: number;
+  comfortIndex: number;
   isHoliday: number;
   dayBeforeHoliday: number;
   dayAfterHoliday: number;
@@ -214,16 +217,38 @@ export class ExogenousDataService {
 
     return dates.map((date) => {
       const weather = weatherByDate.get(date);
+      const tempCelsius = round(weather?.tempCelsius ?? DEFAULT_TEMP_CELSIUS);
+      const rainFlag = (weather?.rainfallMm ?? 0) > 0.5 ? 1 : 0;
+      const humidity = round(weather?.relativeHumidity ?? 60);
       return {
         date,
-        tempCelsius: round(weather?.tempCelsius ?? DEFAULT_TEMP_CELSIUS),
-        rainFlag: (weather?.rainfallMm ?? 0) > 0.5 ? 1 : 0,
-        humidity: round(weather?.relativeHumidity ?? 60),
+        tempCelsius,
+        rainFlag,
+        humidity,
+        ...this.buildWeatherTransformFields(tempCelsius, rainFlag, humidity),
         isHoliday: holidayDates.has(date) ? 1 : 0,
         dayBeforeHoliday: holidayDates.has(addDays(date, 1)) ? 1 : 0,
         dayAfterHoliday: holidayDates.has(addDays(date, -1)) ? 1 : 0,
       };
     });
+  }
+
+  buildWeatherTransformFields(
+    tempCelsius: number,
+    rainFlag: number,
+    humidity: number,
+  ): Pick<ExogenousRow, 'isHotDay' | 'isCoolRainyDay' | 'comfortIndex'> {
+    const temp = Number.isFinite(tempCelsius) ? tempCelsius : DEFAULT_TEMP_CELSIUS;
+    const relativeHumidity = Number.isFinite(humidity) ? humidity : 60;
+    const rain = rainFlag === 1 ? 1 : 0;
+    const comfortIndex =
+      temp - (0.55 - 0.0055 * relativeHumidity) * (temp - 14.5);
+
+    return {
+      isHotDay: temp >= 31 ? 1 : 0,
+      isCoolRainyDay: rain === 1 && temp <= 26 ? 1 : 0,
+      comfortIndex: round(comfortIndex),
+    };
   }
 
   async getCacheStatus(): Promise<ExogenousCacheStatus> {
