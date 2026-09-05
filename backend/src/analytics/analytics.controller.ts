@@ -188,6 +188,36 @@ export class AnalyticsController {
     );
   }
 
+  @Get('cross-sell/seasonal-bundles')
+  async getSeasonalCrossSellBundles(
+    @Query('minSupport') minSupport?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('minLift') minLift?: string,
+    @Query('maxBundleCandidates') maxBundleCandidates?: string,
+    @Query('hour') hour?: string,
+    @Query('sector') sector?: string,
+    @Query('forceRefresh') forceRefresh?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
+  ) {
+    const params = {
+      minSupport,
+      minConfidence,
+      minLift,
+      maxBundleCandidates,
+      hour,
+      sector,
+      forceRefresh,
+      dateStart,
+      dateEnd,
+    };
+    return this.cached(
+      this.key('cross-sell-seasonal-bundles', params),
+      () => this.analyticsService.getSeasonalCrossSellBundles(params),
+      { forceRefresh },
+    );
+  }
+
   @Post('cross-sell/campaign-drafts')
   async createCrossSellCampaignDraft(@Body() dto: any) {
     return this.analyticsService.createCrossSellCampaignDraft(dto);

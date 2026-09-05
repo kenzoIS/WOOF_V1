@@ -2657,3 +2657,78 @@ This file records requested revisions, implementation details, verification, and
 - AI Simulation Module: Modified the Strategic Proximity Recommendations section to fetch data for all hours so that it relies purely on the Header Filter date range, rather than being limited to the selected hour slider.
 
 - Traffic Optimizer: Fixed High Demand Sectors KPI to show sector names, changed 'Placeholder Staff' to 'Active Staff', modified Traffic Trend to show overall data unconstrained by hour, and removed Past Happy Hour Performance.
+
+### AI Simulation Seasonal Bundles (2026-09-06)
+
+- Added a new backend endpoint: `GET /api/analytics/cross-sell/seasonal-bundles`.
+- Implemented weather-aware seasonal bundle mining by filtering historical multi-item baskets into weather/season segments, then running the existing FP-Growth cross-sell engine on each segment.
+- Seasonal segments now include Rainy Season Bundles, Summer Bundles, Cool Rainy Day Bundles, and Rainy Day Bundles using historical weather cache fields and transformed weather variables (`rainFlag`, `isHotDay`, `isCoolRainyDay`, `comfortIndex`, humidity, and Philippine wet/summer months).
+- Added seasonal bundle metadata to returned bundle candidates, including the weather segment label, weather basis, seasonal basket count, and seasonal opportunity score.
+- Added a `getSeasonalCrossSellBundles` frontend API helper.
+- Added a new `Seasonal Bundles` button in the AI Simulation module under AI-Predicted Bundle Opportunities.
+- Updated the bundle opportunity cards so the section can switch between standard FP-Growth bundles and weather-aware seasonal bundles without changing the other AI Simulation charts, proximity recommendations, drawer flow, pricing controls, or submit-for-review behavior.
+- Added a seasonal status panel showing mined weather segments, candidate counts, and basket counts.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Existing FP-Growth Python tests with `python src\analytics\python\test_cross_sell.py` (`7` tests passed).
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### AI Simulation Seasonal Bundle Pagination Fix (2026-09-06)
+
+- Fixed the AI-Predicted Bundle Opportunities pagination source so Seasonal Bundles paginate over the same filtered list shown in the count badge.
+- Corrected the bundle filtering behavior so `Significant Only` filters bundles only when the toggle is enabled instead of silently filtering every mode.
+- Updated the header count to show the active filtered bundle count, preventing confusing states like showing `1-5 of 12` while pagination was hidden.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### AI Simulation Seasonal Bundle Cache Fix (2026-09-06)
+
+- Fixed the `Seasonal Bundles` button so it no longer forces a backend remine when seasonal results already exist.
+- Added a frontend seasonal bundle cache keyed by the current support, confidence, hour, sector, and header date range filters.
+- Repeat clicks on `Seasonal Bundles` now reuse cached results instantly for the same filter set while still allowing the backend cache to serve first-load repeats.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Analytics service Jest regression test with `npm test -- --runInBand analytics.service.spec.ts` (`2` tests passed).
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### AI Simulation Bundle Card Header Cleanup (2026-09-06)
+
+- Standardized the AI-Predicted Bundle Opportunities card header layout.
+- Bundle cards now show the bundle title beside the kind of bundle badge, then show supporting badges below in a consistent order: seasonal/weather bundle label when applicable, historical confidence, business fit, then emerging trend when applicable.
+- Removed the merchandising archetype badge from the visible header to reduce clutter; archetype data remains available in the bundle explanation/reasoning flow.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### AI Simulation Seasonal Bundle Segment Representation (2026-09-06)
+
+- Updated seasonal bundle selection so weather-aware results reserve representation from each generated weather segment before filling the remaining display slots by rank.
+- This prevents Cool Rainy Day or Rainy Day bundle candidates from being generated but hidden by the global top-N slice when Rainy Season or Summer bundles score higher.
+- Updated the seasonal segment badges to show displayed candidates, generated candidates, and basket count separately.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Existing FP-Growth Python tests with `python src\analytics\python\test_cross_sell.py` (`7` tests passed).
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### AI Simulation Business Fit Badge Fix (2026-09-06)
+
+- Fixed regular FP-Growth bundle cards so they preserve `businessFitScore` and `bundleFitReason` from backend association-rule results.
+- This restores the `Business Fit ###%` badge for regular FP-Growth bundles when the backend provides the score, matching the Seasonal Bundles display behavior.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.

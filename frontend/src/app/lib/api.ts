@@ -427,6 +427,11 @@ export async function getCrossSell(params?: CrossSellQuery) {
   return fetchApi(`/analytics/cross-sell${query}`);
 }
 
+export async function getSeasonalCrossSellBundles(params?: CrossSellQuery) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/cross-sell/seasonal-bundles${query}`);
+}
+
 export async function getPricingCatalog(params?: PricingCatalogQuery) {
   const query = toQueryString(params);
   return fetchApi(`/analytics/pricing-catalog${query}`);

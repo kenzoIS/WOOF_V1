@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { BundleArchive, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getBundleArchives, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
+import { BundleArchive, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getBundleArchives, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import {
@@ -60,6 +60,13 @@ interface CrossSellRule {
   minimumMarginPercent?: number | null;
   maxSafeDiscountPercent?: number | null;
   discountRationale?: string;
+  businessFitScore?: number | null;
+  bundleFitReason?: string;
+  seasonalBundleType?: string;
+  weatherSegmentId?: string;
+  weatherBasis?: string;
+  isSeasonalBundle?: boolean;
+  seasonalBasketCount?: number;
 }
 
 interface BundleCandidate {
@@ -77,7 +84,7 @@ interface BundleCandidate {
   cooccurrences?: number;
   opportunityScore?: number;
   baseOpportunityScore?: number;
-  businessFitScore?: number;
+  businessFitScore?: number | null;
   bundleCategory?: string;
   bundleFitReason?: string;
   reason?: string;
@@ -100,6 +107,11 @@ interface BundleCandidate {
   minimumMarginPercent?: number | null;
   maxSafeDiscountPercent?: number | null;
   discountRationale?: string;
+  seasonalBundleType?: string;
+  weatherSegmentId?: string;
+  weatherBasis?: string;
+  isSeasonalBundle?: boolean;
+  seasonalBasketCount?: number;
 }
 
 interface ItemMetric {
@@ -148,6 +160,18 @@ interface CrossSellResponse {
   cached?: boolean;
   message?: string;
   error?: string;
+  seasonalBundleCandidates?: BundleCandidate[];
+  weatherSegments?: Array<{
+    id: string;
+    label: string;
+    basketCount: number;
+    candidateCount?: number;
+    displayedCandidateCount?: number;
+    skipped?: boolean;
+    reason?: string;
+    weatherBasis?: string;
+  }>;
+  weatherBasis?: string;
 }
 
 interface PricingCatalogResponse {
@@ -305,6 +329,11 @@ export function AISimulation() {
   const [crossSellDataAllDay, setCrossSellDataAllDay] = useState<CrossSellResponse | null>(null);
   const [crossSellLoading, setCrossSellLoading] = useState(false);
   const [crossSellError, setCrossSellError] = useState<string | null>(null);
+  const [bundleOpportunityMode, setBundleOpportunityMode] = useState<"standard" | "seasonal">("standard");
+  const [seasonalBundleData, setSeasonalBundleData] = useState<CrossSellResponse | null>(null);
+  const [seasonalBundleLoading, setSeasonalBundleLoading] = useState(false);
+  const [seasonalBundleError, setSeasonalBundleError] = useState<string | null>(null);
+  const [seasonalBundleCache, setSeasonalBundleCache] = useState<Record<string, CrossSellResponse>>({});
   const [bundleDiscountOverrides, setBundleDiscountOverrides] = useState<Record<string, number>>({});
   const [bundleCategoryFilter, setBundleCategoryFilter] = useState("all");
   const [onlySignificant, setOnlySignificant] = useState(false);
@@ -703,6 +732,73 @@ export function AISimulation() {
     selectedHeaderRange.start,
   ]);
 
+  const seasonalBundleQuery = useMemo(() => ({
+    minSupport: (debouncedSupportThreshold / 100).toFixed(2),
+    minConfidence: (debouncedConfidenceLevel / 100).toFixed(2),
+    minLift: "1.20",
+    maxBundleCandidates: "20",
+    hour: String(debouncedDataTime),
+    sector: "all" as const,
+    dateStart: selectedHeaderRange.start,
+    dateEnd: selectedHeaderRange.end,
+  }), [
+    debouncedSupportThreshold,
+    debouncedConfidenceLevel,
+    debouncedDataTime,
+    selectedHeaderRange.end,
+    selectedHeaderRange.start,
+  ]);
+  const seasonalBundleCacheKey = useMemo(
+    () => JSON.stringify(seasonalBundleQuery),
+    [seasonalBundleQuery],
+  );
+
+  const handleLoadSeasonalBundles = (forceRefresh = false) => {
+    setBundleOpportunityMode("seasonal");
+    const cachedSeasonalBundles = seasonalBundleCache[seasonalBundleCacheKey];
+    if (!forceRefresh && cachedSeasonalBundles) {
+      setSeasonalBundleData(cachedSeasonalBundles);
+      setSeasonalBundleError(cachedSeasonalBundles.error || cachedSeasonalBundles.message || null);
+      setSeasonalBundleLoading(false);
+      return;
+    }
+
+    setSeasonalBundleLoading(true);
+    setSeasonalBundleError(null);
+
+    getSeasonalCrossSellBundles({
+      ...seasonalBundleQuery,
+      forceRefresh: forceRefresh ? "true" : undefined,
+    })
+      .then((result: CrossSellResponse) => {
+        setSeasonalBundleData(result);
+        setSeasonalBundleCache((prev) => ({
+          ...prev,
+          [seasonalBundleCacheKey]: result,
+        }));
+        if (result.error) {
+          setSeasonalBundleError(result.error);
+        } else if (result.message) {
+          setSeasonalBundleError(result.message);
+        }
+      })
+      .catch((error: Error) => {
+        setSeasonalBundleError(error.message);
+        setSeasonalBundleData(null);
+      })
+      .finally(() => {
+        setSeasonalBundleLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    setSeasonalBundleData(null);
+    setSeasonalBundleError(null);
+    if (bundleOpportunityMode === "seasonal") {
+      setBundleOpportunityMode("standard");
+    }
+  }, [seasonalBundleCacheKey]);
+
   useEffect(() => {
     let cancelled = false;
     setPricingCatalogLoading(true);
@@ -975,9 +1071,13 @@ export function AISimulation() {
     return false;
   };
 
-  // Bundle predictions based on time analysis with real item prices
-  const allBundlePredictions = useMemo(() => {
-    const lowAssociation = bundleCandidates.map((candidate) => ({
+  const buildBundlePredictions = (sourceData: CrossSellResponse | null) => {
+    const sourceRules = sourceData?.rules || [];
+    const sourceBundleCandidates =
+      sourceData?.bundleCandidates?.length
+        ? sourceData.bundleCandidates
+        : sourceData?.seasonalBundleCandidates || [];
+    const lowAssociation = sourceBundleCandidates.map((candidate) => ({
       bundle: formatPair(candidate.anchorItem, candidate.bundleItem),
       itemA: candidate.anchorItem,
       itemB: candidate.bundleItem,
@@ -1024,6 +1124,11 @@ export function AISimulation() {
       synergyScore: (candidate as any).synergyScore,
       bundleArchetype: (candidate as any).bundleArchetype,
       synergyBreakdown: (candidate as any).synergyBreakdown,
+      seasonalBundleType: candidate.seasonalBundleType,
+      weatherSegmentId: candidate.weatherSegmentId,
+      weatherBasis: candidate.weatherBasis,
+      isSeasonalBundle: candidate.isSeasonalBundle,
+      seasonalBasketCount: candidate.seasonalBasketCount,
       isEmergingTrend: (candidate as any).isEmergingTrend,
       baselineAttachRate: (candidate as any).baselineAttachRate,
       predictedAttachRate: (candidate as any).predictedAttachRate,
@@ -1033,7 +1138,7 @@ export function AISimulation() {
       isSignificant: (candidate as any).isSignificant ?? false,
       rawCandidate: candidate,
     }));
-    const significantRules = rules.map((rule) => ({
+    const significantRules = sourceRules.map((rule) => ({
       bundle: formatPair(rule.itemA, rule.itemB),
       itemA: rule.itemA,
       itemB: rule.itemB,
@@ -1041,8 +1146,8 @@ export function AISimulation() {
       lift: rule.lift || 0,
       support: rule.support || 0,
       score: (rule as any).synergyScore !== undefined && (rule as any).synergyScore !== null ? Math.round((rule as any).synergyScore) : Math.round(Math.min(95, (rule.lift || 0) * 20 + 20)),
-      businessFitScore: null,
-      bundleFitReason: undefined,
+      businessFitScore: (rule as any).businessFitScore ?? null,
+      bundleFitReason: (rule as any).bundleFitReason,
       frequency: rule.cooccurrences || 0,
       type: rule.isMultiItem ? "Multi-item Pattern Rule" : "Significant Association Rule",
       itemAPrice: rule.itemAPrice || 0,
@@ -1075,6 +1180,11 @@ export function AISimulation() {
       synergyScore: (rule as any).synergyScore,
       bundleArchetype: (rule as any).bundleArchetype,
       synergyBreakdown: (rule as any).synergyBreakdown,
+      seasonalBundleType: (rule as any).seasonalBundleType,
+      weatherSegmentId: (rule as any).weatherSegmentId,
+      weatherBasis: (rule as any).weatherBasis,
+      isSeasonalBundle: (rule as any).isSeasonalBundle,
+      seasonalBasketCount: (rule as any).seasonalBasketCount,
       isEmergingTrend: (rule as any).isEmergingTrend,
       baselineAttachRate: (rule as any).baselineAttachRate,
       predictedAttachRate: (rule as any).predictedAttachRate,
@@ -1106,8 +1216,8 @@ export function AISimulation() {
       .map((item) => {
         const key = getBundleKey(item.itemA, item.itemB);
 
-        const foundA = (crossSellData?.itemMetrics || []).find((m) => m.item === item.itemA) || (pricingCatalogData?.itemMetrics || []).find((i) => i.item === item.itemA);
-        const foundB = (crossSellData?.itemMetrics || []).find((m) => m.item === item.itemB) || (pricingCatalogData?.itemMetrics || []).find((i) => i.item === item.itemB);
+        const foundA = (sourceData?.itemMetrics || []).find((m) => m.item === item.itemA) || (pricingCatalogData?.itemMetrics || []).find((i) => i.item === item.itemA);
+        const foundB = (sourceData?.itemMetrics || []).find((m) => m.item === item.itemB) || (pricingCatalogData?.itemMetrics || []).find((i) => i.item === item.itemB);
 
         const pA = item.itemAPrice > 0 ? item.itemAPrice : (foundA?.price || 180);
         const pB = item.itemBPrice > 0 ? item.itemBPrice : (foundB?.price || 150);
@@ -1151,33 +1261,47 @@ export function AISimulation() {
             economics.projectedMarginPercent >= minimumMargin,
         };
       });
-  }, [bundleCandidates, bundleDiscountOverrides, crossSellData, pricingCatalogData, rules]);
+  };
+
+  // Bundle predictions based on time analysis with real item prices
+  const allBundlePredictions = useMemo(
+    () => buildBundlePredictions(crossSellData),
+    [bundleDiscountOverrides, crossSellData, pricingCatalogData],
+  );
+  const seasonalBundlePredictions = useMemo(
+    () => buildBundlePredictions(seasonalBundleData),
+    [bundleDiscountOverrides, pricingCatalogData, seasonalBundleData],
+  );
+  const activeBundlePredictions =
+    bundleOpportunityMode === "seasonal" ? seasonalBundlePredictions : allBundlePredictions;
 
   const bundleCategoryOptions = useMemo(() => {
-    return Array.from(new Set(allBundlePredictions.map((bundle) => bundle.bundleCategory)))
+    return Array.from(new Set(activeBundlePredictions.map((bundle) => bundle.bundleCategory)))
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
-  }, [allBundlePredictions]);
+  }, [activeBundlePredictions]);
 
   const filteredBundlePredictions = useMemo(() => {
-    // Statistically significant bundles with reliable historical backing (co-occurrences >= 2)
-    let filtered = allBundlePredictions.filter(
-      (bundle) => bundle.isSignificant && (bundle.frequency || 0) >= 2
-    );
+    let filtered = activeBundlePredictions;
 
-    // Fallback if dataset has limited multi-item transactions
-    if (filtered.length === 0) {
-      filtered = allBundlePredictions.filter((bundle) => bundle.isSignificant);
-    }
-    if (filtered.length === 0) {
-      filtered = allBundlePredictions;
+    if (onlySignificant) {
+      filtered = activeBundlePredictions.filter(
+        (bundle) => bundle.isSignificant && (bundle.frequency || 0) >= 2
+      );
+
+      if (filtered.length === 0) {
+        filtered = activeBundlePredictions.filter((bundle) => bundle.isSignificant);
+      }
+      if (filtered.length === 0) {
+        filtered = activeBundlePredictions;
+      }
     }
 
     if (bundleCategoryFilter !== "all") {
       filtered = filtered.filter((bundle) => bundle.bundleCategory === bundleCategoryFilter);
     }
     return filtered;
-  }, [allBundlePredictions, bundleCategoryFilter]);
+  }, [activeBundlePredictions, bundleCategoryFilter, onlySignificant]);
 
   const bundlesPerPage = 5;
   const totalBundlePages = Math.ceil(filteredBundlePredictions.length / bundlesPerPage) || 1;
@@ -1189,7 +1313,7 @@ export function AISimulation() {
 
   useEffect(() => {
     setBundlePage(1);
-  }, [bundleCategoryFilter, onlySignificant, debouncedDataTime, selectedHeaderRange]);
+  }, [bundleCategoryFilter, bundleOpportunityMode, onlySignificant, debouncedDataTime, selectedHeaderRange]);
 
   useEffect(() => {
     if (
@@ -3073,7 +3197,7 @@ export function AISimulation() {
                   AI-Predicted Bundle Opportunities
                 </h2>
                 <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Generated from{" "}
+                  {bundleOpportunityMode === "seasonal" ? "Generated from weather-aware " : "Generated from "}
                   <span
                     className="cursor-help font-semibold text-[#223047] underline decoration-dotted decoration-[#F53799]"
                     title="FP-Growth (Frequent Pattern Growth): An advanced AI data-mining algorithm that analyzes thousands of customer receipts to identify items frequently bought together."
@@ -3084,11 +3208,39 @@ export function AISimulation() {
                 </p>
               </div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm font-semibold">
-                Showing {filteredBundlePredictions.length > 0 ? (bundlePage - 1) * bundlesPerPage + 1 : 0}–{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {allBundlePredictions.length} Bundles
+                Showing {filteredBundlePredictions.length > 0 ? (bundlePage - 1) * bundlesPerPage + 1 : 0}–{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {filteredBundlePredictions.length} Bundles
               </Badge>
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setBundleOpportunityMode("standard")}
+                className={`rounded-lg border px-3 py-2 text-xs font-bold transition flex items-center gap-1.5 ${bundleOpportunityMode === "standard"
+                    ? "bg-[#223047] text-white border-[#223047]"
+                    : "bg-white text-[#223047] border-slate-200 hover:border-[#223047]"
+                  }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                FP-Growth Bundles
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLoadSeasonalBundles(false)}
+                disabled={seasonalBundleLoading}
+                className={`rounded-lg border px-3 py-2 text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-60 ${bundleOpportunityMode === "seasonal"
+                    ? "bg-[#06B6D4] text-white border-[#06B6D4]"
+                    : "bg-white text-[#223047] border-[#BDECF3] hover:border-[#06B6D4]"
+                  }`}
+              >
+                {seasonalBundleLoading ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <CalendarDays className="w-3.5 h-3.5" />
+                )}
+                Seasonal Bundles
+              </button>
+              <div className="w-[1px] h-6 bg-slate-200 mx-1 self-center hidden sm:block"></div>
               <button
                 type="button"
                 onClick={() => setBundleCategoryFilter("all")}
@@ -3126,6 +3278,37 @@ export function AISimulation() {
               </button>
             </div>
 
+            {bundleOpportunityMode === "seasonal" && (
+              <div className="rounded-xl border border-[#BDECF3] bg-[#F3FCFD] p-3 text-xs text-[#223047]">
+                {seasonalBundleLoading ? (
+                  <div className="flex items-center gap-2 font-semibold text-[#06B6D4]">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Mining weather-aware seasonal bundles from historical baskets...
+                  </div>
+                ) : seasonalBundleError ? (
+                  <div className="font-semibold text-amber-700">{seasonalBundleError}</div>
+                ) : (
+                  <>
+                    <div className="font-semibold text-[#223047]">
+                      {seasonalBundleData?.weatherBasis || "Weather-aware bundles use historical weather transforms and FP-Growth."}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(seasonalBundleData?.weatherSegments || []).map((segment) => (
+                        <Badge
+                          key={segment.id}
+                          variant="outline"
+                          className="border-[#06B6D4] text-[#067A8A] bg-white text-[11px]"
+                          title={segment.weatherBasis || segment.reason || segment.label}
+                        >
+                          {segment.label}: {segment.displayedCandidateCount ?? 0} shown / {segment.candidateCount ?? 0} generated / {segment.basketCount} baskets
+                        </Badge>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="grid gap-3 md:gap-4">
               {bundlePredictions.length === 0 && (
                 <div className="p-4 md:p-6 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl text-sm text-[#223047] opacity-70">
@@ -3139,41 +3322,42 @@ export function AISimulation() {
                 >
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2">
-                      <h3 className="text-base md:text-lg font-bold text-[#223047]">{bundle.bundle}</h3>
-                      {bundle.bundleArchetype && (
-                        <Badge
-                          className="bg-[#F53799]/10 text-[#F53799] border border-[#F53799]/30 text-xs font-semibold cursor-help"
-                          title={`Merchandising Strategy Archetype (${bundle.bundleArchetype}): The customer behavioral intent and psychology behind this product bundle.`}
-                        >
-                          {bundle.bundleArchetype}
-                        </Badge>
-                      )}
+                      <h3 className="order-1 text-base md:text-lg font-bold text-[#223047]">{bundle.bundle}</h3>
+                      <div className="order-3 basis-full h-0" aria-hidden="true" />
                       {bundle.isEmergingTrend && (
                         <Badge
-                          className="bg-amber-500 text-white font-bold text-xs shadow-xs animate-pulse cursor-help"
+                          className="order-8 bg-amber-500 text-white font-bold text-xs shadow-xs animate-pulse cursor-help"
                           title="Emerging Trend: A fast-growing product combination with accelerating sales momentum in recent transaction cycles."
                         >
                           🔥 Emerging Trend
                         </Badge>
                       )}
+                      {bundle.isSeasonalBundle && bundle.seasonalBundleType && (
+                        <Badge
+                          className="order-4 bg-[#06B6D4]/10 text-[#067A8A] border border-[#06B6D4]/40 text-xs font-semibold cursor-help"
+                          title={bundle.weatherBasis || "This bundle was mined from historical baskets in a weather segment."}
+                        >
+                          {bundle.seasonalBundleType}
+                        </Badge>
+                      )}
                       <Badge
-                        className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs cursor-help font-medium"
+                        className="order-5 bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs cursor-help font-medium"
                         title={`Historical Confidence (${bundle.confidence}%): Probability that a customer purchasing '${bundle.itemA}' will also buy '${bundle.itemB}' in the same checkout.`}
                       >
                         {bundle.confidence}% Historical Confidence
                       </Badge>
                       <Badge
                         variant="outline"
-                        className="text-xs border-[#F53799] text-[#F53799] cursor-help font-medium"
-                        title="Sector Pairing: Cross-department synergy showing which business units (Cafe, Retail, Grooming Services) are combined in this bundle."
+                        className="order-2 text-xs border-[#F53799] text-[#F53799] cursor-help font-medium"
+                        title="Kind of Bundle: The business units or categories represented by this pairing."
                       >
                         {bundle.sectorPair}
                       </Badge>
                       {bundle.businessFitScore !== null && (
                         <Badge
                           variant="outline"
-                          className="text-xs border-emerald-500 text-emerald-700 cursor-help font-medium"
-                          title={`Business Feasibility Fit (${Math.round((bundle.businessFitScore || 0) * 100)}%): Ensures the bundled items make sense together operationally in-store without overloading kitchen or grooming staff.`}
+                          className="order-6 text-xs border-emerald-500 text-emerald-700 cursor-help font-medium"
+                          title={`Business Feasibility Fit (${Math.round((bundle.businessFitScore || 0) * 100)}%): Practicality score based on sector pairing and item-name affinity rules.`}
                         >
                           Business Fit {Math.round((bundle.businessFitScore || 0) * 100)}%
                         </Badge>

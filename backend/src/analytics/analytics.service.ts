@@ -1399,6 +1399,237 @@ export class AnalyticsService {
     }
   }
 
+  async getSeasonalCrossSellBundles(options: CrossSellOptions = {}): Promise<any> {
+    const thresholds = this.normalizeCrossSellThresholds({
+      ...options,
+      minSupport: options.minSupport ?? 0.03,
+      maxBundleCandidates: options.maxBundleCandidates ?? 12,
+    });
+    const hour = this.parseHour(options.hour);
+    const sector = this.normalizeCrossSellSector(options.sector);
+    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const transactionMatch = this.buildCrossSellMatch(hour, sector, dateWindow);
+    const hasTransactionMatch = Object.keys(transactionMatch).length > 0;
+    const pricingDateFilter = dateWindow
+      ? { $gte: dateWindow.start, $lte: dateWindow.end }
+      : { $gte: new Date('2026-01-01T00:00:00.000+08:00') };
+
+    const [baskets, itemPriceRows] = await Promise.all([
+      this.transactionModel
+        .aggregate([
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+          {
+            $group: {
+              _id: '$transactionId',
+              date: { $min: '$date' },
+              items: { $addToSet: '$productName' },
+              sectors: { $addToSet: '$sector' },
+              itemSectors: {
+                $addToSet: {
+                  item: '$productName',
+                  sector: '$sector',
+                },
+              },
+            },
+          },
+          { $match: { 'items.1': { $exists: true } } },
+        ])
+        .allowDiskUse(true)
+        .exec(),
+      this.transactionModel
+        .aggregate([
+          {
+            $match: {
+              ...(sector === 'all' ? {} : { sector: this.normalizeSector(sector) }),
+              date: pricingDateFilter,
+              unitPrice: { $gt: 0 },
+            },
+          },
+          {
+            $project: {
+              productName: 1,
+              unitPrice: { $ifNull: ['$unitPrice', 0] },
+              unitCost: {
+                $cond: [
+                  { $gt: ['$quantity', 0] },
+                  { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
+                  { $ifNull: ['$costOfGoods', 0] },
+                ],
+              },
+              unitGrossProfit: {
+                $cond: [
+                  { $gt: ['$quantity', 0] },
+                  { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
+                  { $ifNull: ['$grossProfit', 0] },
+                ],
+              },
+              margin: { $ifNull: ['$margin', 0] },
+            },
+          },
+          {
+            $group: {
+              _id: '$productName',
+              avgPrice: { $avg: '$unitPrice' },
+              avgUnitCost: { $avg: '$unitCost' },
+              avgUnitGrossProfit: { $avg: '$unitGrossProfit' },
+              avgMargin: { $avg: '$margin' },
+            },
+          },
+        ])
+        .allowDiskUse(true)
+        .exec(),
+    ]);
+
+    const itemPrices: Record<string, number> = {};
+    const itemEconomics: Record<string, {
+      price: number;
+      unitCost: number;
+      unitGrossProfit: number;
+      margin: number;
+    }> = {};
+    for (const row of itemPriceRows) {
+      if (row._id && typeof row.avgPrice === 'number' && Number.isFinite(row.avgPrice)) {
+        itemPrices[String(row._id)] = this.round(row.avgPrice);
+        itemEconomics[String(row._id)] = {
+          price: this.round(row.avgPrice),
+          unitCost: this.round(Number(row.avgUnitCost) || 0),
+          unitGrossProfit: this.round(Number(row.avgUnitGrossProfit) || 0),
+          margin: this.round(Number(row.avgMargin) || 0),
+        };
+      }
+    }
+
+    const datedBaskets = baskets
+      .map((basket: any) => ({
+        ...basket,
+        dateKey: basket.date
+          ? this.getDateKeyInTimeZone(new Date(basket.date), 'Asia/Manila')
+          : null,
+      }))
+      .filter((basket: any) => basket.dateKey);
+    const dateKeys = [...new Set(datedBaskets.map((basket: any) => basket.dateKey as string))]
+      .sort();
+    if (datedBaskets.length < 5 || dateKeys.length === 0) {
+      return {
+        seasonalBundleCandidates: [],
+        weatherSegments: [],
+        totalBaskets: datedBaskets.length,
+        thresholds,
+        message: 'Not enough dated multi-item transactions for seasonal/weather bundles.',
+      };
+    }
+
+    const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
+    const weatherRecords = await this.exogenousDataService.fetchWeatherHistory(
+      lat,
+      lng,
+      dateKeys[0],
+      dateKeys[dateKeys.length - 1],
+    );
+    const weatherByDate = new Map(weatherRecords.map((record) => [record.date, record]));
+    const enrichedBaskets = datedBaskets.map((basket: any) => {
+      const weather = weatherByDate.get(basket.dateKey);
+      const tempCelsius = this.round(Number(weather?.tempCelsius) || 28);
+      const rainFlag = Number(weather?.rainfallMm || 0) > 0.5 ? 1 : 0;
+      const humidity = this.round(Number(weather?.relativeHumidity) || 60);
+      const transforms = this.exogenousDataService.buildWeatherTransformFields(
+        tempCelsius,
+        rainFlag,
+        humidity,
+      );
+      return {
+        ...basket,
+        weather: {
+          tempCelsius,
+          rainFlag,
+          humidity,
+          rainfallMm: this.round(Number(weather?.rainfallMm) || 0),
+          ...transforms,
+        },
+      };
+    });
+
+    const weatherSegments = this.buildSeasonalWeatherSegments(enrichedBaskets);
+    const seasonalBundleCandidates: any[] = [];
+    const segmentSummaries: any[] = [];
+
+    for (const segment of weatherSegments) {
+      if (segment.baskets.length < 5) {
+        segmentSummaries.push({
+          id: segment.id,
+          label: segment.label,
+          basketCount: segment.baskets.length,
+          skipped: true,
+          reason: 'below 5 multi-item baskets',
+        });
+        continue;
+      }
+
+      const inputData = segment.baskets.map((basket: any) => ({
+        transactionId: basket._id,
+        date: basket.date ? new Date(basket.date).toISOString() : null,
+        items: basket.items,
+        sectors: basket.sectors,
+        itemSectors: basket.itemSectors,
+      }));
+      try {
+        const result = await this.runPython<any>('cross_sell.py', {
+          baskets: inputData,
+          itemPrices,
+          itemEconomics,
+          ...thresholds,
+        });
+        const candidates = [
+          ...(Array.isArray(result.bundleCandidates) ? result.bundleCandidates : []),
+          ...(Array.isArray(result.rules) ? result.rules : []),
+        ];
+        const taggedCandidates = candidates
+          .map((candidate: any) =>
+            this.withSeasonalBundleMetadata(candidate, segment, result.totalBaskets || segment.baskets.length),
+          )
+          .filter(Boolean);
+        seasonalBundleCandidates.push(...taggedCandidates);
+        segmentSummaries.push({
+          id: segment.id,
+          label: segment.label,
+          basketCount: segment.baskets.length,
+          candidateCount: taggedCandidates.length,
+          weatherBasis: segment.weatherBasis,
+        });
+      } catch (error) {
+        segmentSummaries.push({
+          id: segment.id,
+          label: segment.label,
+          basketCount: segment.baskets.length,
+          skipped: true,
+          reason: error instanceof Error ? error.message : 'seasonal FP-Growth failed',
+        });
+      }
+    }
+
+    const deduped = this.dedupeSeasonalBundleCandidates(seasonalBundleCandidates);
+    const selected = this.selectSeasonalBundleCandidates(deduped, thresholds.maxBundleCandidates);
+    const displayedCountsBySegment = selected.reduce((counts: Record<string, number>, candidate: any) => {
+      const id = candidate.weatherSegmentId || 'weather';
+      counts[id] = (counts[id] || 0) + 1;
+      return counts;
+    }, {});
+
+    return {
+      seasonalBundleCandidates: selected,
+      bundleCandidates: selected,
+      weatherSegments: segmentSummaries.map((segment) => ({
+        ...segment,
+        displayedCandidateCount: displayedCountsBySegment[segment.id] || 0,
+      })),
+      totalBaskets: datedBaskets.length,
+      thresholds,
+      generatedAt: new Date().toISOString(),
+      weatherBasis:
+        'Historical weather cache using rainFlag, isHotDay, isCoolRainyDay, comfortIndex, humidity, and Philippine wet/summer months.',
+    };
+  }
+
   async getPricingCatalog(options: Pick<CrossSellOptions, 'sector' | 'dateStart' | 'dateEnd'> = {}): Promise<any> {
     const sector = this.normalizeCrossSellSector(options.sector);
     let dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
@@ -3712,6 +3943,184 @@ export class AnalyticsService {
           }
         : {}),
     };
+  }
+
+  private buildSeasonalWeatherSegments(enrichedBaskets: any[]): Array<{
+    id: string;
+    label: string;
+    description: string;
+    weatherBasis: string;
+    baskets: any[];
+  }> {
+    const inMonths = (dateKey: string | null | undefined, months: number[]) => {
+      if (!dateKey || dateKey.length < 7) return false;
+      const month = Number(dateKey.slice(5, 7));
+      return months.includes(month);
+    };
+    const makeSegment = (
+      id: string,
+      label: string,
+      description: string,
+      weatherBasis: string,
+      predicate: (basket: any) => boolean,
+    ) => ({
+      id,
+      label,
+      description,
+      weatherBasis,
+      baskets: enrichedBaskets.filter(predicate),
+    });
+
+    return [
+      makeSegment(
+        'rainy-season',
+        'Rainy Season Bundles',
+        'Bundles mined from baskets during Philippine wet-season months with rain or high humidity signals.',
+        'June-November baskets where rainFlag = 1 or humidity >= 75%.',
+        (basket) =>
+          inMonths(basket.dateKey, [6, 7, 8, 9, 10, 11]) &&
+          (Number(basket.weather?.rainFlag) === 1 || Number(basket.weather?.humidity) >= 75),
+      ),
+      makeSegment(
+        'summer-hot',
+        'Summer Bundles',
+        'Bundles mined from summer or hot-day baskets where cooling beverages and lighter food demand can behave differently.',
+        'March-May baskets or transformed weather flag isHotDay = 1.',
+        (basket) =>
+          inMonths(basket.dateKey, [3, 4, 5]) ||
+          Number(basket.weather?.isHotDay) === 1,
+      ),
+      makeSegment(
+        'cool-rainy',
+        'Cool Rainy Day Bundles',
+        'Bundles mined from rainy baskets with cooler temperatures.',
+        'Transformed weather flag isCoolRainyDay = 1, meaning rainFlag = 1 and tempCelsius <= 26.',
+        (basket) => Number(basket.weather?.isCoolRainyDay) === 1,
+      ),
+      makeSegment(
+        'rainy-day',
+        'Rainy Day Bundles',
+        'Bundles mined from all historically rainy baskets regardless of month.',
+        'Historical rainfall produced rainFlag = 1.',
+        (basket) => Number(basket.weather?.rainFlag) === 1,
+      ),
+    ];
+  }
+
+  private withSeasonalBundleMetadata(candidate: any, segment: {
+    id: string;
+    label: string;
+    weatherBasis: string;
+    baskets: any[];
+  }, totalBaskets: number): any | null {
+    const itemA = candidate.itemA || candidate.anchorItem || candidate.antecedents?.[0];
+    const itemB = candidate.itemB || candidate.bundleItem || candidate.consequents?.[0];
+    if (!itemA || !itemB || itemA === itemB) {
+      return null;
+    }
+
+    const scoreSource =
+      candidate.synergyScore ??
+      (candidate.opportunityScore !== undefined ? candidate.opportunityScore * 100 : undefined) ??
+      (candidate.lift !== undefined ? Math.min(95, Number(candidate.lift) * 20 + 20) : 50);
+    const weatherSupport = Number(candidate.pairSupport ?? candidate.support ?? 0);
+    const seasonalOpportunityScore = this.round(
+      Math.min(100, Math.max(0, Number(scoreSource) || 0) + Math.min(10, weatherSupport * 100)),
+    );
+    const baseReason =
+      candidate.reason ||
+      candidate.bundleFitReason ||
+      `${itemA} and ${itemB} were discovered together by FP-Growth in this weather segment.`;
+
+    return {
+      ...candidate,
+      itemA,
+      itemB,
+      anchorItem: itemA,
+      bundleItem: itemB,
+      seasonalBundleType: segment.label,
+      weatherSegmentId: segment.id,
+      weatherBasis: segment.weatherBasis,
+      isSeasonalBundle: true,
+      seasonalBasketCount: totalBaskets,
+      seasonalOpportunityScore,
+      synergyScore: candidate.synergyScore ?? seasonalOpportunityScore,
+      type: segment.label,
+      reason: `${baseReason} Weather context: ${segment.weatherBasis}`,
+    };
+  }
+
+  private dedupeSeasonalBundleCandidates(candidates: any[]): any[] {
+    const bestBySegmentPair = new Map<string, any>();
+    for (const candidate of candidates) {
+      const itemA = String(candidate.itemA || candidate.anchorItem || '');
+      const itemB = String(candidate.itemB || candidate.bundleItem || '');
+      if (!itemA || !itemB) continue;
+      const pairKey = [itemA, itemB].sort().join('::');
+      const key = `${candidate.weatherSegmentId || 'weather'}::${pairKey}`;
+      const existing = bestBySegmentPair.get(key);
+      if (!existing || this.rankSeasonalBundle(candidate) > this.rankSeasonalBundle(existing)) {
+        bestBySegmentPair.set(key, candidate);
+      }
+    }
+
+    return Array.from(bestBySegmentPair.values()).sort(
+      (a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a),
+    );
+  }
+
+  private selectSeasonalBundleCandidates(candidates: any[], maxCandidates: number): any[] {
+    const limit = Math.max(1, maxCandidates);
+    const bySegment = new Map<string, any[]>();
+    for (const candidate of candidates) {
+      const segmentId = candidate.weatherSegmentId || 'weather';
+      const current = bySegment.get(segmentId) || [];
+      current.push(candidate);
+      bySegment.set(segmentId, current);
+    }
+
+    for (const segmentCandidates of bySegment.values()) {
+      segmentCandidates.sort((a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a));
+    }
+
+    const selected: any[] = [];
+    const selectedKeys = new Set<string>();
+    const candidateKey = (candidate: any) => {
+      const itemA = String(candidate.itemA || candidate.anchorItem || '');
+      const itemB = String(candidate.itemB || candidate.bundleItem || '');
+      return `${candidate.weatherSegmentId || 'weather'}::${[itemA, itemB].sort().join('::')}`;
+    };
+
+    for (const [segmentId, segmentCandidates] of bySegment.entries()) {
+      if (selected.length >= limit) break;
+      const candidate = segmentCandidates[0];
+      if (!candidate) continue;
+      const key = candidateKey(candidate);
+      selected.push(candidate);
+      selectedKeys.add(key);
+      bySegment.set(segmentId, segmentCandidates.slice(1));
+    }
+
+    const remaining = Array.from(bySegment.values())
+      .flat()
+      .sort((a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a));
+    for (const candidate of remaining) {
+      if (selected.length >= limit) break;
+      const key = candidateKey(candidate);
+      if (selectedKeys.has(key)) continue;
+      selected.push(candidate);
+      selectedKeys.add(key);
+    }
+
+    return selected.sort((a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a));
+  }
+
+  private rankSeasonalBundle(candidate: any): number {
+    const score = Number(candidate.seasonalOpportunityScore ?? candidate.synergyScore ?? 0);
+    const confidence = Number(candidate.confidence ?? 0) * 100;
+    const lift = Number(candidate.lift ?? 0) * 10;
+    const frequency = Number(candidate.cooccurrences ?? 0);
+    return score * 1000 + confidence * 100 + lift * 10 + frequency;
   }
 
   private parseHour(value: number | string | undefined): number | undefined {
