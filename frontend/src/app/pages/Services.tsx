@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { useRouter } from "next/router";
 import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight } from "lucide-react";
-import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain } from "../components/ThreeZoneForecastChart";
+import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
@@ -209,6 +209,7 @@ export function Services() {
   const [customForecastStart, setCustomForecastStart] = useState("2026-06-01");
   const [customForecastEnd, setCustomForecastEnd] = useState("2026-06-30");
   const [weatherScenario, setWeatherScenario] = useState("default");
+  const [weatherOverlayEnabled, setWeatherOverlayEnabled] = useState(false);
   const [holidayScenario, setHolidayScenario] = useState("default");
   const [tempOverride, setTempOverride] = useState(28);
   const [rainChanceOverride, setRainChanceOverride] = useState(0); // 0 or 1
@@ -538,6 +539,11 @@ export function Services() {
       }
     }
     return rows;
+  }, [forecastRun]);
+
+  const weatherOverlayData = useMemo<WeatherOverlayPoint[]>(() => {
+    const rows = forecastRun?.modelMetadata?.weatherOverlay;
+    return Array.isArray(rows) ? rows as WeatherOverlayPoint[] : [];
   }, [forecastRun]);
 
   const academicSplitDate = useMemo(() => {
@@ -976,6 +982,33 @@ export function Services() {
             <span className="text-xs px-2.5 py-1 bg-slate-100 text-[#223047] rounded-lg font-semibold">
               90-5-5 Multi-Zone Active
             </span>
+            <div className="flex items-center gap-2 rounded-lg border border-[#BDECF3] bg-[#F3FCFD] p-1.5">
+              <span className="px-2 text-xs font-bold text-[#223047]">Weather Overlay</span>
+              <Button
+                size="sm"
+                variant={weatherOverlayEnabled ? "default" : "ghost"}
+                onClick={() => setWeatherOverlayEnabled(true)}
+                className={
+                  weatherOverlayEnabled
+                    ? "h-8 bg-[#06B6D4] hover:bg-[#06B6D4] text-xs text-white"
+                    : "h-8 text-xs hover:bg-[#EAFBFD] text-[#223047]"
+                }
+              >
+                On
+              </Button>
+              <Button
+                size="sm"
+                variant={!weatherOverlayEnabled ? "default" : "ghost"}
+                onClick={() => setWeatherOverlayEnabled(false)}
+                className={
+                  !weatherOverlayEnabled
+                    ? "h-8 bg-[#06B6D4] hover:bg-[#06B6D4] text-xs text-white"
+                    : "h-8 text-xs hover:bg-[#EAFBFD] text-[#223047]"
+                }
+              >
+                Off
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -992,6 +1025,8 @@ export function Services() {
             themeColor="#06B6D4"
             timeGrain={chartGranularity}
             onTimeGrainChange={(g) => setChartGranularity(g)}
+            weatherOverlayEnabled={weatherOverlayEnabled}
+            weatherOverlayData={weatherOverlayData}
           />
         ) : (
           <div className="flex items-center justify-center h-48 text-sm text-[#223047] opacity-50">

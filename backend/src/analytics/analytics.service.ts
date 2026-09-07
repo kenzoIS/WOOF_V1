@@ -749,8 +749,12 @@ export class AnalyticsService {
       const isForceRefresh = overrides?.forceRefresh === 'true';
 
       if (isOverridesMatch && hasRevenuePayload && !isForceRefresh) {
+        const cachedForecastPayload =
+          typeof cachedForecast.toObject === 'function'
+            ? cachedForecast.toObject()
+            : cachedForecast;
         const cachedPayload = await this.withAdaptiveForecastMetadata(
-          cachedForecast.toObject(),
+          cachedForecastPayload,
           module,
         );
         const anchoredPayload = this.withForecastStartAnchor(cachedPayload);
@@ -4007,6 +4011,42 @@ export class AnalyticsService {
     ];
   }
 
+  private buildForecastWeatherOverlayRows(
+    weatherRecords: Array<{
+      date: string;
+      tempCelsius?: number;
+      rainfallMm?: number;
+      relativeHumidity?: number;
+      isSynthetic?: boolean;
+    }>,
+    historicalDates: string[],
+    futureDates: string[],
+  ): Array<{
+    date: string;
+    tempCelsius: number;
+    rainfallMm: number;
+    humidity: number;
+    rainFlag: number;
+    period: 'historical' | 'forecast';
+  }> {
+    const historicalSet = new Set(historicalDates);
+    const forecastOverlayDates = new Set(futureDates.slice(0, 16));
+    return weatherRecords
+      .filter((record) => !record.isSynthetic)
+      .filter((record) => historicalSet.has(record.date) || forecastOverlayDates.has(record.date))
+      .map((record) => {
+        const rainfallMm = this.round(Number(record.rainfallMm) || 0);
+        return {
+          date: record.date,
+          tempCelsius: this.round(Number(record.tempCelsius) || 0),
+          rainfallMm,
+          humidity: this.round(Number(record.relativeHumidity) || 0),
+          rainFlag: rainfallMm > 0.5 ? 1 : 0,
+          period: historicalSet.has(record.date) ? 'historical' : 'forecast',
+        };
+      });
+  }
+
   private withSeasonalBundleMetadata(candidate: any, segment: {
     id: string;
     label: string;
@@ -4739,6 +4779,11 @@ export class AnalyticsService {
           allDates[0],
           allDates[allDates.length - 1],
         );
+      const weatherOverlay = this.buildForecastWeatherOverlayRows(
+        weatherRecords,
+        historicalDates,
+        futureDates,
+      );
       const years = [...new Set(allDates.map((date) => Number(date.slice(0, 4))))];
       const holidayRecords = (
         await Promise.all(
@@ -4804,6 +4849,8 @@ export class AnalyticsService {
           'avgOrderValue',
           'average_unit_price',
         ],
+        weatherOverlay,
+        weatherOverlayFutureLimitDays: 16,
       };
 
       if (overrides) {
@@ -5097,6 +5144,16 @@ export class AnalyticsService {
     const itemHistory = Array.isArray(run.itemHistory) && run.itemHistory.length > 0
       ? run.itemHistory
       : await this.getItemHistory(module);
+    const existingWeatherOverlay = run.modelMetadata?.weatherOverlay;
+    let weatherOverlay = Array.isArray(existingWeatherOverlay)
+      ? existingWeatherOverlay
+      : [];
+    if (weatherOverlay.length === 0 && historical.length > 0) {
+      weatherOverlay = await this.buildCachedForecastWeatherOverlay(
+        historical.map((point) => String(point.date || '')).filter(Boolean),
+        forecast.map((point) => String(point.date || '')).filter(Boolean),
+      );
+    }
 
     return {
       ...run,
@@ -5120,10 +5177,39 @@ export class AnalyticsService {
               forecast[forecast.length - 1]?.date ||
               '',
           ) || null,
+        weatherOverlay,
+        weatherOverlayFutureLimitDays: 16,
         serverGeneratedAt: new Date().toISOString(),
         timezone: 'Asia/Manila',
       },
     };
+  }
+
+  private async buildCachedForecastWeatherOverlay(
+    historicalDates: string[],
+    futureDates: string[],
+  ): Promise<Array<{
+    date: string;
+    tempCelsius: number;
+    rainfallMm: number;
+    humidity: number;
+    rainFlag: number;
+    period: 'historical' | 'forecast';
+  }>> {
+    const allDates = [...historicalDates, ...futureDates.slice(0, 16)].filter(Boolean).sort();
+    if (allDates.length === 0) return [];
+    const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
+    const weatherRecords = await this.exogenousDataService.fetchWeatherHistory(
+      lat,
+      lng,
+      allDates[0],
+      allDates[allDates.length - 1],
+    );
+    return this.buildForecastWeatherOverlayRows(
+      weatherRecords,
+      historicalDates,
+      futureDates,
+    );
   }
 
   private withBacktestEvaluation(

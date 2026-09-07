@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import {
   ComposedChart,
   Line,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -39,6 +40,19 @@ export interface ThreeZonePoint {
   forecast: number | null;
   confidenceLow?: number | null;
   confidenceHigh?: number | null;
+  tempCelsius?: number | null;
+  rainfallMm?: number | null;
+  humidity?: number | null;
+  weatherPeriod?: "historical" | "forecast";
+}
+
+export interface WeatherOverlayPoint {
+  date: string;
+  tempCelsius?: number | null;
+  rainfallMm?: number | null;
+  humidity?: number | null;
+  rainFlag?: number | null;
+  period?: "historical" | "forecast";
 }
 
 export interface ThreeZoneForecastChartProps {
@@ -52,6 +66,8 @@ export interface ThreeZoneForecastChartProps {
   themeColor?: string; // e.g. "#F53799" for Cafe or "#06B6D4" for Services
   timeGrain?: TimeGrain;
   onTimeGrainChange?: (grain: TimeGrain) => void;
+  weatherOverlayEnabled?: boolean;
+  weatherOverlayData?: WeatherOverlayPoint[];
 }
 
 export type TimeGrain = "monthly" | "weekly" | "daily";
@@ -109,6 +125,10 @@ function aggregatePoints(points: ThreeZonePoint[], grain: TimeGrain): ThreeZoneP
     actualSum: number; actualCount: number;
     predictedSum: number; predictedCount: number;
     forecastSum: number; forecastCount: number;
+    rainfallSum: number; rainfallCount: number;
+    tempSum: number; tempCount: number;
+    humiditySum: number; humidityCount: number;
+    weatherPeriod?: "historical" | "forecast";
     daysInBucket: number;
   }>();
 
@@ -136,6 +156,9 @@ function aggregatePoints(points: ThreeZonePoint[], grain: TimeGrain): ThreeZoneP
       actualSum: 0, actualCount: 0,
       predictedSum: 0, predictedCount: 0,
       forecastSum: 0, forecastCount: 0,
+      rainfallSum: 0, rainfallCount: 0,
+      tempSum: 0, tempCount: 0,
+      humiditySum: 0, humidityCount: 0,
       daysInBucket,
     };
 
@@ -150,6 +173,21 @@ function aggregatePoints(points: ThreeZonePoint[], grain: TimeGrain): ThreeZoneP
     if (pt.forecast != null) {
       existing.forecastSum += pt.forecast;
       existing.forecastCount += 1;
+    }
+    if (pt.rainfallMm != null) {
+      existing.rainfallSum += pt.rainfallMm;
+      existing.rainfallCount += 1;
+    }
+    if (pt.tempCelsius != null) {
+      existing.tempSum += pt.tempCelsius;
+      existing.tempCount += 1;
+    }
+    if (pt.humidity != null) {
+      existing.humiditySum += pt.humidity;
+      existing.humidityCount += 1;
+    }
+    if (!existing.weatherPeriod && pt.weatherPeriod) {
+      existing.weatherPeriod = pt.weatherPeriod;
     }
 
     groups.set(key, existing);
@@ -170,12 +208,25 @@ function aggregatePoints(points: ThreeZonePoint[], grain: TimeGrain): ThreeZoneP
       const forecast = grp.forecastCount > 0
         ? Math.round((grp.forecastSum / grp.forecastCount) * grp.daysInBucket)
         : null;
+      const rainfallMm = grp.rainfallCount > 0
+        ? Math.round(grp.rainfallSum * 10) / 10
+        : null;
+      const tempCelsius = grp.tempCount > 0
+        ? Math.round((grp.tempSum / grp.tempCount) * 10) / 10
+        : null;
+      const humidity = grp.humidityCount > 0
+        ? Math.round((grp.humiditySum / grp.humidityCount) * 10) / 10
+        : null;
 
       return {
         date,
         actual,
         predicted,
         forecast,
+        rainfallMm,
+        tempCelsius,
+        humidity,
+        weatherPeriod: grp.weatherPeriod,
       };
     });
 }
@@ -197,8 +248,38 @@ const ModernTooltip = ({ active, payload, label, grain, prefix, themeColor }: an
           if (p.value == null) return null;
           const isActual = p.dataKey === "actual";
           const isPredicted = p.dataKey === "predicted";
-          const name = isActual ? "Historical Actual" : isPredicted ? "ML Holdout Fit" : "Future Forecast";
-          const color = isActual ? "#38bdf8" : isPredicted ? (themeColor || "#F53799") : "#34d399";
+          const isRainfall = p.dataKey === "rainfallMm";
+          const isTemp = p.dataKey === "tempCelsius";
+          const isHumidity = p.dataKey === "humidity";
+          const name = isActual
+            ? "Historical Actual"
+            : isPredicted
+              ? "ML Holdout Fit"
+              : isRainfall
+                ? "Rainfall"
+                : isTemp
+                  ? "Temperature"
+                  : isHumidity
+                    ? "Humidity"
+                    : "Future Forecast";
+          const color = isActual
+            ? "#38bdf8"
+            : isPredicted
+              ? (themeColor || "#F53799")
+              : isRainfall
+                ? "#06B6D4"
+                : isTemp
+                  ? "#f97316"
+                  : isHumidity
+                    ? "#8b5cf6"
+                    : "#34d399";
+          const formattedValue = isRainfall
+            ? `${Number(p.value).toFixed(1)} mm`
+            : isTemp
+              ? `${Number(p.value).toFixed(1)}°C`
+              : isHumidity
+                ? `${Number(p.value).toFixed(0)}%`
+                : formatFullCurrency(p.value, prefix);
 
           return (
             <div key={p.dataKey} className="flex items-center justify-between gap-3">
@@ -206,7 +287,7 @@ const ModernTooltip = ({ active, payload, label, grain, prefix, themeColor }: an
                 <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
                 <span className="text-slate-300 font-medium">{name}:</span>
               </div>
-              <span className="font-mono font-bold text-white">{formatFullCurrency(p.value, prefix)}</span>
+              <span className="font-mono font-bold text-white">{formattedValue}</span>
             </div>
           );
         })}
@@ -228,6 +309,8 @@ export function ThreeZoneForecastChart({
   themeColor = "#F53799",
   timeGrain: controlledTimeGrain,
   onTimeGrainChange,
+  weatherOverlayEnabled = false,
+  weatherOverlayData = [],
 }: ThreeZoneForecastChartProps) {
   const [internalTimeGrain, setInternalTimeGrain] = useState<TimeGrain>("monthly");
   const timeGrain = controlledTimeGrain ?? internalTimeGrain;
@@ -238,6 +321,13 @@ export function ThreeZoneForecastChart({
   const [yearPreset, setYearPreset] = useState<YearPreset>("all");
   const [splitDate, setSplitDate] = useState<string>(initialSplitDate);
   const [forecastHorizon, setForecastHorizon] = useState<string>(initialForecastHorizon);
+  const weatherOverlayByDate = useMemo(() => {
+    return new Map(
+      (weatherOverlayData || [])
+        .filter((point) => point.date)
+        .map((point) => [point.date, point]),
+    );
+  }, [weatherOverlayData]);
 
   // Sync splitDate and forecastHorizon whenever new prop data arrives
   React.useEffect(() => {
@@ -319,9 +409,13 @@ export function ThreeZoneForecastChart({
         actual,
         predicted,
         forecast,
+        tempCelsius: weatherOverlayByDate.get(d.date)?.tempCelsius ?? null,
+        rainfallMm: weatherOverlayByDate.get(d.date)?.rainfallMm ?? null,
+        humidity: weatherOverlayByDate.get(d.date)?.humidity ?? null,
+        weatherPeriod: weatherOverlayByDate.get(d.date)?.period,
       };
     });
-  }, [filteredRawData, splitDate, forecastHorizon]);
+  }, [filteredRawData, splitDate, forecastHorizon, weatherOverlayByDate]);
 
   // Aggregated data according to timeGrain
   const chartData = useMemo(() => {
@@ -541,7 +635,40 @@ export function ThreeZoneForecastChart({
               tickFormatter={(v) => formatCurrency(v, currencyPrefix)}
               width={65}
             />
+            {weatherOverlayEnabled && (
+              <>
+                <YAxis
+                  yAxisId="rain"
+                  orientation="right"
+                  stroke="#06B6D4"
+                  tick={{ fontSize: 10, fill: "#067A8A", fontWeight: 600 }}
+                  tickFormatter={(v) => `${v} mm`}
+                  width={50}
+                />
+                <YAxis
+                  yAxisId="temp"
+                  orientation="right"
+                  stroke="#f97316"
+                  tick={false}
+                  axisLine={false}
+                  width={0}
+                  domain={["dataMin - 2", "dataMax + 2"]}
+                />
+              </>
+            )}
             <Tooltip content={<ModernTooltip grain={timeGrain} prefix={currencyPrefix} themeColor={themeColor} />} />
+
+            {weatherOverlayEnabled && (
+              <Bar
+                yAxisId="rain"
+                dataKey="rainfallMm"
+                name="Rainfall"
+                fill="#06B6D4"
+                opacity={0.26}
+                radius={[3, 3, 0, 0]}
+                barSize={timeGrain === "daily" ? 8 : 16}
+              />
+            )}
 
             {/* 1. Historical Actual Revenue - Solid Line with point markers */}
             <Line
@@ -577,6 +704,20 @@ export function ThreeZoneForecastChart({
               name="Future Forecast"
             />
 
+            {weatherOverlayEnabled && (
+              <Line
+                yAxisId="temp"
+                type="monotone"
+                dataKey="tempCelsius"
+                stroke="#f97316"
+                strokeWidth={2}
+                strokeDasharray="2 4"
+                dot={{ r: timeGrain === "monthly" ? 3 : 0, fill: "#f97316" }}
+                connectNulls={false}
+                name="Temperature"
+              />
+            )}
+
             {/* Draggable Range Brush / Slider */}
             <Brush
               dataKey="date"
@@ -604,7 +745,24 @@ export function ThreeZoneForecastChart({
             <span className="w-5 h-0.5 bg-[#10b981] rounded-full" />
             <span className="font-semibold">Future Forecast Projection</span>
           </div>
+          {weatherOverlayEnabled && (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-3 bg-[#06B6D4] opacity-30 rounded-sm" />
+                <span className="font-semibold">Rainfall Overlay</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-0.5 border-b-2 border-dashed border-[#f97316]" />
+                <span className="font-semibold">Temperature Overlay</span>
+              </div>
+            </>
+          )}
         </div>
+        {weatherOverlayEnabled && (
+          <div className="text-center text-[11px] text-[#223047] opacity-60">
+            Future weather overlay follows Open-Meteo availability and may stop after the next 16 forecast days.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -2673,6 +2673,7 @@ This file records requested revisions, implementation details, verification, and
 
 - Passed: Backend production TypeScript build with `npm run build`.
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
 - Passed: Existing FP-Growth Python tests with `python src\analytics\python\test_cross_sell.py` (`7` tests passed).
 - Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
 
@@ -2684,6 +2685,33 @@ This file records requested revisions, implementation details, verification, and
 
 ### Verification
 
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+
+### Cafe & Services Forecast Weather Overlay Toggle (2026-09-07)
+
+- Replaced the Cafe forecast panel's `Demand Forecast | Weather Overlay` view switch with a `Weather Overlay` On/Off control.
+- Added the same `Weather Overlay` On/Off control to the Services Revenue & Demand Forecast panel.
+- Extended the shared `ThreeZoneForecastChart` so rainfall bars and temperature line overlays render on top of the main Demand Forecast chart instead of opening a separate weather-only chart.
+- Added forecast-run `modelMetadata.weatherOverlay` rows from Open-Meteo/cache weather data for both Cafe and Services forecast payloads.
+- Limited future weather overlay rows to the first 16 forecast days to match Open-Meteo forecast availability, while allowing historical overlay rows across the visible history range.
+- Excluded synthetic weather rows from the overlay and added cached-forecast overlay backfill so saved forecast responses can still show the overlay without a full model refresh.
+- Removed the Cafe weather-impact fetch/view path from the forecast panel because the separate weather-only graph is no longer used.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### Cafe Forecast Cached Payload Fix (2026-09-07)
+
+- Fixed the cached Cafe/Services forecast response path so Supabase forecast rows are treated as plain objects instead of always calling `.toObject()`.
+- This prevents the Cafe forecast endpoint from failing when a matching cached forecast is served.
+- Updated the Cafe initial forecast load to show/log API failures instead of silently leaving the chart empty with the generic upload-history message.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
 - Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
 - Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.

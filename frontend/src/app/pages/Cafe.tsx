@@ -2,14 +2,14 @@ import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { useRouter } from "next/router";
 import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart, ThumbsUp, ThumbsDown, Sparkles, RefreshCw, CheckCircle2 } from "lucide-react";
-import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain } from "../components/ThreeZoneForecastChart";
+import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
 import { InfoTooltip } from "../components/InfoTooltip";
-import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour, getWeatherImpact, getCafeCoAttachment, submitFeedbackRating } from "../lib/api";
+import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour, getCafeCoAttachment, submitFeedbackRating } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -28,7 +28,6 @@ import {
   Area,
   BarChart,
   Bar,
-  ComposedChart,
   PieChart,
   Pie,
   Cell,
@@ -259,9 +258,7 @@ export function Cafe() {
   
   const [quietPeriod, setQuietPeriod] = useState<any>(null);
   const [pastHappyHours, setPastHappyHours] = useState<any[]>([]);
-  const [weatherImpactData, setWeatherImpactData] = useState<any>(null);
-  const [weatherDays, setWeatherDays] = useState(30);
-  const [forecastViewMode, setForecastViewMode] = useState<"forecast" | "weather">("forecast");
+  const [weatherOverlayEnabled, setWeatherOverlayEnabled] = useState(false);
   const [coAttachmentData, setCoAttachmentData] = useState<any>(null);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
   const [hoveredDonutIndex, setHoveredDonutIndex] = useState<number | null>(null);
@@ -302,9 +299,8 @@ export function Cafe() {
   useEffect(() => {
     getNextQuietPeriod().then(setQuietPeriod).catch(console.error);
     getPastHappyHours().then(setPastHappyHours).catch(console.error);
-    getWeatherImpact("cafe", weatherDays).then(setWeatherImpactData).catch(console.error);
     getCafeCoAttachment().then(setCoAttachmentData).catch(console.error);
-  }, [weatherDays, realtimeRefresh]);
+  }, [realtimeRefresh]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -461,7 +457,12 @@ export function Cafe() {
 
   // API data state
   useEffect(() => {
-    getForecast("cafe", buildCafeForecastParams()).then(setForecastRun).catch(() => {});
+    getForecast("cafe", buildCafeForecastParams())
+      .then(setForecastRun)
+      .catch((error) => {
+        console.error("Cafe forecast failed to load", error);
+        toast.error(error instanceof Error ? error.message : "Cafe forecast failed to load");
+      });
   }, [buildCafeForecastParams, realtimeRefresh]);
 
   useEffect(() => {
@@ -808,6 +809,11 @@ export function Cafe() {
       }
     }
     return rows;
+  }, [forecastRun]);
+
+  const weatherOverlayData = useMemo<WeatherOverlayPoint[]>(() => {
+    const rows = forecastRun?.modelMetadata?.weatherOverlay;
+    return Array.isArray(rows) ? rows as WeatherOverlayPoint[] : [];
   }, [forecastRun]);
 
   const academicSplitDate = useMemo(() => {
@@ -1203,54 +1209,46 @@ export function Cafe() {
               Cafe Revenue & Demand Forecast
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              {forecastViewMode === "forecast" ? (
-                <>
-                  Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Cafe demand prediction." />: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
-                  {forecastRun && <span className="hidden sm:inline"> (MASE: {formatFixed(forecastRun.mase, 2)}, Accuracy: {formatFixed(forecastRun.accuracy, 1)}%)</span>}
-                </>
-              ) : (
-                <>
-                  Exogenous context <InfoTooltip label="Exogenous Weather Impact from Ch 1: Overlays daily rainfall (mm) and temperature against Cafe revenue to measure foot-traffic sensitivity to weather." />: <span className="font-semibold text-[#06B6D4]">Live Open-Meteo Weather vs Daily Net Sales</span>
-                </>
-              )}
+              Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Cafe demand prediction." />: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
+              {forecastRun && <span className="hidden sm:inline"> (MASE: {formatFixed(forecastRun.mase, 2)}, Accuracy: {formatFixed(forecastRun.accuracy, 1)}%)</span>}
             </p>
-            {forecastViewMode === "forecast" && forecastRun?.isFallback && (
+            {forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
                 SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
               </Badge>
             )}
           </div>
 
-          <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
+          <div className="flex items-center gap-2 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1.5">
+            <span className="px-2 text-xs font-bold text-[#223047]">Weather Overlay</span>
             <Button
               size="sm"
-              variant={forecastViewMode === "forecast" ? "default" : "ghost"}
-              onClick={() => setForecastViewMode("forecast")}
+              variant={weatherOverlayEnabled ? "default" : "ghost"}
+              onClick={() => setWeatherOverlayEnabled(true)}
               className={
-                forecastViewMode === "forecast"
+                weatherOverlayEnabled
                   ? "h-8 bg-[#F53799] hover:bg-[#F53799] text-xs text-white"
                   : "h-8 text-xs hover:bg-[#FFF2FA] text-[#223047]"
               }
             >
-              Demand Forecast
+              On
             </Button>
             <Button
               size="sm"
-              variant={forecastViewMode === "weather" ? "default" : "ghost"}
-              onClick={() => setForecastViewMode("weather")}
+              variant={!weatherOverlayEnabled ? "default" : "ghost"}
+              onClick={() => setWeatherOverlayEnabled(false)}
               className={
-                forecastViewMode === "weather"
+                !weatherOverlayEnabled
                   ? "h-8 bg-[#F53799] hover:bg-[#F53799] text-xs text-white"
                   : "h-8 text-xs hover:bg-[#FFF2FA] text-[#223047]"
               }
             >
-              Weather Overlay
+              Off
             </Button>
           </div>
         </div>
 
-        {forecastViewMode === "forecast" ? (
-          <>
+        <>
             {/* ══ 90-5-5 MULTI-ZONE FORECAST CHART ════════════════════════════ */}
             {rawThreeZoneData.length > 0 ? (
               <ThreeZoneForecastChart
@@ -1264,6 +1262,8 @@ export function Cafe() {
                 themeColor="#F53799"
                 timeGrain={chartGranularity}
                 onTimeGrainChange={(g) => setChartGranularity(g)}
+                weatherOverlayEnabled={weatherOverlayEnabled}
+                weatherOverlayData={weatherOverlayData}
               />
             ) : (
               <div className="flex items-center justify-center h-48 text-sm text-[#223047] opacity-50">
@@ -1486,165 +1486,7 @@ export function Cafe() {
                 </div>
               </div>
             </div>
-          </>
-        ) : (
-          /* ══ WEATHER OVERLAY VIEW ════════════════════════════════════════ */
-          <div className="space-y-4 md:space-y-6">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="text-xs text-[#223047] opacity-70">
-                Comparing Daily Net Sales against live precipitation and temperature in Lucena City
-              </div>
-              <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
-                {[
-                  [14, "Last 14 Days"],
-                  [30, "Last 30 Days"],
-                  [60, "Last 60 Days"],
-                ].map(([days, label]) => (
-                  <Button
-                    key={days}
-                    size="sm"
-                    variant={weatherDays === days ? "default" : "ghost"}
-                    onClick={() => setWeatherDays(Number(days))}
-                    className={
-                      weatherDays === days
-                        ? "h-7 bg-[#F53799] hover:bg-[#F53799] text-xs text-white"
-                        : "h-7 text-xs hover:bg-[#FFF2FA] text-[#223047]"
-                    }
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {/* SUMMARY CARDS: RAINY VS DRY PERFORMANCE */}
-            {weatherImpactData?.summary && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
-                <div className="p-3.5 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl flex flex-col justify-between">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs text-[#223047] opacity-60">Rainy Days Avg Revenue</span>
-                    <InfoTooltip label="Average daily Cafe revenue on days with recorded precipitation ≥ 2.0 mm (moderate to heavy rain) in Lucena City via Open-Meteo API." />
-                  </div>
-                  <div className="text-base md:text-xl font-bold text-[#223047] my-0.5">
-                    ₱{Number(weatherImpactData.summary.avgRainyRevenue || 0).toLocaleString()}
-                  </div>
-                  <div className="text-[10px] text-cyan-600 font-semibold">
-                    {weatherImpactData.summary.rainyDaysCount} rainy days recorded
-                  </div>
-                </div>
-
-                <div className="p-3.5 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl flex flex-col justify-between">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs text-[#223047] opacity-60">Clear / Dry Days Avg Revenue</span>
-                    <InfoTooltip label="Average daily Cafe revenue on clear or light-dry days with precipitation < 2.0 mm in Lucena City." />
-                  </div>
-                  <div className="text-base md:text-xl font-bold text-[#223047] my-0.5">
-                    ₱{Number(weatherImpactData.summary.avgDryRevenue || 0).toLocaleString()}
-                  </div>
-                  <div className="text-[10px] text-amber-600 font-semibold">
-                    {weatherImpactData.summary.dryDaysCount} dry days recorded
-                  </div>
-                </div>
-
-                <div className="p-3.5 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl flex flex-col justify-between">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs text-[#223047] opacity-60">Rain Elasticity Impact</span>
-                    <InfoTooltip label="Percentage difference in revenue between rainy days and clear days: ((Rainy Avg - Dry Avg) / Dry Avg) × 100. Fed as an exogenous regressor into SARIMAX & Prophet models." />
-                  </div>
-                  <div className="text-base md:text-xl font-bold text-[#D42A7D] my-0.5">
-                    {weatherImpactData.summary.rainDipPercent > 0
-                      ? `-${weatherImpactData.summary.rainDipPercent}% on rainy days`
-                      : `+${Math.abs(weatherImpactData.summary.rainDipPercent)}% surge`}
-                  </div>
-                  <div className="text-[10px] text-[#223047] opacity-50">
-                    Exogenous SARIMAX feature
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* DUAL-AXIS TIME SERIES CHART */}
-            {!weatherImpactData?.series?.length ? (
-              <div className="py-8 text-center text-sm text-slate-400">
-                Loading exogenous weather impact data...
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <ResponsiveContainer width="100%" height={300} className="md:!h-[360px]">
-                  <ComposedChart data={weatherImpactData.series} margin={{ top: 10, right: 30, left: 10, bottom: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      stroke="#223047"
-                      tickFormatter={formatChartDate}
-                      style={{ fontSize: "10px" }}
-                    />
-                    <YAxis
-                      yAxisId="left"
-                      stroke="#223047"
-                      style={{ fontSize: "10px" }}
-                      tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
-                    />
-                    <YAxis
-                      yAxisId="right"
-                      orientation="right"
-                      stroke="#06B6D4"
-                      style={{ fontSize: "10px" }}
-                      tickFormatter={(val) => `${val} mm`}
-                    />
-                    <Tooltip
-                      formatter={(value: any, name: any) => {
-                        if (name === "Daily Net Sales") return [`₱${Number(value).toLocaleString()}`, name];
-                        if (name === "Rainfall (mm)") return [`${Number(value)} mm`, name];
-                        if (name === "Temperature (°C)") return [`${Number(value)}°C`, name];
-                        return [value, name];
-                      }}
-                      labelFormatter={(label) => formatChartDate(String(label))}
-                      contentStyle={{
-                        backgroundColor: "white",
-                        border: "1px solid #FFD9EC",
-                        borderRadius: "12px",
-                        padding: "12px",
-                        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                      }}
-                    />
-                    <Bar
-                      yAxisId="right"
-                      dataKey="rainfallMm"
-                      name="Rainfall (mm)"
-                      fill="#06B6D4"
-                      opacity={0.65}
-                      radius={[4, 4, 0, 0]}
-                      barSize={14}
-                    />
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="revenue"
-                      name="Daily Net Sales"
-                      stroke="#F53799"
-                      strokeWidth={2.5}
-                      dot={{ r: 3, fill: "#F53799" }}
-                      activeDot={{ r: 6 }}
-                      animationDuration={800}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-
-                <div className="flex flex-wrap justify-center gap-4 md:gap-8 pt-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-[#F53799] rounded-full" />
-                    <span className="text-xs text-[#223047]">Daily Net Sales (Left Y-Axis, ₱)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-[#06B6D4] opacity-70 rounded" />
-                    <span className="text-xs text-[#223047]">Rainfall Volume (Right Y-Axis, mm)</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        </>
       </div>
 
       {/* ══ 2-COLUMN SIDE-BY-SIDE: CO-ATTACHMENT INDEX + CATEGORY REVENUE CONTRIBUTION ══ */}
