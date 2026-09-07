@@ -12,6 +12,7 @@ import { SupabaseService } from '../common/supabase/supabase.service';
 import { EtlService } from '../csv/etl.service';
 import { Transaction, TransactionDocument } from '../csv/schemas/transaction.schema';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AwsService } from '../aws/aws.service';
 
 type PetHubWebhookItem = {
   itemId?: string;
@@ -58,6 +59,7 @@ export class PetHubWebhookService {
     private readonly etlService: EtlService,
     private readonly analyticsService: AnalyticsService,
     private readonly realtimeService: RealtimeService,
+    private readonly awsService: AwsService,
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
   ) {}
@@ -107,6 +109,17 @@ export class PetHubWebhookService {
       body.transactionId,
       transactionsWithUploadId as Transaction[],
     );
+
+    // Archive the raw webhook payload to S3
+    const buffer = Buffer.from(JSON.stringify(payload, null, 2), 'utf-8');
+    this.awsService.uploadRawArchive(
+      `pethub_webhook_${body.transactionId}.json`,
+      buffer,
+      'PetHub',
+      uploadId
+    ).catch(err => {
+      this.logger.warn(`S3 raw archive failed for PetHub webhook ${uploadId}: ${err}`);
+    });
 
     return {
       success: true,
