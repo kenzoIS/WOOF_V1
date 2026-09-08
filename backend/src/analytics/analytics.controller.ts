@@ -153,6 +153,14 @@ export class AnalyticsController {
     );
   }
 
+  @Get('bundle-planning-context')
+  async getBundlePlanningContext(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.analyticsService.getBundlePlanningContext(startDate, endDate);
+  }
+
   @Get('cafe/co-attachment')
   async getCafeCoAttachment() {
     return this.analyticsService.getCafeCoAttachment();

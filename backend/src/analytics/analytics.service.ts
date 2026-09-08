@@ -2568,6 +2568,59 @@ export class AnalyticsService {
     };
   }
 
+  async getBundlePlanningContext(startDate?: string, endDate?: string): Promise<any> {
+    const start = String(startDate || '').trim();
+    const end = String(endDate || startDate || '').trim();
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!datePattern.test(start) || !datePattern.test(end) || start > end) {
+      throw new BadRequestException('A valid availability date range is required.');
+    }
+
+    const startTime = new Date(`${start}T00:00:00.000Z`).getTime();
+    const endTime = new Date(`${end}T00:00:00.000Z`).getTime();
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime - startTime > 90 * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException('Availability date range must be within 90 days.');
+    }
+
+    const coordinates = this.exogenousDataService.getDefaultCoordinates();
+    const weather = await this.exogenousDataService.fetchWeatherHistory(
+      coordinates.lat,
+      coordinates.lng,
+      start,
+      end,
+    );
+    const years = Array.from(new Set([start.slice(0, 4), end.slice(0, 4)]));
+    const holidayGroups = await Promise.all(
+      years.map((year) => this.exogenousDataService.fetchHolidayHistory(Number(year))),
+    );
+    const holidays = holidayGroups.flat();
+    const holidaysByDate = new Map(holidays.map((holiday) => [holiday.date, holiday]));
+
+    return {
+      startDate: start,
+      endDate: end,
+      days: weather.map((record) => {
+        const date = new Date(`${record.date}T00:00:00.000Z`);
+        const holiday = holidaysByDate.get(record.date);
+        const rainFlag = record.rainfallMm > 0.5;
+        return {
+          date: record.date,
+          tempCelsius: record.tempCelsius,
+          rainfallMm: record.rainfallMm,
+          humidity: record.relativeHumidity,
+          rainFlag,
+          condition: rainFlag ? 'Rainy' : record.tempCelsius >= 31 ? 'Hot' : 'Comfortable',
+          weatherRating: rainFlag ? 'Rain-ready' : record.tempCelsius >= 31 ? 'Heat-sensitive' : 'Favorable',
+          isSynthetic: record.isSynthetic,
+          isWeekend: [0, 6].includes(date.getUTCDay()),
+          holidayName: holiday?.name || null,
+        };
+      }),
+      weatherSource: this.exogenousDataService.getLastWeatherSource(),
+      calendarSource: this.exogenousDataService.getLastHolidaySource(),
+    };
+  }
+
   async getCurrentWeather(): Promise<any> {
     const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -4590,14 +4643,26 @@ export class AnalyticsService {
       process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
     );
 
-    return (
-      this.configService.get<string>('PYTHON_PATH') ||
-      (existsSync(localPython)
-        ? localPython
-        : process.platform === 'win32'
-          ? 'python'
-          : 'python3')
+    const configuredPython = this.configService.get<string>('PYTHON_PATH')?.trim();
+    const configuredLooksLikePath = Boolean(
+      configuredPython &&
+        (configuredPython.includes('/') ||
+          configuredPython.includes('\\') ||
+          configuredPython.startsWith('.')),
     );
+    const configuredPath = configuredLooksLikePath && configuredPython
+      ? path.resolve(process.cwd(), configuredPython)
+      : null;
+
+    if (configuredPython && (!configuredLooksLikePath || (configuredPath && existsSync(configuredPath)))) {
+      return configuredPath || configuredPython;
+    }
+
+    return existsSync(localPython)
+      ? localPython
+      : process.platform === 'win32'
+        ? 'python'
+        : 'python3';
   }
 
   private getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {

@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
-import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search, Users, CalendarDays, AlertTriangle, CheckCircle2, Archive, RotateCcw, Trash2, PackagePlus, ThumbsUp, ThumbsDown, RefreshCw } from "lucide-react";
+import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search, Users, CalendarDays, CalendarCheck2, CloudSun, CloudRain, Thermometer, AlertTriangle, CheckCircle2, Archive, RotateCcw, Trash2, PackagePlus, ThumbsUp, ThumbsDown, RefreshCw } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { BundleArchive, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getBundleArchives, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
+import { BundleArchive, BundlePlanningContext, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import {
@@ -211,17 +211,20 @@ const slugify = (value: string) =>
 const formatPercent = (value?: number) =>
   `${Math.round((value || 0) * 100)}%`;
 
+const PHP_SYMBOL = "\u20B1";
+const CELSIUS_SYMBOL = String.fromCharCode(176);
+
 const formatCurrency = (value?: number | null) =>
   value !== undefined && value !== null && Number.isFinite(value)
-    ? `₱${value.toFixed(2)}`
+    ? `${PHP_SYMBOL}${value.toFixed(2)}`
     : "Unavailable";
 
 const formatCompactCurrency = (value?: number | null) => {
   if (value === undefined || value === null || !Number.isFinite(value)) return "";
   const absValue = Math.abs(value);
-  if (absValue >= 1_000_000) return `₱${(value / 1_000_000).toFixed(1)}M`;
-  if (absValue >= 1_000) return `₱${(value / 1_000).toFixed(1)}K`;
-  return `₱${Math.round(value)}`;
+  if (absValue >= 1_000_000) return `${PHP_SYMBOL}${(value / 1_000_000).toFixed(1)}M`;
+  if (absValue >= 1_000) return `${PHP_SYMBOL}${(value / 1_000).toFixed(1)}K`;
+  return `${PHP_SYMBOL}${Math.round(value)}`;
 };
 
 const formatPair = (left: string, right: string) => `${left} + ${right}`;
@@ -359,10 +362,20 @@ export function AISimulation() {
   const [manualProductTwo, setManualProductTwo] = useState("");
   const [manualProductThree, setManualProductThree] = useState("");
   const [manualAvailableMonth, setManualAvailableMonth] = useState("");
-  const [manualStartDate, setManualStartDate] = useState(todayDateKey());
+  const [manualStartDate, setManualStartDate] = useState("");
   const [manualEndDate, setManualEndDate] = useState("");
   const [manualPromoMechanic, setManualPromoMechanic] = useState("");
   const [manualNotes, setManualNotes] = useState("");
+  const [manualPlanningContext, setManualPlanningContext] = useState<BundlePlanningContext | null>(null);
+  const [manualPlanningLoading, setManualPlanningLoading] = useState(false);
+  const [manualPlanningError, setManualPlanningError] = useState<string | null>(null);
+  const [createdManualBundleScore, setCreatedManualBundleScore] = useState<{
+    score: number;
+    generatedBaseline: number;
+    marginScore: number;
+    contextScore: number;
+    bundleName: string;
+  } | null>(null);
   const [bundleArchivesOpen, setBundleArchivesOpen] = useState(false);
   const [bundleArchives, setBundleArchives] = useState<BundleArchive[]>([]);
   const [bundleArchiveCounts, setBundleArchiveCounts] = useState<Record<string, number>>({});
@@ -1275,6 +1288,89 @@ export function AISimulation() {
   const activeBundlePredictions =
     bundleOpportunityMode === "seasonal" ? seasonalBundlePredictions : allBundlePredictions;
 
+  useEffect(() => {
+    if (!manualStartDate) {
+      setManualPlanningContext(null);
+      return;
+    }
+    const endDate = manualEndDate || manualStartDate;
+    if (endDate < manualStartDate) {
+      setManualPlanningContext(null);
+      setManualPlanningError("End date must be on or after the start date.");
+      return;
+    }
+    let cancelled = false;
+    setManualPlanningLoading(true);
+    setManualPlanningError(null);
+    getBundlePlanningContext(manualStartDate, endDate)
+      .then((context) => {
+        if (!cancelled) setManualPlanningContext(context);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setManualPlanningContext(null);
+          setManualPlanningError(error instanceof Error ? error.message : "Weather data is unavailable.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setManualPlanningLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [manualEndDate, manualStartDate]);
+
+  const manualWeatherSummary = useMemo(() => {
+    const days = manualPlanningContext?.days || [];
+    if (!days.length) return null;
+    const coveredDays = days.filter((day) => !day.isSynthetic);
+    const hasReliableWeather = coveredDays.length > 0;
+    const rainyDays = coveredDays.filter((day) => day.rainFlag).length;
+    const holidayDays = days.filter((day) => day.holidayName).length;
+    const weekendDays = days.filter((day) => day.isWeekend).length;
+    const temperatures = coveredDays.map((day) => day.tempCelsius);
+    const minTemperature = hasReliableWeather ? Math.round(Math.min(...temperatures)) : null;
+    const maxTemperature = hasReliableWeather ? Math.round(Math.max(...temperatures)) : null;
+    const month = Number(days[0].date.slice(5, 7));
+    const season = !hasReliableWeather
+      ? "Unavailable"
+      : rainyDays / coveredDays.length >= 0.5
+      ? "Wet Season"
+      : [3, 4, 5].includes(month)
+        ? "Warm Season"
+        : "Transition Season";
+    const calendarLabel = holidayDays > 0
+      ? `${holidayDays} holiday day${holidayDays > 1 ? "s" : ""}`
+      : weekendDays > 0
+        ? `${weekendDays} weekend day${weekendDays > 1 ? "s" : ""}`
+        : "Regular calendar days";
+    const weatherScore = !hasReliableWeather
+      ? null
+      : rainyDays > 0 ? 86 : temperatures.some((temperature) => temperature >= 31) ? 74 : 82;
+    const evidenceScore = weatherScore === null
+      ? null
+      : Math.round((weatherScore + (holidayDays > 0 ? 90 : weekendDays > 0 ? 84 : 72)) / 2);
+    return {
+      rainyDays,
+      coveredDays: coveredDays.length,
+      totalDays: days.length,
+      holidayDays,
+      minTemperature,
+      maxTemperature,
+      season,
+      calendarLabel,
+      hasReliableWeather,
+      evidenceScore,
+      message: !hasReliableWeather
+        ? "No live weather coverage is available for the selected dates, so weather fit is not estimated."
+        : rainyDays > 0
+        ? "Rain-aware dates may favor comfort-oriented Cafe or Services bundles."
+        : temperatures.some((temperature) => temperature >= 31)
+          ? "Warm dates may favor cooling, light, or convenience-led bundle offers."
+          : "Comfortable conditions provide a stable window for broad bundle offers.",
+    };
+  }, [manualPlanningContext]);
+
   const bundleCategoryOptions = useMemo(() => {
     return Array.from(new Set(activeBundlePredictions.map((bundle) => bundle.bundleCategory)))
       .filter(Boolean)
@@ -1616,6 +1712,46 @@ export function AISimulation() {
   const getManualProduct = (name: string) =>
     manualProductOptions.find((item) => item.name === name);
 
+  const calculateManualBundleScore = (products: typeof manualProductOptions, bundlePrice: number) => {
+    const productNames = new Set(products.map((product) => product.name));
+    const exactMatches = allBundlePredictions.filter(
+      (candidate) => productNames.has(candidate.itemA) && productNames.has(candidate.itemB),
+    );
+    const referenceCandidates = allBundlePredictions.slice(0, 5);
+    const generatedBaseline = Math.round(
+      (exactMatches.length ? exactMatches : referenceCandidates).reduce((sum, candidate) => sum + candidate.score, 0) /
+        Math.max(1, (exactMatches.length ? exactMatches : referenceCandidates).length),
+    );
+    const regularPrice = products.reduce((sum, product) => sum + (product.price || 0), 0);
+    const regularCost = products.reduce((sum, product) => sum + (product.unitCost || (product.price || 0) * 0.45), 0);
+    const manualMargin = bundlePrice > 0 ? ((bundlePrice - regularCost) / bundlePrice) * 100 : 0;
+    const generatedMargin = referenceCandidates.length
+      ? referenceCandidates.reduce((sum, candidate) => sum + (candidate.projectedMarginPercent || 0), 0) / referenceCandidates.length
+      : 30;
+    const marginScore = Math.round(Math.max(0, Math.min(100, 50 + (manualMargin - generatedMargin) * 2)));
+    const days = manualPlanningContext?.days || [];
+    const reliableDays = days.filter((day) => !day.isSynthetic);
+    const hasRain = reliableDays.some((day) => day.rainFlag);
+    const hasHotDay = reliableDays.some((day) => day.tempCelsius >= 31);
+    const sectors = new Set(products.flatMap((product) => product.sectors || [product.sector]));
+    const weatherFit = reliableDays.length === 0
+      ? 50
+      : hasRain
+      ? sectors.has("Cafe") || sectors.has("Services") ? 90 : 65
+      : hasHotDay && sectors.has("Cafe") ? 90 : 78;
+    const calendarFit = days.some((day) => day.holidayName) ? 90 : days.some((day) => day.isWeekend) ? 85 : 72;
+    const contextScore = Math.round((weatherFit + calendarFit) / 2);
+    const score = Math.round(generatedBaseline * 0.5 + marginScore * 0.25 + contextScore * 0.25);
+    return {
+      score: Math.max(0, Math.min(100, score)),
+      generatedBaseline,
+      marginScore,
+      contextScore,
+      regularPrice,
+      manualMargin: Math.round(manualMargin * 10) / 10,
+    };
+  };
+
   const resetManualBundleForm = () => {
     setManualBundleName("");
     setManualBundlePrice("");
@@ -1624,7 +1760,7 @@ export function AISimulation() {
     setManualProductTwo("");
     setManualProductThree("");
     setManualAvailableMonth("");
-    setManualStartDate(todayDateKey());
+    setManualStartDate("");
     setManualEndDate("");
     setManualPromoMechanic("");
     setManualNotes("");
@@ -1659,6 +1795,8 @@ export function AISimulation() {
       return;
     }
 
+    const score = calculateManualBundleScore(uniqueProducts, bundlePrice);
+
     try {
       await createBundleArchive({
         source: "manual",
@@ -1686,7 +1824,28 @@ export function AISimulation() {
         metadata: {
           createdFrom: "manual_bundle_builder",
           dateCreated: manualDateCreated,
+          effectivenessScore: score.score,
+          scoreBreakdown: {
+            generatedBaseline: score.generatedBaseline,
+            marginScore: score.marginScore,
+            weatherCalendarScore: score.contextScore,
+          },
+          planningContext: manualPlanningContext
+            ? {
+                startDate: manualPlanningContext.startDate,
+                endDate: manualPlanningContext.endDate,
+                weatherSource: manualPlanningContext.weatherSource,
+                calendarSource: manualPlanningContext.calendarSource,
+              }
+            : null,
         },
+      });
+      setCreatedManualBundleScore({
+        score: score.score,
+        generatedBaseline: score.generatedBaseline,
+        marginScore: score.marginScore,
+        contextScore: score.contextScore,
+        bundleName: manualBundleName.trim(),
       });
       toast.success("Manual bundle created", {
         description: `${manualBundleName} was added to Bundle Archives.`,
@@ -2653,7 +2812,7 @@ export function AISimulation() {
                     <div key={idx} className="space-y-2">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-[#223047] font-medium">{item.pair}</span>
-                        <span className="font-bold text-[#F53799]">{item.frequency}×</span>
+                        <span className="font-bold text-[#F53799]">{item.frequency}x</span>
                       </div>
                       <div className="h-2 bg-[#FFD9EC] rounded-full overflow-hidden">
                         <div
@@ -2780,7 +2939,7 @@ export function AISimulation() {
                           currentLine = (currentLine + " " + w).trim();
                         } else {
                           if (currentLine) lines.push(currentLine);
-                          currentLine = w.length > 11 ? w.slice(0, 10) + "…" : w;
+                          currentLine = w.length > 11 ? w.slice(0, 10) + "..." : w;
                         }
                       });
                       if (currentLine) lines.push(currentLine);
@@ -3156,7 +3315,7 @@ export function AISimulation() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3 md:mb-4">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-gradient-to-br from-[#F53799] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
-                    <span className="text-white text-xs font-bold">⏰</span>
+                    <span className="text-white text-xs font-bold">Time</span>
                   </div>
                   <div className="flex-1">
                     <div className="text-xs md:text-sm font-bold text-[#223047]">Time-Based Pattern Analysis</div>
@@ -3208,7 +3367,7 @@ export function AISimulation() {
                 </p>
               </div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm font-semibold">
-                Showing {filteredBundlePredictions.length > 0 ? (bundlePage - 1) * bundlesPerPage + 1 : 0}–{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {filteredBundlePredictions.length} Bundles
+                Showing {filteredBundlePredictions.length > 0 ? (bundlePage - 1) * bundlesPerPage + 1 : 0}-{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {filteredBundlePredictions.length} Bundles
               </Badge>
             </div>
 
@@ -3329,7 +3488,7 @@ export function AISimulation() {
                           className="order-8 bg-amber-500 text-white font-bold text-xs shadow-xs animate-pulse cursor-help"
                           title="Emerging Trend: A fast-growing product combination with accelerating sales momentum in recent transaction cycles."
                         >
-                          🔥 Emerging Trend
+                          ðŸ”¥ Emerging Trend
                         </Badge>
                       )}
                       {bundle.isSeasonalBundle && bundle.seasonalBundleType && (
@@ -3522,7 +3681,7 @@ export function AISimulation() {
             {totalBundlePages > 1 && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#FFD9EC]/70">
                 <div className="text-xs text-[#223047] opacity-70 font-medium">
-                  Showing {(bundlePage - 1) * bundlesPerPage + 1}–{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {filteredBundlePredictions.length} bundle opportunities (Page {bundlePage} of {totalBundlePages})
+                  Showing {(bundlePage - 1) * bundlesPerPage + 1}-{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {filteredBundlePredictions.length} bundle opportunities (Page {bundlePage} of {totalBundlePages})
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Button
@@ -3694,6 +3853,70 @@ export function AISimulation() {
               </div>
             </div>
 
+            {manualStartDate && (
+            <div className="rounded-2xl border border-[#D7E6F8] bg-[#F6FAFF] p-4 md:p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CloudSun className="w-4 h-4 text-[#06B6D4]" />
+                    <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-[#4D75A3]">Weather + season sales evidence</span>
+                  </div>
+                  <p className="text-xs text-[#223047] opacity-60 mt-1">
+                    {manualPlanningContext?.startDate && manualPlanningContext?.endDate
+                      ? `${manualPlanningContext.startDate} - ${manualPlanningContext.endDate}`
+                      : "Select availability dates to evaluate the selling window."}
+                  </p>
+                </div>
+                {manualPlanningLoading && <span className="text-xs text-[#223047] opacity-60">Checking dates...</span>}
+              </div>
+
+              {manualPlanningError ? (
+                <p className="text-xs text-[#C2410C]">{manualPlanningError}</p>
+              ) : manualWeatherSummary ? (
+                <>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                    {[
+                      { label: "Temperature", value: manualWeatherSummary.hasReliableWeather ? `${manualWeatherSummary.minTemperature}-${manualWeatherSummary.maxTemperature}${CELSIUS_SYMBOL}C` : "Unavailable", icon: Thermometer, color: "text-[#F53799]" },
+                      { label: "Rain signal", value: manualWeatherSummary.hasReliableWeather ? `${manualWeatherSummary.rainyDays}/${manualWeatherSummary.coveredDays} days` : "Unavailable", icon: CloudRain, color: "text-[#06B6D4]" },
+                      { label: "Season", value: manualWeatherSummary.season, icon: CloudSun, color: "text-[#D97706]" },
+                      { label: "Calendar", value: manualWeatherSummary.calendarLabel, icon: CalendarCheck2, color: "text-[#7C3AED]" },
+                    ].map((metric) => (
+                      <div key={metric.label} className="rounded-xl border border-[#E4EDF8] bg-white px-3 py-2.5 min-w-0">
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-[#6B7F9D]">
+                          <metric.icon className={`w-3.5 h-3.5 ${metric.color}`} />
+                          <span className="truncate">{metric.label}</span>
+                        </div>
+                        <div className="mt-1 text-sm font-bold text-[#223047] truncate">{metric.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-xl border border-[#D7E6F8] bg-white px-3.5 py-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs font-bold text-[#223047]">
+                        <CloudSun className="w-4 h-4 text-[#06B6D4]" />
+                        Weather + season fit
+                      </div>
+                      <Badge className="bg-[#E8F8F1] text-[#16845B] border border-[#B8E7D0] hover:bg-[#E8F8F1]">
+                        {manualWeatherSummary.evidenceScore === null ? "Weather unavailable" : `${manualWeatherSummary.evidenceScore}/100 timing fit`}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-xs text-[#223047] opacity-65">{manualWeatherSummary.message}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Badge variant="outline" className="border-[#BFEAF2] text-[#087C98] bg-[#F2FCFE]">
+                        {manualWeatherSummary.hasReliableWeather ? `+${manualWeatherSummary.rainyDays > 0 ? 6 : 4} decision points from weather + season` : "No reliable weather signal"}
+                      </Badge>
+                      <Badge variant="outline" className="border-[#FFD9EC] text-[#B53678] bg-[#FFF7FB]">
+                        {manualWeatherSummary.holidayDays > 0 ? "Holiday calendar signal" : "Historical calendar evidence"}
+                      </Badge>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-2 text-xs text-[#223047] opacity-60">Select an availability date to check expected conditions.</p>
+              )}
+            </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
               <label className="space-y-1.5">
                 <span className="text-xs font-bold text-[#223047]">Promo Mechanic</span>
@@ -3729,6 +3952,26 @@ export function AISimulation() {
             </div>
           </div>
 
+          {createdManualBundleScore && (
+            <div className="bg-white border border-[#BFEAF2] rounded-2xl md:rounded-3xl p-4 md:p-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-[#16A34A]" />
+                    <h2 className="text-lg font-bold text-[#223047]">Bundle Effectiveness Score</h2>
+                  </div>
+                  <p className="text-xs text-[#223047] opacity-60 mt-1">{createdManualBundleScore.bundleName} compared with current system-generated bundle opportunities.</p>
+                </div>
+                <div className="text-3xl font-bold text-[#06B6D4]">{createdManualBundleScore.score}<span className="text-base opacity-60">/100</span></div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-xs text-[#223047]">
+                <div className="rounded-xl bg-[#F2FCFE] p-3"><span className="block opacity-60">Generated baseline</span><strong className="text-lg">{createdManualBundleScore.generatedBaseline}</strong></div>
+                <div className="rounded-xl bg-[#FFF7FB] p-3"><span className="block opacity-60">Margin fit</span><strong className="text-lg">{createdManualBundleScore.marginScore}</strong></div>
+                <div className="rounded-xl bg-[#F0FDF4] p-3"><span className="block opacity-60">Weather/calendar fit</span><strong className="text-lg">{createdManualBundleScore.contextScore}</strong></div>
+              </div>
+            </div>
+          )}
+
           {/* Bundle Archives */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl overflow-hidden">
             <button
@@ -3743,7 +3986,7 @@ export function AISimulation() {
                 <div>
                   <h2 className="text-lg md:text-xl font-bold text-[#223047]">Bundle Archives</h2>
                   <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
-                    {bundleArchiveCounts.active ?? 0} active · {bundleArchiveCounts.generated ?? 0} generated · {bundleArchiveCounts.manual ?? 0} manual
+                    {bundleArchiveCounts.active ?? 0} active | {bundleArchiveCounts.generated ?? 0} generated | {bundleArchiveCounts.manual ?? 0} manual
                   </p>
                 </div>
               </div>
@@ -3822,6 +4065,11 @@ export function AISimulation() {
                             <Badge variant="outline" className="border-[#FFD9EC] text-[#223047]">
                               {bundle.status}
                             </Badge>
+                            {bundle.source === "manual" && typeof bundle.metadata?.effectivenessScore === "number" && (
+                              <Badge className="bg-[#E0F7FA] text-[#0E7490] border border-[#A5F3FC]">
+                                Score {bundle.metadata.effectivenessScore}/100
+                              </Badge>
+                            )}
                           </div>
                           <div className="mt-1 text-xs text-[#223047] opacity-70">
                             {(bundle.items || []).map((item) => item.name).join(" + ")}
@@ -4341,7 +4589,7 @@ export function AISimulation() {
                       : "Unavailable"}
                   </div>
                   <div className="text-[11px] text-[#223047] opacity-70 mt-1">
-                    Safe ceiling: {maxSafeItemDiscount !== null ? `${maxSafeItemDiscount}%` : "Cost data unavailable — margin ceiling cannot be calculated"}
+                    Safe ceiling: {maxSafeItemDiscount !== null ? `${maxSafeItemDiscount}%` : "Cost data unavailable - margin ceiling cannot be calculated"}
                   </div>
                 </div>
               </div>
@@ -4628,7 +4876,7 @@ export function AISimulation() {
                     <div className="text-sm font-bold text-[#223047]">Live Labor Burn Rate</div>
                   </div>
                   <div className="text-2xl font-black text-[#223047]">
-                    ₱{liveCostAndCapacity.totalHourlyCost.toFixed(2)}<span className="text-sm font-medium opacity-60">/hr</span>
+                    {PHP_SYMBOL}{liveCostAndCapacity.totalHourlyCost.toFixed(2)}<span className="text-sm font-medium opacity-60">/hr</span>
                   </div>
                   <div className="text-xs text-[#223047] opacity-65 mt-1">
                     Combined hourly wage of scheduled staff
@@ -4641,7 +4889,7 @@ export function AISimulation() {
                     <div className="text-sm font-bold text-[#223047]">Cost Per Visit (Efficiency)</div>
                   </div>
                   <div className="text-2xl font-black text-[#223047]">
-                    ₱{liveCostAndCapacity.costPerVisit.toFixed(2)}<span className="text-sm font-medium opacity-60">/visit</span>
+                    {PHP_SYMBOL}{liveCostAndCapacity.costPerVisit.toFixed(2)}<span className="text-sm font-medium opacity-60">/visit</span>
                   </div>
                   <div className="text-xs text-[#223047] opacity-65 mt-1">
                     Labor cost vs. total predicted traffic

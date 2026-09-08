@@ -592,6 +592,32 @@ export async function getWeatherImpact(sector = 'cafe', days = 30) {
   return fetchApi(`/analytics/weather/impact?sector=${encodeURIComponent(sector)}&days=${encodeURIComponent(String(days))}`);
 }
 
+export interface BundlePlanningDay {
+  date: string;
+  tempCelsius: number;
+  rainfallMm: number;
+  humidity: number;
+  rainFlag: boolean;
+  condition: string;
+  weatherRating: string;
+  isSynthetic: boolean;
+  isWeekend: boolean;
+  holidayName: string | null;
+}
+
+export interface BundlePlanningContext {
+  startDate: string;
+  endDate: string;
+  days: BundlePlanningDay[];
+  weatherSource: string;
+  calendarSource: string;
+}
+
+export async function getBundlePlanningContext(startDate: string, endDate?: string): Promise<BundlePlanningContext> {
+  const params = new URLSearchParams({ startDate, endDate: endDate || startDate });
+  return fetchApi(`/analytics/bundle-planning-context?${params.toString()}`);
+}
+
 export async function getExogenousStatus() {
   return fetchApi('/analytics/exogenous/status');
 }

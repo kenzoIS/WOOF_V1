@@ -28,14 +28,26 @@ export class SmartReportsService {
       '.venv',
       process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
     );
-    return (
-      this.configService.get<string>('PYTHON_PATH') ||
-      (existsSync(localPython)
-        ? localPython
-        : process.platform === 'win32'
-          ? 'python'
-          : 'python3')
+    const configuredPython = this.configService.get<string>('PYTHON_PATH')?.trim();
+    const configuredLooksLikePath = Boolean(
+      configuredPython &&
+        (configuredPython.includes('/') ||
+          configuredPython.includes('\\') ||
+          configuredPython.startsWith('.')),
     );
+    const configuredPath = configuredLooksLikePath && configuredPython
+      ? path.resolve(process.cwd(), configuredPython)
+      : null;
+
+    if (configuredPython && (!configuredLooksLikePath || (configuredPath && existsSync(configuredPath)))) {
+      return configuredPath || configuredPython;
+    }
+
+    return existsSync(localPython)
+      ? localPython
+      : process.platform === 'win32'
+        ? 'python'
+        : 'python3';
   }
 
   private runPython<T>(
