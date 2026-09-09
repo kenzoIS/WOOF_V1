@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { io, Socket } from "socket.io-client";
 import { toast } from "sonner";
 import { clearApiCache } from "../lib/api";
+import { getSettingsPreferences } from "../lib/preferences";
 
 type RealtimeEventType =
   | "upload_processed"
@@ -51,6 +52,18 @@ function resolveRealtimeUrl() {
 
 function showRealtimeToast(event: RealtimeEvent) {
   if (QUIET_EVENTS.has(event.type)) return;
+
+  const preferences = getSettingsPreferences().notifications;
+  const isFailure = event.type.endsWith("_failed");
+  const isSystem =
+    event.type.startsWith("etl_") ||
+    event.type.startsWith("forecast_") ||
+    event.type === "upload_processed";
+  const isSuggestion = event.type.startsWith("campaign_");
+
+  if (isFailure && !preferences.alerts) return;
+  if (!isFailure && isSystem && !preferences.system) return;
+  if (!isFailure && isSuggestion && !preferences.suggestions) return;
 
   const options = event.message ? { description: event.message } : undefined;
 

@@ -545,16 +545,16 @@ export function ThreeZoneForecastChart({
         {/* Responsive Recharts Composed Chart with Shaded Backgrounds */}
         <ResponsiveContainer width="100%" height={380}>
           <ComposedChart data={chartData} margin={{ top: 20, right: 45, bottom: 8, left: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--forecast-grid, #e2e8f0)" vertical={false} />
 
             {/* ── 1. PAST (Train) Zone Background ── */}
             {zoneBounds.start && zoneBounds.split && (
               <ReferenceArea
                 x1={zoneBounds.start}
                 x2={zoneBounds.split}
-                fill="#f0f9ff"
+                fill="var(--forecast-zone-past, #f0f9ff)"
                 fillOpacity={0.80}
-                stroke="#bae6fd"
+                stroke="var(--forecast-zone-past-stroke, #bae6fd)"
                 strokeWidth={1}
                 label={{
                   value: "PAST",
@@ -572,9 +572,9 @@ export function ThreeZoneForecastChart({
               <ReferenceArea
                 x1={zoneBounds.split}
                 x2={zoneBounds.horizon}
-                fill="#fff7ed"
+                fill="var(--forecast-zone-present, #fff7ed)"
                 fillOpacity={0.95}
-                stroke="#fed7aa"
+                stroke="var(--forecast-zone-present-stroke, #fed7aa)"
                 strokeWidth={1}
                 label={{
                   value: "PRESENT",
@@ -592,9 +592,9 @@ export function ThreeZoneForecastChart({
               <ReferenceArea
                 x1={zoneBounds.horizon}
                 x2={zoneBounds.end}
-                fill="#f0fdf4"
+                fill="var(--forecast-zone-future, #f0fdf4)"
                 fillOpacity={0.90}
-                stroke="#bbf7d0"
+                stroke="var(--forecast-zone-future-stroke, #bbf7d0)"
                 strokeWidth={1}
                 label={{
                   value: "FUTURE",
@@ -623,15 +623,15 @@ export function ThreeZoneForecastChart({
 
             <XAxis
               dataKey="date"
-              stroke="#64748b"
-              tick={{ fontSize: 10, fill: "#475569", fontWeight: 600 }}
+              stroke="var(--forecast-axis-text, #64748b)"
+              tick={{ fontSize: 10, fill: "var(--forecast-axis-text, #475569)", fontWeight: 600 }}
               tickFormatter={(val) => formatDateLabel(val, timeGrain)}
               minTickGap={35}
               interval="preserveStartEnd"
             />
             <YAxis
-              stroke="#64748b"
-              tick={{ fontSize: 10, fill: "#475569", fontWeight: 600 }}
+              stroke="var(--forecast-axis-text, #64748b)"
+              tick={{ fontSize: 10, fill: "var(--forecast-axis-text, #475569)", fontWeight: 600 }}
               tickFormatter={(v) => formatCurrency(v, currencyPrefix)}
               width={65}
             />
@@ -674,9 +674,9 @@ export function ThreeZoneForecastChart({
             <Line
               type="monotone"
               dataKey="actual"
-              stroke="#223047"
+              stroke="var(--forecast-actual-line, #223047)"
               strokeWidth={2.8}
-              dot={{ r: timeGrain === "monthly" ? 3.5 : 0, fill: "#223047" }}
+              dot={{ r: timeGrain === "monthly" ? 3.5 : 0, fill: "var(--forecast-actual-line, #223047)" }}
               connectNulls={false}
               name="Historical Actual"
             />
@@ -723,7 +723,7 @@ export function ThreeZoneForecastChart({
               dataKey="date"
               height={30}
               stroke={themeColor}
-              fill="#FFF7FB"
+              fill="var(--card, #FFF7FB)"
               travellerWidth={10}
               gap={1}
               tickFormatter={(val) => formatDateLabel(val, timeGrain)}
@@ -734,7 +734,7 @@ export function ThreeZoneForecastChart({
         {/* Legend bar */}
         <div className="flex flex-wrap items-center justify-center gap-6 pt-2 text-xs text-[#223047]">
           <div className="flex items-center gap-2">
-            <span className="w-5 h-0.5 bg-[#223047] rounded-full" />
+            <span className="w-5 h-0.5 bg-[#223047] rounded-full" style={{ backgroundColor: "var(--forecast-actual-line, #223047)" }} />
             <span className="font-semibold">Historical Actual Revenue</span>
           </div>
           <div className="flex items-center gap-2">

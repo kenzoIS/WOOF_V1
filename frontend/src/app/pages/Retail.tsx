@@ -786,7 +786,7 @@ export function Retail() {
       </div>
       {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
       <div
-        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
+        className="woof-insight-band rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
         style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
       >
         <div className="flex-1">
@@ -811,7 +811,7 @@ export function Retail() {
       </div>
 
       {/* OMNICHANNEL ECONOMICS */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-6 shadow-sm">
+      <div className="woof-profit-paradox-section bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-6 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pb-2 border-b border-[#FFD9EC]/60">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -870,10 +870,10 @@ export function Retail() {
           {channelEconomics.channels.map((ch) => (
             <div
               key={ch.channel}
-              className="p-4 md:p-5 rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between"
+              className="woof-profit-channel-card p-4 md:p-5 rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between"
               style={{
-                borderColor: ch.isPOS ? "#FFD9EC" : "#E2E8F0",
-                backgroundColor: ch.isPOS ? "#FFF9FC" : "#FFFFFF",
+                borderColor: ch.isPOS ? "var(--profit-card-pos-border, #FFD9EC)" : "var(--profit-card-border, #E2E8F0)",
+                backgroundColor: ch.isPOS ? "var(--profit-card-pos-bg, #FFF9FC)" : "var(--profit-card-bg, #FFFFFF)",
               }}
             >
               <div>
@@ -938,7 +938,7 @@ export function Retail() {
         </div>
 
         {/* WOOF INSIGHT BANNER */}
-        <div className="p-4 md:p-5 rounded-2xl bg-gradient-to-r from-[#FFF2FA] via-[#FFF7FB] to-[#F0FDFA] border border-[#FFD9EC] space-y-3">
+        <div className="woof-insight-band p-4 md:p-5 rounded-2xl bg-gradient-to-r from-[#FFF2FA] via-[#FFF7FB] to-[#F0FDFA] border border-[#FFD9EC] space-y-3">
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-xs">
               WOOF Insight

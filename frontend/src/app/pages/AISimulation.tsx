@@ -4170,7 +4170,7 @@ export function AISimulation() {
               ))}
             </div>
 
-            <div className="bg-gradient-to-br from-[#FFF7FB] to-[#FFF2FA] border border-[#06B6D4]/30 rounded-lg md:rounded-xl p-3 md:p-4">
+            <div className="woof-insight-band bg-gradient-to-br from-[#FFF7FB] to-[#FFF2FA] border border-[#06B6D4]/30 rounded-lg md:rounded-xl p-3 md:p-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2 mb-2">

@@ -2,6 +2,158 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-10 - Settings Module Notification Preferences and Dark Mode Polish
+
+### Requested
+- Make the Settings Module Notification Preferences section work seamlessly.
+- Improve Appearance dark mode so dashboard sections, charts, and visualizations are not visually degraded by color conversion.
+- Update the worklog and validate the changes.
+
+### Frontend Changes
+- Added `frontend/src/app/lib/preferences.ts`.
+- Centralized Settings preferences in one persisted localStorage payload with defaults for:
+  - notification categories
+  - automatic retraining
+  - confidence threshold
+  - data retention
+  - light/dark theme
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Notification switches now persist immediately, broadcast preference changes, and still participate in Save All Settings.
+- Automatic retraining, confidence threshold, data retention, and theme choices now reload correctly after navigation/refresh.
+- Updated `frontend/src/app/components/Header.tsx`.
+- Header notification badge counts and notification panel lists now respect muted notification categories.
+- Added a Reports notification category backed by the existing Smart Reports API so the Daily Reports switch controls real report-ready notifications.
+- Updated `frontend/src/app/components/RealtimeListener.tsx`.
+- Realtime toasts now respect notification preferences for alerts, system events, and campaign/AI suggestion events.
+- Updated `frontend/src/app/components/Layout.tsx`.
+- Layout now applies the centralized stored theme on load while preserving the existing sidebar preference behavior.
+- Updated `frontend/src/styles/theme.css`.
+- Added dark-mode-specific Recharts styling for gridlines, axes, labels, legends, tooltips, and brush/range controls while preserving the chart series colors.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-10 - Settings Module Dark Mode Visual Sweep
+
+### Requested
+- Continue improving dark mode where dashboard sections, charts, visualizations, and KPI cards still looked visually unpleasant.
+- Specifically review WOOF Insight sections, Omnichannel Economics / Profit Paradox areas, Cafe and Services forecast backgrounds, the AI Simulation live behavioral web, and repeated KPI/chart surfaces.
+
+### Frontend Changes
+- Updated `frontend/src/styles/theme.css`.
+- Expanded dark-mode overrides for remaining light-only surfaces, including:
+  - pale section/card backgrounds
+  - inline light-gradient WOOF Insight bands
+  - translucent white panels
+  - table rows and hover states
+  - status/metric colors on dark backgrounds
+  - slate/purple AI visualization containers
+- Added dark-mode-safe forecast chart CSS variables for:
+  - train/past zone
+  - holdout/present zone
+  - forecast/future zone
+  - axis text
+  - gridlines
+  - historical actual line
+- Updated `frontend/src/app/components/ThreeZoneForecastChart.tsx`.
+- Replaced hard-coded 90-5-5 forecast chart fills, strokes, axis colors, brush fill, and historical-line color with theme variables so Cafe and Services forecasts remain readable in both light and dark modes.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-10 - Dark Mode Gradient and Pale Surface Contrast Fix
+
+### Requested
+- Fix remaining dark-mode visual regressions where text became unreadable because pale visualization/card surfaces stayed light while text converted to white.
+- Address the common pattern across the system, including the AI Simulation FP-Growth graph, pattern metrics, time slider panels, bundle opportunity cards, WOOF Insight bands, and similar KPI/chart sections.
+
+### Frontend Changes
+- Updated `frontend/src/styles/theme.css`.
+- Added dark-mode overrides for Tailwind gradient stop utilities that use light WOOF colors:
+  - `from-[#FFF7FB]`
+  - `from-[#FFF2FA]`
+  - `to-[#FFF7FB]`
+  - `to-[#FFF2FA]`
+  - `to-white`
+- Added dark-mode overrides for low-opacity light/accent surfaces:
+  - translucent white panels
+  - `bg-[#F53799]/5` and `/10`
+  - `bg-[#06B6D4]/5` and `/10`
+  - `bg-[#D42A7D]/5` and `/10`
+  - matching hover states
+- These changes convert the remaining pale gradient cards and embedded visualization panels to dark surfaces so existing dark-mode text remains visible.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-10 - WOOF Insight Dark Mode Contrast Fix
+
+### Requested
+- Fix WOOF Insight banners across the system still appearing as pale panels with unreadable dark-mode text.
+
+### Frontend Changes
+- Updated WOOF Insight sections with a shared `woof-insight-band` class in:
+  - `frontend/src/app/pages/Home.tsx`
+  - `frontend/src/app/pages/Cafe.tsx`
+  - `frontend/src/app/pages/Services.tsx`
+  - `frontend/src/app/pages/Retail.tsx`
+  - `frontend/src/app/pages/Feedback.tsx`
+  - `frontend/src/app/pages/AISimulation.tsx`
+  - `frontend/src/app/components/SynergyLiftTracker.tsx`
+- Updated `frontend/src/styles/theme.css`.
+- Added dark-mode-specific `woof-insight-band` rules that override inline pale gradients, set a dark panel background, restore readable text, and style WOOF Insight badges/subcards consistently.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-10 - Cafe Next Quiet Period Section Polish
+
+### Requested
+- Make the Cafe Next Quiet Period area feel like a standalone section and less out of place in dark mode.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Cafe.tsx`.
+- Restructured the Next Quiet Period block into a stronger module-style section with:
+  - icon-led header and explanatory subtitle
+  - contained Recommended Window metric card
+  - contained Promo Model Source card
+  - grouped discount slider/action panel
+  - separated feedback row
+- Updated `frontend/src/styles/theme.css`.
+- Added `woof-quiet-period-section` and `woof-quiet-period-icon` styling for a framed dark module treatment with subtle depth and accent lighting.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-10 - Retail Omnichannel Profit Paradox Dark Mode Fix
+
+### Requested
+- Fix the Omnichannel Economics & Profit Paradox section where dark mode left channel cards and nested profit panels visually out of place and hard to read.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Retail.tsx`.
+- Added `woof-profit-paradox-section` to the Omnichannel Economics container.
+- Added `woof-profit-channel-card` to each channel comparison card.
+- Replaced inline hard-coded channel card background and border colors with CSS variables so dark mode can style them correctly while light mode keeps the original appearance.
+- Updated `frontend/src/styles/theme.css`.
+- Added light and dark CSS variables for Profit Paradox card backgrounds and borders.
+- Added dark-mode styles for the section container, channel cards, inner net-profit strips, dividers, and the green net-profit KPI tile.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
 ## 2026-09-04 - Cafe Segmented Forecast Timeout Guard and Auto Refresh
 
 ### Requested

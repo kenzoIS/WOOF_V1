@@ -48,6 +48,19 @@
   --chart-3: #D42A7D;
   --chart-4: #5CE1E6;
   --chart-5: #FFD9EC;
+  --forecast-zone-past: #f0f9ff;
+  --forecast-zone-present: #fff7ed;
+  --forecast-zone-future: #f0fdf4;
+  --forecast-zone-past-stroke: #bae6fd;
+  --forecast-zone-present-stroke: #fed7aa;
+  --forecast-zone-future-stroke: #bbf7d0;
+  --forecast-actual-line: #223047;
+  --forecast-axis-text: #475569;
+  --forecast-grid: #e2e8f0;
+  --profit-card-bg: #ffffff;
+  --profit-card-pos-bg: #FFF9FC;
+  --profit-card-border: #E2E8F0;
+  --profit-card-pos-border: #FFD9EC;
   --radius: 1rem;
   --sidebar: #ffffff;
   --sidebar-foreground: #223047;
@@ -76,6 +89,19 @@
   --sidebar: #141d2d;
   --sidebar-foreground: #f8fbff;
   --sidebar-accent: rgba(245, 55, 153, 0.16);
+  --forecast-zone-past: rgba(14, 165, 233, 0.12);
+  --forecast-zone-present: rgba(249, 115, 22, 0.12);
+  --forecast-zone-future: rgba(16, 185, 129, 0.12);
+  --forecast-zone-past-stroke: rgba(56, 189, 248, 0.4);
+  --forecast-zone-present-stroke: rgba(251, 146, 60, 0.42);
+  --forecast-zone-future-stroke: rgba(74, 222, 128, 0.38);
+  --forecast-actual-line: #f8fbff;
+  --forecast-axis-text: rgba(248, 251, 255, 0.76);
+  --forecast-grid: rgba(255, 217, 236, 0.18);
+  --profit-card-bg: #182235;
+  --profit-card-pos-bg: #201a2b;
+  --profit-card-border: rgba(58, 228, 250, 0.26);
+  --profit-card-pos-border: rgba(245, 55, 153, 0.36);
 }
 
 .woof-dark body,
@@ -93,12 +119,98 @@
   background-color: #223047 !important;
 }
 
+.woof-dark .bg-\[\#FFFBFD\],
+.woof-dark .bg-\[\#F3FCFD\],
+.woof-dark .bg-\[\#ECFEFF\],
+.woof-dark .bg-\[\#EAFBFD\],
+.woof-dark .bg-slate-100,
+.woof-dark .bg-green-50,
+.woof-dark .bg-red-50,
+.woof-dark .bg-amber-50,
+.woof-dark .bg-white\/50,
+.woof-dark .bg-white\/70,
+.woof-dark .bg-white\/80,
+.woof-dark .bg-white\/90,
+.woof-dark .bg-white\/95,
+.woof-dark .bg-\[\#F53799\]\/5,
+.woof-dark .bg-\[\#06B6D4\]\/5,
+.woof-dark .bg-\[\#D42A7D\]\/5,
+.woof-dark .bg-\[\#F53799\]\/10,
+.woof-dark .bg-\[\#06B6D4\]\/10,
+.woof-dark .bg-\[\#D42A7D\]\/10,
+.woof-dark .hover\:bg-white\/80:hover,
+.woof-dark .hover\:bg-white:hover,
+.woof-dark .hover\:bg-\[\#FFF2FA\]:hover,
+.woof-dark .hover\:bg-\[\#FFF7FB\]:hover,
+.woof-dark .hover\:bg-\[\#EAFBFD\]:hover,
+.woof-dark .hover\:bg-\[\#F53799\]\/10:hover,
+.woof-dark .hover\:bg-\[\#06B6D4\]\/10:hover,
+.woof-dark .hover\:bg-\[\#D42A7D\]\/10:hover {
+  background-color: #243049 !important;
+}
+
+.woof-dark [style*="#FFF7FB"],
+.woof-dark [style*="#FFF2FA"],
+.woof-dark [style*="#FFFBFD"] {
+  background: linear-gradient(135deg, #182235, #243049) !important;
+}
+
 .woof-dark .text-\[\#223047\] {
   color: #f8fbff !important;
 }
 
+.woof-dark .text-slate-600,
+.woof-dark .text-slate-500,
+.woof-dark .text-gray-500,
+.woof-dark .text-\[\#0369a1\],
+.woof-dark .text-\[\#067A8A\],
+.woof-dark .text-\[\#155E75\],
+.woof-dark .text-\[\#164E63\],
+.woof-dark .text-\[\#c2410c\],
+.woof-dark .text-\[\#15803d\] {
+  color: rgba(248, 251, 255, 0.78) !important;
+}
+
 .woof-dark .border-\[\#FFD9EC\] {
   border-color: rgba(255, 217, 236, 0.24) !important;
+}
+
+.woof-dark .border-slate-200,
+.woof-dark .border-\[\#BDECF3\],
+.woof-dark .border-\[\#BFEAF2\],
+.woof-dark .border-\[\#A5F3FC\],
+.woof-dark .border-\[\#E4EDF8\],
+.woof-dark .border-\[\#D7E6F8\],
+.woof-dark .border-green-200,
+.woof-dark .border-green-300,
+.woof-dark .border-red-200,
+.woof-dark .border-amber-500 {
+  border-color: rgba(255, 217, 236, 0.24) !important;
+}
+
+.woof-dark .bg-\[\#e0f2fe\],
+.woof-dark .bg-\[\#ffedd5\],
+.woof-dark .bg-\[\#dcfce7\] {
+  background-color: rgba(248, 251, 255, 0.08) !important;
+}
+
+.woof-dark .from-\[\#FFF7FB\],
+.woof-dark .from-\[\#FFF2FA\] {
+  --tw-gradient-from: #182235 var(--tw-gradient-from-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from) var(--tw-gradient-from-position), var(--tw-gradient-to) var(--tw-gradient-to-position)) !important;
+}
+
+.woof-dark .to-\[\#FFF7FB\],
+.woof-dark .to-\[\#FFF2FA\],
+.woof-dark .to-white {
+  --tw-gradient-to: #243049 var(--tw-gradient-to-position) !important;
+}
+
+.woof-dark .from-\[\#F53799\]\/5,
+.woof-dark .from-\[\#06B6D4\]\/5,
+.woof-dark .from-\[\#D42A7D\]\/5 {
+  --tw-gradient-from-position: 0%;
+  --tw-gradient-to: #243049 var(--tw-gradient-to-position) !important;
 }
 
 .woof-dark input,
@@ -113,6 +225,190 @@
 .woof-dark .shadow-xl,
 .woof-dark .shadow-2xl {
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35) !important;
+}
+
+.woof-dark .recharts-cartesian-grid line,
+.woof-dark .recharts-polar-grid line,
+.woof-dark .recharts-reference-line line {
+  stroke: rgba(255, 217, 236, 0.2) !important;
+}
+
+.woof-dark .recharts-cartesian-axis-line,
+.woof-dark .recharts-cartesian-axis-tick-line {
+  stroke: rgba(248, 251, 255, 0.28) !important;
+}
+
+.woof-dark .recharts-cartesian-axis-tick text,
+.woof-dark .recharts-label,
+.woof-dark .recharts-legend-item-text {
+  fill: rgba(248, 251, 255, 0.74) !important;
+  color: rgba(248, 251, 255, 0.74) !important;
+}
+
+.woof-dark .recharts-default-tooltip {
+  background-color: #182235 !important;
+  border-color: rgba(255, 217, 236, 0.28) !important;
+  color: #f8fbff !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.34) !important;
+}
+
+.woof-dark .recharts-tooltip-label,
+.woof-dark .recharts-tooltip-item {
+  color: #f8fbff !important;
+}
+
+.woof-dark .recharts-brush > rect:first-child {
+  fill: #182235 !important;
+  stroke: rgba(245, 55, 153, 0.55) !important;
+}
+
+.woof-dark .recharts-brush-slide {
+  fill: #F53799 !important;
+  fill-opacity: 0.22 !important;
+  stroke: #F53799 !important;
+}
+
+.woof-dark .recharts-brush-texts text {
+  fill: rgba(248, 251, 255, 0.78) !important;
+}
+
+.woof-dark .recharts-sector,
+.woof-dark .recharts-bar-rectangle,
+.woof-dark .recharts-area-area,
+.woof-dark .recharts-line-curve {
+  filter: none !important;
+}
+
+.woof-dark .recharts-wrapper,
+.woof-dark .recharts-responsive-container {
+  color: #f8fbff;
+}
+
+.woof-dark table,
+.woof-dark thead,
+.woof-dark tbody,
+.woof-dark tr {
+  border-color: rgba(255, 217, 236, 0.18) !important;
+}
+
+.woof-dark tr.bg-white,
+.woof-dark .hover\:bg-\[\#FFF7FB\]:hover {
+  background-color: #1b263a !important;
+}
+
+.woof-dark .bg-gradient-to-br.from-slate-900,
+.woof-dark .bg-gradient-to-br.from-slate-950,
+.woof-dark .bg-gradient-to-r.from-slate-900\/50,
+.woof-dark .bg-slate-900\/50,
+.woof-dark .bg-slate-950\/50,
+.woof-dark .bg-slate-950\/80 {
+  border-color: rgba(58, 228, 250, 0.28) !important;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(248, 251, 255, 0.06) !important;
+}
+
+.woof-dark .bg-gradient-to-br.from-slate-950,
+.woof-dark .bg-slate-950\/50,
+.woof-dark .bg-slate-950\/80 {
+  background-color: #0f172a !important;
+}
+
+.woof-dark .text-white {
+  text-shadow: none;
+}
+
+.woof-dark .text-green-600,
+.woof-dark .text-green-700 {
+  color: #4ade80 !important;
+}
+
+.woof-dark .text-red-600,
+.woof-dark .text-red-700,
+.woof-dark .text-rose-600 {
+  color: #fb7185 !important;
+}
+
+.woof-dark .text-orange-500,
+.woof-dark .text-orange-700 {
+  color: #fb923c !important;
+}
+
+.woof-dark .woof-insight-band {
+  background: linear-gradient(135deg, #182235 0%, #243049 100%) !important;
+  border: 1px solid rgba(255, 217, 236, 0.26) !important;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(248, 251, 255, 0.06) !important;
+}
+
+.woof-dark .woof-insight-band,
+.woof-dark .woof-insight-band p,
+.woof-dark .woof-insight-band h1,
+.woof-dark .woof-insight-band h2,
+.woof-dark .woof-insight-band h3,
+.woof-dark .woof-insight-band h4,
+.woof-dark .woof-insight-band h5,
+.woof-dark .woof-insight-band span,
+.woof-dark .woof-insight-band strong {
+  color: #f8fbff !important;
+}
+
+.woof-dark .woof-insight-band p,
+.woof-dark .woof-insight-band .opacity-70,
+.woof-dark .woof-insight-band .opacity-80 {
+  opacity: 0.86 !important;
+}
+
+.woof-dark .woof-insight-band [data-slot="badge"],
+.woof-dark .woof-insight-band .border,
+.woof-dark .woof-insight-band .bg-white {
+  background-color: rgba(245, 55, 153, 0.16) !important;
+  border-color: rgba(245, 55, 153, 0.38) !important;
+  color: #ff7fc5 !important;
+}
+
+.woof-dark .woof-insight-band .bg-white,
+.woof-dark .woof-insight-band .bg-\[\#FFF7FB\],
+.woof-dark .woof-insight-band .bg-\[\#FFF2FA\] {
+  background-color: rgba(248, 251, 255, 0.08) !important;
+}
+
+.woof-quiet-period-section {
+  border: 1px solid rgba(255, 217, 236, 0.24);
+  background:
+    radial-gradient(circle at top left, rgba(245, 55, 153, 0.2), transparent 30%),
+    linear-gradient(135deg, #182235 0%, #223047 52%, #111827 100%);
+  box-shadow: 0 22px 55px rgba(17, 24, 39, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.woof-quiet-period-icon {
+  box-shadow: 0 0 0 6px rgba(245, 55, 153, 0.08);
+}
+
+.woof-dark .woof-profit-paradox-section {
+  background:
+    radial-gradient(circle at top right, rgba(58, 228, 250, 0.08), transparent 30%),
+    linear-gradient(135deg, #141d2d 0%, #182235 100%) !important;
+  border-color: rgba(255, 217, 236, 0.24) !important;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.26) !important;
+}
+
+.woof-dark .woof-profit-channel-card {
+  box-shadow: inset 0 1px 0 rgba(248, 251, 255, 0.05), 0 14px 32px rgba(0, 0, 0, 0.18);
+}
+
+.woof-dark .woof-profit-channel-card .bg-white,
+.woof-dark .woof-profit-channel-card .bg-\[\#FFF7FB\],
+.woof-dark .woof-profit-channel-card .bg-\[\#FFF2FA\] {
+  background-color: rgba(17, 24, 39, 0.58) !important;
+  border-color: rgba(255, 217, 236, 0.18) !important;
+}
+
+.woof-dark .woof-profit-channel-card .border-t,
+.woof-dark .woof-profit-channel-card .border-b {
+  border-color: rgba(255, 217, 236, 0.18) !important;
+}
+
+.woof-dark .woof-profit-paradox-section .bg-\[\#F0FDF4\] {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  border-color: rgba(74, 222, 128, 0.32) !important;
 }
 
 .woof-dark * {

@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert, Moon, Sun } from "lucide-react";
 import { getExogenousStatus, getForecast } from "../lib/api";
+import {
+  DEFAULT_SETTINGS_PREFERENCES,
+  applyStoredTheme,
+  getSettingsPreferences,
+  saveSettingsPreferences,
+  type NotificationPreferenceKey,
+} from "../lib/preferences";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
@@ -9,12 +16,7 @@ import { toast } from "sonner";
 import { InfoTooltip } from "../components/InfoTooltip";
 
 export function Settings() {
-  const [notifications, setNotifications] = useState({
-    alerts: true,
-    suggestions: true,
-    reports: false,
-    system: true,
-  });
+  const [notifications, setNotifications] = useState(DEFAULT_SETTINGS_PREFERENCES.notifications);
 
   const [exogenousStatus, setExogenousStatus] = useState<any>(null);
 
@@ -24,34 +26,79 @@ export function Settings() {
       .catch((err) => console.error("Failed to load exogenous status:", err));
   }, []);
 
-  const [autoRetrain, setAutoRetrain] = useState(true);
-  const [confidenceThreshold, setConfidenceThreshold] = useState([80]);
-  const [dataRetention, setDataRetention] = useState([90]);
+  const [autoRetrain, setAutoRetrain] = useState(DEFAULT_SETTINGS_PREFERENCES.autoRetrain);
+  const [confidenceThreshold, setConfidenceThreshold] = useState([DEFAULT_SETTINGS_PREFERENCES.confidenceThreshold]);
+  const [dataRetention, setDataRetention] = useState([DEFAULT_SETTINGS_PREFERENCES.dataRetention]);
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
-    try {
-      const savedTheme = localStorage.getItem("woofTheme") || "light";
-      const isDark = savedTheme === "dark";
-      setDarkMode(isDark);
-      document.documentElement.classList.toggle("woof-dark", isDark);
-    } catch {
-      // Ignore localStorage errors
-    }
+    const preferences = getSettingsPreferences();
+    setNotifications(preferences.notifications);
+    setAutoRetrain(preferences.autoRetrain);
+    setConfidenceThreshold([preferences.confidenceThreshold]);
+    setDataRetention([preferences.dataRetention]);
+    setDarkMode(applyStoredTheme() === "dark");
   }, []);
 
   const handleThemeChange = (checked: boolean) => {
     setDarkMode(checked);
     document.documentElement.classList.toggle("woof-dark", checked);
-    try {
-      localStorage.setItem("woofTheme", checked ? "dark" : "light");
-    } catch {
-      // Ignore localStorage errors
-    }
+    saveSettingsPreferences((current) => ({
+      ...current,
+      notifications,
+      autoRetrain,
+      confidenceThreshold: confidenceThreshold[0],
+      dataRetention: dataRetention[0],
+      theme: checked ? "dark" : "light",
+    }));
     toast.success(`${checked ? "Dark" : "Light"} mode enabled`);
   };
 
+  const handleNotificationChange = (key: NotificationPreferenceKey, checked: boolean) => {
+    const nextNotifications = { ...notifications, [key]: checked };
+    setNotifications(nextNotifications);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      notifications: nextNotifications,
+    }));
+    toast.success("Notification preference updated", {
+      description: `${checked ? "Enabled" : "Muted"} ${key} notifications.`,
+    });
+  };
+
+  const handleAutoRetrainChange = (checked: boolean) => {
+    setAutoRetrain(checked);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      autoRetrain: checked,
+    }));
+  };
+
+  const handleConfidenceThresholdChange = (value: number[]) => {
+    setConfidenceThreshold(value);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      confidenceThreshold: value[0] ?? DEFAULT_SETTINGS_PREFERENCES.confidenceThreshold,
+    }));
+  };
+
+  const handleDataRetentionChange = (value: number[]) => {
+    setDataRetention(value);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      dataRetention: value[0] ?? DEFAULT_SETTINGS_PREFERENCES.dataRetention,
+    }));
+  };
+
   const handleSaveSettings = () => {
+    saveSettingsPreferences((current) => ({
+      ...current,
+      notifications,
+      autoRetrain,
+      confidenceThreshold: confidenceThreshold[0],
+      dataRetention: dataRetention[0],
+      theme: darkMode ? "dark" : "light",
+    }));
     toast.success("Settings saved!", {
       description: "Your preferences have been updated.",
     });
@@ -131,10 +178,8 @@ export function Settings() {
                 <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">{item.description}</div>
               </div>
               <Switch
-                checked={notifications[item.key as keyof typeof notifications]}
-                onCheckedChange={(checked) =>
-                  setNotifications({ ...notifications, [item.key]: checked })
-                }
+                checked={notifications[item.key as NotificationPreferenceKey]}
+                onCheckedChange={(checked) => handleNotificationChange(item.key as NotificationPreferenceKey, checked)}
               />
             </div>
           ))}
@@ -170,7 +215,7 @@ export function Settings() {
                   Automatically retrain models when new data is available
                 </div>
               </div>
-              <Switch checked={autoRetrain} onCheckedChange={setAutoRetrain} />
+              <Switch checked={autoRetrain} onCheckedChange={handleAutoRetrainChange} />
             </div>
           </div>
 
@@ -186,7 +231,7 @@ export function Settings() {
               <div className="flex items-center gap-3 md:gap-4">
                 <Slider
                   value={confidenceThreshold}
-                  onValueChange={setConfidenceThreshold}
+                  onValueChange={handleConfidenceThresholdChange}
                   max={95}
                   min={60}
                   step={5}
@@ -364,7 +409,7 @@ export function Settings() {
               <div className="flex items-center gap-3 md:gap-4">
                 <Slider
                   value={dataRetention}
-                  onValueChange={setDataRetention}
+                  onValueChange={handleDataRetentionChange}
                   max={365}
                   min={30}
                   step={30}

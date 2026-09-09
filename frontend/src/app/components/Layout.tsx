@@ -7,6 +7,7 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { RealtimeListener } from "./RealtimeListener";
 import { Toaster } from "./ui/sonner";
 import { ErrorModal } from "./ErrorModal";
+import { applyStoredTheme } from "../lib/preferences";
 
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
 
@@ -26,8 +27,7 @@ export function Layout({ children }: LayoutProps) {
       if (saved !== null) {
         setIsSidebarCollapsed(saved === "true");
       }
-      const savedTheme = localStorage.getItem("woofTheme") || "light";
-      document.documentElement.classList.toggle("woof-dark", savedTheme === "dark");
+      applyStoredTheme();
     } catch {
       // Ignore localStorage errors
     }

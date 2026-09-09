@@ -19,10 +19,15 @@ import {
   INGESTED_HISTORY_END_DATE,
   encodeCustomRange,
 } from "../lib/dateRanges";
+import {
+  DEFAULT_SETTINGS_PREFERENCES,
+  getSettingsPreferences,
+  onSettingsPreferencesChanged,
+} from "../lib/preferences";
 
 interface Notification {
   id: string;
-  type: "alert" | "suggestion" | "system";
+  type: "alert" | "suggestion" | "report" | "system";
   title: string;
   message: string;
   time: string;
@@ -104,7 +109,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [ingestionOpen, setIngestionOpen] = useState(false);
   const ingestionCloseTimer = useRef<number | null>(null);
-  const [notifTab, setNotifTab] = useState<"all" | "alert" | "suggestion" | "system">("all");
+  const [notifTab, setNotifTab] = useState<"all" | Notification["type"]>("all");
   const [currentWeather, setCurrentWeather] = useState<{
     tempCelsius: number;
     rainfallMm: number;
@@ -129,6 +134,16 @@ export function Header({ onMenuClick }: HeaderProps) {
     .toUpperCase() || "WU";
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationPreferences, setNotificationPreferences] = useState(
+    DEFAULT_SETTINGS_PREFERENCES.notifications,
+  );
+
+  useEffect(() => {
+    setNotificationPreferences(getSettingsPreferences().notifications);
+    return onSettingsPreferencesChanged((preferences) => {
+      setNotificationPreferences(preferences.notifications);
+    });
+  }, []);
 
   // Build dynamic notifications from live API data
   useEffect(() => {
@@ -264,6 +279,23 @@ export function Header({ onMenuClick }: HeaderProps) {
         // silently skip
       }
 
+      try {
+        const reports = await import("../lib/api").then((m) => m.getSmartReports());
+        const latestReport = Array.isArray(reports) ? reports[0] : null;
+        if (latestReport) {
+          built.push({
+            id: String(idCounter++),
+            type: "report",
+            title: "Smart Report Ready",
+            message: `${latestReport.title ?? "Latest intelligence report"} is available for review`,
+            time: relativeTime(latestReport.generatedAt),
+            read: false,
+          });
+        }
+      } catch {
+        // silently skip
+      }
+
       if (!cancelled) {
         setNotifications(built);
       }
@@ -306,7 +338,18 @@ export function Header({ onMenuClick }: HeaderProps) {
     minute: "2-digit",
   });
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const notificationsEnabledForType = (type: Notification["type"]) => {
+    if (type === "alert") return notificationPreferences.alerts;
+    if (type === "suggestion") return notificationPreferences.suggestions;
+    if (type === "report") return notificationPreferences.reports;
+    return notificationPreferences.system;
+  };
+
+  const enabledNotifications = notifications.filter((notification) =>
+    notificationsEnabledForType(notification.type),
+  );
+
+  const unreadCount = enabledNotifications.filter((n) => !n.read).length;
 
   const cancelIngestionClose = () => {
     if (ingestionCloseTimer.current) {
@@ -363,6 +406,7 @@ export function Header({ onMenuClick }: HeaderProps) {
     switch (type) {
       case "alert": return "border-l-[#F53799]";
       case "suggestion": return "border-l-[#3AE4FA]";
+      case "report": return "border-l-[#D42A7D]";
       case "system": return "border-l-[#5CE1E6]";
       default: return "border-l-[#FFD9EC]";
     }
@@ -649,6 +693,7 @@ export function Header({ onMenuClick }: HeaderProps) {
                 { label: "All", value: "all" },
                 { label: "Alerts", value: "alert" },
                 { label: "AI Suggestions", value: "suggestion" },
+                { label: "Reports", value: "report" },
                 { label: "System", value: "system" },
               ] as const).map(({ label, value }) => (
                 <button
@@ -670,8 +715,8 @@ export function Header({ onMenuClick }: HeaderProps) {
               {(() => {
                 const visible =
                   notifTab === "all"
-                    ? notifications
-                    : notifications.filter((n) => n.type === notifTab);
+                    ? enabledNotifications
+                    : enabledNotifications.filter((n) => n.type === notifTab);
                 if (visible.length === 0) {
                   return (
                     <div className="flex flex-col items-center justify-center py-10 text-center text-[#223047] opacity-50">

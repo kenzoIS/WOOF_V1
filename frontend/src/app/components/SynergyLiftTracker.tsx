@@ -155,7 +155,7 @@ export function SynergyLiftTracker() {
         </div>
 
         {/* AI Insight Summary */}
-        <div className="bg-gradient-to-r from-emerald-50 to-green-50 border-l-4 border-emerald-500 rounded-lg p-4">
+        <div className="woof-insight-band bg-gradient-to-r from-emerald-50 to-green-50 border-l-4 border-emerald-500 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <div className="p-2 bg-emerald-100 rounded-lg">
               <TrendingUp className="w-5 h-5 text-emerald-600" />

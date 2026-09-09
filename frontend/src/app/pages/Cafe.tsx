@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { useRouter } from "next/router";
-import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart, ThumbsUp, ThumbsDown, Sparkles, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart, ThumbsUp, ThumbsDown, Sparkles, RefreshCw, CheckCircle2, Clock } from "lucide-react";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -1896,7 +1896,7 @@ export function Cafe() {
 
       {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
       <div
-        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
+        className="woof-insight-band rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
         style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
       >
         <div className="flex-1">
@@ -1921,21 +1921,32 @@ export function Cafe() {
       {/* QUIET PERIOD + HAPPY HOUR */}
       <div className="grid grid-cols-1 gap-4 md:gap-6">
         <div className="space-y-4 md:space-y-6">
-          <div className="bg-[#223047] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
-            <div className="flex items-start justify-between">
-              <h3 className="text-base md:text-lg font-bold">Next Quiet Period</h3>
-              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs">
+          <div className="woof-quiet-period-section bg-[#223047] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-6">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="woof-quiet-period-icon flex h-10 w-10 items-center justify-center rounded-xl bg-[#F53799]/20 border border-[#F53799]/40">
+                  <Clock className="h-5 w-5 text-[#FF7FC5]" />
+                </div>
+                <div>
+                  <h3 className="text-lg md:text-xl font-extrabold">Next Quiet Period</h3>
+                  <p className="text-xs md:text-sm text-white/65 mt-0.5">Best low-traffic window for a Cafe happy-hour push</p>
+                </div>
+              </div>
+              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs self-start">
                 ⚙ ENGINE
               </Badge>
             </div>
 
-            <div className="text-2xl md:text-3xl lg:text-4xl font-bold">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-4">
+              <div className="rounded-2xl border border-white/12 bg-white/[0.07] p-4 md:p-5">
+                <div className="text-xs font-semibold uppercase tracking-wide text-white/55">Recommended Window</div>
+                <div className="mt-2 text-3xl md:text-4xl lg:text-5xl font-black tracking-tight">
               {quietPeriod === null 
                 ? "Calculating..." 
                 : quietPeriod.status === 'success' 
                   ? `${formatChartDate(quietPeriod.targetDate)} ${quietPeriod.targetHour}:00` 
                   : "None Detected"}
-            </div>
+                </div>
 
             <div className="flex items-center gap-2 text-xs md:text-sm">
               <span className="opacity-70">Predicted Traffic:</span>
@@ -1947,26 +1958,36 @@ export function Cafe() {
                     : "N/A"}
               </span>
             </div>
+              </div>
 
-            {quietPeriod && quietPeriod.status === 'success' && quietPeriod.modelMetrics && (
-              <div className="rounded-xl bg-white/10 p-3 text-xs">
-                <div className="opacity-70">Promo model source</div>
-                <div className="font-semibold text-[#06B6D4]">
-                  {quietPeriod.modelMetrics.trainingSource === "real_discount_history"
-                    ? `Real discount history (${quietPeriod.modelMetrics.trainingRows} examples)`
-                    : "Fallback model; not enough historical discount examples yet"}
-                </div>
-                {quietPeriod.modelMetrics.accuracy !== null && quietPeriod.modelMetrics.accuracy !== undefined && (
-                  <div className="mt-1 opacity-70">
-                    Validation accuracy: {Math.round(quietPeriod.modelMetrics.accuracy * 100)}%
-                  </div>
+              <div className="rounded-2xl border border-white/12 bg-white/[0.07] p-4 md:p-5 text-xs">
+                <div className="font-semibold uppercase tracking-wide text-white/55">Promo Model Source</div>
+                {quietPeriod && quietPeriod.status === 'success' && quietPeriod.modelMetrics ? (
+                  <>
+                    <div className="mt-2 font-bold text-[#3AE4FA]">
+                      {quietPeriod.modelMetrics.trainingSource === "real_discount_history"
+                        ? `Real discount history (${quietPeriod.modelMetrics.trainingRows} examples)`
+                        : "Fallback model; not enough historical discount examples yet"}
+                    </div>
+                    {quietPeriod.modelMetrics.accuracy !== null && quietPeriod.modelMetrics.accuracy !== undefined && (
+                      <div className="mt-2 text-white/70">
+                        Validation accuracy: <span className="font-bold text-white">{Math.round(quietPeriod.modelMetrics.accuracy * 100)}%</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="mt-2 text-white/65">Waiting for optimizer signal.</div>
                 )}
               </div>
-            )}
+            </div>
 
-            <div className="space-y-3 pt-2 md:pt-4">
-              <div>
-                <label className="text-xs opacity-70 mb-2 block">Discount %</label>
+            <div className="rounded-2xl border border-white/12 bg-white/[0.07] p-4 md:p-5">
+              <div className="flex flex-col md:flex-row md:items-center gap-4">
+                <div className="flex-1">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <label className="text-xs font-bold uppercase tracking-wide text-white/65">Discount %</label>
+                  <span className="text-xl md:text-2xl font-black text-white">{discountValue[0]}%</span>
+                </div>
                 <div className="flex items-center gap-3">
                   <Slider
                     defaultValue={[15]}
@@ -1978,29 +1999,29 @@ export function Cafe() {
                     className="flex-1"
                     disabled={!quietPeriod || quietPeriod.status !== 'success'}
                   />
-                  <span className="text-base md:text-lg font-bold w-10 md:w-12">{discountValue[0]}%</span>
                 </div>
               </div>
-            </div>
 
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button onClick={handleActivateHappyHour} className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
+            <div className="flex flex-col sm:flex-row md:w-auto gap-2">
+              <Button onClick={handleActivateHappyHour} className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm px-6" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
                 Activate Happy Hour
               </Button>
               <Button
                 variant="outline"
                 onClick={() => router.push("/ai-simulation?tab=traffic-optimizer")}
-                className="border-white/30 text-white hover:bg-white/10 text-xs md:text-sm flex items-center justify-center gap-1.5"
+                className="border-white/25 bg-[#111827]/55 text-white hover:bg-white/10 text-xs md:text-sm flex items-center justify-center gap-1.5 px-5"
               >
                 <span>Traffic Optimizer</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Button>
             </div>
+              </div>
+            </div>
 
             {/* Engine Feedback Widget */}
-            <div className="pt-3 border-t border-white/20">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] opacity-80">Was this Happy Hour recommendation helpful?</span>
+            <div className="pt-4 border-t border-white/12">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <span className="text-[11px] md:text-xs text-white/65">Was this Happy Hour recommendation helpful?</span>
                 {happyHourRecalibrating ? (
                   <div className="flex items-center gap-1 text-[11px] text-[#FFD9EC]">
                     <RefreshCw className="w-3 h-3 animate-spin" />
@@ -2015,13 +2036,13 @@ export function Cafe() {
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => handleHappyHourFeedback(true)}
-                      className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-[11px] flex items-center gap-1 transition-colors"
+                      className="px-3 py-1.5 bg-white/12 hover:bg-white/20 border border-white/12 rounded-lg text-[11px] flex items-center gap-1 transition-colors"
                     >
                       <ThumbsUp className="w-2.5 h-2.5" /> Yes
                     </button>
                     <button
                       onClick={() => handleHappyHourFeedback(false)}
-                      className="px-2 py-1 bg-white/20 hover:bg-white/30 rounded text-[11px] flex items-center gap-1 transition-colors"
+                      className="px-3 py-1.5 bg-white/12 hover:bg-white/20 border border-white/12 rounded-lg text-[11px] flex items-center gap-1 transition-colors"
                     >
                       <ThumbsDown className="w-2.5 h-2.5" /> No
                     </button>

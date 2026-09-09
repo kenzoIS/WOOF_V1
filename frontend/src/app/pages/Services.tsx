@@ -1386,7 +1386,7 @@ export function Services() {
 
       {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
       <div
-        className="rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
+        className="woof-insight-band rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
         style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
       >
         <div className="flex-1">
