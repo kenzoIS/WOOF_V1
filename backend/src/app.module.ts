@@ -13,6 +13,7 @@ import { PetHubWebhookModule } from './pethub-webhook/pethub-webhook.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
+import { LlmModule } from './llm/llm.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { ContextModule } from './context/context.module';
     AwsModule,
     RealtimeModule,
     PetHubWebhookModule,
+    LlmModule,
   ],
 })
 export class AppModule {}

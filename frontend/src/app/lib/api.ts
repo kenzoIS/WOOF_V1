@@ -676,6 +676,23 @@ export async function askWoofChatbot(
   });
 }
 
+export async function generateLlmExplanation(input: {
+  feature:
+    | 'manual_bundle_explanation'
+    | 'business_assistant'
+    | 'forecast_explanation'
+    | 'recommendation_explanation'
+    | 'report_summary';
+  prompt: string;
+  context?: Record<string, unknown>;
+}) {
+  return fetchApi('/llm/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
 export interface SmartReport {
   _id: string;
   title: string;

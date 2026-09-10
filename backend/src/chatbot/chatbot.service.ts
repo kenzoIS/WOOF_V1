@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import axios from 'axios';
 import { SupabaseService } from '../common/supabase/supabase.service';
+import { LlmService } from '../llm/llm.service';
 
 type DashboardIntent =
   | 'total_revenue'
@@ -144,7 +145,10 @@ const MONTH_ALIASES: Record<string, string> = {
 
 @Injectable()
 export class ChatbotService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly llmService: LlmService,
+  ) {}
 
   async answer(question: string, history: ChatHistoryItem[] = []): Promise<any> {
     const cleanedQuestion = String(question || '').trim();
@@ -274,41 +278,13 @@ export class ChatbotService {
     history: ChatHistoryItem[] = [],
   ): Promise<QueryPlan> {
     const fallback = this.classifyQuestion(question);
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return this.enrichFallbackPlan(fallback, question);
-    }
-
     try {
-      const response = await axios.post(
-        'https://api.anthropic.com/v1/messages',
-        {
-          model:
-            process.env.ANTHROPIC_CHATBOT_MODEL ||
-            process.env.ANTHROPIC_MODEL ||
-            'claude-3-5-sonnet-latest',
-          max_tokens: 900,
-          temperature: 0,
-          system:
-            'You are the controlled NLP analytics intent planner for the WOOF dashboard chatbot. Return only valid JSON. Do not answer the user directly.',
-          messages: [
-            {
-              role: 'user',
-              content: this.buildPlannerPrompt(question, history),
-            },
-          ],
-        },
-        {
-          headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-          },
-          timeout: 15000,
-        },
-      );
-
-      const parsed = this.parseJsonObject(this.extractAnthropicText(response.data));
+      const response = await this.llmService.generate({
+        feature: 'business_assistant',
+        prompt: this.buildPlannerPrompt(question, history),
+      });
+      if (!response.configured) return this.enrichFallbackPlan(fallback, question);
+      const parsed = this.parseJsonObject(response.text);
       return this.validateClaudePlan(parsed, fallback, question);
     } catch {
       return this.enrichFallbackPlan(fallback, question);
@@ -1599,65 +1575,30 @@ export class ChatbotService {
     latestDate: Date;
     history: ChatHistoryItem[];
   }): Promise<string> {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
     const styleDirective = this.getResponseStyleDirective(input);
-    if (!apiKey) return this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
 
     try {
-      const response = await axios.post(
-        'https://api.anthropic.com/v1/messages',
-        {
-          model:
-            process.env.ANTHROPIC_CHATBOT_MODEL ||
-            process.env.ANTHROPIC_MODEL ||
-            'claude-3-5-sonnet-latest',
-          max_tokens: 220,
-          temperature: 0.2,
-          system: [
-            'You are WOOF, a friendly AI business analyst inside the Happy Tails dashboard.',
-            'Generate a business narrative through NLP using only the verified Supabase warehouse fact pack and validated backend answer.',
-            'Never change, round differently, infer, estimate, or add numbers beyond the verified facts.',
-            'Do not claim causes, trends, or recommendations unless supported by the verified facts or comparison facts.',
-            'Answer the user intent, not just the metric. Explain what the number means when the fact pack includes comparison context.',
-            'If the latest message is a follow-up or correction, acknowledge the change naturally and answer the newly resolved query.',
-            'For normal metric answers, lead with the answer, then add one concise business interpretation if available.',
-            'For top item or breakdown answers, keep list formatting readable and compact.',
-            'If the factual answer says no records were found, acknowledge it clearly and suggest checking another date or range.',
-            'If the user asks something outside dashboard scope, do not answer generally; keep the response scoped to WOOF.',
-            'Keep the answer concise: 2 to 4 short sentences, or a compact numbered list for ranked results. No markdown tables.',
-          ].join(' '),
-          messages: [
-            {
-              role: 'user',
-              content: [
-                'Recent chat context:',
-                input.history
-                  .map((item) => `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`)
-                  .join('\n') || 'None',
-                `Latest user question: ${input.question}`,
-                `Validated planning question: ${input.questionForPlanning}`,
-                `Validated backend answer: ${input.factualAnswer}`,
-                `Verified fact pack JSON: ${JSON.stringify(input.factPack)}`,
-                `Validated intent: ${input.plan.intent}`,
-                `Narrative goal: ${input.plan.narrativeGoal || 'direct_answer'}`,
-                `Validated date range: ${this.rangeLabel(input.plan, input.latestDate)}`,
-                `Response style instruction: ${styleDirective}`,
-                'Write the final user-facing answer now.',
-              ].join('\n'),
-            },
-          ],
-        },
-        {
-          headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-          },
-          timeout: 15000,
-        },
-      );
-      const text = this.extractAnthropicText(response.data);
-      return text || this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
+      const response = await this.llmService.generate({
+        feature: 'business_assistant',
+        prompt: [
+          'Recent chat context:',
+          input.history
+            .map((item) => `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`)
+            .join('\n') || 'None',
+          `Latest user question: ${input.question}`,
+          `Validated planning question: ${input.questionForPlanning}`,
+          `Validated backend answer: ${input.factualAnswer}`,
+          `Verified fact pack JSON: ${JSON.stringify(input.factPack)}`,
+          `Validated intent: ${input.plan.intent}`,
+          `Narrative goal: ${input.plan.narrativeGoal || 'direct_answer'}`,
+          `Validated date range: ${this.rangeLabel(input.plan, input.latestDate)}`,
+          `Response style instruction: ${styleDirective}`,
+          'Write the final user-facing answer now.',
+        ].join('\n'),
+      });
+      return response.configured
+        ? response.text
+        : this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
     } catch {
       return this.fallbackStyledAnswer(input.factualAnswer, styleDirective);
     }

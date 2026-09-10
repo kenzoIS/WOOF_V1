@@ -10,6 +10,7 @@ import { Transaction, TransactionDocument } from '../csv/schemas/transaction.sch
 
 
 import { SupabaseService } from '../common/supabase/supabase.service';
+import { LlmService } from '../llm/llm.service';
 
 @Injectable()
 export class SmartReportsService {
@@ -18,6 +19,7 @@ export class SmartReportsService {
   constructor(
     private supabaseService: SupabaseService,
     private configService: ConfigService,
+    private llmService: LlmService,
   ) {
     this.supabase = this.supabaseService.client;
   }
@@ -329,7 +331,7 @@ export class SmartReportsService {
     const taglishSentiment = this.analyzeTaglishSentiment(mockReviews);
 
     // 8. Parameterized NLG (Natural Language Generation)
-    const nlgSummary = this.generateNlgText(
+    const deterministicSummary = this.generateNlgText(
       title,
       startDateStr,
       endDateStr,
@@ -346,6 +348,26 @@ export class SmartReportsService {
       mockReviews,
       dataCompleteness,
     );
+    const llmSummary = await this.llmService.generate({
+      feature: 'report_summary',
+      prompt: 'Write the executive summary for this verified WOOF report. Preserve every number exactly and separate observations from recommendations.',
+      context: {
+        title,
+        dateRange: { start: startDateStr, end: endDateStr },
+        sectors,
+        totalRevenue: Math.round(totalRevenue),
+        totalGrossProfit: Math.round(totalGrossProfit),
+        averageMargin,
+        channelRevenue,
+        categorySales,
+        trendDirection: extrapolationResult.trendDirection,
+        projectedGrowthRate: extrapolationResult.projectedGrowthRate,
+        dataCompleteness,
+      },
+    });
+    const nlgSummary = llmSummary.configured
+      ? llmSummary.text
+      : deterministicSummary;
 
     // 9. Persist report to Supabase
     const payload = {

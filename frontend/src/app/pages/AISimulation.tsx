@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { BundleArchive, BundlePlanningContext, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
+import { BundleArchive, BundlePlanningContext, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import {
@@ -376,6 +376,7 @@ export function AISimulation() {
     contextScore: number;
     bundleName: string;
   } | null>(null);
+  const [manualBundleExplanation, setManualBundleExplanation] = useState<string | null>(null);
   const [bundleArchivesOpen, setBundleArchivesOpen] = useState(false);
   const [bundleArchives, setBundleArchives] = useState<BundleArchive[]>([]);
   const [bundleArchiveCounts, setBundleArchiveCounts] = useState<Record<string, number>>({});
@@ -1847,6 +1848,26 @@ export function AISimulation() {
         contextScore: score.contextScore,
         bundleName: manualBundleName.trim(),
       });
+      try {
+        const explanation = await generateLlmExplanation({
+          feature: "manual_bundle_explanation",
+          prompt: "Explain why this manually created bundle received its score. Keep it to 2-4 concise sentences and mention one practical improvement only if justified.",
+          context: {
+            bundleName: manualBundleName.trim(),
+            products: uniqueProducts.map((product) => ({ name: product.name, sector: product.sector, price: product.price })),
+            bundlePrice,
+            regularPrice,
+            score: score.score,
+            generatedBaseline: score.generatedBaseline,
+            marginScore: score.marginScore,
+            contextScore: score.contextScore,
+            weatherSummary: manualWeatherSummary,
+          },
+        }) as { text?: string };
+        setManualBundleExplanation(explanation.text || null);
+      } catch {
+        setManualBundleExplanation(null);
+      }
       toast.success("Manual bundle created", {
         description: `${manualBundleName} was added to Bundle Archives.`,
       });
@@ -3969,6 +3990,12 @@ export function AISimulation() {
                 <div className="rounded-xl bg-[#FFF7FB] p-3"><span className="block opacity-60">Margin fit</span><strong className="text-lg">{createdManualBundleScore.marginScore}</strong></div>
                 <div className="rounded-xl bg-[#F0FDF4] p-3"><span className="block opacity-60">Weather/calendar fit</span><strong className="text-lg">{createdManualBundleScore.contextScore}</strong></div>
               </div>
+              {manualBundleExplanation && (
+                <div className="mt-4 rounded-xl border border-[#E4EDF8] bg-[#F6FAFF] p-3 text-sm leading-6 text-[#223047]">
+                  <div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#4D75A3]">AI bundle explanation</div>
+                  {manualBundleExplanation}
+                </div>
+              )}
             </div>
           )}
 
