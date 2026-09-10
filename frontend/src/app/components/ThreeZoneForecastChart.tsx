@@ -77,8 +77,15 @@ export type YearPreset = "all" | "2024-2026" | "2025-2026" | "holdout-focus";
 
 const formatCurrency = (val: number | null | undefined, prefix = "₱") => {
   if (val == null || !Number.isFinite(val)) return "—";
-  if (Math.abs(val) >= 1_000_000) return `${prefix}${(val / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(val) >= 1_000) return `${prefix}${(val / 1_000).toFixed(1)}k`;
+  if (val === 0) return `${prefix}0`;
+  if (Math.abs(val) >= 1_000_000) {
+    const m = val / 1_000_000;
+    return `${prefix}${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (Math.abs(val) >= 1_000) {
+    const k = val / 1_000;
+    return `${prefix}${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}k`;
+  }
   return `${prefix}${Math.round(val).toLocaleString()}`;
 };
 
@@ -434,6 +441,53 @@ export function ThreeZoneForecastChart({
     return { start, split, horizon, end };
   }, [chartData, splitDate, forecastHorizon]);
 
+  // Dynamic Y-axis scale with granular, smooth step increments (e.g., ₱10,000 / ₱20,000 increments)
+  const revenueAxisConfig = useMemo(() => {
+    const values: number[] = [];
+    chartData.forEach((d) => {
+      if (d.actual != null && Number.isFinite(d.actual) && d.actual > 0) values.push(d.actual);
+      if (d.predicted != null && Number.isFinite(d.predicted) && d.predicted > 0) values.push(d.predicted);
+      if (d.forecast != null && Number.isFinite(d.forecast) && d.forecast > 0) values.push(d.forecast);
+      if (d.confidenceHigh != null && Number.isFinite(d.confidenceHigh) && d.confidenceHigh > 0) values.push(d.confidenceHigh);
+    });
+
+    const maxVal = values.length > 0 ? Math.max(...values) : 10000;
+
+    // Granular step size calculation
+    let stepSize: number;
+    if (maxVal <= 5_000) {
+      stepSize = 1_000;
+    } else if (maxVal <= 15_000) {
+      stepSize = 2_500;
+    } else if (maxVal <= 40_000) {
+      stepSize = 5_000;
+    } else if (maxVal <= 100_000) {
+      stepSize = 10_000;
+    } else if (maxVal <= 260_000) {
+      stepSize = 20_000; // Granular ₱20,000 increments for ~₱240k range instead of ₱60,000
+    } else if (maxVal <= 500_000) {
+      stepSize = 50_000;
+    } else if (maxVal <= 1_200_000) {
+      stepSize = 100_000;
+    } else {
+      const exp = Math.floor(Math.log10(maxVal / 10));
+      const mag = Math.pow(10, exp);
+      stepSize = Math.max(10_000, Math.ceil(maxVal / (10 * mag)) * mag);
+    }
+
+    const domainMax = Math.ceil(maxVal / stepSize) * stepSize;
+    const ticks: number[] = [];
+    for (let t = 0; t <= domainMax; t += stepSize) {
+      ticks.push(t);
+    }
+
+    return {
+      domain: [0, domainMax] as [number, number],
+      ticks,
+      stepSize,
+    };
+  }, [chartData]);
+
   // Summary KPIs
   const summaryKpis = useMemo(() => {
     let holdoutActual = 0;
@@ -634,6 +688,9 @@ export function ThreeZoneForecastChart({
               tick={{ fontSize: 10, fill: "var(--forecast-axis-text, #475569)", fontWeight: 600 }}
               tickFormatter={(v) => formatCurrency(v, currencyPrefix)}
               width={65}
+              domain={revenueAxisConfig.domain}
+              ticks={revenueAxisConfig.ticks}
+              allowDataOverflow={false}
             />
             {weatherOverlayEnabled && (
               <>
