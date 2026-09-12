@@ -2,6 +2,96 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-13 - Settings Manual Theme Toggle and Professional Palette
+
+### Requested
+- Add an on/off toggle to the manual theme picker so users can save custom colors and activate them only when they want.
+- Replace the Forest Mint preset with a cleaner professional palette using white, grey, and black.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Added a `Use Manual Colors` switch inside the Manual Theme Picker.
+- Manual color inputs now save valid color values without automatically forcing the custom theme active.
+- Enabling the switch applies the saved custom primary, accent, and surface colors across the system.
+- Disabling the switch returns the dashboard to the default Pink Fusion preset while keeping saved manual colors available.
+- Replaced the Forest Mint preset label and swatches with a Professional Mono white, grey, and black palette.
+- Updated `frontend/src/styles/theme.css`.
+- Replaced the former mint palette CSS variables with professional monochrome values.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-13 - Settings Manual Three-Color Theme Picker
+
+### Requested
+- Change the manual theme picker into a true three-color custom picker.
+- Let users choose colors through color controls or color numbers, then apply those colors across the whole system.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Added a `custom` color theme mode and persisted custom theme values for primary, accent, and surface colors.
+- Added hex color normalization so invalid saved custom values fall back to safe defaults.
+- Added `applyDocumentColorTheme` to apply preset and custom theme classes plus custom CSS variables.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Replaced the preset dropdown with three manual theme controls for Primary, Accent, and Surface.
+- Each manual control now includes a color input and hex input; valid hex edits immediately activate and save the custom theme.
+- Updated `frontend/src/styles/theme.css`.
+- Added `.woof-theme-custom` and connected custom variables to the same global palette and utility-color override system used by presets.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-13 - Settings Appearance Theme Picker
+
+### Requested
+- Make the Appearance section's other themes work.
+- Add practical color combinations and a manual theme picker so users can transform the overall system theme.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Added a persisted `colorTheme` preference with Pink Fusion, Ocean Breeze, Forest Mint, and Executive Slate options.
+- Extended stored theme application so the selected color theme is applied as a document-level class on load.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Replaced decorative Appearance theme cards with clickable saved palette cards.
+- Added a manual theme picker dropdown that updates the active palette immediately.
+- Updated Save All Settings and dark mode persistence to preserve the selected color theme.
+- Updated `frontend/src/styles/theme.css`.
+- Added system-wide palette variables for primary, strong primary, accent, surface, background, border, sidebar, chart, and profit-card colors.
+- Added overrides for common WOOF fixed pink, cyan, blush, and border utility colors so selected palettes affect dashboard controls and repeated surfaces.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-13 - Settings Business Profile and Data Retention Scope
+
+### Requested
+- Implement the Settings Module Business Profile section.
+- Update Data Retention so transaction history remains available for forecasting unless manually archived.
+- Apply retention mainly to logs, generated reports, notifications, feedback events, and temporary caches.
+- Show a note that historical sales data is preserved for model accuracy.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Added persisted Business Profile defaults for business name, branch, location, timezone, currency, and operating hours.
+- Extended Settings preference normalization so older saved preferences safely receive the new Business Profile defaults.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Added a Business Profile settings section with editable identity, location, timezone, currency, opening time, and closing time fields.
+- Wired Business Profile edits into the existing saved Settings preferences flow.
+- Reworked Data Management retention copy into an operational retention policy.
+- Clarified that retention applies to system logs, generated reports, notification history, feedback events, and temporary caches.
+- Added a protected historical sales note explaining that transaction history is preserved for forecasting accuracy unless manually archived by an owner.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
 ## 2026-09-10 - Settings Module Notification Preferences and Dark Mode Polish
 
 ### Requested

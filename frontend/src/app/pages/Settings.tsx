@@ -1,11 +1,15 @@
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert, Moon, Sun } from "lucide-react";
+import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert, Moon, Sun, Building2, MapPin, Clock, CircleDollarSign, Archive, FileText, BellRing, MessageSquare, HardDrive } from "lucide-react";
 import { getExogenousStatus, getForecast } from "../lib/api";
 import {
   DEFAULT_SETTINGS_PREFERENCES,
+  applyDocumentColorTheme,
   applyStoredTheme,
   getSettingsPreferences,
   saveSettingsPreferences,
+  type BusinessProfilePreferences,
+  type ColorThemeKey,
+  type CustomThemePreferences,
   type NotificationPreferenceKey,
 } from "../lib/preferences";
 import { Button } from "../components/ui/button";
@@ -16,6 +20,7 @@ import { toast } from "sonner";
 import { InfoTooltip } from "../components/InfoTooltip";
 
 export function Settings() {
+  const [businessProfile, setBusinessProfile] = useState(DEFAULT_SETTINGS_PREFERENCES.businessProfile);
   const [notifications, setNotifications] = useState(DEFAULT_SETTINGS_PREFERENCES.notifications);
 
   const [exogenousStatus, setExogenousStatus] = useState<any>(null);
@@ -30,13 +35,18 @@ export function Settings() {
   const [confidenceThreshold, setConfidenceThreshold] = useState([DEFAULT_SETTINGS_PREFERENCES.confidenceThreshold]);
   const [dataRetention, setDataRetention] = useState([DEFAULT_SETTINGS_PREFERENCES.dataRetention]);
   const [darkMode, setDarkMode] = useState(false);
+  const [colorTheme, setColorTheme] = useState<ColorThemeKey>(DEFAULT_SETTINGS_PREFERENCES.colorTheme);
+  const [customTheme, setCustomTheme] = useState(DEFAULT_SETTINGS_PREFERENCES.customTheme);
 
   useEffect(() => {
     const preferences = getSettingsPreferences();
+    setBusinessProfile(preferences.businessProfile);
     setNotifications(preferences.notifications);
     setAutoRetrain(preferences.autoRetrain);
     setConfidenceThreshold([preferences.confidenceThreshold]);
     setDataRetention([preferences.dataRetention]);
+    setColorTheme(preferences.colorTheme);
+    setCustomTheme(preferences.customTheme);
     setDarkMode(applyStoredTheme() === "dark");
   }, []);
 
@@ -46,12 +56,52 @@ export function Settings() {
     saveSettingsPreferences((current) => ({
       ...current,
       notifications,
+      businessProfile,
       autoRetrain,
       confidenceThreshold: confidenceThreshold[0],
       dataRetention: dataRetention[0],
       theme: checked ? "dark" : "light",
+      colorTheme,
+      customTheme,
     }));
     toast.success(`${checked ? "Dark" : "Light"} mode enabled`);
+  };
+
+  const handleColorThemeChange = (themeKey: ColorThemeKey) => {
+    setColorTheme(themeKey);
+    applyDocumentColorTheme(themeKey, customTheme);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      colorTheme: themeKey,
+    }));
+    toast.success("Theme colors updated");
+  };
+
+  const handleCustomThemeChange = (key: keyof CustomThemePreferences, value: string) => {
+    const nextTheme = { ...customTheme, [key]: value.toUpperCase() };
+    setCustomTheme(nextTheme);
+
+    if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+      if (colorTheme === "custom") {
+        applyDocumentColorTheme("custom", nextTheme);
+      }
+      saveSettingsPreferences((current) => ({
+        ...current,
+        customTheme: nextTheme,
+      }));
+    }
+  };
+
+  const handleManualThemeToggle = (checked: boolean) => {
+    const nextTheme: ColorThemeKey = checked ? "custom" : "pink";
+    setColorTheme(nextTheme);
+    applyDocumentColorTheme(nextTheme, customTheme);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      colorTheme: nextTheme,
+      customTheme,
+    }));
+    toast.success(checked ? "Manual colors enabled" : "Manual colors disabled");
   };
 
   const handleNotificationChange = (key: NotificationPreferenceKey, checked: boolean) => {
@@ -64,6 +114,15 @@ export function Settings() {
     toast.success("Notification preference updated", {
       description: `${checked ? "Enabled" : "Muted"} ${key} notifications.`,
     });
+  };
+
+  const handleBusinessProfileChange = (key: keyof BusinessProfilePreferences, value: string) => {
+    const nextProfile = { ...businessProfile, [key]: value };
+    setBusinessProfile(nextProfile);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      businessProfile: nextProfile,
+    }));
   };
 
   const handleAutoRetrainChange = (checked: boolean) => {
@@ -93,11 +152,14 @@ export function Settings() {
   const handleSaveSettings = () => {
     saveSettingsPreferences((current) => ({
       ...current,
+      businessProfile,
       notifications,
       autoRetrain,
       confidenceThreshold: confidenceThreshold[0],
       dataRetention: dataRetention[0],
       theme: darkMode ? "dark" : "light",
+      colorTheme,
+      customTheme,
     }));
     toast.success("Settings saved!", {
       description: "Your preferences have been updated.",
@@ -131,6 +193,69 @@ export function Settings() {
       });
   };
 
+  const profileInputClass = "w-full px-3 py-2 bg-white/70 border border-[#FFD9EC] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F53799]/30 text-[#223047]";
+  const profileLabelClass = "text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold uppercase tracking-wide";
+  const retentionScopeItems = [
+    { label: "System logs", icon: FileText },
+    { label: "Generated reports", icon: Archive },
+    { label: "Notifications", icon: BellRing },
+    { label: "Feedback events", icon: MessageSquare },
+    { label: "Temporary caches", icon: HardDrive },
+  ];
+  const colorThemes: Array<{
+    key: Exclude<ColorThemeKey, "custom">;
+    name: string;
+    description: string;
+    primary: string;
+    accent: string;
+    surface: string;
+  }> = [
+    {
+      key: "pink",
+      name: "Pink Fusion",
+      description: "Original WOOF pink and cyan dashboard style",
+      primary: "#F53799",
+      accent: "#06B6D4",
+      surface: "#FFF7FB",
+    },
+    {
+      key: "ocean",
+      name: "Ocean Breeze",
+      description: "Blue and teal theme for calmer operations review",
+      primary: "#0EA5E9",
+      accent: "#14B8A6",
+      surface: "#F0FDFA",
+    },
+    {
+      key: "mint",
+      name: "Professional Mono",
+      description: "White, grey, and black palette for a clean executive look",
+      primary: "#111827",
+      accent: "#6B7280",
+      surface: "#F9FAFB",
+    },
+    {
+      key: "slate",
+      name: "Executive Slate",
+      description: "Slate and violet theme for low-glare dashboards",
+      primary: "#6366F1",
+      accent: "#22D3EE",
+      surface: "#F8FAFC",
+    },
+  ];
+  const customThemeFields: Array<{
+    key: keyof CustomThemePreferences;
+    label: string;
+    description: string;
+  }> = [
+    { key: "primary", label: "Primary", description: "Actions, selected states, and main highlights" },
+    { key: "accent", label: "Accent", description: "Secondary indicators, charts, and supporting badges" },
+    { key: "surface", label: "Surface", description: "Soft page sections, cards, and quiet backgrounds" },
+  ];
+  const activePaletteName = colorTheme === "custom"
+    ? "Custom Manual Theme"
+    : colorThemes.find((theme) => theme.key === colorTheme)?.name;
+
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
       {/* PAGE HEADER */}
@@ -146,6 +271,115 @@ export function Settings() {
         <Button onClick={handleSaveSettings} className="bg-[#F53799] hover:bg-[#D42A7D] w-full md:w-auto">
           Save All Settings
         </Button>
+      </div>
+
+      {/* BUSINESS PROFILE */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div className="flex items-center gap-2 md:gap-3">
+          <Building2 className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
+          <div>
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Business Profile
+            </h2>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              Maintain the operating defaults WOOF uses for reports, timestamps, and forecast windows
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-2 md:pt-4">
+          <div className="lg:col-span-2 p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={profileLabelClass}>Business Name</label>
+                <input
+                  type="text"
+                  value={businessProfile.businessName}
+                  onChange={(event) => handleBusinessProfileChange("businessName", event.target.value)}
+                  className={profileInputClass}
+                />
+              </div>
+              <div>
+                <label className={profileLabelClass}>Branch Name</label>
+                <input
+                  type="text"
+                  value={businessProfile.branchName}
+                  onChange={(event) => handleBusinessProfileChange("branchName", event.target.value)}
+                  className={profileInputClass}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className={profileLabelClass}>Operating Location</label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#F53799]" />
+                  <input
+                    type="text"
+                    value={businessProfile.location}
+                    onChange={(event) => handleBusinessProfileChange("location", event.target.value)}
+                    className={`${profileInputClass} pl-9`}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
+            <div>
+              <label className={profileLabelClass}>Timezone</label>
+              <select
+                value={businessProfile.timezone}
+                onChange={(event) => handleBusinessProfileChange("timezone", event.target.value)}
+                className={profileInputClass}
+              >
+                <option value="Asia/Manila">Asia/Manila</option>
+                <option value="UTC">UTC</option>
+                <option value="America/New_York">America/New_York</option>
+                <option value="Europe/London">Europe/London</option>
+              </select>
+            </div>
+            <div>
+              <label className={profileLabelClass}>Currency</label>
+              <div className="relative">
+                <CircleDollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#06B6D4]" />
+                <select
+                  value={businessProfile.currency}
+                  onChange={(event) => handleBusinessProfileChange("currency", event.target.value)}
+                  className={`${profileInputClass} pl-9`}
+                >
+                  <option value="PHP">PHP - Philippine Peso</option>
+                  <option value="USD">USD - US Dollar</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 md:p-5 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50">
+              <label className={profileLabelClass}>Opening Time</label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#F53799]" />
+                <input
+                  type="time"
+                  value={businessProfile.openingTime}
+                  onChange={(event) => handleBusinessProfileChange("openingTime", event.target.value)}
+                  className={`${profileInputClass} pl-9`}
+                />
+              </div>
+            </div>
+            <div className="p-4 md:p-5 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50">
+              <label className={profileLabelClass}>Closing Time</label>
+              <div className="relative">
+                <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#06B6D4]" />
+                <input
+                  type="time"
+                  value={businessProfile.closingTime}
+                  onChange={(event) => handleBusinessProfileChange("closingTime", event.target.value)}
+                  className={`${profileInputClass} pl-9`}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* NOTIFICATION PREFERENCES */}
@@ -391,34 +625,62 @@ export function Settings() {
               Data Management
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Control data retention and export options
+              Control operational retention rules, protected forecasting history, and export options
             </p>
           </div>
         </div>
 
         <div className="grid gap-4 md:gap-6 pt-2 md:pt-4">
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4">
-            <div>
-              <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
-                <span>Data Retention Period</span>
-                <InfoTooltip label="How long WOOF should keep historical records available for analysis, reports, and audit checks." />
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-5 border border-[#FFD9EC]/50">
+            <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5">
+              <div>
+                <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                  <span>Operational Retention Window</span>
+                  <InfoTooltip label="How long WOOF keeps short-lived operational records before they become eligible for cleanup or archive review." />
+                </div>
+                <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-3 md:mb-4">
+                  Keep logs, generated reports, notifications, feedback events, and temporary caches for {dataRetention[0]} days.
+                </div>
+                <div className="flex items-center gap-3 md:gap-4">
+                  <Slider
+                    value={dataRetention}
+                    onValueChange={handleDataRetentionChange}
+                    max={365}
+                    min={30}
+                    step={30}
+                    className="flex-1"
+                  />
+                  <span className="text-base md:text-lg font-bold text-[#D42A7D] w-12 md:w-16">
+                    {dataRetention[0]}d
+                  </span>
+                </div>
               </div>
-              <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-3 md:mb-4">
-                Keep historical data for {dataRetention[0]} days
+
+              <div className="rounded-xl border border-[#06B6D4]/30 bg-white/80 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#06B6D4]/10">
+                    <Database className="h-4 w-4 text-[#06B6D4]" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-sm text-[#223047]">Historical Sales Protected</div>
+                    <p className="mt-1 text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+                      Transaction history is preserved for forecasting accuracy unless it is manually archived by an owner.
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-3 md:gap-4">
-                <Slider
-                  value={dataRetention}
-                  onValueChange={handleDataRetentionChange}
-                  max={365}
-                  min={30}
-                  step={30}
-                  className="flex-1"
-                />
-                <span className="text-base md:text-lg font-bold text-[#D42A7D] w-12 md:w-16">
-                  {dataRetention[0]}d
-                </span>
-              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+              {retentionScopeItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.label} className="flex items-center gap-2 rounded-xl border border-[#FFD9EC]/70 bg-white/70 px-3 py-3 text-xs font-semibold text-[#223047]">
+                    <Icon className="h-4 w-4 shrink-0 text-[#F53799]" />
+                    <span>{item.label}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -440,7 +702,7 @@ export function Settings() {
               Appearance
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Customize your dashboard experience
+              Customize dashboard display mode and system-wide accent colors
             </p>
           </div>
         </div>
@@ -470,15 +732,65 @@ export function Settings() {
             </div>
           </div>
 
-          {[
-            { name: "Pink Fusion (Default)", primary: "#F53799", secondary: "#06B6D4" },
-            { name: "Ocean Breeze", primary: "#06B6D4", secondary: "#06B6D4" },
-            { name: "Sunset Glow", primary: "#F53799", secondary: "#D42A7D" },
-            { name: "Minimal Gray", primary: "#223047", secondary: "#FFD9EC" },
-          ].map((theme) => (
+          <div className="sm:col-span-2 rounded-xl md:rounded-2xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 md:p-6 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+              <div className="max-w-2xl">
+                <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                  <span>Manual Theme Picker</span>
+                  <InfoTooltip label="Choose three custom colors using color wheels or hex values. Saved colors only transform the system when manual colors are enabled." />
+                </div>
+                <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
+                  Active palette: {activePaletteName}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-[#FFD9EC] bg-white/70 px-3 py-2">
+                <span className="text-xs font-semibold text-[#223047]">
+                  Use Manual Colors
+                </span>
+                <Switch checked={colorTheme === "custom"} onCheckedChange={handleManualThemeToggle} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {customThemeFields.map((field) => (
+                <div key={field.key} className="rounded-xl border border-[#FFD9EC]/70 bg-white/70 p-3 space-y-3">
+                  <div>
+                    <label className={profileLabelClass}>{field.label}</label>
+                    <p className="text-xs text-[#223047] opacity-60" style={{ lineHeight: "1.5" }}>
+                      {field.description}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={/^#[0-9A-Fa-f]{6}$/.test(customTheme[field.key]) ? customTheme[field.key] : DEFAULT_SETTINGS_PREFERENCES.customTheme[field.key]}
+                      onChange={(event) => handleCustomThemeChange(field.key, event.target.value)}
+                      className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-[#FFD9EC] bg-white p-1"
+                      aria-label={`${field.label} color wheel`}
+                    />
+                    <input
+                      type="text"
+                      value={customTheme[field.key]}
+                      onChange={(event) => handleCustomThemeChange(field.key, event.target.value)}
+                      className={profileInputClass}
+                      maxLength={7}
+                      placeholder="#F53799"
+                      aria-label={`${field.label} hex color`}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {colorThemes.map((theme) => (
             <button
               key={theme.name}
-              className="p-4 md:p-6 bg-[#FFF7FB] border-2 border-[#FFD9EC] rounded-xl md:rounded-2xl hover:border-[#F53799] transition-all text-left"
+              type="button"
+              onClick={() => handleColorThemeChange(theme.key)}
+              className={`p-4 md:p-6 bg-[#FFF7FB] border-2 rounded-xl md:rounded-2xl hover:border-[#F53799] transition-all text-left ${
+                colorTheme === theme.key ? "border-[#F53799] shadow-sm" : "border-[#FFD9EC]"
+              }`}
+              aria-pressed={colorTheme === theme.key}
             >
               <div className="flex items-center gap-2 md:gap-3 mb-2 md:mb-3">
                 <div
@@ -487,11 +799,18 @@ export function Settings() {
                 />
                 <div
                   className="w-6 h-6 md:w-8 md:h-8 rounded-full"
-                  style={{ backgroundColor: theme.secondary }}
+                  style={{ backgroundColor: theme.accent }}
+                />
+                <div
+                  className="w-6 h-6 md:w-8 md:h-8 rounded-full border border-[#FFD9EC]"
+                  style={{ backgroundColor: theme.surface }}
                 />
               </div>
               <div className="font-semibold text-sm md:text-base text-[#223047]">{theme.name}</div>
-              {theme.name === "Pink Fusion (Default)" && (
+              <div className="mt-1 text-xs text-[#223047] opacity-60" style={{ lineHeight: "1.5" }}>
+                {theme.description}
+              </div>
+              {colorTheme === theme.key && (
                 <Badge className="mt-2 bg-[#F53799] text-white hover:bg-[#F53799] text-xs">
                   Active
                 </Badge>
