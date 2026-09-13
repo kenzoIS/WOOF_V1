@@ -585,7 +585,7 @@ export function Retail() {
       </div>
 
       {/* KPI ROW */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
           {/* Retail Revenue Today */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
@@ -832,7 +832,7 @@ export function Retail() {
         </div>
 
         {/* TOP LEVEL ECONOMICS KPI STRIP */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <div className="woof-kpi-row grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           <div className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC]">
             <div className="text-[11px] text-[#223047] opacity-70 font-medium">Gross Retail Sales</div>
             <div className="text-base md:text-xl font-bold text-[#223047] mt-0.5">

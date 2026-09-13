@@ -13,7 +13,7 @@ import {
 } from "./ui/select";
 import { Button } from "./ui/button";
 import { DataIngestion } from "./DataIngestion";
-import { ChannelStatus, DataRange, getChannelStatus, getCurrentWeather, getDataRange } from "../lib/api";
+import { ChannelStatus, DataRange, getAlertThresholds, getChannelStatus, getCurrentWeather, getDataRange } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -137,11 +137,20 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [notificationPreferences, setNotificationPreferences] = useState(
     DEFAULT_SETTINGS_PREFERENCES.notifications,
   );
+  const [alertThresholds, setAlertThresholds] = useState(
+    DEFAULT_SETTINGS_PREFERENCES.alertThresholds,
+  );
 
   useEffect(() => {
-    setNotificationPreferences(getSettingsPreferences().notifications);
+    const preferences = getSettingsPreferences();
+    setNotificationPreferences(preferences.notifications);
+    setAlertThresholds(preferences.alertThresholds);
+    getAlertThresholds()
+      .then(setAlertThresholds)
+      .catch(() => {});
     return onSettingsPreferencesChanged((preferences) => {
       setNotificationPreferences(preferences.notifications);
+      setAlertThresholds(preferences.alertThresholds);
     });
   }, []);
 
@@ -264,7 +273,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           const daysSinceEnd = Math.floor(
             (Date.now() - new Date(range.historyEndDate).getTime()) / 86_400_000
           );
-          if (daysSinceEnd > 7) {
+          if (daysSinceEnd > alertThresholds.dataStalenessDays) {
             built.push({
               id: String(idCounter++),
               type: "system",
@@ -275,6 +284,28 @@ export function Header({ onMenuClick }: HeaderProps) {
             });
           }
         }
+      } catch {
+        // silently skip
+      }
+
+      try {
+        const [cafeForecast, servicesForecast] = await Promise.all([
+          import("../lib/api").then((m) => m.getForecast("cafe", { compact: "true" })),
+          import("../lib/api").then((m) => m.getForecast("services", { compact: "true" })),
+        ]);
+        [cafeForecast, servicesForecast].forEach((forecast) => {
+          const accuracy = Number(forecast?.accuracy);
+          if (Number.isFinite(accuracy) && accuracy <= alertThresholds.forecastAccuracyWarning) {
+            built.push({
+              id: String(idCounter++),
+              type: "alert",
+              title: "Forecast Accuracy Warning",
+              message: `${forecast.module} forecast accuracy is ${accuracy.toFixed(1)}%; threshold is ${alertThresholds.forecastAccuracyWarning}%`,
+              time: relativeTime(forecast.generatedAt),
+              read: false,
+            });
+          }
+        });
       } catch {
         // silently skip
       }
@@ -303,7 +334,7 @@ export function Header({ onMenuClick }: HeaderProps) {
 
     buildNotifications();
     return () => { cancelled = true; };
-  }, []);
+  }, [alertThresholds]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {

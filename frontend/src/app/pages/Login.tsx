@@ -4,6 +4,7 @@ import { Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Toaster } from "../components/ui/sonner";
+import { getSettingsPreferences } from "../lib/preferences";
 import logoImg from "../../imports/happytailslogo-removebg-preview.png";
 
 type ForgotPasswordStep = "email" | "otp" | "newPassword";
@@ -305,7 +306,7 @@ export function Login() {
       toast.success("Welcome back!", {
         description: "Signed in to WOOF.",
       });
-      router.push("/");
+      router.push(getSettingsPreferences().dashboard.defaultLandingPage);
     }, 1000);
   };
 

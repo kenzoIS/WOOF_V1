@@ -10,6 +10,7 @@ import { AwsModule } from './aws/aws.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { PetHubWebhookModule } from './pethub-webhook/pethub-webhook.module';
+import { SettingsModule } from './settings/settings.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
@@ -64,6 +65,7 @@ import { LlmModule } from './llm/llm.module';
     RealtimeModule,
     PetHubWebhookModule,
     LlmModule,
+    SettingsModule,
   ],
 })
 export class AppModule {}

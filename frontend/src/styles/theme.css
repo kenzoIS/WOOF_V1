@@ -237,6 +237,48 @@
   border-color: var(--woof-theme-border) !important;
 }
 
+.woof-insight-band {
+  background: linear-gradient(135deg, var(--woof-theme-surface) 0%, color-mix(in srgb, var(--woof-theme-background) 72%, white) 100%) !important;
+  border-color: color-mix(in srgb, var(--woof-theme-primary) 28%, var(--woof-theme-border)) !important;
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--woof-theme-primary) 10%, transparent) !important;
+}
+
+.woof-insight-band [data-slot="badge"],
+.woof-insight-band .bg-\[\#F53799\],
+.woof-insight-band .bg-\[\#D42A7D\] {
+  background-color: var(--woof-theme-primary) !important;
+  color: #ffffff !important;
+}
+
+.woof-insight-band .text-\[\#F53799\],
+.woof-insight-band .text-\[\#D42A7D\] {
+  color: var(--woof-theme-primary) !important;
+}
+
+.woof-insight-band .text-\[\#06B6D4\],
+.woof-insight-band .text-\[\#3AE4FA\],
+.woof-insight-band .text-cyan-400,
+.woof-insight-band .text-emerald-600,
+.woof-insight-band .text-green-600 {
+  color: var(--woof-theme-accent) !important;
+}
+
+.woof-insight-band .border-\[\#FFD9EC\],
+.woof-insight-band .border-\[\#06B6D4\]\/30,
+.woof-insight-band .border-emerald-500,
+.woof-insight-band .border-green-500 {
+  border-color: var(--woof-theme-primary) !important;
+}
+
+.woof-insight-band .bg-white,
+.woof-insight-band .bg-white\/70,
+.woof-insight-band .bg-\[\#FFF7FB\],
+.woof-insight-band .bg-\[\#FFF2FA\],
+.woof-insight-band .from-emerald-50,
+.woof-insight-band .to-green-50 {
+  background-color: color-mix(in srgb, var(--woof-theme-surface) 82%, white) !important;
+}
+
 .woof-dark body,
 .woof-dark .woof-main {
   background: #111827;
@@ -466,9 +508,18 @@
 }
 
 .woof-dark .woof-insight-band {
-  background: linear-gradient(135deg, #182235 0%, #243049 100%) !important;
-  border: 1px solid rgba(255, 217, 236, 0.26) !important;
+  background: linear-gradient(135deg, #182235 0%, color-mix(in srgb, #243049 76%, var(--woof-theme-primary)) 100%) !important;
+  border: 1px solid color-mix(in srgb, var(--woof-theme-primary) 42%, rgba(255, 255, 255, 0.16)) !important;
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(248, 251, 255, 0.06) !important;
+}
+
+.woof-dark .woof-insight-band img,
+.woof-dark .woof-insight-band picture,
+.woof-dark .woof-insight-band video,
+.woof-dark .woof-insight-band canvas {
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
 }
 
 .woof-dark .woof-insight-band,
@@ -492,15 +543,68 @@
 .woof-dark .woof-insight-band [data-slot="badge"],
 .woof-dark .woof-insight-band .border,
 .woof-dark .woof-insight-band .bg-white {
-  background-color: rgba(245, 55, 153, 0.16) !important;
-  border-color: rgba(245, 55, 153, 0.38) !important;
-  color: #ff7fc5 !important;
+  background-color: color-mix(in srgb, var(--woof-theme-primary) 18%, transparent) !important;
+  border-color: color-mix(in srgb, var(--woof-theme-primary) 42%, transparent) !important;
+  color: color-mix(in srgb, var(--woof-theme-primary) 72%, #ffffff) !important;
 }
 
 .woof-dark .woof-insight-band .bg-white,
 .woof-dark .woof-insight-band .bg-\[\#FFF7FB\],
 .woof-dark .woof-insight-band .bg-\[\#FFF2FA\] {
   background-color: rgba(248, 251, 255, 0.08) !important;
+}
+
+.woof-dark .woof-insight-band .text-\[\#F53799\],
+.woof-dark .woof-insight-band .text-\[\#D42A7D\] {
+  color: color-mix(in srgb, var(--woof-theme-primary) 76%, #ffffff) !important;
+}
+
+.woof-dark .woof-insight-band .text-\[\#06B6D4\],
+.woof-dark .woof-insight-band .text-\[\#3AE4FA\],
+.woof-dark .woof-insight-band .text-cyan-400,
+.woof-dark .woof-insight-band .text-emerald-600,
+.woof-dark .woof-insight-band .text-green-600 {
+  color: color-mix(in srgb, var(--woof-theme-accent) 76%, #ffffff) !important;
+}
+
+.woof-hide-tooltips .woof-info-tooltip {
+  display: none !important;
+}
+
+:root:not(.woof-show-demo-controls) .woof-demo-control {
+  display: none !important;
+}
+
+.woof-compact-kpis .woof-kpi-row {
+  padding: 0.75rem !important;
+}
+
+.woof-compact-kpis .woof-kpi-row > .grid {
+  gap: 0.5rem !important;
+}
+
+.woof-compact-kpis .woof-kpi-row.grid {
+  gap: 0.5rem !important;
+}
+
+.woof-compact-kpis .woof-kpi-row > .grid > div {
+  gap: 0.5rem !important;
+  padding: 0.625rem 0.75rem !important;
+}
+
+.woof-compact-kpis .woof-kpi-row.grid > div {
+  gap: 0.5rem !important;
+  padding: 0.625rem 0.75rem !important;
+}
+
+.woof-compact-kpis .woof-kpi-row .woof-kpi-card {
+  padding: 0.75rem !important;
+}
+
+.woof-compact-kpis .woof-kpi-row .woof-kpi-card [class*="text-xl"],
+.woof-compact-kpis .woof-kpi-row .woof-kpi-card [class*="text-2xl"] {
+  font-size: 1rem !important;
+  line-height: 1.35 !important;
 }
 
 .woof-quiet-period-section {

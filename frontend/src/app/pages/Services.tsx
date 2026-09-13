@@ -20,6 +20,7 @@ import {
   parseGlobalRange,
   countDays,
 } from "../lib/dateRanges";
+import { getSettingsPreferences, onSettingsPreferencesChanged } from "../lib/preferences";
 import {
   LineChart,
   Line,
@@ -217,6 +218,12 @@ export function Services() {
   const [forecastMode, setForecastMode] = useState<string>("production");
   const [isSimulating, setIsSimulating] = useState(false);
   const [chartGranularity, setChartGranularity] = useState<TimeGrain>("monthly");
+  useEffect(() => {
+    setChartGranularity(getSettingsPreferences().dashboard.defaultChartView);
+    return onSettingsPreferencesChanged((preferences) => {
+      setChartGranularity(preferences.dashboard.defaultChartView);
+    });
+  }, []);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
 
   // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
@@ -896,7 +903,7 @@ export function Services() {
       </div>
 
       {/* KPI ROW */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Services Revenue Today */}
           <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">

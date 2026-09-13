@@ -17,7 +17,7 @@ export function InfoTooltip({ label, side = "top" }: InfoTooltipProps) {
       <TooltipTrigger asChild>
         <span
           role="img"
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#FFD9EC] bg-white text-[#F53799] shadow-sm transition-colors hover:border-[#F53799] hover:bg-[#FFF2FA] focus:outline-none focus:ring-2 focus:ring-[#F53799]/30"
+          className="woof-info-tooltip inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#FFD9EC] bg-white text-[#F53799] shadow-sm transition-colors hover:border-[#F53799] hover:bg-[#FFF2FA] focus:outline-none focus:ring-2 focus:ring-[#F53799]/30"
           aria-label="More information"
         >
           <Info className="h-3.5 w-3.5" />

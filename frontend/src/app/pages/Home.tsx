@@ -473,7 +473,7 @@ export function Home() {
       )}
 
       {/* SECTION 2 — PRIMARY KPI ROW */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="mb-3 flex items-center gap-2 text-xs md:text-sm text-[#223047] opacity-80">
           <span>Selected-period KPIs from uploaded transaction data</span>
           <InfoTooltip label="KPIs are the key numbers WOOF uses to summarize business performance for the selected date range." />
@@ -1015,7 +1015,7 @@ export function Home() {
       {/* Demo: Connection Lost Button (for testing - can be removed) */}
       <button
         onClick={triggerConnectionLost}
-        className="fixed bottom-4 left-1/2 -translate-x-1/2 lg:left-[calc(50%+4rem)] lg:translate-x-0 px-3 py-1.5 bg-gray-800 text-white text-xs rounded-lg opacity-20 hover:opacity-100 transition-opacity z-40"
+        className="woof-demo-control fixed bottom-4 left-1/2 -translate-x-1/2 lg:left-[calc(50%+4rem)] lg:translate-x-0 px-3 py-1.5 bg-gray-800 text-white text-xs rounded-lg opacity-20 hover:opacity-100 transition-opacity z-40"
         title="Simulate connection lost (Demo)"
       >
         Test Connection

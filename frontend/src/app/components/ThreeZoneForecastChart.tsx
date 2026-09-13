@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   ComposedChart,
   Line,
@@ -21,6 +21,10 @@ import {
   Sparkles,
   SlidersHorizontal,
 } from "lucide-react";
+import {
+  getSettingsPreferences,
+  onSettingsPreferencesChanged,
+} from "../lib/preferences";
 
 // --- Types ---
 
@@ -320,6 +324,12 @@ export function ThreeZoneForecastChart({
   weatherOverlayData = [],
 }: ThreeZoneForecastChartProps) {
   const [internalTimeGrain, setInternalTimeGrain] = useState<TimeGrain>("monthly");
+  useEffect(() => {
+    setInternalTimeGrain(getSettingsPreferences().dashboard.defaultChartView);
+    return onSettingsPreferencesChanged((preferences) => {
+      setInternalTimeGrain(preferences.dashboard.defaultChartView);
+    });
+  }, []);
   const timeGrain = controlledTimeGrain ?? internalTimeGrain;
   const setTimeGrain = (g: TimeGrain) => {
     setInternalTimeGrain(g);

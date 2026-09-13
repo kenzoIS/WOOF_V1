@@ -2,6 +2,165 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-14 - Settings Dashboard Preferences
+
+### Requested
+- Add Dashboard Preferences after the Appearance section.
+- Retain or add only necessary industry-standard dashboard preferences.
+- Make the settings behave seamlessly throughout the dashboard.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Added persisted Dashboard Preferences for default landing page, compact KPI cards, demo controls visibility, tooltip visibility, default chart view, and sidebar collapsed default.
+- Added document-level dashboard preference classes for compact KPIs, demo controls, tooltip visibility, and sidebar default state.
+- Preserved the previous `woofSidebarCollapsed` localStorage key as a migration fallback.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Added a Dashboard Preferences section after Appearance with landing page, chart view, compact KPI, demo controls, explanations/tooltips, and sidebar default controls.
+- Updated `frontend/src/app/components/Layout.tsx`.
+- Layout now applies dashboard preference classes, listens for Settings changes, and keeps sidebar collapse state synced with Settings.
+- Updated `frontend/src/app/components/InfoTooltip.tsx`.
+- Info tooltip icons now respect the global tooltip visibility setting.
+- Updated `frontend/src/app/pages/Login.tsx`.
+- Login now redirects to the configured default landing page.
+- Updated `frontend/src/app/components/ThreeZoneForecastChart.tsx`, `frontend/src/app/pages/Cafe.tsx`, and `frontend/src/app/pages/Services.tsx`.
+- Forecast chart views now initialize from and respond to the saved default chart view.
+- Updated KPI surfaces in `Home.tsx`, `Cafe.tsx`, `Services.tsx`, and `Retail.tsx`.
+- Compact KPI mode now reduces spacing on primary dashboard KPI rows and the Retail economics KPI strip.
+- Updated the Home demo connection button with the shared demo-control class so it is hidden unless demo controls are enabled.
+- Updated `frontend/src/styles/theme.css`.
+- Added global CSS for hidden demo controls, hidden tooltips, and compact KPI density.
+
+### Verification
+- Passed: `npm test -- settings.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-14 - Alert Threshold Core Rule Reduction
+
+### Requested
+- Retain only Capacity warning threshold, Low inventory threshold, Data staleness warning, and Forecast accuracy warning.
+- Clarify what the Capacity warning threshold takes into account.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Removed spoilage risk and marketplace margin erosion from persisted alert threshold defaults and normalization.
+- Updated `frontend/src/app/lib/api.ts`.
+- Removed spoilage risk and marketplace margin erosion from alert threshold API typing.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Removed the Spoilage Risk Threshold and Marketplace Margin Erosion controls from the Alert Thresholds panel.
+- Updated Alert Thresholds helper copy to focus on capacity, inventory, model quality, and data freshness.
+- Clarified the Capacity Warning description as forecasted service slots, queue load, or store traffic reaching risky utilization.
+
+### Backend Changes
+- Updated `backend/src/settings/settings.service.ts`.
+- Removed spoilage risk and marketplace margin erosion from the backend alert threshold contract, defaults, limits, and evaluator.
+- Updated `backend/src/settings/settings.service.spec.ts`.
+- Adjusted threshold normalization tests to cover the retained capacity and staleness rules.
+
+### Verification
+- Passed: `npm test -- settings.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-14 - Alert Threshold Badge Cleanup
+
+### Requested
+- Remove the `Backend Synced` badge from the Alert Thresholds panel.
+- Clarify whether the Alert Threshold settings are relevant.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Removed the `Backend Synced` badge from the Alert Thresholds header.
+- Simplified the Alert Thresholds tooltip copy so the section focuses on trigger rules rather than implementation detail.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-14 - Notification Alert Threshold Rules
+
+### Requested
+- Add Alert Thresholds alongside Notification Preferences.
+- Include trigger rules for spoilage risk, capacity warnings, low inventory, forecast accuracy warnings, data staleness after X days, and marketplace margin erosion.
+- Make sure the backend works and self-test the implementation.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Added persisted `alertThresholds` defaults and normalization for all six threshold rules.
+- Updated `frontend/src/app/lib/api.ts`.
+- Added API client functions for getting, saving, and evaluating backend alert thresholds.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Added an Alert Thresholds panel inside Notification Preferences with sliders for:
+  - spoilage risk threshold
+  - capacity warning threshold
+  - low inventory threshold
+  - forecast accuracy warning threshold
+  - data staleness warning after X days
+  - marketplace margin erosion alert threshold
+- Alert threshold changes save locally and sync to the backend.
+- Updated `frontend/src/app/components/Header.tsx`.
+- Header data staleness notifications now use the configured threshold instead of a fixed 7-day rule.
+- Header forecast accuracy warnings now use the configured forecast accuracy threshold for Cafe and Services forecast checks.
+
+### Backend Changes
+- Added `backend/src/settings/settings.module.ts`.
+- Added `backend/src/settings/settings.controller.ts`.
+- Added `backend/src/settings/settings.service.ts`.
+- Registered `SettingsModule` in `backend/src/app.module.ts`.
+- Added backend endpoints:
+  - `GET /api/settings/alert-thresholds`
+  - `PATCH /api/settings/alert-thresholds`
+  - `POST /api/settings/alert-thresholds/evaluate`
+- Backend threshold updates are normalized and clamped to safe numeric ranges.
+- Backend evaluator returns triggered alert rules for supplied metric payloads.
+- Added `backend/src/settings/settings.service.spec.ts` for default, clamp, and trigger-rule evaluation coverage.
+
+### Verification
+- Passed: `npm test -- settings.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm run build` in `backend`.
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-14 - WOOF Insight Background and Image Preservation
+
+### Requested
+- Remove the right-side gradient glow from WOOF Insight sections.
+- Prevent WOOF Insight images from being inverted or visually altered in dark mode.
+
+### Frontend Changes
+- Updated `frontend/src/styles/theme.css`.
+- Removed the right-side radial gradient from the shared `.woof-insight-band` background in light and dark modes.
+- Kept WOOF Insight sections theme-aware with a cleaner linear surface based on the selected preset or manual theme.
+- Added dark-mode image/media resets inside `.woof-insight-band` so mascots, illustrations, videos, and canvases keep their original colors.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
+## 2026-09-14 - Theme-Aware WOOF Insight Sections
+
+### Requested
+- Make WOOF Insight sections across modules adapt when preset or manual themes are selected.
+
+### Frontend Changes
+- Updated `frontend/src/styles/theme.css`.
+- Added theme-aware base styling for `.woof-insight-band` so shared insight sections use the active palette's primary, accent, surface, background, and border colors.
+- Added WOOF Insight overrides for embedded badges, fixed pink/cyan/green text, borders, and light inner cards.
+- Updated dark-mode WOOF Insight styling to blend with the selected preset or manual theme instead of using fixed pink/cyan colors.
+- Covered modules that already use the shared `woof-insight-band` class, including Home, Cafe, Retail, Services, Feedback, AI Simulation, and Synergy insight surfaces.
+
+### Verification
+- Passed: `npx tsc --noEmit --pretty false` in `frontend`.
+- Initial sandboxed `npm run build` hit `spawn EPERM`.
+- Passed after approval: `npm run build` in `frontend`.
+
 ## 2026-09-13 - Settings Manual Theme Toggle and Professional Palette
 
 ### Requested

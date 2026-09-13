@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert, Moon, Sun, Building2, MapPin, Clock, CircleDollarSign, Archive, FileText, BellRing, MessageSquare, HardDrive } from "lucide-react";
-import { getExogenousStatus, getForecast } from "../lib/api";
+import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert, Moon, Sun, Building2, MapPin, Clock, CircleDollarSign, Archive, FileText, BellRing, MessageSquare, HardDrive, Gauge, LayoutDashboard, PanelLeftClose, Eye, BarChart3 } from "lucide-react";
+import { getAlertThresholds, getExogenousStatus, getForecast, saveAlertThresholds } from "../lib/api";
 import {
   DEFAULT_SETTINGS_PREFERENCES,
   applyDocumentColorTheme,
@@ -10,6 +10,8 @@ import {
   type BusinessProfilePreferences,
   type ColorThemeKey,
   type CustomThemePreferences,
+  type AlertThresholdPreferences,
+  type DashboardPreferences,
   type NotificationPreferenceKey,
 } from "../lib/preferences";
 import { Button } from "../components/ui/button";
@@ -22,6 +24,8 @@ import { InfoTooltip } from "../components/InfoTooltip";
 export function Settings() {
   const [businessProfile, setBusinessProfile] = useState(DEFAULT_SETTINGS_PREFERENCES.businessProfile);
   const [notifications, setNotifications] = useState(DEFAULT_SETTINGS_PREFERENCES.notifications);
+  const [alertThresholds, setAlertThresholds] = useState(DEFAULT_SETTINGS_PREFERENCES.alertThresholds);
+  const [dashboardPreferences, setDashboardPreferences] = useState(DEFAULT_SETTINGS_PREFERENCES.dashboard);
 
   const [exogenousStatus, setExogenousStatus] = useState<any>(null);
 
@@ -42,12 +46,24 @@ export function Settings() {
     const preferences = getSettingsPreferences();
     setBusinessProfile(preferences.businessProfile);
     setNotifications(preferences.notifications);
+    setAlertThresholds(preferences.alertThresholds);
+    setDashboardPreferences(preferences.dashboard);
     setAutoRetrain(preferences.autoRetrain);
     setConfidenceThreshold([preferences.confidenceThreshold]);
     setDataRetention([preferences.dataRetention]);
     setColorTheme(preferences.colorTheme);
     setCustomTheme(preferences.customTheme);
     setDarkMode(applyStoredTheme() === "dark");
+
+    getAlertThresholds()
+      .then((thresholds) => {
+        setAlertThresholds(thresholds);
+        saveSettingsPreferences((current) => ({
+          ...current,
+          alertThresholds: thresholds,
+        }));
+      })
+      .catch((err) => console.warn("Using local alert thresholds:", err));
   }, []);
 
   const handleThemeChange = (checked: boolean) => {
@@ -56,6 +72,8 @@ export function Settings() {
     saveSettingsPreferences((current) => ({
       ...current,
       notifications,
+      alertThresholds,
+      dashboard: dashboardPreferences,
       businessProfile,
       autoRetrain,
       confidenceThreshold: confidenceThreshold[0],
@@ -116,6 +134,39 @@ export function Settings() {
     });
   };
 
+  const handleAlertThresholdChange = (
+    key: keyof AlertThresholdPreferences,
+    value: number[],
+  ) => {
+    const nextThresholds = {
+      ...alertThresholds,
+      [key]: value[0] ?? DEFAULT_SETTINGS_PREFERENCES.alertThresholds[key],
+    };
+    setAlertThresholds(nextThresholds);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      alertThresholds: nextThresholds,
+    }));
+    saveAlertThresholds(nextThresholds).catch((err) => {
+      console.warn("Alert threshold backend sync failed:", err);
+    });
+  };
+
+  const handleDashboardPreferenceChange = <K extends keyof DashboardPreferences>(
+    key: K,
+    value: DashboardPreferences[K],
+  ) => {
+    const nextDashboardPreferences = {
+      ...dashboardPreferences,
+      [key]: value,
+    };
+    setDashboardPreferences(nextDashboardPreferences);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      dashboard: nextDashboardPreferences,
+    }));
+  };
+
   const handleBusinessProfileChange = (key: keyof BusinessProfilePreferences, value: string) => {
     const nextProfile = { ...businessProfile, [key]: value };
     setBusinessProfile(nextProfile);
@@ -154,6 +205,8 @@ export function Settings() {
       ...current,
       businessProfile,
       notifications,
+      alertThresholds,
+      dashboard: dashboardPreferences,
       autoRetrain,
       confidenceThreshold: confidenceThreshold[0],
       dataRetention: dataRetention[0],
@@ -201,6 +254,57 @@ export function Settings() {
     { label: "Notifications", icon: BellRing },
     { label: "Feedback events", icon: MessageSquare },
     { label: "Temporary caches", icon: HardDrive },
+  ];
+  const alertThresholdItems: Array<{
+    key: keyof AlertThresholdPreferences;
+    label: string;
+    description: string;
+    min: number;
+    max: number;
+    step: number;
+    suffix: string;
+    direction: string;
+  }> = [
+    {
+      key: "capacityWarning",
+      label: "Capacity Warning Threshold",
+      description: "Warn when forecasted service slots, queue load, or store traffic reaches a risky utilization level.",
+      min: 50,
+      max: 100,
+      step: 5,
+      suffix: "%",
+      direction: "Alert when usage >= threshold",
+    },
+    {
+      key: "lowInventory",
+      label: "Low Inventory Threshold",
+      description: "Flag SKUs when available stock drops to this percent of the reorder baseline.",
+      min: 5,
+      max: 60,
+      step: 5,
+      suffix: "%",
+      direction: "Alert when inventory <= threshold",
+    },
+    {
+      key: "forecastAccuracyWarning",
+      label: "Forecast Accuracy Warning",
+      description: "Warn when validation accuracy falls below the acceptable model quality floor.",
+      min: 50,
+      max: 99,
+      step: 1,
+      suffix: "%",
+      direction: "Alert when accuracy <= threshold",
+    },
+    {
+      key: "dataStalenessDays",
+      label: "Data Staleness Warning",
+      description: "Warn when the newest transaction or upload data is older than this many days.",
+      min: 1,
+      max: 30,
+      step: 1,
+      suffix: "d",
+      direction: "Alert when data age > threshold",
+    },
   ];
   const colorThemes: Array<{
     key: Exclude<ColorThemeKey, "custom">;
@@ -255,6 +359,21 @@ export function Settings() {
   const activePaletteName = colorTheme === "custom"
     ? "Custom Manual Theme"
     : colorThemes.find((theme) => theme.key === colorTheme)?.name;
+  const landingPageOptions: Array<{ value: DashboardPreferences["defaultLandingPage"]; label: string }> = [
+    { value: "/", label: "Home" },
+    { value: "/cafe", label: "Cafe" },
+    { value: "/services", label: "Services" },
+    { value: "/retail", label: "Retail" },
+    { value: "/ai-simulation", label: "AI Simulation" },
+    { value: "/smart-reports", label: "Smart Reports" },
+    { value: "/feedback", label: "Feedback" },
+    { value: "/audit", label: "Audit" },
+  ];
+  const chartViewOptions: Array<{ value: DashboardPreferences["defaultChartView"]; label: string }> = [
+    { value: "monthly", label: "Monthly" },
+    { value: "weekly", label: "Weekly" },
+    { value: "daily", label: "Daily" },
+  ];
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
@@ -417,6 +536,51 @@ export function Settings() {
               />
             </div>
           ))}
+        </div>
+
+        <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 md:p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+              <Gauge className="h-5 w-5 text-[#F53799]" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-base md:text-lg text-[#223047]">Alert Thresholds</h3>
+                <InfoTooltip label="Trigger rules used to decide when WOOF should surface operational warnings." />
+              </div>
+              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+                  Tune the business rules that trigger capacity, inventory, model quality, and data freshness warnings.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
+            {alertThresholdItems.map((item) => (
+              <div key={item.key} className="rounded-xl border border-[#FFD9EC]/70 bg-white/70 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-sm md:text-base text-[#223047]">{item.label}</div>
+                    <p className="text-xs text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.5" }}>
+                      {item.description}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-base md:text-lg font-bold text-[#F53799]">
+                    {alertThresholds[item.key]}{item.suffix}
+                  </span>
+                </div>
+                <Slider
+                  value={[alertThresholds[item.key]]}
+                  onValueChange={(value) => handleAlertThresholdChange(item.key, value)}
+                  min={item.min}
+                  max={item.max}
+                  step={item.step}
+                />
+                <div className="text-[11px] font-semibold text-[#223047] opacity-50">
+                  {item.direction}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -817,6 +981,123 @@ export function Settings() {
               )}
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* DASHBOARD PREFERENCES */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div className="flex items-center gap-2 md:gap-3">
+          <LayoutDashboard className="w-5 h-5 md:w-6 md:h-6 text-[#06B6D4]" />
+          <div>
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Dashboard Preferences
+            </h2>
+            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
+              Set the default workspace behavior for daily monitoring
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-2 md:pt-4">
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                <LayoutDashboard className="h-5 w-5 text-[#F53799]" />
+              </div>
+              <div className="flex-1">
+                <label className={profileLabelClass}>Default Landing Page</label>
+                <select
+                  value={dashboardPreferences.defaultLandingPage}
+                  onChange={(event) => handleDashboardPreferenceChange(
+                    "defaultLandingPage",
+                    event.target.value as DashboardPreferences["defaultLandingPage"],
+                  )}
+                  className={profileInputClass}
+                >
+                  {landingPageOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                <BarChart3 className="h-5 w-5 text-[#06B6D4]" />
+              </div>
+              <div className="flex-1">
+                <label className={profileLabelClass}>Default Chart View</label>
+                <select
+                  value={dashboardPreferences.defaultChartView}
+                  onChange={(event) => handleDashboardPreferenceChange(
+                    "defaultChartView",
+                    event.target.value as DashboardPreferences["defaultChartView"],
+                  )}
+                  className={profileInputClass}
+                >
+                  {chartViewOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:gap-4">
+            {[
+              {
+                key: "compactKpiCards",
+                label: "Compact KPI Cards",
+                description: "Reduce KPI card padding and label spacing across summary rows.",
+                icon: LayoutDashboard,
+              },
+              {
+                key: "showDemoControls",
+                label: "Show Demo Controls",
+                description: "Reveal test-only controls such as connection simulation buttons.",
+                icon: Eye,
+              },
+              {
+                key: "showTooltips",
+                label: "Show Explanations",
+                description: "Display inline info icons beside metrics and technical labels.",
+                icon: Eye,
+              },
+              {
+                key: "sidebarCollapsedByDefault",
+                label: "Sidebar Collapsed by Default",
+                description: "Start the dashboard with the compact navigation rail.",
+                icon: PanelLeftClose,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              const key = item.key as keyof Pick<
+                DashboardPreferences,
+                "compactKpiCards" | "showDemoControls" | "showTooltips" | "sidebarCollapsedByDefault"
+              >;
+              return (
+                <div key={item.key} className="flex items-center justify-between gap-3 p-4 md:p-5 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                      <Icon className="h-4 w-4 text-[#F53799]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm md:text-base text-[#223047]">{item.label}</div>
+                      <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">{item.description}</div>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={Boolean(dashboardPreferences[key])}
+                    onCheckedChange={(checked) => handleDashboardPreferenceChange(key, checked)}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

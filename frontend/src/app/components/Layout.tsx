@@ -7,7 +7,13 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { RealtimeListener } from "./RealtimeListener";
 import { Toaster } from "./ui/sonner";
 import { ErrorModal } from "./ErrorModal";
-import { applyStoredTheme } from "../lib/preferences";
+import {
+  applyDocumentDashboardPreferences,
+  applyStoredTheme,
+  getSettingsPreferences,
+  onSettingsPreferencesChanged,
+  saveSettingsPreferences,
+} from "../lib/preferences";
 
 const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
 
@@ -23,21 +29,30 @@ export function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("woofSidebarCollapsed");
-      if (saved !== null) {
-        setIsSidebarCollapsed(saved === "true");
-      }
+      const preferences = getSettingsPreferences();
+      setIsSidebarCollapsed(preferences.dashboard.sidebarCollapsedByDefault);
       applyStoredTheme();
     } catch {
       // Ignore localStorage errors
     }
+
+    return onSettingsPreferencesChanged((preferences) => {
+      applyDocumentDashboardPreferences(preferences.dashboard);
+      setIsSidebarCollapsed(preferences.dashboard.sidebarCollapsedByDefault);
+    });
   }, []);
 
   const handleToggleSidebarCollapse = () => {
     setIsSidebarCollapsed((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem("woofSidebarCollapsed", String(next));
+        saveSettingsPreferences((current) => ({
+          ...current,
+          dashboard: {
+            ...current.dashboard,
+            sidebarCollapsedByDefault: next,
+          },
+        }));
       } catch {
         // Ignore
       }

@@ -281,6 +281,13 @@ export interface TrafficOptimizerResponse {
   }>;
 }
 
+export interface AlertThresholds {
+  capacityWarning: number;
+  lowInventory: number;
+  forecastAccuracyWarning: number;
+  dataStalenessDays: number;
+}
+
 async function fetchApi(path: string, options?: RequestInit) {
   const canUseCache = shouldCacheRequest(path, options);
   const cacheKey = `${API_BASE}${path}`;
@@ -394,6 +401,33 @@ export async function deleteUpload(id: string) {
 
 export async function getMetrics() {
   return fetchApi('/csv/metrics');
+}
+
+export async function getAlertThresholds(): Promise<AlertThresholds> {
+  return fetchApi('/settings/alert-thresholds');
+}
+
+export async function saveAlertThresholds(
+  thresholds: Partial<AlertThresholds>,
+): Promise<AlertThresholds> {
+  return fetchApi('/settings/alert-thresholds', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(thresholds),
+  });
+}
+
+export async function evaluateAlertThresholds(metrics: Partial<{
+  capacityUsage: number;
+  lowInventoryPercent: number;
+  forecastAccuracy: number;
+  dataAgeDays: number;
+}>) {
+  return fetchApi('/settings/alert-thresholds/evaluate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(metrics),
+  });
 }
 
 // Analytics APIs

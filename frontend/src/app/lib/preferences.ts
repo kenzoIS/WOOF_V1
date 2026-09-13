@@ -19,9 +19,39 @@ export type CustomThemePreferences = {
   surface: string;
 };
 
+export type DashboardLandingPage =
+  | "/"
+  | "/cafe"
+  | "/services"
+  | "/retail"
+  | "/ai-simulation"
+  | "/smart-reports"
+  | "/feedback"
+  | "/audit";
+
+export type DashboardChartView = "monthly" | "weekly" | "daily";
+
+export type DashboardPreferences = {
+  defaultLandingPage: DashboardLandingPage;
+  compactKpiCards: boolean;
+  showDemoControls: boolean;
+  showTooltips: boolean;
+  defaultChartView: DashboardChartView;
+  sidebarCollapsedByDefault: boolean;
+};
+
+export type AlertThresholdPreferences = {
+  capacityWarning: number;
+  lowInventory: number;
+  forecastAccuracyWarning: number;
+  dataStalenessDays: number;
+};
+
 export type SettingsPreferences = {
   businessProfile: BusinessProfilePreferences;
   notifications: NotificationPreferences;
+  alertThresholds: AlertThresholdPreferences;
+  dashboard: DashboardPreferences;
   autoRetrain: boolean;
   confidenceThreshold: number;
   dataRetention: number;
@@ -46,6 +76,20 @@ export const DEFAULT_SETTINGS_PREFERENCES: SettingsPreferences = {
     reports: false,
     system: true,
   },
+  alertThresholds: {
+    capacityWarning: 85,
+    lowInventory: 20,
+    forecastAccuracyWarning: 80,
+    dataStalenessDays: 7,
+  },
+  dashboard: {
+    defaultLandingPage: "/",
+    compactKpiCards: false,
+    showDemoControls: false,
+    showTooltips: true,
+    defaultChartView: "monthly",
+    sidebarCollapsedByDefault: false,
+  },
   autoRetrain: true,
   confidenceThreshold: 80,
   dataRetention: 90,
@@ -60,13 +104,43 @@ export const DEFAULT_SETTINGS_PREFERENCES: SettingsPreferences = {
 
 const SETTINGS_KEY = "woofSettingsPreferences";
 const LEGACY_THEME_KEY = "woofTheme";
+const LEGACY_SIDEBAR_KEY = "woofSidebarCollapsed";
 const PREFERENCES_EVENT = "woof:settings-preferences-changed";
 const THEME_CLASSES = ["woof-theme-pink", "woof-theme-ocean", "woof-theme-mint", "woof-theme-slate", "woof-theme-custom"];
+const DASHBOARD_CLASSES = ["woof-compact-kpis", "woof-show-demo-controls", "woof-hide-tooltips", "woof-sidebar-default-collapsed"];
 
 function normalizeHexColor(value: unknown, fallback: string) {
   return typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value)
     ? value.toUpperCase()
     : fallback;
+}
+
+function normalizeNumber(value: unknown, fallback: number, min: number, max: number) {
+  const numericValue =
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.min(max, Math.max(min, Math.round(numericValue)));
+}
+
+function normalizeLandingPage(value: unknown): DashboardLandingPage {
+  const allowed: DashboardLandingPage[] = [
+    "/",
+    "/cafe",
+    "/services",
+    "/retail",
+    "/ai-simulation",
+    "/smart-reports",
+    "/feedback",
+    "/audit",
+  ];
+  return allowed.includes(value as DashboardLandingPage)
+    ? value as DashboardLandingPage
+    : DEFAULT_SETTINGS_PREFERENCES.dashboard.defaultLandingPage;
+}
+
+function normalizeChartView(value: unknown): DashboardChartView {
+  return value === "weekly" || value === "daily"
+    ? value
+    : DEFAULT_SETTINGS_PREFERENCES.dashboard.defaultChartView;
 }
 
 function normalizePreferences(value: Partial<SettingsPreferences> | null): SettingsPreferences {
@@ -76,6 +150,20 @@ function normalizePreferences(value: Partial<SettingsPreferences> | null): Setti
     notifications: {
       ...DEFAULT_SETTINGS_PREFERENCES.notifications,
       ...(value?.notifications ?? {}),
+    },
+    alertThresholds: {
+      capacityWarning: normalizeNumber(value?.alertThresholds?.capacityWarning, DEFAULT_SETTINGS_PREFERENCES.alertThresholds.capacityWarning, 1, 100),
+      lowInventory: normalizeNumber(value?.alertThresholds?.lowInventory, DEFAULT_SETTINGS_PREFERENCES.alertThresholds.lowInventory, 1, 100),
+      forecastAccuracyWarning: normalizeNumber(value?.alertThresholds?.forecastAccuracyWarning, DEFAULT_SETTINGS_PREFERENCES.alertThresholds.forecastAccuracyWarning, 1, 100),
+      dataStalenessDays: normalizeNumber(value?.alertThresholds?.dataStalenessDays, DEFAULT_SETTINGS_PREFERENCES.alertThresholds.dataStalenessDays, 1, 60),
+    },
+    dashboard: {
+      defaultLandingPage: normalizeLandingPage(value?.dashboard?.defaultLandingPage),
+      compactKpiCards: Boolean(value?.dashboard?.compactKpiCards ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.compactKpiCards),
+      showDemoControls: Boolean(value?.dashboard?.showDemoControls ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.showDemoControls),
+      showTooltips: Boolean(value?.dashboard?.showTooltips ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.showTooltips),
+      defaultChartView: normalizeChartView(value?.dashboard?.defaultChartView),
+      sidebarCollapsedByDefault: Boolean(value?.dashboard?.sidebarCollapsedByDefault ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.sidebarCollapsedByDefault),
     },
     businessProfile: {
       ...DEFAULT_SETTINGS_PREFERENCES.businessProfile,
@@ -111,8 +199,18 @@ export function getSettingsPreferences(): SettingsPreferences {
     const saved = localStorage.getItem(SETTINGS_KEY);
     const parsed = saved ? JSON.parse(saved) as Partial<SettingsPreferences> : null;
     const legacyTheme = localStorage.getItem(LEGACY_THEME_KEY);
+    const legacySidebarCollapsed = localStorage.getItem(LEGACY_SIDEBAR_KEY);
     return normalizePreferences({
       ...parsed,
+      dashboard: {
+        ...DEFAULT_SETTINGS_PREFERENCES.dashboard,
+        ...(parsed?.dashboard ?? {}),
+        sidebarCollapsedByDefault:
+          parsed?.dashboard?.sidebarCollapsedByDefault ??
+          (legacySidebarCollapsed === null
+            ? DEFAULT_SETTINGS_PREFERENCES.dashboard.sidebarCollapsedByDefault
+            : legacySidebarCollapsed === "true"),
+      },
       theme: parsed?.theme ?? (legacyTheme === "dark" ? "dark" : "light"),
     });
   } catch {
@@ -134,6 +232,7 @@ export function saveSettingsPreferences(
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(preferences));
       localStorage.setItem(LEGACY_THEME_KEY, preferences.theme);
+      localStorage.setItem(LEGACY_SIDEBAR_KEY, String(preferences.dashboard.sidebarCollapsedByDefault));
       window.dispatchEvent(new CustomEvent(PREFERENCES_EVENT, { detail: preferences }));
     } catch {
       // Keep the UI responsive even when browser storage is unavailable.
@@ -173,11 +272,24 @@ export function applyDocumentColorTheme(
   }
 }
 
+export function applyDocumentDashboardPreferences(
+  dashboard = DEFAULT_SETTINGS_PREFERENCES.dashboard,
+) {
+  if (typeof document !== "undefined") {
+    document.documentElement.classList.remove(...DASHBOARD_CLASSES);
+    document.documentElement.classList.toggle("woof-compact-kpis", dashboard.compactKpiCards);
+    document.documentElement.classList.toggle("woof-show-demo-controls", dashboard.showDemoControls);
+    document.documentElement.classList.toggle("woof-hide-tooltips", !dashboard.showTooltips);
+    document.documentElement.classList.toggle("woof-sidebar-default-collapsed", dashboard.sidebarCollapsedByDefault);
+  }
+}
+
 export function applyStoredTheme() {
   const preferences = getSettingsPreferences();
   if (typeof document !== "undefined") {
     document.documentElement.classList.toggle("woof-dark", preferences.theme === "dark");
     applyDocumentColorTheme(preferences.colorTheme, preferences.customTheme);
+    applyDocumentDashboardPreferences(preferences.dashboard);
   }
   return preferences.theme;
 }
