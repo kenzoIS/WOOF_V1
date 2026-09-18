@@ -15,6 +15,7 @@ import { SettingsModule } from './settings/settings.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
 import { LlmModule } from './llm/llm.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { LlmModule } from './llm/llm.module';
     PetHubWebhookModule,
     LlmModule,
     SettingsModule,
+    AuditModule,
   ],
 })
 export class AppModule {}

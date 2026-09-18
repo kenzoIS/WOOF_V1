@@ -407,6 +407,15 @@ export async function getAlertThresholds(): Promise<AlertThresholds> {
   return fetchApi('/settings/alert-thresholds');
 }
 
+export async function getAuditLogs(params?: Record<string, string>) {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+  return fetchApi(`/audit/logs${query}`);
+}
+
+export async function getAuditSummary() {
+  return fetchApi('/audit/summary');
+}
+
 export async function saveAlertThresholds(
   thresholds: Partial<AlertThresholds>,
 ): Promise<AlertThresholds> {

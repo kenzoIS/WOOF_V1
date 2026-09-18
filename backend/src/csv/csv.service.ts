@@ -13,6 +13,7 @@ import { DataValidationService } from './data-validation.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AwsService } from '../aws/aws.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AuditService } from '../audit/audit.service';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import {
@@ -97,6 +98,7 @@ export class CsvService {
     private analyticsService: AnalyticsService,
     private awsService: AwsService,
     private realtimeService: RealtimeService,
+    private auditService: AuditService,
   ) {}
 
   async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
@@ -182,6 +184,11 @@ export class CsvService {
         throw new InternalServerErrorException('Failed to create upload record in Supabase: ' + insertError?.message);
     }
     const upload = uploadRows[0];
+    void this.auditService.record({
+      actor: 'Owner', actorType: 'user', action: 'Uploaded new data', module: 'data_ingestion',
+      category: 'workflow', target: file.originalname, stateAfter: 'Uploaded',
+      metadata: { channel, uploadId: upload.id, recordCount: transactions.length },
+    });
 
     // Add csvUploadId and channel to each transaction, then bulk insert
     const uploadId = upload.id;
@@ -513,6 +520,11 @@ export class CsvService {
               message: `${module} forecast has been precomputed and cached.`,
               module,
               uploadId,
+            });
+            void this.auditService.record({
+              actor: 'System', actorType: 'system', action: 'Retrained forecasting system', module: 'forecasting',
+              category: 'ai_system', target: module, stateBefore: 'Stale', stateAfter: 'Updated',
+              metadata: { uploadId, trigger: 'new_data_upload' },
             });
           }
         });

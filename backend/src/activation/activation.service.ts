@@ -10,6 +10,7 @@ import { Model } from 'mongoose';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AuditService } from '../audit/audit.service';
 import {
   CampaignActivation,
   CampaignActivationDocument,
@@ -63,6 +64,7 @@ export class ActivationService {
     private readonly analyticsService: AnalyticsService,
     private readonly supabaseService: SupabaseService,
     private readonly realtimeService: RealtimeService,
+    private readonly auditService: AuditService,
     @InjectModel(CampaignActivation.name)
     private readonly campaignModel: Model<CampaignActivationDocument>,
   ) {}
@@ -200,7 +202,7 @@ export class ActivationService {
     return { campaign };
   }
 
-  async publishCampaignToPetHub(campaignId: string) {
+  async publishCampaignToPetHub(campaignId: string, actor = 'Owner', actorType: 'user' | 'system' = 'user') {
     const endpoint = this.getPetHubCampaignsEndpoint();
     if (!endpoint) {
       throw new BadRequestException(
@@ -237,6 +239,12 @@ export class ActivationService {
         .lean()
         .exec();
 
+      void this.auditService.record({
+        actor, actorType, action: 'Pushed campaign to PetHub', module: 'campaign_activation',
+        category: actorType === 'user' ? 'workflow' : 'ai_system', target: campaignTitle,
+        stateBefore: 'Queued', stateAfter: 'Published', metadata: { campaignId },
+      });
+
       this.realtimeService.emit({
         type: 'campaign_published',
         title: 'Campaign published',
@@ -249,6 +257,12 @@ export class ActivationService {
         pethubResponse: response.data,
       };
     } catch (error) {
+      void this.auditService.record({
+        actor, actorType, action: 'Failed to push campaign to PetHub', module: 'campaign_activation',
+        category: actorType === 'user' ? 'workflow' : 'ai_system', target: campaignTitle,
+        stateBefore: 'Queued', stateAfter: 'Publish failed', metadata: { campaignId, error: error instanceof Error ? error.message : String(error) },
+        status: 'failed',
+      });
       this.realtimeService.emit({
         type: 'campaign_publish_failed',
         title: 'PetHub publish failed',
@@ -352,7 +366,7 @@ export class ActivationService {
     };
   }
 
-  async updateCampaignStatus(campaignId: string, status: CampaignStatus) {
+  async updateCampaignStatus(campaignId: string, status: CampaignStatus, actor = 'Owner') {
     if (!['draft', 'approved', 'queued', 'published'].includes(status)) {
       throw new BadRequestException('Invalid campaign status');
     }
@@ -369,6 +383,11 @@ export class ActivationService {
     if (!campaign) {
       throw new BadRequestException('Campaign not found');
     }
+    void this.auditService.record({
+      actor, actorType: 'user', action: `Changed campaign status to ${status}`, module: 'campaign_activation',
+      category: 'workflow', target: campaign.title || campaignId,
+      stateBefore: current.status, stateAfter: status, metadata: { campaignId },
+    });
     return { campaign };
   }
 
