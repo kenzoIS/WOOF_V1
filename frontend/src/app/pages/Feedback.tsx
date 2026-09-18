@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { MessageSquareHeart, TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, RefreshCw, Sparkles } from "lucide-react";
+import { MessageSquareHeart, TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Box } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
@@ -95,7 +95,7 @@ export function Feedback() {
 
       toast.dismiss(toastId);
       toast.success("System Recalibration Complete!", {
-        description: `Models updated (${res?.metrics?.modelVersion || "v2.4"}). Run archived to AWS S3.`,
+        description: `Retraining initiated at ${new Date(res?.timestamp).toLocaleTimeString()}. Run archived to AWS S3.`,
       });
 
       await loadData();
@@ -235,7 +235,7 @@ export function Feedback() {
             {summary?.positiveRatio ? `${summary.positiveRatio}%` : "High"}
           </div>
           <p className="text-xs text-[#223047] opacity-50 hidden md:block">
-            {summary?.recalibrationsTriggered ?? 3} recalibrations synced
+            {summary?.recalibrationsTriggered ?? 0} recalibrations synced
           </p>
         </div>
       </div>
@@ -265,7 +265,22 @@ export function Feedback() {
         />
       </div>
 
-      {/* ACTIVE PROMOTIONS */}
+      {/* EMPTY STATE */}
+      {!loading && promotions.length === 0 ? (
+        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-8 md:p-12 space-y-4 text-center">
+          <div className="flex justify-center mb-4">
+            <div className="w-16 h-16 bg-[#FFF7FB] rounded-full flex items-center justify-center border border-[#FFD9EC]">
+              <Box className="w-8 h-8 text-[#F53799]" />
+            </div>
+          </div>
+          <h2 className="text-xl md:text-2xl font-bold text-[#223047]">No promotional feedback campaigns deployed yet</h2>
+          <p className="text-sm md:text-base text-[#223047] opacity-60 max-w-lg mx-auto" style={{ lineHeight: "1.6" }}>
+            Deploy a bundle from the Bundle Simulator to begin collecting real-world lift data and train the recommendation models.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* ACTIVE PROMOTIONS */}
       {activePromotions.length > 0 && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div>
@@ -485,6 +500,8 @@ export function Feedback() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* LEARNING INSIGHTS */}
       <div className="bg-gradient-to-br from-[#F53799] to-[#D42A7D] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 shadow-md">

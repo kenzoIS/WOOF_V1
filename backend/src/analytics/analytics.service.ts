@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -6543,7 +6544,7 @@ export class AnalyticsService {
   async recalibrateModels(source = 'user_action', reason = 'Manual recalibration'): Promise<any> {
     const timestamp = new Date().toISOString();
 
-    // 1. Invalidate or refresh stale cross-sell caches
+    // 1. Invalidate stale cross-sell caches
     try {
       await this.supabaseService.client
         .from('cross_sell_caches')
@@ -6553,39 +6554,47 @@ export class AnalyticsService {
       // Ignore cache clearing errors
     }
 
-    // 2. Build recalibration run metadata
+    // 2. Invalidate cached forecast runs in Supabase
+    try {
+      await this.supabaseService.client
+        .from('forecast_runs')
+        .delete()
+        .in('module', ['Cafe', 'Services']);
+    } catch {
+      // Ignore deletion errors
+    }
+
+    // 3. Trigger background forecast refresh for actual retraining
+    this.refreshForecastInBackground('Cafe', { forceRefresh: 'true' });
+    this.refreshForecastInBackground('Services', { forceRefresh: 'true' });
+
+    // 4. Build truthful recalibration run metadata
     const recalibrationPayload = {
       recalibrationId: `recal-${Date.now()}`,
       timestamp,
       source,
       reason,
-      status: 'completed',
+      status: 'recalibrating',
       enginesRecalibrated: [
         {
           name: 'Bundle Simulator FP-Growth Engine',
-          adjustment: 'Re-weighted low-association candidate confidence by feedback penalty coefficient',
-          status: 'synced',
+          adjustment: 'Re-weighting low-association candidate confidence by feedback penalty coefficient',
+          status: 'invalidated',
         },
         {
-          name: 'Traffic Optimizer Quiet Period Model',
-          adjustment: 'Updated Prophet exogenous regressor weights with observed response variances',
-          status: 'synced',
-        },
-        {
-          name: 'Dynamic Markdown Recommender',
-          adjustment: 'Recalibrated safe margin boundary and price elasticity thresholds',
-          status: 'synced',
+          name: 'Time-Series Forecast Engine (Prophet/SARIMAX)',
+          adjustment: 'Initiated full background retraining pipeline on Cafe and Services datasets',
+          status: 'training_in_progress',
         },
       ],
       metrics: {
-        priorAccuracy: '87.4%',
-        recalibratedAccuracyEstimate: '91.2%',
-        feedbackSignalsProcessed: 18,
-        modelVersion: 'v2.4.1-feedback-tuned',
+        priorAccuracy: null,
+        recalibratedAccuracyEstimate: null,
+        modelVersion: 'v2.5-dynamic',
       },
     };
 
-    // 3. Archive recalibration run to AWS S3 Data Lake
+    // 5. Archive recalibration run to AWS S3 Data Lake
     this.awsService
       .uploadRecalibrationArchive(source, recalibrationPayload)
       .catch((err) => console.warn(`S3 recalibration archive failed: ${err}`));
@@ -6629,7 +6638,7 @@ export class AnalyticsService {
       pendingCount: pending,
       avgAccuracy,
       positiveRatio,
-      recalibrationsTriggered: Math.max(3, notHelpful + 2),
+      recalibrationsTriggered: notHelpful,
       aiInsight: {
         title: 'Continuous System Learning Insight',
         summary: `Your feedback signals have helped WOOF identify that afternoon cross-sell bundles (Cafe + Services) achieve an average prediction accuracy of ${avgAccuracy}%. The system continuously recalibrates association rules and off-peak discount elasticity upon each feedback rating.`,
@@ -6657,18 +6666,15 @@ export class AnalyticsService {
   }
 
   private async getSeededFeedbackPromotions(status?: string, type?: string): Promise<any[]> {
-    // Collect active state from bundle_archives and dynamic_promos if available
     let dynamicHappyHours: any[] = [];
     try {
       const { data } = await this.supabaseService.client
         .from('dynamic_promos')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(3);
+        .limit(10);
       if (data && Array.isArray(data)) dynamicHappyHours = data;
-    } catch {
-      // Ignore
-    }
+    } catch {}
 
     let bundleArchives: any[] = [];
     try {
@@ -6676,107 +6682,152 @@ export class AnalyticsService {
         .from('bundle_archives')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(3);
+        .limit(10);
       if (data && Array.isArray(data)) bundleArchives = data;
-    } catch {
-      // Ignore
-    }
+    } catch {}
 
-    const items: any[] = [
-      {
-        id: 'promo-1',
+    const items: any[] = [];
+
+    bundleArchives.forEach(bundle => {
+      items.push({
+        id: `bundle-${bundle.id}`,
         type: 'bundle',
-        title: bundleArchives[0]?.bundle_name || 'Cappuccino + Full Grooming Bundle',
-        deployedDate: 'Apr 14, 2026',
-        targetTime: '2:00 PM - 5:00 PM',
-        discount: '15% off combo',
-        predictedLift: '+₱4,250',
-        actualLift: '+₱4,680',
-        confidence: '92%',
-        sector: 'Cafe + Services',
-        status: 'completed',
-        feedback: null,
-      },
-      {
-        id: 'promo-2',
-        type: 'flash-sale',
-        title: 'Flash Sale: Premium Dog Food',
-        deployedDate: 'Apr 14, 2026',
-        targetTime: '6:00 PM',
-        discount: '20% off',
-        predictedLift: '+₱2,890',
-        actualLift: '+₱3,120',
-        confidence: '87%',
-        sector: 'Retail',
-        status: 'completed',
-        feedback: null,
-      },
-      {
-        id: 'promo-3',
+        title: bundle.bundle_name || 'Promotional Bundle',
+        deployedDate: bundle.created_at ? new Date(bundle.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+        targetTime: bundle.availability_start_date && bundle.availability_end_date ? `${new Date(bundle.availability_start_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${new Date(bundle.availability_end_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : 'Anytime',
+        discount: bundle.discount_percent ? `${bundle.discount_percent}% off combo` : 'Combo discount',
+        predictedLift: bundle.lift ? `+₱${bundle.lift.toLocaleString()}` : null,
+        actualLift: bundle.metadata?.actualLift ? `+₱${bundle.metadata.actualLift.toLocaleString()}` : null,
+        confidence: bundle.confidence ? `${bundle.confidence}%` : '80%',
+        sector: bundle.items?.[0]?.sector || 'Cafe + Services',
+        status: bundle.status || 'completed',
+        feedback: bundle.metadata?.feedback || null,
+      });
+    });
+
+    dynamicHappyHours.forEach(promo => {
+      items.push({
+        id: `promo-${promo.id}`,
         type: 'happy-hour',
-        title: dynamicHappyHours[0]?.target_date
-          ? `Happy Hour Promo (${new Date(dynamicHappyHours[0].target_date).toLocaleDateString()})`
-          : 'Happy Hour: All Beverages',
-        deployedDate: 'Apr 13, 2026',
-        targetTime: '3:00 PM - 4:00 PM',
-        discount: dynamicHappyHours[0]?.owner_approved_discount_percent
-          ? `${dynamicHappyHours[0].owner_approved_discount_percent}% off`
-          : 'Buy 1 Get 1',
-        predictedLift: '+₱1,650',
-        actualLift: '+₱1,820',
-        confidence: '84%',
+        title: `Happy Hour Promo`,
+        deployedDate: promo.created_at ? new Date(promo.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+        targetTime: promo.target_date ? new Date(promo.target_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Anytime',
+        discount: promo.owner_approved_discount_percent ? `${promo.owner_approved_discount_percent}% off` : 'Discount',
+        predictedLift: promo.metadata?.predictedLift ? `+₱${promo.metadata.predictedLift.toLocaleString()}` : null,
+        actualLift: promo.metadata?.actualLift ? `+₱${promo.metadata.actualLift.toLocaleString()}` : null,
+        confidence: promo.probability_score ? `${promo.probability_score}%` : '80%',
         sector: 'Cafe',
-        status: 'completed',
-        feedback: null,
-      },
-      {
-        id: 'promo-4',
-        type: 'bundle',
-        title: bundleArchives[1]?.bundle_name || 'Pet Spa + Cafe Combo',
-        deployedDate: 'Apr 12, 2026',
-        targetTime: '11:00 AM - 3:00 PM',
-        discount: '10% off combo',
-        predictedLift: '+₱3,200',
-        actualLift: '+₱2,450',
-        confidence: '78%',
-        sector: 'Cafe + Services',
-        status: 'completed',
-        feedback: null,
-      },
-      {
-        id: 'promo-5',
-        type: 'discount',
-        title: 'Weekend Special: Pet Accessories',
-        deployedDate: 'Apr 11, 2026',
-        targetTime: 'All day',
-        discount: '25% off',
-        predictedLift: '+₱5,400',
-        actualLift: '+₱6,100',
-        confidence: '90%',
-        sector: 'Retail',
-        status: 'completed',
-        feedback: null,
-      },
-      {
-        id: 'promo-6',
-        type: 'bundle',
-        title: 'Birthday Package Deal',
-        deployedDate: 'Apr 15, 2026',
-        targetTime: '1:00 PM - 6:00 PM',
-        discount: '20% off package',
-        predictedLift: '+₱4,800',
-        actualLift: null,
-        confidence: '88%',
-        sector: 'Services + Cafe',
-        status: 'active',
-        feedback: null,
-      },
-    ];
+        status: promo.status === 'approved' ? 'active' : (promo.status || 'completed'),
+        feedback: promo.metadata?.feedback || null,
+      });
+    });
 
     return items.filter((p) => {
       if (status && status !== 'all' && p.status !== status) return false;
       if (type && type !== 'all' && p.type !== type) return false;
       return true;
     });
+  }
+
+  // ----------------------------------------------------------------
+  // Automated Lift Tracking
+  // ----------------------------------------------------------------
+  @Cron('0 2 * * *')
+  async trackActualPromotionLift() {
+    console.log('[Cron] Running daily actual lift calculation for promotions...');
+
+    // 1. Process bundle_archives
+    try {
+      const { data: bundles } = await this.supabaseService.client
+        .from('bundle_archives')
+        .select('*')
+        .in('status', ['active', 'completed'])
+        .not('availability_start_date', 'is', null)
+        .order('created_at', { ascending: false });
+
+      if (bundles && bundles.length > 0) {
+        for (const bundle of bundles) {
+          if (!bundle.availability_start_date || !bundle.availability_end_date) continue;
+          const startDate = new Date(bundle.availability_start_date);
+          const endDate = new Date(bundle.availability_end_date);
+          
+          if (Date.now() < startDate.getTime()) continue;
+          
+          const baselineStart = new Date(startDate);
+          baselineStart.setDate(baselineStart.getDate() - 7);
+          
+          const items = bundle.items?.map((i: any) => i.name) || [];
+          if (items.length === 0) continue;
+
+          const promoSales = await this.transactionModel.aggregate([
+            { $match: { productName: { $in: items }, date: { $gte: startDate, $lte: endDate } } },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+          ]); // .allowDiskUse(true) is handled by schema pre-hook
+
+          const baselineSales = await this.transactionModel.aggregate([
+            { $match: { productName: { $in: items }, date: { $gte: baselineStart, $lt: startDate } } },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+          ]);
+
+          const promoTotal = promoSales[0]?.totalAmount || 0;
+          const baselineTotal = baselineSales[0]?.totalAmount || 0;
+          
+          const actualLift = Math.max(0, promoTotal - baselineTotal);
+
+          const metadata = bundle.metadata || {};
+          metadata.actualLift = actualLift;
+
+          await this.supabaseService.client
+            .from('bundle_archives')
+            .update({ metadata })
+            .eq('id', bundle.id);
+        }
+      }
+    } catch (err) {
+      console.error('[Cron] Error calculating bundle lift:', err);
+    }
+
+    // 2. Process dynamic_promos
+    try {
+      const { data: promos } = await this.supabaseService.client
+        .from('dynamic_promos')
+        .select('*')
+        .in('status', ['approved', 'completed'])
+        .not('target_date', 'is', null);
+
+      if (promos && promos.length > 0) {
+        for (const promo of promos) {
+          const promoDate = new Date(promo.target_date);
+          if (Date.now() < promoDate.getTime()) continue;
+
+          const baselineStart = new Date(promoDate);
+          baselineStart.setDate(baselineStart.getDate() - 7);
+
+          const promoSales = await this.transactionModel.aggregate([
+            { $match: { sector: 'Cafe', date: { $gte: promoDate, $lt: new Date(promoDate.getTime() + 24 * 60 * 60 * 1000) } } },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+          ]);
+
+          const baselineSales = await this.transactionModel.aggregate([
+            { $match: { sector: 'Cafe', date: { $gte: baselineStart, $lt: new Date(baselineStart.getTime() + 24 * 60 * 60 * 1000) } } },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+          ]);
+
+          const promoTotal = promoSales[0]?.totalAmount || 0;
+          const baselineTotal = baselineSales[0]?.totalAmount || 0;
+          
+          const actualLift = Math.max(0, promoTotal - baselineTotal);
+          const metadata = promo.metadata || {};
+          metadata.actualLift = actualLift;
+
+          await this.supabaseService.client
+            .from('dynamic_promos')
+            .update({ metadata })
+            .eq('id', promo.id);
+        }
+      }
+    } catch (err) {
+      console.error('[Cron] Error calculating dynamic promo lift:', err);
+    }
   }
 }

@@ -280,6 +280,17 @@ export class ExogenousDataService {
     date: string,
   ): Promise<WeatherRecord | null> {
     try {
+      // Open-Meteo free tier limits future forecasts to ~14-16 days.
+      // Prevent guaranteed 400 Bad Request errors for far-future dates.
+      const targetDate = new Date(date).getTime();
+      const now = Date.now();
+      const daysAhead = (targetDate - now) / (1000 * 60 * 60 * 24);
+      
+      if (daysAhead > 14) {
+        this.logger.log(`Skipping Open-Meteo API for ${date} (>${Math.round(daysAhead)} days in future exceeds API limit). Returning default.`);
+        return null;
+      }
+
       // Use Archive API for historical data. It supports fetching exactly 1 day.
       const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean&timezone=Asia%2FManila`;
       

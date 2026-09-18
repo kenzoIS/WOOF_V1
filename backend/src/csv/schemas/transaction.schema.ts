@@ -67,7 +67,14 @@ export const TransactionSchema = SchemaFactory.createForClass(Transaction);
 
 // Add indexes for performance
 TransactionSchema.index({ csvUploadId: 1 });
-TransactionSchema.index({ sector: 1, date: 1 });
-TransactionSchema.index({ channel: 1 });
+TransactionSchema.index({ sector: 1, date: -1 });
+TransactionSchema.index({ channel: 1, date: -1 });
+TransactionSchema.index({ sector: 1, category: 1, date: -1 });
+TransactionSchema.index({ hash: 1 }, { unique: true, sparse: true });
+TransactionSchema.index({ date: 1, totalAmount: 1 }); // totalAmount instead of totalSpent since totalAmount is in schema
 TransactionSchema.index({ transactionId: 1 });
-TransactionSchema.index({ date: 1 });
+
+// Ensure all aggregations can spill to disk to prevent RAM limit errors
+TransactionSchema.pre('aggregate', function() {
+  this.allowDiskUse(true);
+});
