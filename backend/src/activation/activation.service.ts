@@ -83,14 +83,13 @@ export class ActivationService {
         5_000,
         {
           bundleCandidates: [],
-          warning: 'Cross-sell recommendations timed out; showing forecast/KPI recommendations only.',
+          warning:
+            'Cross-sell recommendations timed out; showing forecast/KPI recommendations only.',
         },
       ),
-      this.withTimeout(
-        this.analyticsService.getHomeOverview('week'),
-        5_000,
-        { suggestions: [] },
-      ),
+      this.withTimeout(this.analyticsService.getHomeOverview('week'), 5_000, {
+        suggestions: [],
+      }),
     ]);
 
     const bundleRecommendations = this.mapBundleRecommendations(
@@ -109,9 +108,10 @@ export class ActivationService {
     };
   }
 
-  private async resolveLatestActivationWindow(): Promise<
-    { dateStart: string; dateEnd: string } | null
-  > {
+  private async resolveLatestActivationWindow(): Promise<{
+    dateStart: string;
+    dateEnd: string;
+  } | null> {
     try {
       const range = await this.analyticsService.getDataRange();
       const end = String(range?.historyEndDate || '').slice(0, 10);
@@ -171,8 +171,7 @@ export class ActivationService {
       .toString(36)
       .slice(2, 7)
       .toUpperCase()}`;
-    const generatedAssets =
-      await this.generateAssetsWithClaude(recommendation);
+    const generatedAssets = await this.generateAssetsWithClaude(recommendation);
     const campaignImageUrl = await this.generateAndStoreCampaignImage(
       campaignId,
       recommendation,
@@ -202,7 +201,11 @@ export class ActivationService {
     return { campaign };
   }
 
-  async publishCampaignToPetHub(campaignId: string, actor = 'Owner', actorType: 'user' | 'system' = 'user') {
+  async publishCampaignToPetHub(
+    campaignId: string,
+    actor = 'Owner',
+    actorType: 'user' | 'system' = 'user',
+  ) {
     const endpoint = this.getPetHubCampaignsEndpoint();
     if (!endpoint) {
       throw new BadRequestException(
@@ -210,7 +213,10 @@ export class ActivationService {
       );
     }
 
-    let campaign = await this.campaignModel.findOne({ campaignId }).lean().exec();
+    let campaign = await this.campaignModel
+      .findOne({ campaignId })
+      .lean()
+      .exec();
     if (!campaign) {
       throw new BadRequestException('Campaign not found');
     }
@@ -235,14 +241,24 @@ export class ActivationService {
       const response = await this.postPetHubCampaign(endpoint, payload, token);
 
       const updated = await this.campaignModel
-        .findOneAndUpdate({ campaignId }, { status: 'published' }, { new: true })
+        .findOneAndUpdate(
+          { campaignId },
+          { status: 'published' },
+          { new: true },
+        )
         .lean()
         .exec();
 
       void this.auditService.record({
-        actor, actorType, action: 'Pushed campaign to PetHub', module: 'campaign_activation',
-        category: actorType === 'user' ? 'workflow' : 'ai_system', target: campaignTitle,
-        stateBefore: 'Queued', stateAfter: 'Published', metadata: { campaignId },
+        actor,
+        actorType,
+        action: 'Pushed campaign to PetHub',
+        module: 'campaign_activation',
+        category: actorType === 'user' ? 'workflow' : 'ai_system',
+        target: campaignTitle,
+        stateBefore: 'Queued',
+        stateAfter: 'Published',
+        metadata: { campaignId },
       });
 
       this.realtimeService.emit({
@@ -258,9 +274,18 @@ export class ActivationService {
       };
     } catch (error) {
       void this.auditService.record({
-        actor, actorType, action: 'Failed to push campaign to PetHub', module: 'campaign_activation',
-        category: actorType === 'user' ? 'workflow' : 'ai_system', target: campaignTitle,
-        stateBefore: 'Queued', stateAfter: 'Publish failed', metadata: { campaignId, error: error instanceof Error ? error.message : String(error) },
+        actor,
+        actorType,
+        action: 'Failed to push campaign to PetHub',
+        module: 'campaign_activation',
+        category: actorType === 'user' ? 'workflow' : 'ai_system',
+        target: campaignTitle,
+        stateBefore: 'Queued',
+        stateAfter: 'Publish failed',
+        metadata: {
+          campaignId,
+          error: error instanceof Error ? error.message : String(error),
+        },
         status: 'failed',
       });
       this.realtimeService.emit({
@@ -317,11 +342,13 @@ export class ActivationService {
       .lean()
       .exec();
 
-    return updated || {
-      ...campaign,
-      generatedAssets: updatedAssets,
-      pethubPayload: updatedPayload,
-    };
+    return (
+      updated || {
+        ...campaign,
+        generatedAssets: updatedAssets,
+        pethubPayload: updatedPayload,
+      }
+    );
   }
 
   private resolveCampaignImageUrl(campaign: any): string {
@@ -366,11 +393,18 @@ export class ActivationService {
     };
   }
 
-  async updateCampaignStatus(campaignId: string, status: CampaignStatus, actor = 'Owner') {
+  async updateCampaignStatus(
+    campaignId: string,
+    status: CampaignStatus,
+    actor = 'Owner',
+  ) {
     if (!['draft', 'approved', 'queued', 'published'].includes(status)) {
       throw new BadRequestException('Invalid campaign status');
     }
-    const current = await this.campaignModel.findOne({ campaignId }).lean().exec();
+    const current = await this.campaignModel
+      .findOne({ campaignId })
+      .lean()
+      .exec();
     if (!current) {
       throw new BadRequestException('Campaign not found');
     }
@@ -384,9 +418,15 @@ export class ActivationService {
       throw new BadRequestException('Campaign not found');
     }
     void this.auditService.record({
-      actor, actorType: 'user', action: `Changed campaign status to ${status}`, module: 'campaign_activation',
-      category: 'workflow', target: campaign.title || campaignId,
-      stateBefore: current.status, stateAfter: status, metadata: { campaignId },
+      actor,
+      actorType: 'user',
+      action: `Changed campaign status to ${status}`,
+      module: 'campaign_activation',
+      category: 'workflow',
+      target: campaign.title || campaignId,
+      stateBefore: current.status,
+      stateAfter: status,
+      metadata: { campaignId },
     });
     return { campaign };
   }
@@ -453,7 +493,10 @@ export class ActivationService {
       targetSegment: 'PetHub customers in the next high-intent sales window',
       expectedLift: item.expectedLift || 'Projected lift unavailable',
       confidence: item.confidence || 'N/A',
-      reason: item.reason || item.detailedExplanation || 'WOOF recommended this action.',
+      reason:
+        item.reason ||
+        item.detailedExplanation ||
+        'WOOF recommended this action.',
       analyticsContext: {
         trigger: item.trigger,
         detailedExplanation: item.detailedExplanation,
@@ -475,12 +518,10 @@ export class ActivationService {
       const response = await axios.post(
         'https://api.anthropic.com/v1/messages',
         {
-          model:
-            process.env.ANTHROPIC_MODEL ||
-            'claude-3-5-sonnet-latest',
+          model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest',
           max_tokens: 1200,
           temperature: 0.7,
-      system:
+          system:
             'You generate concise, brand-safe Happy Tails / PetHub campaign materials. Return only valid JSON with no markdown. Do not invent prices, customer names, competitor names, medical claims, guaranteed outcomes, or unverifiable claims.',
           messages: [
             {
@@ -514,9 +555,10 @@ export class ActivationService {
     const primary = items[0] || 'Happy Tails favorite';
     const pair = items.length > 1 ? items.join(' + ') : primary;
     const savings = this.extractDiscount(recommendation.promoMechanic);
-    const cta = recommendation.source === 'market_basket_analysis'
-      ? 'Claim Bundle'
-      : 'View Offer';
+    const cta =
+      recommendation.source === 'market_basket_analysis'
+        ? 'Claim Bundle'
+        : 'View Offer';
 
     return {
       headline: this.customerHeadline(recommendation, primary),
@@ -590,7 +632,10 @@ export class ActivationService {
         42,
       ),
       subtitle: this.limitText(
-        this.safeString(assets.shortCaption, payload.subtitle || payload.note || ''),
+        this.safeString(
+          assets.shortCaption,
+          payload.subtitle || payload.note || '',
+        ),
         100,
       ),
       description: this.limitText(
@@ -602,15 +647,26 @@ export class ActivationService {
         payload.campaignImageUrl || payload.campaign_image_url || '',
       ),
       ctaText: this.limitText(
-        this.safeString(assets.callToAction, payload.ctaText || payload.cta_text || 'View Offer'),
+        this.safeString(
+          assets.callToAction,
+          payload.ctaText || payload.cta_text || 'View Offer',
+        ),
         24,
       ),
       promoMechanic: this.limitText(
-        this.safeString(campaign.promoMechanic, payload.promoMechanic || payload.promo_mechanic || 'Featured PetHub placement'),
+        this.safeString(
+          campaign.promoMechanic,
+          payload.promoMechanic ||
+            payload.promo_mechanic ||
+            'Featured PetHub placement',
+        ),
         120,
       ),
       targetSegment: this.limitText(
-        this.safeString(campaign.targetSegment, payload.targetSegment || payload.target_segment || 'Pet owners'),
+        this.safeString(
+          campaign.targetSegment,
+          payload.targetSegment || payload.target_segment || 'Pet owners',
+        ),
         80,
       ),
       source: 'WOOF',
@@ -744,7 +800,9 @@ export class ActivationService {
 </svg>`;
   }
 
-  private inferCampaignSector(recommendation: ActivationRecommendation): string {
+  private inferCampaignSector(
+    recommendation: ActivationRecommendation,
+  ): string {
     const text = [
       recommendation.title,
       recommendation.promoMechanic,
@@ -753,16 +811,29 @@ export class ActivationService {
     ]
       .join(' ')
       .toLowerCase();
-    if (text.includes('groom') || text.includes('service') || text.includes('boarding')) {
+    if (
+      text.includes('groom') ||
+      text.includes('service') ||
+      text.includes('boarding')
+    ) {
       return 'Services';
     }
-    if (text.includes('cafe') || text.includes('drink') || text.includes('treat') || text.includes('food')) {
+    if (
+      text.includes('cafe') ||
+      text.includes('drink') ||
+      text.includes('treat') ||
+      text.includes('food')
+    ) {
       return 'Cafe';
     }
     return 'Retail';
   }
 
-  private wrapSvgText(value: string, maxChars: number, maxLines: number): string[] {
+  private wrapSvgText(
+    value: string,
+    maxChars: number,
+    maxLines: number,
+  ): string[] {
     const words = this.safeString(value, 'Happy Tails Offer').split(/\s+/);
     const lines: string[] = [];
     let current = '';
@@ -777,7 +848,10 @@ export class ActivationService {
       if (lines.length === maxLines) break;
     }
     if (current && lines.length < maxLines) lines.push(current);
-    if (lines.length === maxLines && words.join(' ').length > lines.join(' ').length) {
+    if (
+      lines.length === maxLines &&
+      words.join(' ').length > lines.join(' ').length
+    ) {
       lines[maxLines - 1] = this.limitText(lines[maxLines - 1], maxChars);
     }
     return lines;
@@ -911,7 +985,8 @@ export class ActivationService {
       return this.limitText(`Shop ${pair}`, 34);
     }
     const mechanic = recommendation.promoMechanic.toLowerCase();
-    if (mechanic.includes('%')) return this.limitText(recommendation.promoMechanic, 34);
+    if (mechanic.includes('%'))
+      return this.limitText(recommendation.promoMechanic, 34);
     return 'Featured PetHub Offer';
   }
 
@@ -996,7 +1071,9 @@ export class ActivationService {
       | undefined;
     const recommendation = sourceRecommendation || (body as any);
     if (!recommendation?.title) {
-      throw new BadRequestException('Campaign generation requires a recommendation title');
+      throw new BadRequestException(
+        'Campaign generation requires a recommendation title',
+      );
     }
     return {
       id: String(recommendation.id || `manual-${Date.now()}`),
@@ -1008,9 +1085,7 @@ export class ActivationService {
       promoMechanic: String(
         recommendation.promoMechanic || 'Featured PetHub placement',
       ),
-      targetSegment: String(
-        recommendation.targetSegment || 'PetHub customers',
-      ),
+      targetSegment: String(recommendation.targetSegment || 'PetHub customers'),
       expectedLift: String(recommendation.expectedLift || 'N/A'),
       confidence: String(recommendation.confidence || 'N/A'),
       reason: String(recommendation.reason || 'Generated from WOOF analytics.'),
@@ -1025,7 +1100,8 @@ export class ActivationService {
   private suggestMechanic(item: any): string {
     const score = Number(item.opportunityScore || 0);
     const crossSector = Boolean(item.crossSector);
-    if (score >= 75) return crossSector ? '15% cross-sector bundle' : '10% bundle discount';
+    if (score >= 75)
+      return crossSector ? '15% cross-sector bundle' : '10% bundle discount';
     if (score >= 45) return 'PetHub featured bundle placement';
     return 'Awareness bundle with homepage placement';
   }
@@ -1036,6 +1112,9 @@ export class ActivationService {
   }
 
   private slug(value: string): string {
-    return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
   }
 }

@@ -9,6 +9,10 @@ export class WeatherController {
   async triggerWeatherSync() {
     await this.weatherService.fetchCurrentWeather();
     await this.weatherService.fetchDailyForecast();
-    return { success: true, message: 'Weather sync triggered successfully for current and 5-day forecast.' };
+    return {
+      success: true,
+      message:
+        'Weather sync triggered successfully for current and 5-day forecast.',
+    };
   }
 }

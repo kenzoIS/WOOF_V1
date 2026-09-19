@@ -26,7 +26,10 @@ export class CampaignActivation {
   @Prop({ default: 'PetHub customers' })
   targetSegment: string;
 
-  @Prop({ default: 'draft', enum: ['draft', 'approved', 'queued', 'published'] })
+  @Prop({
+    default: 'draft',
+    enum: ['draft', 'approved', 'queued', 'published'],
+  })
   status: 'draft' | 'approved' | 'queued' | 'published';
 
   @Prop({ type: Object, required: true })

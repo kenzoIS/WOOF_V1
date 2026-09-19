@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -6,8 +10,10 @@ import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Transaction, TransactionDocument } from '../csv/schemas/transaction.schema';
-
+import {
+  Transaction,
+  TransactionDocument,
+} from '../csv/schemas/transaction.schema';
 
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { LlmService } from '../llm/llm.service';
@@ -30,18 +36,25 @@ export class SmartReportsService {
       '.venv',
       process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
     );
-    const configuredPython = this.configService.get<string>('PYTHON_PATH')?.trim();
+    const configuredPython = this.configService
+      .get<string>('PYTHON_PATH')
+      ?.trim();
     const configuredLooksLikePath = Boolean(
       configuredPython &&
-        (configuredPython.includes('/') ||
-          configuredPython.includes('\\') ||
-          configuredPython.startsWith('.')),
+      (configuredPython.includes('/') ||
+        configuredPython.includes('\\') ||
+        configuredPython.startsWith('.')),
     );
-    const configuredPath = configuredLooksLikePath && configuredPython
-      ? path.resolve(process.cwd(), configuredPython)
-      : null;
+    const configuredPath =
+      configuredLooksLikePath && configuredPython
+        ? path.resolve(process.cwd(), configuredPython)
+        : null;
 
-    if (configuredPython && (!configuredLooksLikePath || (configuredPath && existsSync(configuredPath)))) {
+    if (
+      configuredPython &&
+      (!configuredLooksLikePath ||
+        (configuredPath && existsSync(configuredPath)))
+    ) {
       return configuredPath || configuredPython;
     }
 
@@ -125,39 +138,77 @@ export class SmartReportsService {
 
   private getMockTaglishReviewsForCategory(category: string): string[] {
     const reviewsMap: Record<string, string[]> = {
-      'Grooming': [
+      Grooming: [
         'Super ganda ng gupit sa aso ko, mabait din yung groomer.',
         'Medyo matagal lang yung pila pero mahusay naman mag-groom.',
-        'Ang bango ng balahibo pagkatapos! Will recommend this cafe.'
+        'Ang bango ng balahibo pagkatapos! Will recommend this cafe.',
       ],
-      'Coffee': [
+      Coffee: [
         'Masarap yung Caramel Macchiato, hindi masyadong matamis.',
         'Mabagal yung service nila nung weekend, tagal lumabas ng iced coffee.',
-        'Sulit yung price at friendly ang staff.'
+        'Sulit yung price at friendly ang staff.',
       ],
       'Rice meals': [
         'Ang sarap ng baked mac at chicken! Sulit na sulit.',
         'Medyo late dumating yung food order pero masarap naman.',
-        'Hindi masyadong masarap yung rice meal na nakuha ko ngayon.'
-      ]
+        'Hindi masyadong masarap yung rice meal na nakuha ko ngayon.',
+      ],
     };
-    return reviewsMap[category] || [
-      'Maganda naman ang service at friendly ang staff.',
-      'Medyo matagal pero okay naman.'
-    ];
+    return (
+      reviewsMap[category] || [
+        'Maganda naman ang service at friendly ang staff.',
+        'Medyo matagal pero okay naman.',
+      ]
+    );
   }
 
-  private analyzeTaglishSentiment(reviews: string[]): { score: number; label: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' } {
+  private analyzeTaglishSentiment(reviews: string[]): {
+    score: number;
+    label: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
+  } {
     let positiveCount = 0;
     let negativeCount = 0;
-    
-    const posKeywords = ['maganda', 'mahusay', 'mabango', 'masarap', 'gusto', 'recommend', 'mabilis', 'friendly', 'bait', 'perfect', 'love', 'great', 'good', 'happy', 'satisfied', 'sulit', 'sarap'];
-    const negKeywords = ['mabagal', 'matagal', 'late', 'pangit', 'mahal', 'bad', 'poor', 'sira', 'disappointed', 'worst', 'delay', 'rude', 'dumi', 'marumi'];
 
-    reviews.forEach(review => {
+    const posKeywords = [
+      'maganda',
+      'mahusay',
+      'mabango',
+      'masarap',
+      'gusto',
+      'recommend',
+      'mabilis',
+      'friendly',
+      'bait',
+      'perfect',
+      'love',
+      'great',
+      'good',
+      'happy',
+      'satisfied',
+      'sulit',
+      'sarap',
+    ];
+    const negKeywords = [
+      'mabagal',
+      'matagal',
+      'late',
+      'pangit',
+      'mahal',
+      'bad',
+      'poor',
+      'sira',
+      'disappointed',
+      'worst',
+      'delay',
+      'rude',
+      'dumi',
+      'marumi',
+    ];
+
+    reviews.forEach((review) => {
       const words = review.toLowerCase().split(/\s+/);
-      words.forEach(word => {
-        const cleanWord = word.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+      words.forEach((word) => {
+        const cleanWord = word.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
         if (posKeywords.includes(cleanWord)) positiveCount++;
         if (negKeywords.includes(cleanWord)) negativeCount++;
       });
@@ -166,7 +217,7 @@ export class SmartReportsService {
     const total = positiveCount + negativeCount;
     if (total === 0) return { score: 0, label: 'NEUTRAL' };
     const score = (positiveCount - negativeCount) / total;
-    
+
     let label: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' = 'NEUTRAL';
     if (score > 0.05) label = 'POSITIVE';
     else if (score < -0.05) label = 'NEGATIVE';
@@ -198,7 +249,8 @@ export class SmartReportsService {
     // 3. Query PostgreSQL star schema fact table via Supabase client
     const { data: factRows, error: factErr } = await this.supabase
       .from('fact_cross_channel_transactions')
-      .select(`
+      .select(
+        `
         net_sales,
         gross_profit,
         cost_of_goods,
@@ -208,17 +260,22 @@ export class SmartReportsService {
         channel_dim:channel_id!inner(channel_name),
         date_dim:date_id!inner(full_date, avg_temperature_celsius, rainfall_mm, is_holiday),
         business_segment_dim:segment_id!inner(segment_name)
-      `)
+      `,
+      )
       .gte('date_dim.full_date', startDateStr)
       .lte('date_dim.full_date', endDateStr)
       .in('business_segment_dim.segment_name', pgSectors);
 
     if (factErr) {
-      throw new InternalServerErrorException(`Supabase query failed: ${factErr.message}`);
+      throw new InternalServerErrorException(
+        `Supabase query failed: ${factErr.message}`,
+      );
     }
 
     if (!factRows || factRows.length === 0) {
-      throw new NotFoundException('No transactions found in the specified date range and sectors');
+      throw new NotFoundException(
+        'No transactions found in the specified date range and sectors',
+      );
     }
 
     // 4. In-Memory descriptive aggregation & Data Completeness evaluation
@@ -255,7 +312,8 @@ export class SmartReportsService {
       }
 
       const channelName = row.channel_dim?.channel_name || 'Unknown';
-      channelRevenue[channelName] = (channelRevenue[channelName] || 0) + netSales;
+      channelRevenue[channelName] =
+        (channelRevenue[channelName] || 0) + netSales;
 
       const itemId = row.product_id || row.service_id;
       const category = itemCategoryMap.get(itemId) || 'Uncategorized';
@@ -278,9 +336,13 @@ export class SmartReportsService {
     });
 
     const dataCompleteness =
-      factRows.length > 0 ? Math.round((completeCount / factRows.length) * 100) : 100;
+      factRows.length > 0
+        ? Math.round((completeCount / factRows.length) * 100)
+        : 100;
     const averageMargin =
-      totalRevenue > 0 ? Math.round((totalGrossProfit / totalRevenue) * 100) : 0;
+      totalRevenue > 0
+        ? Math.round((totalGrossProfit / totalRevenue) * 100)
+        : 0;
 
     const history = Array.from(dailyHistoryMap.values()).sort((a, b) =>
       a.date.localeCompare(b.date),
@@ -350,7 +412,8 @@ export class SmartReportsService {
     );
     const llmSummary = await this.llmService.generate({
       feature: 'report_summary',
-      prompt: 'Write the executive summary for this verified WOOF report. Preserve every number exactly and separate observations from recommendations.',
+      prompt:
+        'Write the executive summary for this verified WOOF report. Preserve every number exactly and separate observations from recommendations.',
       context: {
         title,
         dateRange: { start: startDateStr, end: endDateStr },
@@ -406,7 +469,9 @@ export class SmartReportsService {
       .single();
 
     if (saveErr) {
-      throw new InternalServerErrorException(`Failed to save report: ${saveErr.message}`);
+      throw new InternalServerErrorException(
+        `Failed to save report: ${saveErr.message}`,
+      );
     }
 
     return this.mapToCamelCase(newReport);

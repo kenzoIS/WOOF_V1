@@ -19,9 +19,11 @@ export class CsvController {
   constructor(private readonly csvService: CsvService) {}
 
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file', {
-    limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
-  }))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
+    }),
+  )
   async uploadCsv(
     @UploadedFile() file: Express.Multer.File,
     @Body('channel') channel?: string,
@@ -31,7 +33,9 @@ export class CsvController {
     }
 
     const allowedExtensions = ['.csv', '.xlsx', '.xls'];
-    const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
+    const ext = file.originalname
+      .toLowerCase()
+      .slice(file.originalname.lastIndexOf('.'));
     if (!allowedExtensions.includes(ext)) {
       throw new BadRequestException('Only CSV and Excel files are supported');
     }

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 
 const ANALYTICS_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -384,8 +392,21 @@ export class AnalyticsController {
   }
 
   @Post('promos/draft')
-  async activateHappyHour(@Body() body: { discountPercent: number, targetDate: string, targetHour: number, probabilityScore: number }) {
-    return this.analyticsService.activateHappyHour(body.discountPercent, body.targetDate, body.targetHour, body.probabilityScore);
+  async activateHappyHour(
+    @Body()
+    body: {
+      discountPercent: number;
+      targetDate: string;
+      targetHour: number;
+      probabilityScore: number;
+    },
+  ) {
+    return this.analyticsService.activateHappyHour(
+      body.discountPercent,
+      body.targetDate,
+      body.targetHour,
+      body.probabilityScore,
+    );
   }
 
   // ----------------------------------------------------------------
@@ -407,15 +428,18 @@ export class AnalyticsController {
 
   @Post('feedback/submit')
   async submitFeedback(
-    @Body() dto: { id: string; feedback: 'helpful' | 'not-helpful'; notes?: string },
+    @Body()
+    dto: {
+      id: string;
+      feedback: 'helpful' | 'not-helpful';
+      notes?: string;
+    },
   ) {
     return this.analyticsService.submitFeedback(dto.id, dto);
   }
 
   @Post('feedback/recalibrate')
-  async recalibrateModels(
-    @Body() dto: { source?: string; reason?: string },
-  ) {
+  async recalibrateModels(@Body() dto: { source?: string; reason?: string }) {
     return this.analyticsService.recalibrateModels(dto?.source, dto?.reason);
   }
 }

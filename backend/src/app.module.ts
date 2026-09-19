@@ -34,12 +34,17 @@ import { AuditModule } from './audit/audit.module';
             'MONGODB_URI still contains a placeholder. Replace <db_password> in backend/.env with the MongoDB Atlas database user password.',
           );
         }
-        
+
         if (!config.SUPABASE_URL || typeof config.SUPABASE_URL !== 'string') {
           throw new Error('SUPABASE_URL must be configured in backend/.env');
         }
-        if (!config.SUPABASE_SERVICE_ROLE_KEY || typeof config.SUPABASE_SERVICE_ROLE_KEY !== 'string') {
-          throw new Error('SUPABASE_SERVICE_ROLE_KEY must be configured in backend/.env');
+        if (
+          !config.SUPABASE_SERVICE_ROLE_KEY ||
+          typeof config.SUPABASE_SERVICE_ROLE_KEY !== 'string'
+        ) {
+          throw new Error(
+            'SUPABASE_SERVICE_ROLE_KEY must be configured in backend/.env',
+          );
         }
 
         return config;

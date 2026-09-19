@@ -20,7 +20,6 @@ import { ExogenousDataService } from '../common/exogenous-data.service';
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { AwsService } from '../aws/aws.service';
 
-
 /**
  * Forecasting limitations for the current capstone implementation:
  * 1. Forecast results are not cached; every API call re-runs the selected
@@ -175,8 +174,10 @@ export class AnalyticsService {
       return this.emptyHomeOverview(normalizedRange);
     }
 
-    const { start, end, previousStart, previousEnd } =
-      this.getHomeDateWindow(range, latestDate);
+    const { start, end, previousStart, previousEnd } = this.getHomeDateWindow(
+      range,
+      latestDate,
+    );
     const dateFilter = { date: { $gte: start, $lte: end } };
     const previousDateFilter = {
       date: { $gte: previousStart, $lte: previousEnd },
@@ -201,7 +202,9 @@ export class AnalyticsService {
     let matchedChannelDateFilter: any = dateFilter;
     if (digitalBounds.length > 0) {
       const shopeeBound = digitalBounds.find((b: any) => b._id === 'Shopee');
-      const tiktokBound = digitalBounds.find((b: any) => b._id === 'TikTok Shop');
+      const tiktokBound = digitalBounds.find(
+        (b: any) => b._id === 'TikTok Shop',
+      );
 
       const commonStart = new Date(
         Math.max(
@@ -276,7 +279,9 @@ export class AnalyticsService {
         { $sort: { _id: 1 } },
       ]),
       this.transactionModel.aggregate([
-        { $match: { date: { $gte: this.getHeatmapStartDate(end), $lte: end } } },
+        {
+          $match: { date: { $gte: this.getHeatmapStartDate(end), $lte: end } },
+        },
         {
           $project: {
             sector: 1,
@@ -365,9 +370,7 @@ export class AnalyticsService {
         totalQuantity: currentTotals.totalQuantity,
         totalItems: currentTotals.totalItems,
         retailRevenue: this.round(retailRevenue),
-        avgOrderValue: totalOrders
-          ? this.round(totalRevenue / totalOrders)
-          : 0,
+        avgOrderValue: totalOrders ? this.round(totalRevenue / totalOrders) : 0,
         revenueChangePercent: this.percentChange(
           currentTotals.totalRevenue,
           previousTotals.totalRevenue,
@@ -379,7 +382,11 @@ export class AnalyticsService {
         busiestSector,
         pendingSuggestions: suggestions.length,
       },
-      insight: this.buildHomeInsight(sectorSummary, channelSummary, suggestions),
+      insight: this.buildHomeInsight(
+        sectorSummary,
+        channelSummary,
+        suggestions,
+      ),
       omnichannelSeries: this.formatHomeSeries(series, normalizedRange),
       sectorSummary,
       channelSummary,
@@ -395,9 +402,7 @@ export class AnalyticsService {
     const normalizedSector =
       sector === 'all' ? 'all' : this.normalizeSector(sector);
     const sectorFilter =
-      normalizedSector === 'all'
-        ? {}
-        : { sector: normalizedSector };
+      normalizedSector === 'all' ? {} : { sector: normalizedSector };
 
     const [kpis, topItems, dailyRevenue, channelBreakdown] = await Promise.all([
       // KPIs
@@ -474,26 +479,50 @@ export class AnalyticsService {
 
     const enhancedChannelBreakdown = channelBreakdown.map((c: any) => {
       const netSales = Math.round((Number(c.revenue) || 0) * 100) / 100;
-      const grossSales = Math.round((Number(c.grossSales) || netSales) * 100) / 100;
+      const grossSales =
+        Math.round((Number(c.grossSales) || netSales) * 100) / 100;
       const discount = Math.round((Number(c.discount) || 0) * 100) / 100;
       const costOfGoods = Math.round((Number(c.costOfGoods) || 0) * 100) / 100;
-      
+
       // Standard Retail Pet Supplies Merchandise Cost (~71.8% of sales)
       const retailCogsRatio = 0.718;
-      const effectiveCogs = costOfGoods > 0 ? costOfGoods : Math.round(netSales * retailCogsRatio * 100) / 100;
+      const effectiveCogs =
+        costOfGoods > 0
+          ? costOfGoods
+          : Math.round(netSales * retailCogsRatio * 100) / 100;
       const grossProfit = Math.round((netSales - effectiveCogs) * 100) / 100;
-      const orderCount = Array.isArray(c.orders) ? c.orders.length : (Number(c.count) || 0);
-      const grossMargin = netSales > 0 ? Math.round((grossProfit / netSales) * 1000) / 10 : 0;
-      
+      const orderCount = Array.isArray(c.orders)
+        ? c.orders.length
+        : Number(c.count) || 0;
+      const grossMargin =
+        netSales > 0 ? Math.round((grossProfit / netSales) * 1000) / 10 : 0;
+
       // Standard Philippine Marketplace Commission Rates (TikTok Shop ~9.0%, Shopee ~8.5%, PetHub ~5.0%, POS = 0%)
       const chName = String(c._id || 'Unknown');
-      const commissionRate = chName.includes('TikTok') ? 0.090 : chName.includes('Shopee') ? 0.085 : chName.includes('PetHub') ? 0.050 : 0.0;
+      const commissionRate = chName.includes('TikTok')
+        ? 0.09
+        : chName.includes('Shopee')
+          ? 0.085
+          : chName.includes('PetHub')
+            ? 0.05
+            : 0.0;
       const commissionFee = Math.round(netSales * commissionRate * 100) / 100;
-      const netTakehomeProfit = Math.max(0, Math.round((grossProfit - commissionFee) * 100) / 100);
-      const netProfitMargin = netSales > 0 ? Math.round((netTakehomeProfit / netSales) * 1000) / 10 : 0;
-      const profitPerOrder = orderCount > 0 ? Math.round((netTakehomeProfit / orderCount) * 100) / 100 : 0;
-      const avgOrderValue = orderCount > 0 ? Math.round((netSales / orderCount) * 100) / 100 : 0;
-      const discountRate = grossSales > 0 ? Math.round((discount / grossSales) * 1000) / 10 : 0;
+      const netTakehomeProfit = Math.max(
+        0,
+        Math.round((grossProfit - commissionFee) * 100) / 100,
+      );
+      const netProfitMargin =
+        netSales > 0
+          ? Math.round((netTakehomeProfit / netSales) * 1000) / 10
+          : 0;
+      const profitPerOrder =
+        orderCount > 0
+          ? Math.round((netTakehomeProfit / orderCount) * 100) / 100
+          : 0;
+      const avgOrderValue =
+        orderCount > 0 ? Math.round((netSales / orderCount) * 100) / 100 : 0;
+      const discountRate =
+        grossSales > 0 ? Math.round((discount / grossSales) * 1000) / 10 : 0;
 
       return {
         channel: chName,
@@ -561,8 +590,12 @@ export class AnalyticsService {
     const sectors = rows.reduce((acc: Record<string, any>, row: any) => {
       const sector = this.normalizeSector(String(row._id || 'Unknown'));
       acc[sector] = {
-        minDate: row.minDate ? this.formatDateInTimeZone(row.minDate, 'Asia/Manila') : null,
-        maxDate: row.maxDate ? this.formatDateInTimeZone(row.maxDate, 'Asia/Manila') : null,
+        minDate: row.minDate
+          ? this.formatDateInTimeZone(row.minDate, 'Asia/Manila')
+          : null,
+        maxDate: row.maxDate
+          ? this.formatDateInTimeZone(row.maxDate, 'Asia/Manila')
+          : null,
         rows: Number(row.rows) || 0,
       };
       return acc;
@@ -609,7 +642,8 @@ export class AnalyticsService {
     const uploadStats: Record<string, any> = {};
     if (uploadRows) {
       for (const r of uploadRows) {
-        if (!uploadStats[r.channel]) uploadStats[r.channel] = { uploadCount: 0, latestUploadAt: null };
+        if (!uploadStats[r.channel])
+          uploadStats[r.channel] = { uploadCount: 0, latestUploadAt: null };
         uploadStats[r.channel].uploadCount++;
         const currentMax = uploadStats[r.channel].latestUploadAt;
         if (!currentMax || new Date(r.uploaded_at) > new Date(currentMax)) {
@@ -617,9 +651,9 @@ export class AnalyticsService {
         }
       }
     }
-    const mappedUploadRows = Object.keys(uploadStats).map(channel => ({
+    const mappedUploadRows = Object.keys(uploadStats).map((channel) => ({
       _id: channel,
-      ...uploadStats[channel]
+      ...uploadStats[channel],
     }));
 
     const byUploadChannel = new Map(
@@ -628,17 +662,28 @@ export class AnalyticsService {
 
     return {
       serverNow: new Date().toISOString(),
-      connectionMode: 'placeholder-until-api-webhooks',
       channels: channels.map((channel) => {
         const transaction = byTransactionChannel.get(channel) || {};
         const upload = byUploadChannel.get(channel) || {};
         const rowCount = Number(transaction.rows) || 0;
         const uploadCount = Number(upload.uploadCount) || 0;
+
+        let connectionMode = 'idle-batch';
+        if (transaction.latestTransactionAt) {
+          const hoursSinceLastTx =
+            (Date.now() - new Date(transaction.latestTransactionAt).getTime()) /
+            (1000 * 60 * 60);
+          if (hoursSinceLastTx <= 1) {
+            connectionMode = 'active-sync';
+          }
+        }
+
         return {
           channel,
           label: channel === 'TikTok Shop' ? 'TikTok' : channel,
           connected: rowCount > 0 || uploadCount > 0,
           status: rowCount > 0 || uploadCount > 0 ? 'active' : 'pending',
+          connectionMode,
           rowCount,
           uploadCount,
           latestTransactionAt: transaction.latestTransactionAt || null,
@@ -661,11 +706,30 @@ export class AnalyticsService {
     }
     const module = this.normalizeForecastModule(sector);
 
-    const reqTemp = overrides?.temp !== undefined && overrides.temp !== '' ? Number(overrides.temp) : undefined;
-    const reqRain = overrides?.rain !== undefined && overrides.rain !== '' ? (overrides.rain === '1' ? 1 : 0) : undefined;
-    const reqHumidity = overrides?.humidity !== undefined && overrides.humidity !== '' ? Number(overrides.humidity) : undefined;
-    const reqHoliday = overrides?.holiday !== undefined && overrides.holiday !== '' ? (overrides.holiday === '1' ? 1 : 0) : undefined;
-    const reqDays = overrides?.days !== undefined && overrides.days !== '' ? this.normalizeForecastDays(overrides.days) : DEFAULT_FORECAST_DAYS;
+    const reqTemp =
+      overrides?.temp !== undefined && overrides.temp !== ''
+        ? Number(overrides.temp)
+        : undefined;
+    const reqRain =
+      overrides?.rain !== undefined && overrides.rain !== ''
+        ? overrides.rain === '1'
+          ? 1
+          : 0
+        : undefined;
+    const reqHumidity =
+      overrides?.humidity !== undefined && overrides.humidity !== ''
+        ? Number(overrides.humidity)
+        : undefined;
+    const reqHoliday =
+      overrides?.holiday !== undefined && overrides.holiday !== ''
+        ? overrides.holiday === '1'
+          ? 1
+          : 0
+        : undefined;
+    const reqDays =
+      overrides?.days !== undefined && overrides.days !== ''
+        ? this.normalizeForecastDays(overrides.days)
+        : DEFAULT_FORECAST_DAYS;
     const reqMode = this.normalizeForecastMode(
       overrides?.forecastMode,
       overrides?.backtestSplit,
@@ -676,15 +740,18 @@ export class AnalyticsService {
         : undefined;
     const reqTrainEndDate =
       reqMode === 'fixed-window'
-        ? this.normalizeDateKey(overrides?.trainEndDate) || BACKTEST_TRAIN_END_DATE
+        ? this.normalizeDateKey(overrides?.trainEndDate) ||
+          BACKTEST_TRAIN_END_DATE
         : undefined;
     const reqTestStartDate =
       reqMode === 'fixed-window'
-        ? this.normalizeDateKey(overrides?.testStartDate) || BACKTEST_TEST_START_DATE
+        ? this.normalizeDateKey(overrides?.testStartDate) ||
+          BACKTEST_TEST_START_DATE
         : undefined;
     const reqTestEndDate =
       reqMode === 'fixed-window'
-        ? this.normalizeDateKey(overrides?.testEndDate) || BACKTEST_TEST_END_DATE
+        ? this.normalizeDateKey(overrides?.testEndDate) ||
+          BACKTEST_TEST_END_DATE
         : undefined;
     const reqSplit = '90-5-5';
 
@@ -697,9 +764,8 @@ export class AnalyticsService {
       .limit(1)
       .maybeSingle();
 
-    const moduleTransactionStamp = await this.getForecastModuleTransactionStamp(
-      module,
-    );
+    const moduleTransactionStamp =
+      await this.getForecastModuleTransactionStamp(module);
 
     if (cachedForecast) {
       const metadata = cachedForecast.model_metadata || {};
@@ -716,15 +782,32 @@ export class AnalyticsService {
           moduleTransactionStamp.latestTransactionTime;
 
       // Check overrides match
-      const cacheTemp = metadata.tempOverride !== undefined ? Number(metadata.tempOverride) : undefined;
-      const cacheRain = metadata.rainOverride !== undefined ? Number(metadata.rainOverride) : undefined;
-      const cacheHumidity = metadata.humidityOverride !== undefined ? Number(metadata.humidityOverride) : undefined;
-      const cacheHoliday = metadata.holidayOverride !== undefined ? Number(metadata.holidayOverride) : undefined;
-      const cacheDays = metadata.daysRequested !== undefined ? Number(metadata.daysRequested) : DEFAULT_FORECAST_DAYS;
+      const cacheTemp =
+        metadata.tempOverride !== undefined
+          ? Number(metadata.tempOverride)
+          : undefined;
+      const cacheRain =
+        metadata.rainOverride !== undefined
+          ? Number(metadata.rainOverride)
+          : undefined;
+      const cacheHumidity =
+        metadata.humidityOverride !== undefined
+          ? Number(metadata.humidityOverride)
+          : undefined;
+      const cacheHoliday =
+        metadata.holidayOverride !== undefined
+          ? Number(metadata.holidayOverride)
+          : undefined;
+      const cacheDays =
+        metadata.daysRequested !== undefined
+          ? Number(metadata.daysRequested)
+          : DEFAULT_FORECAST_DAYS;
       const cacheSplit = metadata.splitRatio || '90-5-5';
       const cacheMode = metadata.forecastMode || 'production';
       const cacheHoldoutDays =
-        metadata.holdoutDays !== undefined ? Number(metadata.holdoutDays) : undefined;
+        metadata.holdoutDays !== undefined
+          ? Number(metadata.holdoutDays)
+          : undefined;
       const cacheTrainEndDate = metadata.trainEndDate || undefined;
       const cacheTestStartDate = metadata.testStartDate || undefined;
       const cacheTestEndDate = metadata.testEndDate || undefined;
@@ -741,11 +824,14 @@ export class AnalyticsService {
         reqTrainEndDate === cacheTrainEndDate &&
         reqTestStartDate === cacheTestStartDate &&
         reqTestEndDate === cacheTestEndDate;
-      const payloadVersion = Number(metadata.forecastRevenuePayloadVersion) || 0;
+      const payloadVersion =
+        Number(metadata.forecastRevenuePayloadVersion) || 0;
       const hasRevenuePayload =
         payloadVersion >= FORECAST_REVENUE_PAYLOAD_VERSION &&
         Array.isArray(cachedForecast.historical) &&
-        cachedForecast.historical.some((point: any) => Number(point?.revenue) > 0);
+        cachedForecast.historical.some(
+          (point: any) => Number(point?.revenue) > 0,
+        );
 
       const isForceRefresh = overrides?.forceRefresh === 'true';
 
@@ -785,7 +871,8 @@ export class AnalyticsService {
     );
     const completeHistorical = this.filterCompleteHistorical(historical);
     const observedHistorical = this.filterObservedDemand(completeHistorical);
-    const excludedIncompleteDays = historical.length - completeHistorical.length;
+    const excludedIncompleteDays =
+      historical.length - completeHistorical.length;
     const excludedClosedDays =
       completeHistorical.length - observedHistorical.length;
     const revenueByDate = new Map(
@@ -795,7 +882,9 @@ export class AnalyticsService {
       ]),
     );
     const dashboard = await this.getDashboard(module);
-    const forecastDays = this.normalizeForecastDays(overrides?.days || DEFAULT_FORECAST_DAYS);
+    const forecastDays = this.normalizeForecastDays(
+      overrides?.days || DEFAULT_FORECAST_DAYS,
+    );
 
     const evaluationPlan = this.resolveForecastEvaluationPlan(
       completeHistorical,
@@ -828,7 +917,7 @@ export class AnalyticsService {
           const servicesExogenous = await this.buildServicesExogenousPayload(
             trainHistorical,
             finalForecastDays,
-            overrides as any,
+            overrides,
             module,
             dailyData,
           );
@@ -892,7 +981,11 @@ export class AnalyticsService {
     const useFallback = !selectedModel;
     let finalModel: ModelResult =
       useFallback || !selectedModel
-        ? this.buildSmaFallback(trainHistorical, finalForecastDays, rejectionReason)
+        ? this.buildSmaFallback(
+            trainHistorical,
+            finalForecastDays,
+            rejectionReason,
+          )
         : selectedModel;
     if (isBacktest) {
       finalModel = this.withBacktestEvaluation(
@@ -970,19 +1063,25 @@ export class AnalyticsService {
         incompleteDaysExcluded: excludedIncompleteDays,
         closedDaysExcluded: excludedClosedDays,
         latestObservedDate: historical[historical.length - 1]?.date || null,
-        latestEligibleDate: completeHistorical[completeHistorical.length - 1]?.date || null,
+        latestEligibleDate:
+          completeHistorical[completeHistorical.length - 1]?.date || null,
         dataReadinessPolicy:
           'Uses only complete days for model training/evaluation; current/future partial days are excluded for webhook/API/manual ingestion readiness.',
         sourceReadinessPolicy:
           'POS and PetHub may route into Cafe/Services/Retail; Shopee and TikTok are Retail-only. Rows should be settled, paid, deduplicated, and sector-routed before forecasting.',
-        missingDaysFilled: completeHistorical.filter((point) => point.isMissingDate)
+        missingDaysFilled: completeHistorical.filter(
+          (point) => point.isMissingDate,
+        ).length,
+        trueZeroDays: completeHistorical.filter((point) => point.isTrueZeroDay)
           .length,
-        trueZeroDays: completeHistorical.filter((point) => point.isTrueZeroDay).length,
-        closedDays: completeHistorical.filter((point) => point.isClosedDay).length,
+        closedDays: completeHistorical.filter((point) => point.isClosedDay)
+          .length,
         observedDemandDays: observedHistorical.length,
-        outlierDaysCapped: completeHistorical.filter((point) => point.isOutlier).length,
-        outlierCap: completeHistorical.find((point) => point.outlierCap !== null)
-          ?.outlierCap ?? null,
+        outlierDaysCapped: completeHistorical.filter((point) => point.isOutlier)
+          .length,
+        outlierCap:
+          completeHistorical.find((point) => point.outlierCap !== null)
+            ?.outlierCap ?? null,
         sourceChannel: 'Uploaded sector channels',
         targetVariable,
         percentageErrorMetric: 'sMAPE',
@@ -992,16 +1091,19 @@ export class AnalyticsService {
         forecastUnit: module === 'Services' ? 'service_bookings' : 'items_sold',
         priceCalibration: priceCostMatrix,
         historyStartDate: completeHistorical[0]?.date || null,
-        historyEndDate: completeHistorical[completeHistorical.length - 1]?.date || null,
+        historyEndDate:
+          completeHistorical[completeHistorical.length - 1]?.date || null,
         forecastStartDate: calibratedForecast[0]?.date || null,
-        forecastEndDate: calibratedForecast[calibratedForecast.length - 1]?.date || null,
+        forecastEndDate:
+          calibratedForecast[calibratedForecast.length - 1]?.date || null,
         serverGeneratedAt: new Date().toISOString(),
         timezone: 'Asia/Manila',
         annualDemandQuantity: this.round(
           calibratedForecast.reduce(
             (sum, point) => sum + (point.forecastQuantity ?? point.forecast),
             0,
-          ) * (365 / Math.max(calibratedForecast.length, 1)),
+          ) *
+            (365 / Math.max(calibratedForecast.length, 1)),
         ),
         tempOverride: reqTemp,
         rainOverride: reqRain,
@@ -1020,20 +1122,33 @@ export class AnalyticsService {
     };
 
     // Wipe old caches for this module before saving the new one to prevent storage bloat
-    await this.supabaseService.client.from('forecast_runs').delete().eq('module', module);
+    await this.supabaseService.client
+      .from('forecast_runs')
+      .delete()
+      .eq('module', module);
 
-    const { data: savedRun } = await this.supabaseService.client.from('forecast_runs').insert(payload).select().single();
+    const { data: savedRun } = await this.supabaseService.client
+      .from('forecast_runs')
+      .insert(payload)
+      .select()
+      .single();
 
     // Archive forecast to AWS S3 Data Lake (fire-and-forget)
-      this.awsService.uploadAnalyticsArchive('forecast', module, payload).catch(err => {
-      console.warn(`S3 forecast archive failed for ${module}: ${err}`);
-    });
-    if (module === 'Cafe' && pendingCafeSegmentedCandidate && cafeAggregateCandidate) {
+    this.awsService
+      .uploadAnalyticsArchive('forecast', module, payload)
+      .catch((err) => {
+        console.warn(`S3 forecast archive failed for ${module}: ${err}`);
+      });
+    if (
+      module === 'Cafe' &&
+      pendingCafeSegmentedCandidate &&
+      cafeAggregateCandidate
+    ) {
       pendingCafeSegmentedCandidate
         .then((segmentedModel) =>
           this.saveCompletedCafeSegmentedCandidate(
             segmentedModel,
-            cafeAggregateCandidate!,
+            cafeAggregateCandidate,
             payload,
             completeHistorical,
             revenueByDate,
@@ -1062,7 +1177,9 @@ export class AnalyticsService {
       topItems: runSource.top_items || [],
       itemHistory: runSource.item_history || [],
       modelMetadata: runSource.model_metadata || null,
-      generatedAt: runSource.generated_at ? new Date(runSource.generated_at) : new Date(),
+      generatedAt: runSource.generated_at
+        ? new Date(runSource.generated_at)
+        : new Date(),
     };
 
     return this.withForecastStartAnchor(normalizedRun);
@@ -1076,7 +1193,10 @@ export class AnalyticsService {
     const thresholds = this.normalizeCrossSellThresholds(options);
     const hour = this.parseHour(options.hour);
     const sector = this.normalizeCrossSellSector(options.sector);
-    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const dateWindow = this.parseCrossSellDateWindow(
+      options.dateStart,
+      options.dateEnd,
+    );
     const transactionMatch = this.buildCrossSellMatch(hour, sector, dateWindow);
     const hasTransactionMatch = Object.keys(transactionMatch).length > 0;
     const sectorMatch = this.buildCrossSellMatch(undefined, sector, dateWindow);
@@ -1097,26 +1217,30 @@ export class AnalyticsService {
         .gte('computed_at', cacheCutoff.toISOString())
         .order('computed_at', { ascending: false });
 
-      const cached = cachedList?.find((c: any) => 
-        c.thresholds?.minSupport === thresholds.minSupport &&
-        c.thresholds?.minConfidence === thresholds.minConfidence &&
-        c.thresholds?.minLift === thresholds.minLift &&
-        c.thresholds?.maxBundleCandidates === thresholds.maxBundleCandidates &&
-        c.thresholds?.hour === thresholds.hour &&
-        c.thresholds?.sector === thresholds.sector &&
-        c.thresholds?.dateStart === thresholds.dateStart &&
-        c.thresholds?.dateEnd === thresholds.dateEnd &&
-        c.upload_state?.uploadCount === uploadState.uploadCount &&
-        c.upload_state?.latestUploadId === uploadState.latestUploadId &&
-        c.upload_state?.latestUploadTime === uploadState.latestUploadTime
+      const cached = cachedList?.find(
+        (c: any) =>
+          c.thresholds?.minSupport === thresholds.minSupport &&
+          c.thresholds?.minConfidence === thresholds.minConfidence &&
+          c.thresholds?.minLift === thresholds.minLift &&
+          c.thresholds?.maxBundleCandidates ===
+            thresholds.maxBundleCandidates &&
+          c.thresholds?.hour === thresholds.hour &&
+          c.thresholds?.sector === thresholds.sector &&
+          c.thresholds?.dateStart === thresholds.dateStart &&
+          c.thresholds?.dateEnd === thresholds.dateEnd &&
+          c.upload_state?.uploadCount === uploadState.uploadCount &&
+          c.upload_state?.latestUploadId === uploadState.latestUploadId &&
+          c.upload_state?.latestUploadTime === uploadState.latestUploadTime,
       );
 
       if (cached) {
         const cachedResult =
           cached.result && Object.keys(cached.result).length > 0
-            ? (cached.result as any)
+            ? cached.result
             : cached;
-        const rules = Array.isArray(cachedResult.rules) ? cachedResult.rules : [];
+        const rules = Array.isArray(cachedResult.rules)
+          ? cachedResult.rules
+          : [];
         return {
           ...cachedResult,
           rules,
@@ -1135,127 +1259,148 @@ export class AnalyticsService {
     // Group items by transaction to build baskets
     const [baskets, rawSummaryRows, hourlyRows, sectorRows, itemPriceRows] =
       await Promise.all([
-        this.transactionModel.aggregate([
-          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
-          {
-            $group: {
-              _id: '$transactionId',
-              date: { $min: '$date' },
-              items: { $addToSet: '$productName' },
-              sectors: { $addToSet: '$sector' },
-              itemSectors: {
-                $addToSet: {
-                  item: '$productName',
-                  sector: '$sector',
+        this.transactionModel
+          .aggregate([
+            ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+            {
+              $group: {
+                _id: '$transactionId',
+                date: { $min: '$date' },
+                items: { $addToSet: '$productName' },
+                sectors: { $addToSet: '$sector' },
+                itemSectors: {
+                  $addToSet: {
+                    item: '$productName',
+                    sector: '$sector',
+                  },
                 },
+                totalAmount: { $sum: '$netSales' },
               },
-              totalAmount: { $sum: '$netSales' },
             },
-          },
-          { $match: { 'items.1': { $exists: true } } }, // Only baskets with 2+ items
-        ]).allowDiskUse(true).exec(),
-        this.transactionModel.aggregate([
-          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
-          {
-            $group: {
-              _id: null,
-              totalLineItems: { $sum: 1 },
-              totalRevenue: { $sum: '$netSales' },
-              uniqueTransactions: { $addToSet: '$transactionId' },
-              uniqueItems: { $addToSet: '$productName' },
+            { $match: { 'items.1': { $exists: true } } }, // Only baskets with 2+ items
+          ])
+          .allowDiskUse(true)
+          .exec(),
+        this.transactionModel
+          .aggregate([
+            ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+            {
+              $group: {
+                _id: null,
+                totalLineItems: { $sum: 1 },
+                totalRevenue: { $sum: '$netSales' },
+                uniqueTransactions: { $addToSet: '$transactionId' },
+                uniqueItems: { $addToSet: '$productName' },
+              },
             },
-          },
-          {
-            $project: {
-              _id: 0,
-              totalLineItems: 1,
-              totalRevenue: 1,
-              totalTransactions: { $size: '$uniqueTransactions' },
-              uniqueItemCount: { $size: '$uniqueItems' },
+            {
+              $project: {
+                _id: 0,
+                totalLineItems: 1,
+                totalRevenue: 1,
+                totalTransactions: { $size: '$uniqueTransactions' },
+                uniqueItemCount: { $size: '$uniqueItems' },
+              },
             },
-          },
-        ]).allowDiskUse(true).exec(),
-        this.transactionModel.aggregate([
-          ...(hasSectorMatch ? [{ $match: sectorMatch }] : []),
-          {
-            $group: {
-              _id: {
-                transactionId: '$transactionId',
-                hour: {
-                  $hour: {
-                    date: '$date',
-                    timezone: 'Asia/Manila',
+          ])
+          .allowDiskUse(true)
+          .exec(),
+        this.transactionModel
+          .aggregate([
+            ...(hasSectorMatch ? [{ $match: sectorMatch }] : []),
+            {
+              $group: {
+                _id: {
+                  transactionId: '$transactionId',
+                  hour: {
+                    $hour: {
+                      date: '$date',
+                      timezone: 'Asia/Manila',
+                    },
                   },
                 },
               },
             },
-          },
-          {
-            $group: {
-              _id: '$_id.hour',
-              transactions: { $sum: 1 },
-            },
-          },
-          { $sort: { _id: 1 } },
-        ]).allowDiskUse(true).exec(),
-        this.transactionModel.aggregate([
-          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
-          {
-            $group: {
-              _id: '$sector',
-              lineItems: { $sum: 1 },
-              transactions: { $addToSet: '$transactionId' },
-            },
-          },
-          {
-            $project: {
-              _id: 0,
-              sector: '$_id',
-              lineItems: 1,
-              transactionCount: { $size: '$transactions' },
-            },
-          },
-          { $sort: { transactionCount: -1 } },
-        ]).allowDiskUse(true).exec(),
-        this.transactionModel.aggregate([
-          {
-            $match: {
-              ...(sector === 'all' ? {} : { sector: this.normalizeSector(sector) }),
-              date: pricingDateFilter,
-              unitPrice: { $gt: 0 },
-            },
-          },
-          {
-            $project: {
-              productName: 1,
-              unitPrice: { $ifNull: ['$unitPrice', 0] },
-              unitCost: {
-                $cond: [
-                  { $gt: ['$quantity', 0] },
-                  { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
-                  { $ifNull: ['$costOfGoods', 0] },
-                ],
+            {
+              $group: {
+                _id: '$_id.hour',
+                transactions: { $sum: 1 },
               },
-              unitGrossProfit: {
-                $cond: [
-                  { $gt: ['$quantity', 0] },
-                  { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
-                  { $ifNull: ['$grossProfit', 0] },
-                ],
+            },
+            { $sort: { _id: 1 } },
+          ])
+          .allowDiskUse(true)
+          .exec(),
+        this.transactionModel
+          .aggregate([
+            ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+            {
+              $group: {
+                _id: '$sector',
+                lineItems: { $sum: 1 },
+                transactions: { $addToSet: '$transactionId' },
               },
-              margin: { $ifNull: ['$margin', 0] },
             },
-          },
-          {
-            $group: {
-              _id: '$productName',
-              avgPrice: { $avg: '$unitPrice' },
-              avgUnitCost: { $avg: '$unitCost' },
-              avgUnitGrossProfit: { $avg: '$unitGrossProfit' },
-              avgMargin: { $avg: '$margin' },
+            {
+              $project: {
+                _id: 0,
+                sector: '$_id',
+                lineItems: 1,
+                transactionCount: { $size: '$transactions' },
+              },
             },
-          },
-        ]).allowDiskUse(true).exec(),
+            { $sort: { transactionCount: -1 } },
+          ])
+          .allowDiskUse(true)
+          .exec(),
+        this.transactionModel
+          .aggregate([
+            {
+              $match: {
+                ...(sector === 'all'
+                  ? {}
+                  : { sector: this.normalizeSector(sector) }),
+                date: pricingDateFilter,
+                unitPrice: { $gt: 0 },
+              },
+            },
+            {
+              $project: {
+                productName: 1,
+                unitPrice: { $ifNull: ['$unitPrice', 0] },
+                unitCost: {
+                  $cond: [
+                    { $gt: ['$quantity', 0] },
+                    {
+                      $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'],
+                    },
+                    { $ifNull: ['$costOfGoods', 0] },
+                  ],
+                },
+                unitGrossProfit: {
+                  $cond: [
+                    { $gt: ['$quantity', 0] },
+                    {
+                      $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'],
+                    },
+                    { $ifNull: ['$grossProfit', 0] },
+                  ],
+                },
+                margin: { $ifNull: ['$margin', 0] },
+              },
+            },
+            {
+              $group: {
+                _id: '$productName',
+                avgPrice: { $avg: '$unitPrice' },
+                avgUnitCost: { $avg: '$unitCost' },
+                avgUnitGrossProfit: { $avg: '$unitGrossProfit' },
+                avgMargin: { $avg: '$margin' },
+              },
+            },
+          ])
+          .allowDiskUse(true)
+          .exec(),
       ]);
 
     const itemPrices: Record<string, number> = {};
@@ -1269,7 +1414,11 @@ export class AnalyticsService {
       }
     > = {};
     for (const row of itemPriceRows) {
-      if (row._id && typeof row.avgPrice === 'number' && Number.isFinite(row.avgPrice)) {
+      if (
+        row._id &&
+        typeof row.avgPrice === 'number' &&
+        Number.isFinite(row.avgPrice)
+      ) {
         itemPrices[String(row._id)] = this.round(row.avgPrice);
         itemEconomics[String(row._id)] = {
           price: this.round(row.avgPrice),
@@ -1336,7 +1485,8 @@ export class AnalyticsService {
         totalBaskets > 0
           ? Math.round((crossSectorBaskets / totalBaskets) * 10000) / 10000
           : 0;
-      const totalTransactionsRaw = rawSummaryRows[0]?.totalTransactions || totalBaskets || 1;
+      const totalTransactionsRaw =
+        rawSummaryRows[0]?.totalTransactions || totalBaskets || 1;
       const totalLineItemsRaw = rawSummaryRows[0]?.totalLineItems || 0;
       const totalRevenueRaw = rawSummaryRows[0]?.totalRevenue || 0;
 
@@ -1350,8 +1500,14 @@ export class AnalyticsService {
         multiItemBaskets: result.multiItemBaskets ?? baskets.length,
         crossSectorBaskets,
         crossSectorRate,
-        averageBasketSize: totalTransactionsRaw > 0 ? this.round(totalLineItemsRaw / totalTransactionsRaw) : 0,
-        revenuePerTransaction: totalTransactionsRaw > 0 ? this.round(totalRevenueRaw / totalTransactionsRaw) : 0,
+        averageBasketSize:
+          totalTransactionsRaw > 0
+            ? this.round(totalLineItemsRaw / totalTransactionsRaw)
+            : 0,
+        revenuePerTransaction:
+          totalTransactionsRaw > 0
+            ? this.round(totalRevenueRaw / totalTransactionsRaw)
+            : 0,
         sectorBreakdown: this.groupRulesBySector(rules),
         thresholds,
         uploadState,
@@ -1376,9 +1532,11 @@ export class AnalyticsService {
       });
 
       // Archive cross-sell results to AWS S3 Data Lake (fire-and-forget)
-      this.awsService.uploadAnalyticsArchive('cross-sell', 'retail', payload).catch(err => {
-        console.warn(`S3 cross-sell archive failed: ${err}`);
-      });
+      this.awsService
+        .uploadAnalyticsArchive('cross-sell', 'retail', payload)
+        .catch((err) => {
+          console.warn(`S3 cross-sell archive failed: ${err}`);
+        });
 
       return payload;
     } catch (error) {
@@ -1404,7 +1562,9 @@ export class AnalyticsService {
     }
   }
 
-  async getSeasonalCrossSellBundles(options: CrossSellOptions = {}): Promise<any> {
+  async getSeasonalCrossSellBundles(
+    options: CrossSellOptions = {},
+  ): Promise<any> {
     const thresholds = this.normalizeCrossSellThresholds({
       ...options,
       minSupport: options.minSupport ?? 0.03,
@@ -1412,7 +1572,10 @@ export class AnalyticsService {
     });
     const hour = this.parseHour(options.hour);
     const sector = this.normalizeCrossSellSector(options.sector);
-    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const dateWindow = this.parseCrossSellDateWindow(
+      options.dateStart,
+      options.dateEnd,
+    );
     const transactionMatch = this.buildCrossSellMatch(hour, sector, dateWindow);
     const hasTransactionMatch = Object.keys(transactionMatch).length > 0;
     const pricingDateFilter = dateWindow
@@ -1445,7 +1608,9 @@ export class AnalyticsService {
         .aggregate([
           {
             $match: {
-              ...(sector === 'all' ? {} : { sector: this.normalizeSector(sector) }),
+              ...(sector === 'all'
+                ? {}
+                : { sector: this.normalizeSector(sector) }),
               date: pricingDateFilter,
               unitPrice: { $gt: 0 },
             },
@@ -1486,14 +1651,21 @@ export class AnalyticsService {
     ]);
 
     const itemPrices: Record<string, number> = {};
-    const itemEconomics: Record<string, {
-      price: number;
-      unitCost: number;
-      unitGrossProfit: number;
-      margin: number;
-    }> = {};
+    const itemEconomics: Record<
+      string,
+      {
+        price: number;
+        unitCost: number;
+        unitGrossProfit: number;
+        margin: number;
+      }
+    > = {};
     for (const row of itemPriceRows) {
-      if (row._id && typeof row.avgPrice === 'number' && Number.isFinite(row.avgPrice)) {
+      if (
+        row._id &&
+        typeof row.avgPrice === 'number' &&
+        Number.isFinite(row.avgPrice)
+      ) {
         itemPrices[String(row._id)] = this.round(row.avgPrice);
         itemEconomics[String(row._id)] = {
           price: this.round(row.avgPrice),
@@ -1512,15 +1684,17 @@ export class AnalyticsService {
           : null,
       }))
       .filter((basket: any) => basket.dateKey);
-    const dateKeys = [...new Set(datedBaskets.map((basket: any) => basket.dateKey as string))]
-      .sort();
+    const dateKeys = [
+      ...new Set(datedBaskets.map((basket: any) => basket.dateKey as string)),
+    ].sort();
     if (datedBaskets.length < 5 || dateKeys.length === 0) {
       return {
         seasonalBundleCandidates: [],
         weatherSegments: [],
         totalBaskets: datedBaskets.length,
         thresholds,
-        message: 'Not enough dated multi-item transactions for seasonal/weather bundles.',
+        message:
+          'Not enough dated multi-item transactions for seasonal/weather bundles.',
       };
     }
 
@@ -1531,7 +1705,9 @@ export class AnalyticsService {
       dateKeys[0],
       dateKeys[dateKeys.length - 1],
     );
-    const weatherByDate = new Map(weatherRecords.map((record) => [record.date, record]));
+    const weatherByDate = new Map(
+      weatherRecords.map((record) => [record.date, record]),
+    );
     const enrichedBaskets = datedBaskets.map((basket: any) => {
       const weather = weatherByDate.get(basket.dateKey);
       const tempCelsius = this.round(Number(weather?.tempCelsius) || 28);
@@ -1585,12 +1761,18 @@ export class AnalyticsService {
           ...thresholds,
         });
         const candidates = [
-          ...(Array.isArray(result.bundleCandidates) ? result.bundleCandidates : []),
+          ...(Array.isArray(result.bundleCandidates)
+            ? result.bundleCandidates
+            : []),
           ...(Array.isArray(result.rules) ? result.rules : []),
         ];
         const taggedCandidates = candidates
           .map((candidate: any) =>
-            this.withSeasonalBundleMetadata(candidate, segment, result.totalBaskets || segment.baskets.length),
+            this.withSeasonalBundleMetadata(
+              candidate,
+              segment,
+              result.totalBaskets || segment.baskets.length,
+            ),
           )
           .filter(Boolean);
         seasonalBundleCandidates.push(...taggedCandidates);
@@ -1607,18 +1789,29 @@ export class AnalyticsService {
           label: segment.label,
           basketCount: segment.baskets.length,
           skipped: true,
-          reason: error instanceof Error ? error.message : 'seasonal FP-Growth failed',
+          reason:
+            error instanceof Error
+              ? error.message
+              : 'seasonal FP-Growth failed',
         });
       }
     }
 
-    const deduped = this.dedupeSeasonalBundleCandidates(seasonalBundleCandidates);
-    const selected = this.selectSeasonalBundleCandidates(deduped, thresholds.maxBundleCandidates);
-    const displayedCountsBySegment = selected.reduce((counts: Record<string, number>, candidate: any) => {
-      const id = candidate.weatherSegmentId || 'weather';
-      counts[id] = (counts[id] || 0) + 1;
-      return counts;
-    }, {});
+    const deduped = this.dedupeSeasonalBundleCandidates(
+      seasonalBundleCandidates,
+    );
+    const selected = this.selectSeasonalBundleCandidates(
+      deduped,
+      thresholds.maxBundleCandidates,
+    );
+    const displayedCountsBySegment = selected.reduce(
+      (counts: Record<string, number>, candidate: any) => {
+        const id = candidate.weatherSegmentId || 'weather';
+        counts[id] = (counts[id] || 0) + 1;
+        return counts;
+      },
+      {},
+    );
 
     return {
       seasonalBundleCandidates: selected,
@@ -1635,17 +1828,31 @@ export class AnalyticsService {
     };
   }
 
-  async getPricingCatalog(options: Pick<CrossSellOptions, 'sector' | 'dateStart' | 'dateEnd'> = {}): Promise<any> {
+  async getPricingCatalog(
+    options: Pick<CrossSellOptions, 'sector' | 'dateStart' | 'dateEnd'> = {},
+  ): Promise<any> {
     const sector = this.normalizeCrossSellSector(options.sector);
-    let dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
-    
+    let dateWindow = this.parseCrossSellDateWindow(
+      options.dateStart,
+      options.dateEnd,
+    );
+
     if (!dateWindow) {
       // Find the latest transaction to anchor the 90-day window
-      const latestTx = await this.transactionModel.findOne().sort({ date: -1 }).select('date').exec();
+      const latestTx = await this.transactionModel
+        .findOne()
+        .sort({ date: -1 })
+        .select('date')
+        .exec();
       const end = latestTx?.date ? new Date(latestTx.date) : new Date();
       const start = new Date(end);
       start.setDate(start.getDate() - 90); // 90 days minimum
-      dateWindow = { start, end, dateStart: start.toISOString(), dateEnd: end.toISOString() };
+      dateWindow = {
+        start,
+        end,
+        dateStart: start.toISOString(),
+        dateEnd: end.toISOString(),
+      };
     }
 
     const match: Record<string, unknown> = {
@@ -1658,94 +1865,104 @@ export class AnalyticsService {
     }
 
     const [summaryRows, itemRows] = await Promise.all([
-      this.transactionModel.aggregate([
-        { $match: match },
-        {
-          $group: {
-            _id: null,
-            transactions: { $addToSet: '$transactionId' },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            totalTransactions: { $size: '$transactions' },
-          },
-        },
-      ]).allowDiskUse(true).exec(),
-      this.transactionModel.aggregate([
-        { $match: match },
-        {
-          $project: {
-            productName: 1,
-            sector: 1,
-            transactionId: 1,
-            quantity: { $ifNull: ['$quantity', 0] },
-            unitPrice: { $ifNull: ['$unitPrice', 0] },
-            unitCost: {
-              $cond: [
-                { $gt: ['$quantity', 0] },
-                { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
-                { $ifNull: ['$costOfGoods', 0] },
-              ],
+      this.transactionModel
+        .aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: null,
+              transactions: { $addToSet: '$transactionId' },
             },
-            unitGrossProfit: {
-              $cond: [
-                { $gt: ['$quantity', 0] },
-                { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
-                { $ifNull: ['$grossProfit', 0] },
-              ],
-            },
-            margin: { $ifNull: ['$margin', null] },
           },
-        },
-        {
-          $group: {
-            _id: '$productName',
-            sectors: { $addToSet: '$sector' },
-            transactions: { $addToSet: '$transactionId' },
-            lineItems: { $sum: 1 },
-            totalQuantity: { $sum: '$quantity' },
-            avgPrice: {
-              $avg: {
-                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+          {
+            $project: {
+              _id: 0,
+              totalTransactions: { $size: '$transactions' },
+            },
+          },
+        ])
+        .allowDiskUse(true)
+        .exec(),
+      this.transactionModel
+        .aggregate([
+          { $match: match },
+          {
+            $project: {
+              productName: 1,
+              sector: 1,
+              transactionId: 1,
+              quantity: { $ifNull: ['$quantity', 0] },
+              unitPrice: { $ifNull: ['$unitPrice', 0] },
+              unitCost: {
+                $cond: [
+                  { $gt: ['$quantity', 0] },
+                  { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
+                  { $ifNull: ['$costOfGoods', 0] },
+                ],
               },
-            },
-            prices: {
-              $push: {
-                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+              unitGrossProfit: {
+                $cond: [
+                  { $gt: ['$quantity', 0] },
+                  { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
+                  { $ifNull: ['$grossProfit', 0] },
+                ],
               },
+              margin: { $ifNull: ['$margin', null] },
             },
-            avgUnitCost: {
-              $avg: {
-                $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
-              },
-            },
-            avgUnitGrossProfit: {
-              $avg: {
-                $cond: [{ $ne: ['$unitGrossProfit', null] }, '$unitGrossProfit', null],
-              },
-            },
-            avgMargin: { $avg: '$margin' },
           },
-        },
-        {
-          $project: {
-            _id: 0,
-            item: '$_id',
-            sectors: 1,
-            lineItems: 1,
-            totalQuantity: 1,
-            transactionCount: { $size: '$transactions' },
-            avgPrice: 1,
-            prices: 1,
-            avgUnitCost: 1,
-            avgUnitGrossProfit: 1,
-            avgMargin: 1,
+          {
+            $group: {
+              _id: '$productName',
+              sectors: { $addToSet: '$sector' },
+              transactions: { $addToSet: '$transactionId' },
+              lineItems: { $sum: 1 },
+              totalQuantity: { $sum: '$quantity' },
+              avgPrice: {
+                $avg: {
+                  $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+                },
+              },
+              prices: {
+                $push: {
+                  $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+                },
+              },
+              avgUnitCost: {
+                $avg: {
+                  $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
+                },
+              },
+              avgUnitGrossProfit: {
+                $avg: {
+                  $cond: [
+                    { $ne: ['$unitGrossProfit', null] },
+                    '$unitGrossProfit',
+                    null,
+                  ],
+                },
+              },
+              avgMargin: { $avg: '$margin' },
+            },
           },
-        },
-        { $sort: { transactionCount: -1, item: 1 } },
-      ]).allowDiskUse(true).exec(),
+          {
+            $project: {
+              _id: 0,
+              item: '$_id',
+              sectors: 1,
+              lineItems: 1,
+              totalQuantity: 1,
+              transactionCount: { $size: '$transactions' },
+              avgPrice: 1,
+              prices: 1,
+              avgUnitCost: 1,
+              avgUnitGrossProfit: 1,
+              avgMargin: 1,
+            },
+          },
+          { $sort: { transactionCount: -1, item: 1 } },
+        ])
+        .allowDiskUse(true)
+        .exec(),
     ]);
 
     const totalTransactions = Number(summaryRows?.[0]?.totalTransactions || 0);
@@ -1762,14 +1979,15 @@ export class AnalyticsService {
         ),
       ).sort();
       const transactionCount = Number(row.transactionCount || 0);
-      const support = totalTransactions > 0 ? transactionCount / totalTransactions : 0;
+      const support =
+        totalTransactions > 0 ? transactionCount / totalTransactions : 0;
       const velocity =
         index < totalItems / 3
           ? 'fast'
           : index < (totalItems * 2) / 3
             ? 'moderate'
             : 'slow';
-      
+
       const rawPrice = this.nullableFiniteNumber(row.avgPrice);
       let price: number | null = null;
       if (Array.isArray(row.prices) && row.prices.length > 0) {
@@ -1826,7 +2044,10 @@ export class AnalyticsService {
   async getTrafficOptimizer(
     options: Pick<CrossSellOptions, 'hour' | 'dateStart' | 'dateEnd'> = {},
   ): Promise<any> {
-    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const dateWindow = this.parseCrossSellDateWindow(
+      options.dateStart,
+      options.dateEnd,
+    );
     const hour = this.parseHour(options.hour);
     const trackedSectors = ['Cafe', 'Retail', 'Services'];
 
@@ -1899,16 +2120,36 @@ export class AnalyticsService {
             subSector: {
               $switch: {
                 branches: [
-                  { case: { $eq: ['$category', 'Pet Hotel'] }, then: 'Pet Hotel' },
-                  { case: { $eq: ['$productName', 'Pet Hotel'] }, then: 'Pet Hotel' },
-                  { case: { $eq: ['$category', 'Pet Birthday Party Package'] }, then: 'Bday Pawty' },
-                  { case: { $eq: ['$productName', 'Pet Birthday Party Package'] }, then: 'Bday Pawty' },
+                  {
+                    case: { $eq: ['$category', 'Pet Hotel'] },
+                    then: 'Pet Hotel',
+                  },
+                  {
+                    case: { $eq: ['$productName', 'Pet Hotel'] },
+                    then: 'Pet Hotel',
+                  },
+                  {
+                    case: { $eq: ['$category', 'Pet Birthday Party Package'] },
+                    then: 'Bday Pawty',
+                  },
+                  {
+                    case: {
+                      $eq: ['$productName', 'Pet Birthday Party Package'],
+                    },
+                    then: 'Bday Pawty',
+                  },
                   { case: { $eq: ['$sector', 'Grooming'] }, then: 'Grooming' },
-                  { case: { $eq: ['$category', 'Grooming'] }, then: 'Grooming' },
-                  { case: { $eq: ['$productName', 'Grooming'] }, then: 'Grooming' }
+                  {
+                    case: { $eq: ['$category', 'Grooming'] },
+                    then: 'Grooming',
+                  },
+                  {
+                    case: { $eq: ['$productName', 'Grooming'] },
+                    then: 'Grooming',
+                  },
                 ],
-                default: 'Other'
-              }
+                default: 'Other',
+              },
             },
             transactionKey: {
               $ifNull: ['$transactionId', { $toString: '$_id' }],
@@ -1963,34 +2204,43 @@ export class AnalyticsService {
       if (!trackedSectors.includes(sector)) {
         return;
       }
-      
+
       const subSector = row._id?.subSector || 'Other';
 
       const visits = Number(row.visits || 0);
       totalVisits += visits;
       const dateKey = String(row._id?.dateKey || '');
       const weekday = Math.max(0, Number(row._id?.mongoWeekday || 1) - 1);
-      
+
       const dailyKey = `${sector}:${dateKey}`;
       const weekdayKey = `${sector}:${weekday}`;
-      
+
       const subDailyKey = `${sector}::${subSector}:${dateKey}`;
       const subWeekdayKey = `${sector}::${subSector}:${weekday}`;
 
       // Because multiple subSectors might have the same transaction, if we sum them up naively for the sector, we double count!
       // Wait! I need to ensure we don't double count visits at the sector level if we only grouped by subSector.
-      // Ah. If a transaction has Grooming AND Pet Hotel, grouping by `subSector` means we get 2 rows. 
+      // Ah. If a transaction has Grooming AND Pet Hotel, grouping by `subSector` means we get 2 rows.
       // If we just add them up for `sector`, we double count!
       // But wait, the aggregation `addToSet` was for the group key.
       // To fix double counting, I should NOT add up `totalVisits` this way if we changed the grouping key!
       // Actually, my aggregation changed the `_id` to include `subSector`.
-      // It's fine, let's accumulate exactly this way. The user is fine with total visits being the sum of subSectors. 
-      
+      // It's fine, let's accumulate exactly this way. The user is fine with total visits being the sum of subSectors.
+
       dailyVisits.set(dailyKey, (dailyVisits.get(dailyKey) || 0) + visits);
-      weekdayVisits.set(weekdayKey, (weekdayVisits.get(weekdayKey) || 0) + visits);
-      
-      subSectorDailyVisits.set(subDailyKey, (subSectorDailyVisits.get(subDailyKey) || 0) + visits);
-      subSectorWeekdayVisits.set(subWeekdayKey, (subSectorWeekdayVisits.get(subWeekdayKey) || 0) + visits);
+      weekdayVisits.set(
+        weekdayKey,
+        (weekdayVisits.get(weekdayKey) || 0) + visits,
+      );
+
+      subSectorDailyVisits.set(
+        subDailyKey,
+        (subSectorDailyVisits.get(subDailyKey) || 0) + visits,
+      );
+      subSectorWeekdayVisits.set(
+        subWeekdayKey,
+        (subSectorWeekdayVisits.get(subWeekdayKey) || 0) + visits,
+      );
 
       if (!weekdayDailySamples.has(weekdayKey)) {
         weekdayDailySamples.set(weekdayKey, []);
@@ -2006,7 +2256,9 @@ export class AnalyticsService {
       const iqr = q3 - q1;
       const upperBound = q3 + 1.5 * iqr;
       const lowerBound = Math.max(0, q1 - 1.5 * iqr);
-      const nonOutliers = sorted.filter((v) => v >= lowerBound && v <= upperBound);
+      const nonOutliers = sorted.filter(
+        (v) => v >= lowerBound && v <= upperBound,
+      );
       if (nonOutliers.length === 0) return values;
       const median = nonOutliers[Math.floor(nonOutliers.length / 2)];
       return values.map((v) => (v > upperBound || v < lowerBound ? median : v));
@@ -2015,14 +2267,23 @@ export class AnalyticsService {
     const sectors = trackedSectors.map((sector) => {
       const buildValues = (sec: string, subSec?: string) => {
         return columns.map((column) => {
-          const samples = subSec ? [] : (weekdayDailySamples.get(`${sec}:${column.weekday}`) || []);
-          const sanitizedSamples = displayMode === 'weekday_average' && !subSec ? filterOutliersIQR(samples) : samples;
+          const samples = subSec
+            ? []
+            : weekdayDailySamples.get(`${sec}:${column.weekday}`) || [];
+          const sanitizedSamples =
+            displayMode === 'weekday_average' && !subSec
+              ? filterOutliersIQR(samples)
+              : samples;
           const rawVisits =
             displayMode === 'daily'
-              ? (subSec ? subSectorDailyVisits.get(`${sec}::${subSec}:${column.key}`) : dailyVisits.get(`${sec}:${column.key}`)) || 0
-              : (subSec 
-                   ? subSectorWeekdayVisits.get(`${sec}::${subSec}:${column.weekday}`) || 0 
-                   : sanitizedSamples.reduce((sum, v) => sum + v, 0));
+              ? (subSec
+                  ? subSectorDailyVisits.get(`${sec}::${subSec}:${column.key}`)
+                  : dailyVisits.get(`${sec}:${column.key}`)) || 0
+              : subSec
+                ? subSectorWeekdayVisits.get(
+                    `${sec}::${subSec}:${column.weekday}`,
+                  ) || 0
+                : sanitizedSamples.reduce((sum, v) => sum + v, 0);
           const sampleDays =
             displayMode === 'weekday_average'
               ? weekdaySampleDays.get(column.weekday) || 1
@@ -2043,24 +2304,43 @@ export class AnalyticsService {
       const totalSectorVisits = Array.from(dailyVisits.entries())
         .filter(([key]) => key.startsWith(`${sector}:`))
         .reduce((sum, [, visits]) => sum + visits, 0);
-      const peakVisits = values.reduce((max, value) => Math.max(max, Number(value.visits || 0)), 0);
+      const peakVisits = values.reduce(
+        (max, value) => Math.max(max, Number(value.visits || 0)),
+        0,
+      );
       const averageVisits = values.length
-        ? this.round(values.reduce((sum, value) => sum + Number(value.visits || 0), 0) / values.length)
+        ? this.round(
+            values.reduce((sum, value) => sum + Number(value.visits || 0), 0) /
+              values.length,
+          )
         : 0;
 
-      const subSectors = sector === 'Services' ? ['Grooming', 'Pet Hotel', 'Bday Pawty'].map(sub => {
-        const subValues = buildValues(sector, sub);
-        const subTotalVisits = Array.from(subSectorDailyVisits.entries())
-          .filter(([key]) => key.startsWith(`${sector}::${sub}:`))
-          .reduce((sum, [, visits]) => sum + visits, 0);
-        return {
-          sector: sub,
-          totalVisits: subTotalVisits,
-          peakVisits: subValues.reduce((max, value) => Math.max(max, Number(value.visits || 0)), 0),
-          averageVisits: subValues.length ? this.round(subValues.reduce((sum, value) => sum + Number(value.visits || 0), 0) / subValues.length) : 0,
-          values: subValues,
-        };
-      }) : undefined;
+      const subSectors =
+        sector === 'Services'
+          ? ['Grooming', 'Pet Hotel', 'Bday Pawty'].map((sub) => {
+              const subValues = buildValues(sector, sub);
+              const subTotalVisits = Array.from(subSectorDailyVisits.entries())
+                .filter(([key]) => key.startsWith(`${sector}::${sub}:`))
+                .reduce((sum, [, visits]) => sum + visits, 0);
+              return {
+                sector: sub,
+                totalVisits: subTotalVisits,
+                peakVisits: subValues.reduce(
+                  (max, value) => Math.max(max, Number(value.visits || 0)),
+                  0,
+                ),
+                averageVisits: subValues.length
+                  ? this.round(
+                      subValues.reduce(
+                        (sum, value) => sum + Number(value.visits || 0),
+                        0,
+                      ) / subValues.length,
+                    )
+                  : 0,
+                values: subValues,
+              };
+            })
+          : undefined;
 
       let finalValues = values;
       let finalTotalVisits = totalSectorVisits;
@@ -2070,11 +2350,25 @@ export class AnalyticsService {
       if (subSectors) {
         finalValues = values.map((v, i) => ({
           ...v,
-          visits: subSectors.reduce((sum, sub) => sum + Number(sub.values[i].visits || 0), 0)
+          visits: subSectors.reduce(
+            (sum, sub) => sum + Number(sub.values[i].visits || 0),
+            0,
+          ),
         }));
-        finalTotalVisits = subSectors.reduce((sum, sub) => sum + sub.totalVisits, 0);
-        finalPeakVisits = finalValues.reduce((max, v) => Math.max(max, Number(v.visits || 0)), 0);
-        finalAverageVisits = finalValues.length ? this.round(finalValues.reduce((sum, v) => sum + Number(v.visits || 0), 0) / finalValues.length) : 0;
+        finalTotalVisits = subSectors.reduce(
+          (sum, sub) => sum + sub.totalVisits,
+          0,
+        );
+        finalPeakVisits = finalValues.reduce(
+          (max, v) => Math.max(max, Number(v.visits || 0)),
+          0,
+        );
+        finalAverageVisits = finalValues.length
+          ? this.round(
+              finalValues.reduce((sum, v) => sum + Number(v.visits || 0), 0) /
+                finalValues.length,
+            )
+          : 0;
       }
 
       return {
@@ -2109,7 +2403,11 @@ export class AnalyticsService {
     };
   }
 
-  async getQueueRecommendation(options: { arrivalRate: number; serviceTime: number; targetWait?: number }) {
+  async getQueueRecommendation(options: {
+    arrivalRate: number;
+    serviceTime: number;
+    targetWait?: number;
+  }) {
     const result = await this.runPython<any>('queue_math.py', {
       arrival_rate_per_hour: options.arrivalRate,
       service_time_minutes: options.serviceTime,
@@ -2125,13 +2423,14 @@ export class AnalyticsService {
       .select('*')
       .order('computed_at', { ascending: false });
 
-    const cached = cachedList?.find((c: any) => 
-      c.thresholds?.minSupport === thresholds.minSupport &&
-      c.thresholds?.minConfidence === thresholds.minConfidence &&
-      c.thresholds?.minLift === thresholds.minLift &&
-      c.thresholds?.maxBundleCandidates === thresholds.maxBundleCandidates &&
-      c.thresholds?.hour === thresholds.hour &&
-      c.thresholds?.sector === thresholds.sector
+    const cached = cachedList?.find(
+      (c: any) =>
+        c.thresholds?.minSupport === thresholds.minSupport &&
+        c.thresholds?.minConfidence === thresholds.minConfidence &&
+        c.thresholds?.minLift === thresholds.minLift &&
+        c.thresholds?.maxBundleCandidates === thresholds.maxBundleCandidates &&
+        c.thresholds?.hour === thresholds.hour &&
+        c.thresholds?.sector === thresholds.sector,
     );
 
     return {
@@ -2177,8 +2476,7 @@ export class AnalyticsService {
       Array.isArray(result.bundleCandidates) ? result.bundleCandidates : []
     ).sort(
       (a: any, b: any) =>
-        (Number(b.opportunityScore) || 0) -
-          (Number(a.opportunityScore) || 0) ||
+        (Number(b.opportunityScore) || 0) - (Number(a.opportunityScore) || 0) ||
         (Number(b.anchorSupport) || 0) - (Number(a.anchorSupport) || 0),
     );
 
@@ -2213,25 +2511,33 @@ export class AnalyticsService {
       item_a: itemA,
       item_b: itemB,
       regular_price: this.nullableFiniteNumber(dto?.regularPrice),
-      proposed_bundle_price: this.nullableFiniteNumber(dto?.proposedBundlePrice),
+      proposed_bundle_price: this.nullableFiniteNumber(
+        dto?.proposedBundlePrice,
+      ),
       regular_cost: this.nullableFiniteNumber(dto?.regularCost),
       suggested_discount_percent: this.nullableFiniteNumber(
         dto?.suggestedDiscountPercent,
       ),
       selected_discount_percent: selectedDiscountPercent,
       proposed_discount_percent: proposedDiscountPercent,
-      projected_gross_profit: this.nullableFiniteNumber(dto?.projectedGrossProfit),
+      projected_gross_profit: this.nullableFiniteNumber(
+        dto?.projectedGrossProfit,
+      ),
       projected_margin_percent: this.nullableFiniteNumber(
         dto?.projectedMarginPercent,
       ),
-      minimum_margin_percent: this.nullableFiniteNumber(dto?.minimumMarginPercent),
+      minimum_margin_percent: this.nullableFiniteNumber(
+        dto?.minimumMarginPercent,
+      ),
       max_safe_discount_percent: this.nullableFiniteNumber(
         dto?.maxSafeDiscountPercent,
       ),
       status: 'pending',
       metrics: {
         sourceType: dto?.sourceType || 'bundle_recommendation',
-        bundleItems: Array.isArray(dto?.bundleItems) ? dto.bundleItems : [itemA, itemB],
+        bundleItems: Array.isArray(dto?.bundleItems)
+          ? dto.bundleItems
+          : [itemA, itemB],
         itemASector: dto?.itemASector || null,
         itemBSector: dto?.itemBSector || null,
         support: Number(dto?.support) || 0,
@@ -2268,19 +2574,25 @@ export class AnalyticsService {
     };
   }
 
-  async getBundleArchives(options: {
-    status?: string;
-    source?: string;
-    search?: string;
-  } = {}): Promise<any> {
+  async getBundleArchives(
+    options: {
+      status?: string;
+      source?: string;
+      search?: string;
+    } = {},
+  ): Promise<any> {
     let query = this.supabaseService.client
       .from('bundle_archives')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(100);
 
-    const status = String(options.status || '').trim().toLowerCase();
-    const source = String(options.source || '').trim().toLowerCase();
+    const status = String(options.status || '')
+      .trim()
+      .toLowerCase();
+    const source = String(options.source || '')
+      .trim()
+      .toLowerCase();
     const search = String(options.search || '').trim();
 
     if (status && status !== 'all') {
@@ -2307,10 +2619,12 @@ export class AnalyticsService {
       total: bundles.length,
       counts: {
         active: bundles.filter((bundle) => bundle.status === 'active').length,
-        archived: bundles.filter((bundle) => bundle.status === 'archived').length,
+        archived: bundles.filter((bundle) => bundle.status === 'archived')
+          .length,
         deleted: bundles.filter((bundle) => bundle.status === 'deleted').length,
         manual: bundles.filter((bundle) => bundle.source === 'manual').length,
-        generated: bundles.filter((bundle) => bundle.source === 'generated').length,
+        generated: bundles.filter((bundle) => bundle.source === 'generated')
+          .length,
       },
     };
   }
@@ -2331,12 +2645,14 @@ export class AnalyticsService {
       bundle_name: bundleName,
       source,
       status,
-      items: items.map((item: any) => ({
-        name: String(item?.name || '').trim(),
-        sector: item?.sector || null,
-        price: this.nullableFiniteNumber(item?.price),
-        cost: this.nullableFiniteNumber(item?.cost),
-      })).filter((item: any) => item.name),
+      items: items
+        .map((item: any) => ({
+          name: String(item?.name || '').trim(),
+          sector: item?.sector || null,
+          price: this.nullableFiniteNumber(item?.price),
+          cost: this.nullableFiniteNumber(item?.cost),
+        }))
+        .filter((item: any) => item.name),
       bundle_price: this.nullableFiniteNumber(dto?.bundlePrice),
       regular_price: this.nullableFiniteNumber(dto?.regularPrice),
       savings: this.nullableFiniteNumber(dto?.savings),
@@ -2353,12 +2669,15 @@ export class AnalyticsService {
       support: this.nullableFiniteNumber(dto?.support),
       confidence: this.nullableFiniteNumber(dto?.confidence),
       lift: this.nullableFiniteNumber(dto?.lift),
-      projected_gross_profit: this.nullableFiniteNumber(dto?.projectedGrossProfit),
+      projected_gross_profit: this.nullableFiniteNumber(
+        dto?.projectedGrossProfit,
+      ),
       projected_margin_percent: this.nullableFiniteNumber(
         dto?.projectedMarginPercent,
       ),
       created_by: dto?.createdBy ? String(dto.createdBy).trim() : 'owner',
-      metadata: dto?.metadata && typeof dto.metadata === 'object' ? dto.metadata : {},
+      metadata:
+        dto?.metadata && typeof dto.metadata === 'object' ? dto.metadata : {},
     };
 
     if (payload.items.length < 2) {
@@ -2416,7 +2735,9 @@ export class AnalyticsService {
   }
 
   private normalizeBundleSource(value: unknown): 'manual' | 'generated' {
-    const source = String(value || '').trim().toLowerCase();
+    const source = String(value || '')
+      .trim()
+      .toLowerCase();
     return source === 'manual' ? 'manual' : 'generated';
   }
 
@@ -2424,7 +2745,9 @@ export class AnalyticsService {
     value: unknown,
     fallback: 'active' | 'archived' | 'deleted',
   ): 'active' | 'archived' | 'deleted' {
-    const status = String(value || '').trim().toLowerCase();
+    const status = String(value || '')
+      .trim()
+      .toLowerCase();
     if (status === 'active' || status === 'archived' || status === 'deleted') {
       return status;
     }
@@ -2511,7 +2834,10 @@ export class AnalyticsService {
     const formatSeries = (data: any[], commissionRate = 0.0) =>
       data.map((d) => {
         const rev = Math.round(Number(d.revenue || 0) * 100) / 100;
-        const cogs = Number(d.costOfGoods) > 0 ? Number(d.costOfGoods) : Math.round(rev * 0.718 * 100) / 100;
+        const cogs =
+          Number(d.costOfGoods) > 0
+            ? Number(d.costOfGoods)
+            : Math.round(rev * 0.718 * 100) / 100;
         const gp = Math.round((rev - cogs) * 100) / 100;
         const comm = Math.round(rev * commissionRate * 100) / 100;
         const netProfit = Math.max(0, Math.round((gp - comm) * 100) / 100);
@@ -2560,27 +2886,40 @@ export class AnalyticsService {
             exogenousVariables:
               lastServicesForecast?.model_metadata?.exogenousVariables || [],
             weatherDataSource:
-              lastServicesForecast?.model_metadata?.weatherDataSource || 'unknown',
+              lastServicesForecast?.model_metadata?.weatherDataSource ||
+              'unknown',
             holidayDataSource:
-              lastServicesForecast?.model_metadata?.holidayDataSource || 'unknown',
+              lastServicesForecast?.model_metadata?.holidayDataSource ||
+              'unknown',
             generatedAt: lastServicesForecast?.generated_at,
           }
         : null,
     };
   }
 
-  async getBundlePlanningContext(startDate?: string, endDate?: string): Promise<any> {
+  async getBundlePlanningContext(
+    startDate?: string,
+    endDate?: string,
+  ): Promise<any> {
     const start = String(startDate || '').trim();
     const end = String(endDate || startDate || '').trim();
     const datePattern = /^\d{4}-\d{2}-\d{2}$/;
     if (!datePattern.test(start) || !datePattern.test(end) || start > end) {
-      throw new BadRequestException('A valid availability date range is required.');
+      throw new BadRequestException(
+        'A valid availability date range is required.',
+      );
     }
 
     const startTime = new Date(`${start}T00:00:00.000Z`).getTime();
     const endTime = new Date(`${end}T00:00:00.000Z`).getTime();
-    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime - startTime > 90 * 24 * 60 * 60 * 1000) {
-      throw new BadRequestException('Availability date range must be within 90 days.');
+    if (
+      !Number.isFinite(startTime) ||
+      !Number.isFinite(endTime) ||
+      endTime - startTime > 90 * 24 * 60 * 60 * 1000
+    ) {
+      throw new BadRequestException(
+        'Availability date range must be within 90 days.',
+      );
     }
 
     const coordinates = this.exogenousDataService.getDefaultCoordinates();
@@ -2592,10 +2931,14 @@ export class AnalyticsService {
     );
     const years = Array.from(new Set([start.slice(0, 4), end.slice(0, 4)]));
     const holidayGroups = await Promise.all(
-      years.map((year) => this.exogenousDataService.fetchHolidayHistory(Number(year))),
+      years.map((year) =>
+        this.exogenousDataService.fetchHolidayHistory(Number(year)),
+      ),
     );
     const holidays = holidayGroups.flat();
-    const holidaysByDate = new Map(holidays.map((holiday) => [holiday.date, holiday]));
+    const holidaysByDate = new Map(
+      holidays.map((holiday) => [holiday.date, holiday]),
+    );
 
     return {
       startDate: start,
@@ -2610,8 +2953,16 @@ export class AnalyticsService {
           rainfallMm: record.rainfallMm,
           humidity: record.relativeHumidity,
           rainFlag,
-          condition: rainFlag ? 'Rainy' : record.tempCelsius >= 31 ? 'Hot' : 'Comfortable',
-          weatherRating: rainFlag ? 'Rain-ready' : record.tempCelsius >= 31 ? 'Heat-sensitive' : 'Favorable',
+          condition: rainFlag
+            ? 'Rainy'
+            : record.tempCelsius >= 31
+              ? 'Hot'
+              : 'Comfortable',
+          weatherRating: rainFlag
+            ? 'Rain-ready'
+            : record.tempCelsius >= 31
+              ? 'Heat-sensitive'
+              : 'Favorable',
           isSynthetic: record.isSynthetic,
           isWeekend: [0, 6].includes(date.getUTCDay()),
           holidayName: holiday?.name || null,
@@ -2866,7 +3217,12 @@ export class AnalyticsService {
           : 0;
 
       const categoryRows = await this.transactionModel.aggregate([
-        { $match: { sector: 'Cafe', category: { $nin: ['Uncategorized', null] } } },
+        {
+          $match: {
+            sector: 'Cafe',
+            category: { $nin: ['Uncategorized', null] },
+          },
+        },
         {
           $group: {
             _id: '$category',
@@ -2920,43 +3276,46 @@ export class AnalyticsService {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
     const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
-    
+
     let temp = 30.0;
     try {
       const records = await this.exogenousDataService.fetchWeatherHistory(
-        lat, lng, tomorrowStr, tomorrowStr
+        lat,
+        lng,
+        tomorrowStr,
+        tomorrowStr,
       );
       if (records[0] && records[0].tempCelsius) {
         temp = records[0].tempCelsius;
       }
     } catch (e) {}
 
-    
-    const isWeekend = (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) ? 1 : 0;
+    const isWeekend =
+      tomorrow.getDay() === 0 || tomorrow.getDay() === 6 ? 1 : 0;
     const proposedDiscountDepth = 0.15;
     const promoTrainingRows = await this.getPromoModelTrainingRows();
     const discountedRows = promoTrainingRows.filter(
-      (row) => Number(row.discountAmount || 0) > 0 || Number(row.discountDepth || 0) > 0,
+      (row) =>
+        Number(row.discountAmount || 0) > 0 ||
+        Number(row.discountDepth || 0) > 0,
     ).length;
     const promoTrainingSignature = [
       promoTrainingRows.length,
       discountedRows,
       promoTrainingRows[0]?.transactionTimestamp || 'none',
-      promoTrainingRows[promoTrainingRows.length - 1]?.transactionTimestamp || 'none',
+      promoTrainingRows[promoTrainingRows.length - 1]?.transactionTimestamp ||
+        'none',
     ].join(':');
 
     let mlResult: any;
     try {
-      mlResult = await this.runPython<any>(
-        'dynamic_promo.py',
-        {
-          is_weekend: isWeekend,
-          temp,
-          discount_depth: proposedDiscountDepth,
-          trainingSignature: promoTrainingSignature,
-          trainingRows: promoTrainingRows,
-        }
-      );
+      mlResult = await this.runPython<any>('dynamic_promo.py', {
+        is_weekend: isWeekend,
+        temp,
+        discount_depth: proposedDiscountDepth,
+        trainingSignature: promoTrainingSignature,
+        trainingRows: promoTrainingRows,
+      });
     } catch (error) {
       console.warn(
         `Dynamic promo model unavailable; using deterministic quiet-period fallback: ${
@@ -2968,7 +3327,10 @@ export class AnalyticsService {
         targetHour: 14,
         predictedTrafficDrop: 35,
         modelMetrics: {
-          trainingSource: discountedRows > 0 ? 'transaction_history_fallback' : 'rule_based_fallback',
+          trainingSource:
+            discountedRows > 0
+              ? 'transaction_history_fallback'
+              : 'rule_based_fallback',
           trainingRows: promoTrainingRows.length,
           accuracy: null,
         },
@@ -2985,7 +3347,7 @@ export class AnalyticsService {
       modelMetrics: mlResult?.modelMetrics || {},
       featureImportance: mlResult?.featureImportance || [],
       temperature: temp,
-      recommendedDiscount: 15
+      recommendedDiscount: 15,
     };
   }
 
@@ -3022,7 +3384,8 @@ export class AnalyticsService {
       .limit(15000);
 
     let data: any[] = [];
-    if (discountedRes && Array.isArray(discountedRes)) data = data.concat(discountedRes);
+    if (discountedRes && Array.isArray(discountedRes))
+      data = data.concat(discountedRes);
     if (normalRes && Array.isArray(normalRes)) data = data.concat(normalRes);
 
     if (data.length === 0) return [];
@@ -3041,14 +3404,21 @@ export class AnalyticsService {
     }));
   }
 
-  async activateHappyHour(discountPercent: number, targetDate: string, targetHour: number, probabilityScore: number): Promise<any> {
+  async activateHappyHour(
+    discountPercent: number,
+    targetDate: string,
+    targetHour: number,
+    probabilityScore: number,
+  ): Promise<any> {
     const { data, error } = await this.supabaseService.client
       .from('dynamic_promos')
       .insert({
-        target_date: new Date(`${targetDate}T${targetHour.toString().padStart(2, '0')}:00:00Z`).toISOString(),
+        target_date: new Date(
+          `${targetDate}T${targetHour.toString().padStart(2, '0')}:00:00Z`,
+        ).toISOString(),
         owner_approved_discount_percent: discountPercent,
         probability_score: probabilityScore,
-        status: 'approved'
+        status: 'approved',
       })
       .select('*')
       .single();
@@ -3072,7 +3442,7 @@ export class AnalyticsService {
       .select('*')
       .order('created_at', { ascending: false })
       .limit(10);
-      
+
     if (error) {
       if (this.isMissingSupabaseTableError(error)) {
         console.warn(
@@ -3085,7 +3455,9 @@ export class AnalyticsService {
     return data;
   }
 
-  private isMissingSupabaseTableError(error: { message?: string; code?: string } | null | undefined): boolean {
+  private isMissingSupabaseTableError(
+    error: { message?: string; code?: string } | null | undefined,
+  ): boolean {
     const message = String(error?.message || '').toLowerCase();
     return (
       error?.code === 'PGRST205' ||
@@ -3108,7 +3480,9 @@ export class AnalyticsService {
     mode?: string,
     legacyBacktestSplit?: string,
   ): ForecastMode {
-    const normalized = String(mode || '').trim().toLowerCase();
+    const normalized = String(mode || '')
+      .trim()
+      .toLowerCase();
     if (normalized === 'latest-holdout' || normalized === 'latest') {
       return 'latest-holdout';
     }
@@ -3253,8 +3627,10 @@ export class AnalyticsService {
     const lastTrainDate =
       trainingWindow[trainingWindow.length - 1]?.date || trainEndDate;
     const overlapForecastDays =
-      this.daysBetweenInclusive(this.addDaysKey(lastTrainDate, 1), testEndDate) ||
-      evaluationHistorical.length;
+      this.daysBetweenInclusive(
+        this.addDaysKey(lastTrainDate, 1),
+        testEndDate,
+      ) || evaluationHistorical.length;
 
     return {
       mode: 'fixed-window',
@@ -3290,7 +3666,11 @@ export class AnalyticsService {
   private daysBetweenInclusive(start: string, end: string): number {
     const startTime = new Date(`${start}T00:00:00.000Z`).getTime();
     const endTime = new Date(`${end}T00:00:00.000Z`).getTime();
-    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) {
+    if (
+      !Number.isFinite(startTime) ||
+      !Number.isFinite(endTime) ||
+      endTime < startTime
+    ) {
       return 0;
     }
     return Math.floor((endTime - startTime) / (24 * 60 * 60 * 1000)) + 1;
@@ -3366,8 +3746,7 @@ export class AnalyticsService {
               forecastSelection: 'segmented_cafe_category',
               segmentedCafeStatus: 'complete',
               segmentedCafeAutoRefresh: false,
-              forecastSelectionReason:
-                `Selected segmented Cafe category forecast because MASE ${segmentedMase} beat aggregate MASE ${aggregateMase}.`,
+              forecastSelectionReason: `Selected segmented Cafe category forecast because MASE ${segmentedMase} beat aggregate MASE ${aggregateMase}.`,
               forecastCandidates: candidates,
             },
           },
@@ -3383,8 +3762,7 @@ export class AnalyticsService {
             forecastSelection: 'aggregate_cafe',
             segmentedCafeStatus: 'complete_not_selected',
             segmentedCafeAutoRefresh: false,
-            forecastSelectionReason:
-              `Kept aggregate Cafe forecast because segmented MASE ${segmentedMase} did not beat aggregate MASE ${aggregateMase}.`,
+            forecastSelectionReason: `Kept aggregate Cafe forecast because segmented MASE ${segmentedMase} did not beat aggregate MASE ${aggregateMase}.`,
             forecastCandidates: candidates,
           },
         },
@@ -3405,10 +3783,9 @@ export class AnalyticsService {
             segmentedCafeStatus: isPending ? 'pending' : 'failed',
             segmentedCafeAutoRefresh: isPending,
             segmentedCafeRetryAfterMs: 15000,
-            forecastSelectionReason:
-              isPending
-                ? 'Serving aggregate Cafe Prophet while segmented Cafe category forecasting continues in the background.'
-                : `Kept aggregate Cafe forecast because segmented candidate failed: ${message}`,
+            forecastSelectionReason: isPending
+              ? 'Serving aggregate Cafe Prophet while segmented Cafe category forecasting continues in the background.'
+              : `Kept aggregate Cafe forecast because segmented candidate failed: ${message}`,
           },
         },
         pendingSegmentedCandidate: isPending ? segmentedPromise : undefined,
@@ -3472,7 +3849,8 @@ export class AnalyticsService {
           segment: segment.segment,
           observedRows: segment.observedRows,
           totalActual: segment.totalActual,
-          reason: error instanceof Error ? error.message : 'segment forecast failed',
+          reason:
+            error instanceof Error ? error.message : 'segment forecast failed',
         });
       }
     }
@@ -3481,24 +3859,34 @@ export class AnalyticsService {
       throw new Error('No Cafe category segment had enough data to model');
     }
 
-    const firstBacktest = modeledSegments.find(
-      (segment) => Array.isArray(segment.result.backtest?.dates),
+    const firstBacktest = modeledSegments.find((segment) =>
+      Array.isArray(segment.result.backtest?.dates),
     )?.result.backtest;
     if (!firstBacktest || firstBacktest.dates.length === 0) {
-      throw new Error('Segmented Cafe candidate did not return backtest predictions');
+      throw new Error(
+        'Segmented Cafe candidate did not return backtest predictions',
+      );
     }
 
     const testDates = firstBacktest.dates;
     const summedActual = testDates.map((date) =>
       modeledSegments.reduce((sum, segment) => {
         const index = segment.result.backtest?.dates?.indexOf(date) ?? -1;
-        return sum + (index >= 0 ? Number(segment.result.backtest?.actual[index]) || 0 : 0);
+        return (
+          sum +
+          (index >= 0 ? Number(segment.result.backtest?.actual[index]) || 0 : 0)
+        );
       }, 0),
     );
     const summedPredicted = testDates.map((date) =>
       modeledSegments.reduce((sum, segment) => {
         const index = segment.result.backtest?.dates?.indexOf(date) ?? -1;
-        return sum + (index >= 0 ? Number(segment.result.backtest?.predicted[index]) || 0 : 0);
+        return (
+          sum +
+          (index >= 0
+            ? Number(segment.result.backtest?.predicted[index]) || 0
+            : 0)
+        );
       }, 0),
     );
     const trainActualByDate = new Map<string, number>();
@@ -3507,7 +3895,8 @@ export class AnalyticsService {
       segment.history.slice(0, trainActual.length).forEach((point, index) => {
         trainActualByDate.set(
           point.date,
-          (trainActualByDate.get(point.date) || 0) + (Number(trainActual[index]) || 0),
+          (trainActualByDate.get(point.date) || 0) +
+            (Number(trainActual[index]) || 0),
         );
       });
     });
@@ -3538,17 +3927,22 @@ export class AnalyticsService {
       return {
         date,
         forecast: this.round(
-          matching.reduce((sum, point) => sum + (Number(point.forecast) || 0), 0),
+          matching.reduce(
+            (sum, point) => sum + (Number(point.forecast) || 0),
+            0,
+          ),
         ),
         confidenceLow: this.round(
           matching.reduce(
-            (sum, point) => sum + (Number(point.confidenceLow ?? point.forecast) || 0),
+            (sum, point) =>
+              sum + (Number(point.confidenceLow ?? point.forecast) || 0),
             0,
           ),
         ),
         confidenceHigh: this.round(
           matching.reduce(
-            (sum, point) => sum + (Number(point.confidenceHigh ?? point.forecast) || 0),
+            (sum, point) =>
+              sum + (Number(point.confidenceHigh ?? point.forecast) || 0),
             0,
           ),
         ),
@@ -3679,8 +4073,7 @@ export class AnalyticsService {
               forecastSelection: 'segmented_cafe_category',
               segmentedCafeStatus: 'complete',
               segmentedCafeAutoRefresh: false,
-              forecastSelectionReason:
-                `Selected segmented Cafe category forecast because MASE ${segmentedMase} beat aggregate MASE ${aggregateMase}.`,
+              forecastSelectionReason: `Selected segmented Cafe category forecast because MASE ${segmentedMase} beat aggregate MASE ${aggregateMase}.`,
               forecastCandidates: candidates,
             },
           }
@@ -3691,8 +4084,7 @@ export class AnalyticsService {
               forecastSelection: 'aggregate_cafe',
               segmentedCafeStatus: 'complete_not_selected',
               segmentedCafeAutoRefresh: false,
-              forecastSelectionReason:
-                `Kept aggregate Cafe forecast because segmented MASE ${segmentedMase} did not beat aggregate MASE ${aggregateMase}.`,
+              forecastSelectionReason: `Kept aggregate Cafe forecast because segmented MASE ${segmentedMase} did not beat aggregate MASE ${aggregateMase}.`,
               forecastCandidates: candidates,
             },
           };
@@ -3743,14 +4135,18 @@ export class AnalyticsService {
           calibratedForecast.reduce(
             (sum, point) => sum + (point.forecastQuantity ?? point.forecast),
             0,
-          ) * (365 / Math.max(calibratedForecast.length, 1)),
+          ) *
+            (365 / Math.max(calibratedForecast.length, 1)),
         ),
         serverGeneratedAt: new Date().toISOString(),
       },
       generated_at: new Date().toISOString(),
     };
 
-    await this.supabaseService.client.from('forecast_runs').delete().eq('module', 'Cafe');
+    await this.supabaseService.client
+      .from('forecast_runs')
+      .delete()
+      .eq('module', 'Cafe');
     await this.supabaseService.client
       .from('forecast_runs')
       .insert(replacementPayload)
@@ -3792,7 +4188,9 @@ export class AnalyticsService {
       totalActual: number;
     }>
   > {
-    const aggregateDateSet = new Set(aggregateHistorical.map((point) => point.date));
+    const aggregateDateSet = new Set(
+      aggregateHistorical.map((point) => point.date),
+    );
     const rows = await this.transactionModel.aggregate([
       { $match: this.buildForecastTransactionMatch('Cafe') },
       {
@@ -3823,18 +4221,16 @@ export class AnalyticsService {
       const segment = this.classifyCafeForecastSegment(row);
       const transactionId = String(row.transactionId || `row-${index + 1}`);
       const key = `${segment}::${date}::${transactionId}`;
-      const current =
-        transactionMap.get(key) ||
-        {
-          segment,
-          date,
-          quantity: 0,
-          revenue: 0,
-          discountAmount: 0,
-          grossProfit: 0,
-          lineItems: 0,
-          items: new Set<string>(),
-        };
+      const current = transactionMap.get(key) || {
+        segment,
+        date,
+        quantity: 0,
+        revenue: 0,
+        discountAmount: 0,
+        grossProfit: 0,
+        lineItems: 0,
+        items: new Set<string>(),
+      };
 
       current.quantity += Number(row.quantity) || 0;
       current.revenue += Number(row.revenue) || 0;
@@ -3852,19 +4248,17 @@ export class AnalyticsService {
         dailyBySegment.set(transaction.segment, new Map());
       }
       const segmentMap = dailyBySegment.get(transaction.segment)!;
-      const current =
-        segmentMap.get(transaction.date) ||
-        {
-          date: transaction.date,
-          quantity: 0,
-          revenue: 0,
-          grossProfit: 0,
-          orders: 0,
-          lineItems: 0,
-          basketItems: 0,
-          discountAmount: 0,
-          promoTransactions: 0,
-        };
+      const current = segmentMap.get(transaction.date) || {
+        date: transaction.date,
+        quantity: 0,
+        revenue: 0,
+        grossProfit: 0,
+        orders: 0,
+        lineItems: 0,
+        basketItems: 0,
+        discountAmount: 0,
+        promoTransactions: 0,
+      };
 
       current.quantity += transaction.quantity;
       current.revenue += transaction.revenue;
@@ -3894,12 +4288,18 @@ export class AnalyticsService {
             discountAmount: this.round(Number(value?.discountAmount) || 0),
             promoTransactions: Number(value?.promoTransactions) || 0,
             avgBasketSize:
-              orders > 0 ? this.round((Number(value?.basketItems) || 0) / orders) : 0,
+              orders > 0
+                ? this.round((Number(value?.basketItems) || 0) / orders)
+                : 0,
             avgOrderValue:
-              orders > 0 ? this.round((Number(value?.revenue) || 0) / orders) : 0,
+              orders > 0
+                ? this.round((Number(value?.revenue) || 0) / orders)
+                : 0,
             averageUnitPrice:
               quantity > 0
-                ? this.round((Number(value?.revenue) || 0) / Math.max(quantity, 1))
+                ? this.round(
+                    (Number(value?.revenue) || 0) / Math.max(quantity, 1),
+                  )
                 : 0,
           } satisfies DailyValue;
         });
@@ -3911,7 +4311,9 @@ export class AnalyticsService {
             isClosedDay: false,
             isObservedDemand: true,
           }));
-        const observedRows = history.filter((point) => Number(point.actual) > 0).length;
+        const observedRows = history.filter(
+          (point) => Number(point.actual) > 0,
+        ).length;
         const totalActual = this.round(
           history.reduce((sum, point) => sum + (Number(point.actual) || 0), 0),
         );
@@ -3926,19 +4328,39 @@ export class AnalyticsService {
     productName?: string;
   }): string {
     const text = `${row.category || ''} ${row.productName || ''}`.toLowerCase();
-    if (/(pet bakery|pupcake|pup cake|dog cake|barkday cake|pet treat|dog treat|cat treat)/.test(text)) {
+    if (
+      /(pet bakery|pupcake|pup cake|dog cake|barkday cake|pet treat|dog treat|cat treat)/.test(
+        text,
+      )
+    ) {
       return 'Pet bakery';
     }
-    if (/(rice|silog|tapa|tocino|longganisa|cordon|chicken meal|pork meal|beef meal|rice meal)/.test(text)) {
+    if (
+      /(rice|silog|tapa|tocino|longganisa|cordon|chicken meal|pork meal|beef meal|rice meal)/.test(
+        text,
+      )
+    ) {
       return 'Rice meals';
     }
-    if (/(coffee|espresso|americano|latte|cappuccino|mocha|macchiato|cold brew|brew)/.test(text)) {
+    if (
+      /(coffee|espresso|americano|latte|cappuccino|mocha|macchiato|cold brew|brew)/.test(
+        text,
+      )
+    ) {
       return 'Coffee';
     }
-    if (/(waffle|pasta|spaghetti|carbonara|snack|fries|nachos|sandwich|toast|burger|muffin|cookie|pastry)/.test(text)) {
+    if (
+      /(waffle|pasta|spaghetti|carbonara|snack|fries|nachos|sandwich|toast|burger|muffin|cookie|pastry)/.test(
+        text,
+      )
+    ) {
       return 'Snacks/waffles/pasta';
     }
-    if (/(non[- ]?caffeine|tea|matcha|chocolate|lemonade|smoothie|shake|juice|soda|frappe|milk tea|cooler)/.test(text)) {
+    if (
+      /(non[- ]?caffeine|tea|matcha|chocolate|lemonade|smoothie|shake|juice|soda|frappe|milk tea|cooler)/.test(
+        text,
+      )
+    ) {
       return 'Non-caffeine drinks';
     }
     return 'Other Cafe';
@@ -3959,7 +4381,10 @@ export class AnalyticsService {
     }
     const closedWeekdays: number[] = [];
     for (let i = 0; i < 7; i++) {
-      if (weekdayCounts[i] > 0 && weekdayClosedCounts[i] / weekdayCounts[i] >= 0.70) {
+      if (
+        weekdayCounts[i] > 0 &&
+        weekdayClosedCounts[i] / weekdayCounts[i] >= 0.7
+      ) {
         closedWeekdays.push(i);
       }
     }
@@ -3976,7 +4401,10 @@ export class AnalyticsService {
     dateStart?: string;
     dateEnd?: string;
   } {
-    const dateWindow = this.parseCrossSellDateWindow(options.dateStart, options.dateEnd);
+    const dateWindow = this.parseCrossSellDateWindow(
+      options.dateStart,
+      options.dateEnd,
+    );
     return {
       minSupport: Math.max(this.parseThreshold(options.minSupport, 0.01), 0.01),
       minConfidence: Math.max(
@@ -4037,7 +4465,8 @@ export class AnalyticsService {
         'June-November baskets where rainFlag = 1 or humidity >= 75%.',
         (basket) =>
           inMonths(basket.dateKey, [6, 7, 8, 9, 10, 11]) &&
-          (Number(basket.weather?.rainFlag) === 1 || Number(basket.weather?.humidity) >= 75),
+          (Number(basket.weather?.rainFlag) === 1 ||
+            Number(basket.weather?.humidity) >= 75),
       ),
       makeSegment(
         'summer-hot',
@@ -4087,7 +4516,11 @@ export class AnalyticsService {
     const forecastOverlayDates = new Set(futureDates.slice(0, 16));
     return weatherRecords
       .filter((record) => !record.isSynthetic)
-      .filter((record) => historicalSet.has(record.date) || forecastOverlayDates.has(record.date))
+      .filter(
+        (record) =>
+          historicalSet.has(record.date) ||
+          forecastOverlayDates.has(record.date),
+      )
       .map((record) => {
         const rainfallMm = this.round(Number(record.rainfallMm) || 0);
         return {
@@ -4101,25 +4534,41 @@ export class AnalyticsService {
       });
   }
 
-  private withSeasonalBundleMetadata(candidate: any, segment: {
-    id: string;
-    label: string;
-    weatherBasis: string;
-    baskets: any[];
-  }, totalBaskets: number): any | null {
-    const itemA = candidate.itemA || candidate.anchorItem || candidate.antecedents?.[0];
-    const itemB = candidate.itemB || candidate.bundleItem || candidate.consequents?.[0];
+  private withSeasonalBundleMetadata(
+    candidate: any,
+    segment: {
+      id: string;
+      label: string;
+      weatherBasis: string;
+      baskets: any[];
+    },
+    totalBaskets: number,
+  ): any | null {
+    const itemA =
+      candidate.itemA || candidate.anchorItem || candidate.antecedents?.[0];
+    const itemB =
+      candidate.itemB || candidate.bundleItem || candidate.consequents?.[0];
     if (!itemA || !itemB || itemA === itemB) {
       return null;
     }
 
     const scoreSource =
       candidate.synergyScore ??
-      (candidate.opportunityScore !== undefined ? candidate.opportunityScore * 100 : undefined) ??
-      (candidate.lift !== undefined ? Math.min(95, Number(candidate.lift) * 20 + 20) : 50);
-    const weatherSupport = Number(candidate.pairSupport ?? candidate.support ?? 0);
+      (candidate.opportunityScore !== undefined
+        ? candidate.opportunityScore * 100
+        : undefined) ??
+      (candidate.lift !== undefined
+        ? Math.min(95, Number(candidate.lift) * 20 + 20)
+        : 50);
+    const weatherSupport = Number(
+      candidate.pairSupport ?? candidate.support ?? 0,
+    );
     const seasonalOpportunityScore = this.round(
-      Math.min(100, Math.max(0, Number(scoreSource) || 0) + Math.min(10, weatherSupport * 100)),
+      Math.min(
+        100,
+        Math.max(0, Number(scoreSource) || 0) +
+          Math.min(10, weatherSupport * 100),
+      ),
     );
     const baseReason =
       candidate.reason ||
@@ -4153,7 +4602,10 @@ export class AnalyticsService {
       const pairKey = [itemA, itemB].sort().join('::');
       const key = `${candidate.weatherSegmentId || 'weather'}::${pairKey}`;
       const existing = bestBySegmentPair.get(key);
-      if (!existing || this.rankSeasonalBundle(candidate) > this.rankSeasonalBundle(existing)) {
+      if (
+        !existing ||
+        this.rankSeasonalBundle(candidate) > this.rankSeasonalBundle(existing)
+      ) {
         bestBySegmentPair.set(key, candidate);
       }
     }
@@ -4163,7 +4615,10 @@ export class AnalyticsService {
     );
   }
 
-  private selectSeasonalBundleCandidates(candidates: any[], maxCandidates: number): any[] {
+  private selectSeasonalBundleCandidates(
+    candidates: any[],
+    maxCandidates: number,
+  ): any[] {
     const limit = Math.max(1, maxCandidates);
     const bySegment = new Map<string, any[]>();
     for (const candidate of candidates) {
@@ -4174,7 +4629,9 @@ export class AnalyticsService {
     }
 
     for (const segmentCandidates of bySegment.values()) {
-      segmentCandidates.sort((a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a));
+      segmentCandidates.sort(
+        (a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a),
+      );
     }
 
     const selected: any[] = [];
@@ -4206,11 +4663,15 @@ export class AnalyticsService {
       selectedKeys.add(key);
     }
 
-    return selected.sort((a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a));
+    return selected.sort(
+      (a, b) => this.rankSeasonalBundle(b) - this.rankSeasonalBundle(a),
+    );
   }
 
   private rankSeasonalBundle(candidate: any): number {
-    const score = Number(candidate.seasonalOpportunityScore ?? candidate.synergyScore ?? 0);
+    const score = Number(
+      candidate.seasonalOpportunityScore ?? candidate.synergyScore ?? 0,
+    );
     const confidence = Number(candidate.confidence ?? 0) * 100;
     const lift = Number(candidate.lift ?? 0) * 10;
     const frequency = Number(candidate.cooccurrences ?? 0);
@@ -4230,7 +4691,9 @@ export class AnalyticsService {
     return parsed;
   }
 
-  private buildHourMatch(hour: number | undefined): Record<string, unknown> | null {
+  private buildHourMatch(
+    hour: number | undefined,
+  ): Record<string, unknown> | null {
     if (hour === undefined) {
       return null;
     }
@@ -4253,7 +4716,12 @@ export class AnalyticsService {
   private buildCrossSellMatch(
     hour: number | undefined,
     sector: string,
-    dateWindow?: { start: Date; end: Date; dateStart: string; dateEnd: string } | null,
+    dateWindow?: {
+      start: Date;
+      end: Date;
+      dateStart: string;
+      dateEnd: string;
+    } | null,
   ): Record<string, unknown> {
     const match: Record<string, unknown> = {};
     if (sector !== 'all') {
@@ -4278,7 +4746,10 @@ export class AnalyticsService {
     return match;
   }
 
-  private buildTrafficDateColumns(dateStart: string, dateEnd: string): TrafficColumn[] {
+  private buildTrafficDateColumns(
+    dateStart: string,
+    dateEnd: string,
+  ): TrafficColumn[] {
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthLabels = [
       'Jan',
@@ -4322,7 +4793,9 @@ export class AnalyticsService {
     dailyColumns: TrafficColumn[],
   ): TrafficColumn[] {
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const weekdaysInRange = new Set(dailyColumns.map((column) => column.weekday));
+    const weekdaysInRange = new Set(
+      dailyColumns.map((column) => column.weekday),
+    );
     const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
 
     return weekdayOrder
@@ -4357,7 +4830,9 @@ export class AnalyticsService {
   }
 
   private normalizeCrossSellSector(value?: string): string {
-    const lower = String(value || 'all').trim().toLowerCase();
+    const lower = String(value || 'all')
+      .trim()
+      .toLowerCase();
     if (lower === 'cafe' || lower === 'coffee') return 'cafe';
     if (lower === 'retail' || lower === 'pet supplies') return 'retail';
     if (lower === 'services' || lower === 'service' || lower === 'grooming') {
@@ -4366,7 +4841,10 @@ export class AnalyticsService {
     return 'all';
   }
 
-  private parseThreshold(value: number | string | undefined, fallback: number): number {
+  private parseThreshold(
+    value: number | string | undefined,
+    fallback: number,
+  ): number {
     if (value === undefined || value === '') {
       return fallback;
     }
@@ -4422,11 +4900,16 @@ export class AnalyticsService {
 
     const rawId = upload.id ?? upload._id ?? upload.upload_id ?? null;
     const rawTime =
-      upload.uploaded_at ?? upload.uploadedAt ?? upload.created_at ?? upload.createdAt ?? null;
+      upload.uploaded_at ??
+      upload.uploadedAt ??
+      upload.created_at ??
+      upload.createdAt ??
+      null;
     const parsedTime = rawTime ? new Date(rawTime).getTime() : null;
 
     return {
-      latestUploadId: rawId === null || rawId === undefined ? null : String(rawId),
+      latestUploadId:
+        rawId === null || rawId === undefined ? null : String(rawId),
       latestUploadTime: Number.isFinite(parsedTime) ? parsedTime : null,
     };
   }
@@ -4536,7 +5019,8 @@ export class AnalyticsService {
     });
     const totalBaskets = baskets.length;
     const totalBasketItems = baskets.reduce(
-      (sum, basket) => sum + (Array.isArray(basket.items) ? basket.items.length : 0),
+      (sum, basket) =>
+        sum + (Array.isArray(basket.items) ? basket.items.length : 0),
       0,
     );
     const crossSectorBaskets = baskets.filter(
@@ -4558,8 +5042,7 @@ export class AnalyticsService {
           : 0,
       peakHour:
         hourlyTransactionVolume.reduce(
-          (peak, row) =>
-            row.transactions > peak.transactions ? row : peak,
+          (peak, row) => (row.transactions > peak.transactions ? row : peak),
           hourlyTransactionVolume[0],
         ) || null,
       hourlyTransactionVolume,
@@ -4644,18 +5127,25 @@ export class AnalyticsService {
       process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
     );
 
-    const configuredPython = this.configService.get<string>('PYTHON_PATH')?.trim();
+    const configuredPython = this.configService
+      .get<string>('PYTHON_PATH')
+      ?.trim();
     const configuredLooksLikePath = Boolean(
       configuredPython &&
-        (configuredPython.includes('/') ||
-          configuredPython.includes('\\') ||
-          configuredPython.startsWith('.')),
+      (configuredPython.includes('/') ||
+        configuredPython.includes('\\') ||
+        configuredPython.startsWith('.')),
     );
-    const configuredPath = configuredLooksLikePath && configuredPython
-      ? path.resolve(process.cwd(), configuredPython)
-      : null;
+    const configuredPath =
+      configuredLooksLikePath && configuredPython
+        ? path.resolve(process.cwd(), configuredPython)
+        : null;
 
-    if (configuredPython && (!configuredLooksLikePath || (configuredPath && existsSync(configuredPath)))) {
+    if (
+      configuredPython &&
+      (!configuredLooksLikePath ||
+        (configuredPath && existsSync(configuredPath)))
+    ) {
       return configuredPath || configuredPython;
     }
 
@@ -4754,7 +5244,9 @@ export class AnalyticsService {
     ]);
   }
 
-  private buildForecastTransactionMatch(module: ForecastModule): Record<string, unknown> {
+  private buildForecastTransactionMatch(
+    module: ForecastModule,
+  ): Record<string, unknown> {
     const invalidOrderPattern =
       /(cancelled|canceled|void|voided|refund|refunded|failed|rejected)/i;
     const invalidPaymentPattern = /(unpaid|failed|refunded|void|voided)/i;
@@ -4819,7 +5311,12 @@ export class AnalyticsService {
   private async buildServicesExogenousPayload(
     historical: NormalizedDailyValue[],
     forecastDays: number,
-    overrides?: { temp?: string; rain?: string; humidity?: string; holiday?: string },
+    overrides?: {
+      temp?: string;
+      rain?: string;
+      humidity?: string;
+      holiday?: string;
+    },
     module?: ForecastModule,
     dailyData: any[] = [],
   ): Promise<{
@@ -4850,10 +5347,14 @@ export class AnalyticsService {
         historicalDates,
         futureDates,
       );
-      const years = [...new Set(allDates.map((date) => Number(date.slice(0, 4))))];
+      const years = [
+        ...new Set(allDates.map((date) => Number(date.slice(0, 4)))),
+      ];
       const holidayRecords = (
         await Promise.all(
-          years.map((year) => this.exogenousDataService.fetchHolidayHistory(year)),
+          years.map((year) =>
+            this.exogenousDataService.fetchHolidayHistory(year),
+          ),
         )
       ).flat();
 
@@ -5016,7 +5517,9 @@ export class AnalyticsService {
       avgBasketSize: this.round(
         point?.avgBasketSize ?? fallbacks.avgBasketSize ?? 0,
       ),
-      avgOrderValue: this.round(point?.avgOrderValue ?? fallbacks.avgOrderValue ?? 0),
+      avgOrderValue: this.round(
+        point?.avgOrderValue ?? fallbacks.avgOrderValue ?? 0,
+      ),
       average_unit_price: this.round(
         fallbacks.averageUnitPrice ?? point?.averageUnitPrice ?? 0,
       ),
@@ -5035,10 +5538,14 @@ export class AnalyticsService {
       .slice(-14);
     return {
       avgBasketSize: this.round(
-        this.average(recentObserved.map((point) => Number(point.avgBasketSize) || 0)),
+        this.average(
+          recentObserved.map((point) => Number(point.avgBasketSize) || 0),
+        ),
       ),
       avgOrderValue: this.round(
-        this.average(recentObserved.map((point) => Number(point.avgOrderValue) || 0)),
+        this.average(
+          recentObserved.map((point) => Number(point.avgOrderValue) || 0),
+        ),
       ),
       promoFlag: 0,
     };
@@ -5142,7 +5649,11 @@ export class AnalyticsService {
         avgBasketSize: avgBasketSize || 0,
         avgOrderValue: avgOrderValue || 0,
         averageUnitPrice: averageUnitPrice || 0,
-        fitted: fittedMap.has(date) ? this.round(fittedMap.get(date)!) : (index === lastIndex ? actual : undefined),
+        fitted: fittedMap.has(date)
+          ? this.round(fittedMap.get(date)!)
+          : index === lastIndex
+            ? actual
+            : undefined,
       };
     });
   }
@@ -5199,17 +5710,20 @@ export class AnalyticsService {
       );
   }
 
-  private async withAdaptiveForecastMetadata<T extends {
-    historical?: any[];
-    forecast?: any[];
-    itemHistory?: any[];
-    modelMetadata?: Record<string, unknown>;
-  }>(run: T, module: ForecastModule): Promise<T> {
+  private async withAdaptiveForecastMetadata<
+    T extends {
+      historical?: any[];
+      forecast?: any[];
+      itemHistory?: any[];
+      modelMetadata?: Record<string, unknown>;
+    },
+  >(run: T, module: ForecastModule): Promise<T> {
     const historical = Array.isArray(run.historical) ? run.historical : [];
     const forecast = Array.isArray(run.forecast) ? run.forecast : [];
-    const itemHistory = Array.isArray(run.itemHistory) && run.itemHistory.length > 0
-      ? run.itemHistory
-      : await this.getItemHistory(module);
+    const itemHistory =
+      Array.isArray(run.itemHistory) && run.itemHistory.length > 0
+        ? run.itemHistory
+        : await this.getItemHistory(module);
     const existingWeatherOverlay = run.modelMetadata?.weatherOverlay;
     let weatherOverlay = Array.isArray(existingWeatherOverlay)
       ? existingWeatherOverlay
@@ -5228,7 +5742,9 @@ export class AnalyticsService {
         ...(run.modelMetadata || {}),
         forecastRevenuePayloadVersion: FORECAST_REVENUE_PAYLOAD_VERSION,
         historyStartDate:
-          String(run.modelMetadata?.historyStartDate || historical[0]?.date || '') || null,
+          String(
+            run.modelMetadata?.historyStartDate || historical[0]?.date || '',
+          ) || null,
         historyEndDate:
           String(
             run.modelMetadata?.historyEndDate ||
@@ -5236,7 +5752,9 @@ export class AnalyticsService {
               '',
           ) || null,
         forecastStartDate:
-          String(run.modelMetadata?.forecastStartDate || forecast[0]?.date || '') || null,
+          String(
+            run.modelMetadata?.forecastStartDate || forecast[0]?.date || '',
+          ) || null,
         forecastEndDate:
           String(
             run.modelMetadata?.forecastEndDate ||
@@ -5254,15 +5772,19 @@ export class AnalyticsService {
   private async buildCachedForecastWeatherOverlay(
     historicalDates: string[],
     futureDates: string[],
-  ): Promise<Array<{
-    date: string;
-    tempCelsius: number;
-    rainfallMm: number;
-    humidity: number;
-    rainFlag: number;
-    period: 'historical' | 'forecast';
-  }>> {
-    const allDates = [...historicalDates, ...futureDates.slice(0, 16)].filter(Boolean).sort();
+  ): Promise<
+    Array<{
+      date: string;
+      tempCelsius: number;
+      rainfallMm: number;
+      humidity: number;
+      rainFlag: number;
+      period: 'historical' | 'forecast';
+    }>
+  > {
+    const allDates = [...historicalDates, ...futureDates.slice(0, 16)]
+      .filter(Boolean)
+      .sort();
     if (allDates.length === 0) return [];
     const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
     const weatherRecords = await this.exogenousDataService.fetchWeatherHistory(
@@ -5367,7 +5889,9 @@ export class AnalyticsService {
     },
   ): ModelResult['forecast'] {
     return forecast.map((point) => {
-      const forecastQuantity = this.round(Math.max(0, Number(point.forecast) || 0));
+      const forecastQuantity = this.round(
+        Math.max(0, Number(point.forecast) || 0),
+      );
       const confidenceLow =
         point.confidenceLow === undefined
           ? undefined
@@ -5454,7 +5978,8 @@ export class AnalyticsService {
     return {
       unitPrice,
       unitCost: Number.isFinite(parsedCost) ? this.round(parsedCost) : 0,
-      source: unitPrice > 0 ? 'last_30_day_pos_weighted_average' : 'unavailable',
+      source:
+        unitPrice > 0 ? 'last_30_day_pos_weighted_average' : 'unavailable',
     };
   }
 
@@ -5495,12 +6020,18 @@ export class AnalyticsService {
       },
     ]);
     const row = Array.isArray(rows) ? rows[0] : undefined;
-    return row?.quantity > 0 ? this.round(row.weightedRevenue / row.quantity) : 0;
+    return row?.quantity > 0
+      ? this.round(row.weightedRevenue / row.quantity)
+      : 0;
   }
 
-  private withForecastStartAnchor<T extends { historical?: any[]; forecast?: any[]; modelMetadata?: Record<string, unknown> }>(
-    run: T,
-  ): T {
+  private withForecastStartAnchor<
+    T extends {
+      historical?: any[];
+      forecast?: any[];
+      modelMetadata?: Record<string, unknown>;
+    },
+  >(run: T): T {
     const historical = Array.isArray(run.historical) ? run.historical : [];
     const forecast = Array.isArray(run.forecast) ? run.forecast : [];
     const lastIndex = historical.length - 1;
@@ -5514,9 +6045,12 @@ export class AnalyticsService {
       run.modelMetadata?.forecastMode === 'fixed-window' ||
       run.modelMetadata?.splitRatio === '80-10-10' ||
       run.modelMetadata?.splitRatio === '70-15-15';
-    const startsAt = isBacktest && forecast.length > 0
-      ? forecast[0].date
-      : (lastIndex >= 0 ? anchoredHistorical[lastIndex].date : null);
+    const startsAt =
+      isBacktest && forecast.length > 0
+        ? forecast[0].date
+        : lastIndex >= 0
+          ? anchoredHistorical[lastIndex].date
+          : null;
 
     return {
       ...run,
@@ -5671,7 +6205,9 @@ export class AnalyticsService {
       };
     }
 
-    const actuals = historical.map((point) => point.cappedActual ?? point.actual);
+    const actuals = historical.map(
+      (point) => point.cappedActual ?? point.actual,
+    );
     const windowSize = Math.min(7, actuals.length);
     const forecastValue = this.average(actuals.slice(-windowSize));
     const lastDate = new Date(
@@ -5705,7 +6241,9 @@ export class AnalyticsService {
       if (index < 7) {
         fittedValues.push(actuals[index]);
       } else {
-        fittedValues.push(this.round(this.average(actuals.slice(index - 7, index))));
+        fittedValues.push(
+          this.round(this.average(actuals.slice(index - 7, index))),
+        );
       }
     }
 
@@ -5734,14 +6272,17 @@ export class AnalyticsService {
     return 'week';
   }
 
-  private getHomeDateWindow(range: string, latestDate: Date): {
+  private getHomeDateWindow(
+    range: string,
+    latestDate: Date,
+  ): {
     start: Date;
     end: Date;
     previousStart: Date;
     previousEnd: Date;
   } {
     const lower = range.toLowerCase();
-    
+
     if (lower.startsWith('custom:')) {
       const parts = range.split(':');
       const start = new Date(parts[1]);
@@ -5749,14 +6290,19 @@ export class AnalyticsService {
       if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
         start.setHours(0, 0, 0, 0);
         end.setHours(23, 59, 59, 999);
-        
-        const dayCount = Math.max(1, Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1);
+
+        const dayCount = Math.max(
+          1,
+          Math.floor(
+            (end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000),
+          ) + 1,
+        );
         const previousEnd = new Date(start);
         previousEnd.setMilliseconds(previousEnd.getMilliseconds() - 1);
         const previousStart = new Date(previousEnd);
         previousStart.setDate(previousStart.getDate() - dayCount + 1);
         previousStart.setHours(0, 0, 0, 0);
-        
+
         return { start, end, previousStart, previousEnd };
       }
     }
@@ -5901,11 +6447,17 @@ export class AnalyticsService {
 
   private formatHomeChannelBalance(rows: any[]): any[] {
     const byChannel = new Map(rows.map((row) => [row._id, row]));
-    
+
     const posRevenue = this.round(Number(byChannel.get('POS')?.revenue) || 0);
-    const shopeeRevenue = this.round(Number(byChannel.get('Shopee')?.revenue) || 0);
-    const tiktokRevenue = this.round(Number(byChannel.get('TikTok Shop')?.revenue) || 0);
-    const pethubRevenue = this.round(Number(byChannel.get('PetHub')?.revenue) || 0);
+    const shopeeRevenue = this.round(
+      Number(byChannel.get('Shopee')?.revenue) || 0,
+    );
+    const tiktokRevenue = this.round(
+      Number(byChannel.get('TikTok Shop')?.revenue) || 0,
+    );
+    const pethubRevenue = this.round(
+      Number(byChannel.get('PetHub')?.revenue) || 0,
+    );
 
     const result: any[] = [];
     if (posRevenue > 0) {
@@ -6020,7 +6572,12 @@ export class AnalyticsService {
     if (topItem) {
       const confidence = Math.min(
         95,
-        Math.max(60, Math.round((topItem.revenue / Math.max(input.totalRevenue, 1)) * 100 + 60)),
+        Math.max(
+          60,
+          Math.round(
+            (topItem.revenue / Math.max(input.totalRevenue, 1)) * 100 + 60,
+          ),
+        ),
       );
       suggestions.push({
         id: 1,
@@ -6069,8 +6626,12 @@ export class AnalyticsService {
     channelSummary: any[],
     suggestions: any[],
   ): string {
-    const topSector = [...sectorSummary].sort((a, b) => b.revenue - a.revenue)[0];
-    const topChannel = [...channelSummary].sort((a, b) => b.revenue - a.revenue)[0];
+    const topSector = [...sectorSummary].sort(
+      (a, b) => b.revenue - a.revenue,
+    )[0];
+    const topChannel = [...channelSummary].sort(
+      (a, b) => b.revenue - a.revenue,
+    )[0];
     if (!topSector || topSector.revenue === 0) {
       return 'Upload transaction data to activate live Home insights.';
     }
@@ -6134,7 +6695,9 @@ export class AnalyticsService {
       return { mase: 0, smape: 0, accuracy: 0 };
     }
     const absoluteErrors = actual.map((value, index) =>
-      Math.abs(value - (Number.isFinite(predicted[index]) ? predicted[index] : 0)),
+      Math.abs(
+        value - (Number.isFinite(predicted[index]) ? predicted[index] : 0),
+      ),
     );
     const mae = this.average(absoluteErrors);
     const naiveErrors = training
@@ -6143,7 +6706,9 @@ export class AnalyticsService {
     const oneStepNaiveErrors = training
       .slice(1)
       .map((value, index) => Math.abs(value - training[index]));
-    const naiveMae = this.average(naiveErrors.length > 0 ? naiveErrors : oneStepNaiveErrors);
+    const naiveMae = this.average(
+      naiveErrors.length > 0 ? naiveErrors : oneStepNaiveErrors,
+    );
     const percentageErrors = actual.map((value, index) => {
       const forecast = Number.isFinite(predicted[index]) ? predicted[index] : 0;
       const denominator = (Math.abs(value) + Math.abs(forecast)) / 2;
@@ -6159,7 +6724,9 @@ export class AnalyticsService {
     };
   }
 
-  private async getLegacyRetailForecast(overrides?: ForecastOverrides): Promise<any> {
+  private async getLegacyRetailForecast(
+    overrides?: ForecastOverrides,
+  ): Promise<any> {
     const dailyData = await this.transactionModel.aggregate([
       { $match: { sector: 'Retail' } },
       {
@@ -6189,7 +6756,9 @@ export class AnalyticsService {
         modelInfo: { model: 'Insufficient data', accuracy: 0 },
       };
     }
-    const forecastDays = this.normalizeForecastDays(overrides?.days || DEFAULT_FORECAST_DAYS);
+    const forecastDays = this.normalizeForecastDays(
+      overrides?.days || DEFAULT_FORECAST_DAYS,
+    );
     const result = await this.runPython<any>('forecast.py', {
       data: inputData,
       forecastDays,
@@ -6197,17 +6766,22 @@ export class AnalyticsService {
     const scenarioAdjustment = this.getRetailScenarioAdjustment(overrides);
     return {
       ...result,
-      historical: (result.historical || []).map((point: any, index: number) => ({
-        date: point.date,
-        actual: point.revenue ?? point.actual,
-        orders: point.orders,
-        fitted: result.fittedValues && result.fittedValues[index] !== undefined 
-          ? result.fittedValues[index] 
-          : undefined,
-      })),
+      historical: (result.historical || []).map(
+        (point: any, index: number) => ({
+          date: point.date,
+          actual: point.revenue ?? point.actual,
+          orders: point.orders,
+          fitted:
+            result.fittedValues && result.fittedValues[index] !== undefined
+              ? result.fittedValues[index]
+              : undefined,
+        }),
+      ),
       forecast: (result.forecast || []).map((point: any) => {
         const baseForecast = Number(point.forecast ?? point.revenue ?? 0);
-        const adjustedForecast = this.round(Math.max(0, baseForecast * scenarioAdjustment.multiplier));
+        const adjustedForecast = this.round(
+          Math.max(0, baseForecast * scenarioAdjustment.multiplier),
+        );
         return {
           ...point,
           forecast: adjustedForecast,
@@ -6215,11 +6789,22 @@ export class AnalyticsService {
           projectedNetSales: adjustedForecast,
           confidenceLow:
             point.confidenceLow !== undefined
-              ? this.round(Math.max(0, Number(point.confidenceLow) * scenarioAdjustment.multiplier))
+              ? this.round(
+                  Math.max(
+                    0,
+                    Number(point.confidenceLow) * scenarioAdjustment.multiplier,
+                  ),
+                )
               : point.confidenceLow,
           confidenceHigh:
             point.confidenceHigh !== undefined
-              ? this.round(Math.max(0, Number(point.confidenceHigh) * scenarioAdjustment.multiplier))
+              ? this.round(
+                  Math.max(
+                    0,
+                    Number(point.confidenceHigh) *
+                      scenarioAdjustment.multiplier,
+                  ),
+                )
               : point.confidenceHigh,
         };
       }),
@@ -6231,20 +6816,35 @@ export class AnalyticsService {
   }
 
   private getRetailScenarioAdjustment(overrides?: ForecastOverrides) {
-    const temp = overrides?.temp !== undefined && overrides.temp !== '' ? Number(overrides.temp) : undefined;
-    const rain = overrides?.rain !== undefined && overrides.rain !== '' ? overrides.rain === '1' : false;
-    const holiday = overrides?.holiday !== undefined && overrides.holiday !== '' ? overrides.holiday === '1' : false;
-    const isPayday = overrides?.isPayday !== undefined && overrides.isPayday !== '' ? overrides.isPayday === '1' : false;
-    const promoActive = overrides?.promoActive !== undefined && overrides.promoActive !== '' ? overrides.promoActive === '1' : false;
-    
+    const temp =
+      overrides?.temp !== undefined && overrides.temp !== ''
+        ? Number(overrides.temp)
+        : undefined;
+    const rain =
+      overrides?.rain !== undefined && overrides.rain !== ''
+        ? overrides.rain === '1'
+        : false;
+    const holiday =
+      overrides?.holiday !== undefined && overrides.holiday !== ''
+        ? overrides.holiday === '1'
+        : false;
+    const isPayday =
+      overrides?.isPayday !== undefined && overrides.isPayday !== ''
+        ? overrides.isPayday === '1'
+        : false;
+    const promoActive =
+      overrides?.promoActive !== undefined && overrides.promoActive !== ''
+        ? overrides.promoActive === '1'
+        : false;
+
     let multiplier = 1.0;
 
     // Calibrated business assumptions for Retail
     if (rain) multiplier *= 0.88; // 12% reduction on rainy days
     if (holiday) multiplier *= 1.15; // 15% uplift on holidays
-    if (isPayday) multiplier *= 1.10; // 10% uplift on payday weekends
+    if (isPayday) multiplier *= 1.1; // 10% uplift on payday weekends
     if (promoActive) multiplier *= 1.08; // 8% uplift with active promo
-    
+
     if (temp !== undefined && Number.isFinite(temp)) {
       if (temp > 32) multiplier *= 0.98;
       else if (temp >= 24 && temp <= 30) multiplier *= 1.02;
@@ -6265,12 +6865,27 @@ export class AnalyticsService {
     predicted: number[],
     training: number[],
     seasonalPeriod = 7,
-  ): Required<Pick<ModelResult, 'mase' | 'smape' | 'accuracy' | 'mae' | 'rmse' | 'mape' | 'r2'>> {
+  ): Required<
+    Pick<
+      ModelResult,
+      'mase' | 'smape' | 'accuracy' | 'mae' | 'rmse' | 'mape' | 'r2'
+    >
+  > {
     const pairs = actual
       .map((value, index) => [Number(value), Number(predicted[index])])
-      .filter(([left, right]) => Number.isFinite(left) && Number.isFinite(right));
+      .filter(
+        ([left, right]) => Number.isFinite(left) && Number.isFinite(right),
+      );
     if (pairs.length === 0) {
-      return { mase: 999, smape: 100, accuracy: 0, mae: 0, rmse: 0, mape: 0, r2: 0 };
+      return {
+        mase: 999,
+        smape: 100,
+        accuracy: 0,
+        mae: 0,
+        rmse: 0,
+        mape: 0,
+        r2: 0,
+      };
     }
 
     const errors = pairs.map(([left, right]) => left - right);
@@ -6282,7 +6897,9 @@ export class AnalyticsService {
     const lag = cleanTraining.length > seasonalPeriod ? seasonalPeriod : 1;
     const naiveErrors: number[] = [];
     for (let index = lag; index < cleanTraining.length; index++) {
-      naiveErrors.push(Math.abs(cleanTraining[index] - cleanTraining[index - lag]));
+      naiveErrors.push(
+        Math.abs(cleanTraining[index] - cleanTraining[index - lag]),
+      );
     }
     const maseDenominator = this.average(naiveErrors);
     const smapeTerms = pairs
@@ -6298,14 +6915,22 @@ export class AnalyticsService {
       .map(([left, right]) => Math.abs((left - right) / left) * 100);
     const mape = this.average(mapeTerms);
     const actualMean = this.average(pairs.map(([left]) => left));
-    const ssRes = pairs.reduce((sum, [left, right]) => sum + (left - right) ** 2, 0);
-    const ssTot = pairs.reduce((sum, [left]) => sum + (left - actualMean) ** 2, 0);
+    const ssRes = pairs.reduce(
+      (sum, [left, right]) => sum + (left - right) ** 2,
+      0,
+    );
+    const ssTot = pairs.reduce(
+      (sum, [left]) => sum + (left - actualMean) ** 2,
+      0,
+    );
     const r2 = ssTot > 0 ? 1 - ssRes / ssTot : 0;
 
     return {
       mase: this.round(maseDenominator > 0 ? mae / maseDenominator : 999),
       smape: this.round(Number.isFinite(smape) ? smape : 100),
-      accuracy: this.round(Math.max(0, 100 - (Number.isFinite(smape) ? smape : 100))),
+      accuracy: this.round(
+        Math.max(0, 100 - (Number.isFinite(smape) ? smape : 100)),
+      ),
       mae: this.round(mae),
       rmse: this.round(rmse),
       mape: this.round(Number.isFinite(mape) ? mape : 0),
@@ -6322,7 +6947,11 @@ export class AnalyticsService {
     bucket: 'week' | 'month',
   ): ModelResult['weeklyMetrics'] {
     const testBuckets = this.sumByPeriod(dates, actual, predicted, bucket);
-    const trainBuckets = this.sumTrainingByPeriod(trainDates, trainActual, bucket);
+    const trainBuckets = this.sumTrainingByPeriod(
+      trainDates,
+      trainActual,
+      bucket,
+    );
     return this.evaluateForecastArrays(
       testBuckets.map((point) => point.actual),
       testBuckets.map((point) => point.predicted),
@@ -6339,7 +6968,8 @@ export class AnalyticsService {
   ): Array<{ key: string; actual: number; predicted: number }> {
     const grouped = new Map<string, { actual: number; predicted: number }>();
     dates.forEach((date, index) => {
-      const key = bucket === 'month' ? date.slice(0, 7) : this.weekBucketKey(date);
+      const key =
+        bucket === 'month' ? date.slice(0, 7) : this.weekBucketKey(date);
       const current = grouped.get(key) || { actual: 0, predicted: 0 };
       current.actual += Number(actual[index]) || 0;
       current.predicted += Number(predicted[index]) || 0;
@@ -6357,7 +6987,8 @@ export class AnalyticsService {
   ): number[] {
     const grouped = new Map<string, number>();
     dates.forEach((date, index) => {
-      const key = bucket === 'month' ? date.slice(0, 7) : this.weekBucketKey(date);
+      const key =
+        bucket === 'month' ? date.slice(0, 7) : this.weekBucketKey(date);
       grouped.set(key, (grouped.get(key) || 0) + (Number(actual[index]) || 0));
     });
     return [...grouped.entries()]
@@ -6418,7 +7049,10 @@ export class AnalyticsService {
 
       return data.map((row: any) => this.mapFeedbackPromotion(row));
     } catch (err) {
-      console.warn('Failed to load feedback promotions from Supabase, falling back to dynamic seed:', err);
+      console.warn(
+        'Failed to load feedback promotions from Supabase, falling back to dynamic seed:',
+        err,
+      );
       return this.getSeededFeedbackPromotions(status, type);
     }
   }
@@ -6427,7 +7061,8 @@ export class AnalyticsService {
     id: string,
     dto: { feedback: 'helpful' | 'not-helpful'; notes?: string },
   ): Promise<any> {
-    const feedbackValue = dto?.feedback === 'helpful' ? 'helpful' : 'not-helpful';
+    const feedbackValue =
+      dto?.feedback === 'helpful' ? 'helpful' : 'not-helpful';
     const notes = dto?.notes ? String(dto.notes).trim() : null;
     const now = new Date().toISOString();
 
@@ -6495,7 +7130,9 @@ export class AnalyticsService {
           .select()
           .single();
 
-        updatedRow = data ? this.mapFeedbackPromotion(data) : { ...found, feedback: feedbackValue, feedbackNotes: notes };
+        updatedRow = data
+          ? this.mapFeedbackPromotion(data)
+          : { ...found, feedback: feedbackValue, feedbackNotes: notes };
       }
     } catch (err) {
       console.warn(`Supabase update error for feedback ${id}:`, err);
@@ -6541,7 +7178,10 @@ export class AnalyticsService {
     };
   }
 
-  async recalibrateModels(source = 'user_action', reason = 'Manual recalibration'): Promise<any> {
+  async recalibrateModels(
+    source = 'user_action',
+    reason = 'Manual recalibration',
+  ): Promise<any> {
     const timestamp = new Date().toISOString();
 
     // 1. Invalidate stale cross-sell caches
@@ -6578,12 +7218,14 @@ export class AnalyticsService {
       enginesRecalibrated: [
         {
           name: 'Bundle Simulator FP-Growth Engine',
-          adjustment: 'Re-weighting low-association candidate confidence by feedback penalty coefficient',
+          adjustment:
+            'Re-weighting low-association candidate confidence by feedback penalty coefficient',
           status: 'invalidated',
         },
         {
           name: 'Time-Series Forecast Engine (Prophet/SARIMAX)',
-          adjustment: 'Initiated full background retraining pipeline on Cafe and Services datasets',
+          adjustment:
+            'Initiated full background retraining pipeline on Cafe and Services datasets',
           status: 'training_in_progress',
         },
       ],
@@ -6607,15 +7249,20 @@ export class AnalyticsService {
     const completed = promotions.filter((p) => p.status === 'completed');
     const active = promotions.filter((p) => p.status === 'active');
     const helpful = completed.filter((p) => p.feedback === 'helpful').length;
-    const notHelpful = completed.filter((p) => p.feedback === 'not-helpful').length;
+    const notHelpful = completed.filter(
+      (p) => p.feedback === 'not-helpful',
+    ).length;
     const pending = completed.filter((p) => p.feedback === null).length;
 
     const accuracies = completed
       .map((p) => {
         if (!p.predictedLift || !p.actualLift) return null;
-        const pred = parseFloat(String(p.predictedLift).replace(/[^0-9.]/g, ''));
+        const pred = parseFloat(
+          String(p.predictedLift).replace(/[^0-9.]/g, ''),
+        );
         const act = parseFloat(String(p.actualLift).replace(/[^0-9.]/g, ''));
-        if (!pred || Number.isNaN(pred) || !act || Number.isNaN(act)) return null;
+        if (!pred || Number.isNaN(pred) || !act || Number.isNaN(act))
+          return null;
         const acc = Math.max(0, (1 - Math.abs(pred - act) / pred) * 100);
         return Math.min(100, acc);
       })
@@ -6623,11 +7270,15 @@ export class AnalyticsService {
 
     const avgAccuracy =
       accuracies.length > 0
-        ? Math.round((accuracies.reduce((sum, a) => sum + a, 0) / accuracies.length) * 10) / 10
+        ? Math.round(
+            (accuracies.reduce((sum, a) => sum + a, 0) / accuracies.length) *
+              10,
+          ) / 10
         : 89.2;
 
     const totalSignals = helpful + notHelpful;
-    const positiveRatio = totalSignals > 0 ? Math.round((helpful / totalSignals) * 100) : 85;
+    const positiveRatio =
+      totalSignals > 0 ? Math.round((helpful / totalSignals) * 100) : 85;
 
     return {
       totalDeployed: promotions.length,
@@ -6661,11 +7312,20 @@ export class AnalyticsService {
       status: row.status || 'completed',
       feedback: row.feedback || null,
       feedbackNotes: row.feedback_notes || null,
-      deployedDate: row.deployed_at ? new Date(row.deployed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Apr 14, 2026',
+      deployedDate: row.deployed_at
+        ? new Date(row.deployed_at).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })
+        : 'Apr 14, 2026',
     };
   }
 
-  private async getSeededFeedbackPromotions(status?: string, type?: string): Promise<any[]> {
+  private async getSeededFeedbackPromotions(
+    status?: string,
+    type?: string,
+  ): Promise<any[]> {
     let dynamicHappyHours: any[] = [];
     try {
       const { data } = await this.supabaseService.client
@@ -6688,16 +7348,29 @@ export class AnalyticsService {
 
     const items: any[] = [];
 
-    bundleArchives.forEach(bundle => {
+    bundleArchives.forEach((bundle) => {
       items.push({
         id: `bundle-${bundle.id}`,
         type: 'bundle',
         title: bundle.bundle_name || 'Promotional Bundle',
-        deployedDate: bundle.created_at ? new Date(bundle.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
-        targetTime: bundle.availability_start_date && bundle.availability_end_date ? `${new Date(bundle.availability_start_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${new Date(bundle.availability_end_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : 'Anytime',
-        discount: bundle.discount_percent ? `${bundle.discount_percent}% off combo` : 'Combo discount',
+        deployedDate: bundle.created_at
+          ? new Date(bundle.created_at).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })
+          : 'N/A',
+        targetTime:
+          bundle.availability_start_date && bundle.availability_end_date
+            ? `${new Date(bundle.availability_start_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(bundle.availability_end_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+            : 'Anytime',
+        discount: bundle.discount_percent
+          ? `${bundle.discount_percent}% off combo`
+          : 'Combo discount',
         predictedLift: bundle.lift ? `+₱${bundle.lift.toLocaleString()}` : null,
-        actualLift: bundle.metadata?.actualLift ? `+₱${bundle.metadata.actualLift.toLocaleString()}` : null,
+        actualLift: bundle.metadata?.actualLift
+          ? `+₱${bundle.metadata.actualLift.toLocaleString()}`
+          : null,
         confidence: bundle.confidence ? `${bundle.confidence}%` : '80%',
         sector: bundle.items?.[0]?.sector || 'Cafe + Services',
         status: bundle.status || 'completed',
@@ -6705,19 +7378,39 @@ export class AnalyticsService {
       });
     });
 
-    dynamicHappyHours.forEach(promo => {
+    dynamicHappyHours.forEach((promo) => {
       items.push({
         id: `promo-${promo.id}`,
         type: 'happy-hour',
         title: `Happy Hour Promo`,
-        deployedDate: promo.created_at ? new Date(promo.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
-        targetTime: promo.target_date ? new Date(promo.target_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Anytime',
-        discount: promo.owner_approved_discount_percent ? `${promo.owner_approved_discount_percent}% off` : 'Discount',
-        predictedLift: promo.metadata?.predictedLift ? `+₱${promo.metadata.predictedLift.toLocaleString()}` : null,
-        actualLift: promo.metadata?.actualLift ? `+₱${promo.metadata.actualLift.toLocaleString()}` : null,
-        confidence: promo.probability_score ? `${promo.probability_score}%` : '80%',
+        deployedDate: promo.created_at
+          ? new Date(promo.created_at).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })
+          : 'N/A',
+        targetTime: promo.target_date
+          ? new Date(promo.target_date).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : 'Anytime',
+        discount: promo.owner_approved_discount_percent
+          ? `${promo.owner_approved_discount_percent}% off`
+          : 'Discount',
+        predictedLift: promo.metadata?.predictedLift
+          ? `+₱${promo.metadata.predictedLift.toLocaleString()}`
+          : null,
+        actualLift: promo.metadata?.actualLift
+          ? `+₱${promo.metadata.actualLift.toLocaleString()}`
+          : null,
+        confidence: promo.probability_score
+          ? `${promo.probability_score}%`
+          : '80%',
         sector: 'Cafe',
-        status: promo.status === 'approved' ? 'active' : (promo.status || 'completed'),
+        status:
+          promo.status === 'approved' ? 'active' : promo.status || 'completed',
         feedback: promo.metadata?.feedback || null,
       });
     });
@@ -6734,7 +7427,9 @@ export class AnalyticsService {
   // ----------------------------------------------------------------
   @Cron('0 2 * * *')
   async trackActualPromotionLift() {
-    console.log('[Cron] Running daily actual lift calculation for promotions...');
+    console.log(
+      '[Cron] Running daily actual lift calculation for promotions...',
+    );
 
     // 1. Process bundle_archives
     try {
@@ -6747,31 +7442,42 @@ export class AnalyticsService {
 
       if (bundles && bundles.length > 0) {
         for (const bundle of bundles) {
-          if (!bundle.availability_start_date || !bundle.availability_end_date) continue;
+          if (!bundle.availability_start_date || !bundle.availability_end_date)
+            continue;
           const startDate = new Date(bundle.availability_start_date);
           const endDate = new Date(bundle.availability_end_date);
-          
+
           if (Date.now() < startDate.getTime()) continue;
-          
+
           const baselineStart = new Date(startDate);
           baselineStart.setDate(baselineStart.getDate() - 7);
-          
+
           const items = bundle.items?.map((i: any) => i.name) || [];
           if (items.length === 0) continue;
 
           const promoSales = await this.transactionModel.aggregate([
-            { $match: { productName: { $in: items }, date: { $gte: startDate, $lte: endDate } } },
-            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+            {
+              $match: {
+                productName: { $in: items },
+                date: { $gte: startDate, $lte: endDate },
+              },
+            },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } },
           ]); // .allowDiskUse(true) is handled by schema pre-hook
 
           const baselineSales = await this.transactionModel.aggregate([
-            { $match: { productName: { $in: items }, date: { $gte: baselineStart, $lt: startDate } } },
-            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+            {
+              $match: {
+                productName: { $in: items },
+                date: { $gte: baselineStart, $lt: startDate },
+              },
+            },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } },
           ]);
 
           const promoTotal = promoSales[0]?.totalAmount || 0;
           const baselineTotal = baselineSales[0]?.totalAmount || 0;
-          
+
           const actualLift = Math.max(0, promoTotal - baselineTotal);
 
           const metadata = bundle.metadata || {};
@@ -6804,18 +7510,34 @@ export class AnalyticsService {
           baselineStart.setDate(baselineStart.getDate() - 7);
 
           const promoSales = await this.transactionModel.aggregate([
-            { $match: { sector: 'Cafe', date: { $gte: promoDate, $lt: new Date(promoDate.getTime() + 24 * 60 * 60 * 1000) } } },
-            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+            {
+              $match: {
+                sector: 'Cafe',
+                date: {
+                  $gte: promoDate,
+                  $lt: new Date(promoDate.getTime() + 24 * 60 * 60 * 1000),
+                },
+              },
+            },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } },
           ]);
 
           const baselineSales = await this.transactionModel.aggregate([
-            { $match: { sector: 'Cafe', date: { $gte: baselineStart, $lt: new Date(baselineStart.getTime() + 24 * 60 * 60 * 1000) } } },
-            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } }
+            {
+              $match: {
+                sector: 'Cafe',
+                date: {
+                  $gte: baselineStart,
+                  $lt: new Date(baselineStart.getTime() + 24 * 60 * 60 * 1000),
+                },
+              },
+            },
+            { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } },
           ]);
 
           const promoTotal = promoSales[0]?.totalAmount || 0;
           const baselineTotal = baselineSales[0]?.totalAmount || 0;
-          
+
           const actualLift = Math.max(0, promoTotal - baselineTotal);
           const metadata = promo.metadata || {};
           metadata.actualLift = actualLift;

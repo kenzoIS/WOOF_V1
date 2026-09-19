@@ -80,7 +80,7 @@ describe('CsvService flexible uploads', () => {
       'POS',
     );
 
-    expect((result as any).upload.recordCount).toBe(1);
+    expect(result.upload.recordCount).toBe(1);
     expect(insertMany).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -104,7 +104,7 @@ describe('CsvService flexible uploads', () => {
       'POS',
     );
 
-    expect((result as any).upload.recordCount).toBe(1);
+    expect(result.upload.recordCount).toBe(1);
     expect(insertMany).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -156,7 +156,7 @@ describe('CsvService flexible uploads', () => {
       'POS',
     );
 
-    expect((result as any).upload.recordCount).toBe(5001);
+    expect(result.upload.recordCount).toBe(5001);
     expect(insertMany).toHaveBeenCalledTimes(2);
     expect(insertMany.mock.calls[0][0]).toHaveLength(5000);
     expect(insertMany.mock.calls[1][0]).toHaveLength(1);
@@ -199,7 +199,7 @@ describe('CsvService flexible uploads', () => {
       'TikTok',
     );
 
-    expect((result as any).upload.channel).toBe('TikTok Shop');
+    expect(result.upload.channel).toBe('TikTok Shop');
     expect(insertMany).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -236,8 +236,8 @@ describe('CsvService flexible uploads', () => {
       'PetHub',
     );
 
-    expect((result as any).upload.channel).toBe('PetHub');
-    expect((result as any).upload.recordCount).toBe(3);
+    expect(result.upload.channel).toBe('PetHub');
+    expect(result.upload.recordCount).toBe(3);
     expect(insertMany).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -290,7 +290,7 @@ describe('CsvService flexible uploads', () => {
       'PetHub',
     );
 
-    expect((result as any).upload.recordCount).toBe(0);
+    expect(result.upload.recordCount).toBe(0);
     expect(insertMany).not.toHaveBeenCalled();
   });
 
@@ -308,7 +308,9 @@ describe('CsvService flexible uploads', () => {
     ]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Upload');
-    const buffer = Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+    const buffer = Buffer.from(
+      XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }),
+    );
 
     const result = await service.processUpload(
       {
@@ -318,7 +320,7 @@ describe('CsvService flexible uploads', () => {
       'POS',
     );
 
-    expect((result as any).upload.recordCount).toBe(1);
+    expect(result.upload.recordCount).toBe(1);
     expect(insertMany).toHaveBeenCalledWith(
       [
         expect.objectContaining({

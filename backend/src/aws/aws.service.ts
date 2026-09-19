@@ -115,7 +115,13 @@ export class AwsService {
   // ----------------------------------------------------------------
 
   async uploadAnalyticsArchive(
-    type: 'forecast' | 'cross-sell' | 'smart-report' | 'dynamic-promo' | 'feedback' | 'recalibration',
+    type:
+      | 'forecast'
+      | 'cross-sell'
+      | 'smart-report'
+      | 'dynamic-promo'
+      | 'feedback'
+      | 'recalibration',
     module: string,
     payload: Record<string, unknown>,
   ): Promise<string | null> {
@@ -131,14 +137,22 @@ export class AwsService {
     promotionType: string,
     payload: Record<string, unknown>,
   ): Promise<string | null> {
-    return this.uploadAnalyticsArchive('feedback', promotionType || 'general', payload);
+    return this.uploadAnalyticsArchive(
+      'feedback',
+      promotionType || 'general',
+      payload,
+    );
   }
 
   async uploadRecalibrationArchive(
     module: string,
     payload: Record<string, unknown>,
   ): Promise<string | null> {
-    return this.uploadAnalyticsArchive('recalibration', module || 'system', payload);
+    return this.uploadAnalyticsArchive(
+      'recalibration',
+      module || 'system',
+      payload,
+    );
   }
 
   // ----------------------------------------------------------------
@@ -186,7 +200,8 @@ export class AwsService {
   private mimeForFilename(filename: string): string {
     const ext = filename.split('.').pop()?.toLowerCase();
     if (ext === 'csv') return 'text/csv';
-    if (ext === 'xlsx' || ext === 'xls') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (ext === 'xlsx' || ext === 'xls')
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     return 'application/octet-stream';
   }
 

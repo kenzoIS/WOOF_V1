@@ -10,7 +10,10 @@ import { Model } from 'mongoose';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { EtlService } from '../csv/etl.service';
-import { Transaction, TransactionDocument } from '../csv/schemas/transaction.schema';
+import {
+  Transaction,
+  TransactionDocument,
+} from '../csv/schemas/transaction.schema';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AwsService } from '../aws/aws.service';
 
@@ -112,14 +115,18 @@ export class PetHubWebhookService {
 
     // Archive the raw webhook payload to S3
     const buffer = Buffer.from(JSON.stringify(payload, null, 2), 'utf-8');
-    this.awsService.uploadRawArchive(
-      `pethub_webhook_${body.transactionId}.json`,
-      buffer,
-      'PetHub',
-      uploadId
-    ).catch(err => {
-      this.logger.warn(`S3 raw archive failed for PetHub webhook ${uploadId}: ${err}`);
-    });
+    this.awsService
+      .uploadRawArchive(
+        `pethub_webhook_${body.transactionId}.json`,
+        buffer,
+        'PetHub',
+        uploadId,
+      )
+      .catch((err) => {
+        this.logger.warn(
+          `S3 raw archive failed for PetHub webhook ${uploadId}: ${err}`,
+        );
+      });
 
     return {
       success: true,
@@ -135,7 +142,9 @@ export class PetHubWebhookService {
       .get<string>('PETHUB_WEBHOOK_SECRET')
       ?.trim();
     if (!expectedSecret) {
-      throw new UnauthorizedException('PETHUB_WEBHOOK_SECRET is not configured');
+      throw new UnauthorizedException(
+        'PETHUB_WEBHOOK_SECRET is not configured',
+      );
     }
     if (!incomingSecret || incomingSecret !== expectedSecret) {
       throw new UnauthorizedException('Invalid PetHub webhook secret');
@@ -154,8 +163,13 @@ export class PetHubWebhookService {
     if (!body.transactionId || typeof body.transactionId !== 'string') {
       throw new BadRequestException('transactionId is required');
     }
-    if (!body.completedAt || Number.isNaN(new Date(body.completedAt).getTime())) {
-      throw new BadRequestException('completedAt must be a valid ISO timestamp');
+    if (
+      !body.completedAt ||
+      Number.isNaN(new Date(body.completedAt).getTime())
+    ) {
+      throw new BadRequestException(
+        'completedAt must be a valid ISO timestamp',
+      );
     }
     if (!Array.isArray(body.items) || body.items.length === 0) {
       throw new BadRequestException('items must contain at least one item');
@@ -187,10 +201,7 @@ export class PetHubWebhookService {
     return body.items.map((item, index) => {
       const quantity = Math.max(1, this.toNumber(item.quantity, 1));
       const unitPrice = this.toNumber(item.unitPrice);
-      const grossAmount = this.toNumber(
-        item.grossAmount,
-        unitPrice * quantity,
-      );
+      const grossAmount = this.toNumber(item.grossAmount, unitPrice * quantity);
       const discount = this.toNumber(item.discountAmount);
       const netSales = this.toNumber(item.netAmount, grossAmount - discount);
       const category = this.safeString(item.category, 'PetHub');
@@ -205,7 +216,10 @@ export class PetHubWebhookService {
         date: completedAt,
         transactionId: body.transactionId,
         productName,
-        sku: this.safeString(item.sku, item.itemId || `${body.transactionId}-${index + 1}`),
+        sku: this.safeString(
+          item.sku,
+          item.itemId || `${body.transactionId}-${index + 1}`,
+        ),
         category,
         sector,
         quantity,
@@ -322,8 +336,9 @@ export class PetHubWebhookService {
       ...new Set(
         transactions
           .map((transaction) => transaction.sector)
-          .filter((sector): sector is 'Cafe' | 'Services' =>
-            sector === 'Cafe' || sector === 'Services',
+          .filter(
+            (sector): sector is 'Cafe' | 'Services' =>
+              sector === 'Cafe' || sector === 'Services',
           ),
       ),
     ];
@@ -390,9 +405,7 @@ export class PetHubWebhookService {
     }
 
     const normalizedCategory = category.toLowerCase();
-    if (
-      /pet menu|pet bakery|cafe|food|drink/.test(normalizedCategory)
-    ) {
+    if (/pet menu|pet bakery|cafe|food|drink/.test(normalizedCategory)) {
       return 'Cafe';
     }
     if (

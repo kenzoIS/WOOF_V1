@@ -30,13 +30,15 @@ export const DEFAULT_ALERT_THRESHOLDS: AlertThresholds = {
   dataStalenessDays: 7,
 };
 
-const THRESHOLD_LIMITS: Record<AlertThresholdKey, { min: number; max: number }> =
-  {
-    capacityWarning: { min: 1, max: 100 },
-    lowInventory: { min: 1, max: 100 },
-    forecastAccuracyWarning: { min: 1, max: 100 },
-    dataStalenessDays: { min: 1, max: 60 },
-  };
+const THRESHOLD_LIMITS: Record<
+  AlertThresholdKey,
+  { min: number; max: number }
+> = {
+  capacityWarning: { min: 1, max: 100 },
+  lowInventory: { min: 1, max: 100 },
+  forecastAccuracyWarning: { min: 1, max: 100 },
+  dataStalenessDays: { min: 1, max: 60 },
+};
 
 @Injectable()
 export class SettingsService {
@@ -91,22 +93,21 @@ export class SettingsService {
   }
 
   private normalizeAlertThresholds(input: Partial<AlertThresholds>) {
-    return (Object.keys(DEFAULT_ALERT_THRESHOLDS) as AlertThresholdKey[]).reduce(
-      (normalized, key) => {
-        const limits = THRESHOLD_LIMITS[key];
-        const rawValue = input[key];
-        const numericValue =
-          typeof rawValue === 'number' && Number.isFinite(rawValue)
-            ? rawValue
-            : DEFAULT_ALERT_THRESHOLDS[key];
-        normalized[key] = Math.min(
-          limits.max,
-          Math.max(limits.min, Math.round(numericValue)),
-        );
-        return normalized;
-      },
-      {} as AlertThresholds,
-    );
+    return (
+      Object.keys(DEFAULT_ALERT_THRESHOLDS) as AlertThresholdKey[]
+    ).reduce((normalized, key) => {
+      const limits = THRESHOLD_LIMITS[key];
+      const rawValue = input[key];
+      const numericValue =
+        typeof rawValue === 'number' && Number.isFinite(rawValue)
+          ? rawValue
+          : DEFAULT_ALERT_THRESHOLDS[key];
+      normalized[key] = Math.min(
+        limits.max,
+        Math.max(limits.min, Math.round(numericValue)),
+      );
+      return normalized;
+    }, {} as AlertThresholds);
   }
 
   private pushIfTriggered(

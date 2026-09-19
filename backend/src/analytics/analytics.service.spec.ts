@@ -1,7 +1,7 @@
 import { AnalyticsService } from './analytics.service';
 
 describe('AnalyticsService', () => {
-  const service = Object.create(AnalyticsService.prototype) as any;
+  const service = Object.create(AnalyticsService.prototype);
 
   it('selects the segmented Cafe candidate when its MASE is lower than aggregate', async () => {
     service.buildCafeSegmentedForecastCandidate = jest.fn().mockResolvedValue({
@@ -30,7 +30,9 @@ describe('AnalyticsService', () => {
 
     expect(selected.model.modelName).toContain('Segmented Cafe Category');
     expect(selected.model.mase).toBe(0.4);
-    expect(selected.model.modelMetadata.forecastSelection).toBe('segmented_cafe_category');
+    expect(selected.model.modelMetadata.forecastSelection).toBe(
+      'segmented_cafe_category',
+    );
   });
 
   it('keeps the aggregate Cafe candidate when segmentation is worse', async () => {
@@ -60,6 +62,8 @@ describe('AnalyticsService', () => {
 
     expect(selected.model.modelName).toBe('Prophet aggregate');
     expect(selected.model.mase).toBe(0.56);
-    expect(selected.model.modelMetadata.forecastSelection).toBe('aggregate_cafe');
+    expect(selected.model.modelMetadata.forecastSelection).toBe(
+      'aggregate_cafe',
+    );
   });
 });

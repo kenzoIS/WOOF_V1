@@ -75,6 +75,6 @@ TransactionSchema.index({ date: 1, totalAmount: 1 }); // totalAmount instead of 
 TransactionSchema.index({ transactionId: 1 });
 
 // Ensure all aggregations can spill to disk to prevent RAM limit errors
-TransactionSchema.pre('aggregate', function() {
+TransactionSchema.pre('aggregate', function () {
   this.allowDiskUse(true);
 });

@@ -6,8 +6,20 @@ export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   @Get('logs')
-  getLogs(@Query() query: { search?: string; module?: string; status?: string; category?: string; limit?: string }) {
-    return this.auditService.list({ ...query, limit: Number(query.limit) || 200 });
+  getLogs(
+    @Query()
+    query: {
+      search?: string;
+      module?: string;
+      status?: string;
+      category?: string;
+      limit?: string;
+    },
+  ) {
+    return this.auditService.list({
+      ...query,
+      limit: Number(query.limit) || 200,
+    });
   }
 
   @Get('summary')

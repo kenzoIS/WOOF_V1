@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { ActivationService } from './activation.service';
 
 @Controller('activation')
@@ -26,7 +34,11 @@ export class ActivationController {
     @Body('status') status: 'draft' | 'approved' | 'queued' | 'published',
     @Headers('x-user-name') userName?: string,
   ): Promise<any> {
-    return this.activationService.updateCampaignStatus(campaignId, status, userName || 'Owner');
+    return this.activationService.updateCampaignStatus(
+      campaignId,
+      status,
+      userName || 'Owner',
+    );
   }
 
   @Post('campaigns/:campaignId/publish')
@@ -34,6 +46,10 @@ export class ActivationController {
     @Param('campaignId') campaignId: string,
     @Headers('x-user-name') userName?: string,
   ): Promise<any> {
-    return this.activationService.publishCampaignToPetHub(campaignId, userName || 'Owner', 'user');
+    return this.activationService.publishCampaignToPetHub(
+      campaignId,
+      userName || 'Owner',
+      'user',
+    );
   }
 }

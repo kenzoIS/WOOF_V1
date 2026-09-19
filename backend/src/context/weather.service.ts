@@ -9,13 +9,14 @@ import { WeatherLog, WeatherLogDocument } from './schemas/weather-log.schema';
 @Injectable()
 export class WeatherService {
   private readonly logger = new Logger(WeatherService.name);
-  
+
   // Lucena City Coordinates
   private readonly lat = 13.9333;
   private readonly lon = 121.6167;
 
   constructor(
-    @InjectModel(WeatherLog.name) private weatherLogModel: Model<WeatherLogDocument>,
+    @InjectModel(WeatherLog.name)
+    private weatherLogModel: Model<WeatherLogDocument>,
     private readonly httpService: HttpService,
   ) {}
 
@@ -28,11 +29,11 @@ export class WeatherService {
       const response = await lastValueFrom(
         this.httpService.get(url, {
           headers: { 'User-Agent': 'WOOF-App/1.0' },
-        })
+        }),
       );
-      
+
       const current = response.data.current;
-      
+
       await this.weatherLogModel.create({
         location: 'Lucena City',
         timestamp: new Date(current.time),
@@ -56,11 +57,11 @@ export class WeatherService {
       const response = await lastValueFrom(
         this.httpService.get(url, {
           headers: { 'User-Agent': 'WOOF-App/1.0' },
-        })
+        }),
       );
-      
+
       const hourly = response.data.hourly;
-      
+
       const logs = hourly.time.map((timeString: string, index: number) => ({
         location: 'Lucena City',
         timestamp: new Date(timeString),
@@ -72,12 +73,16 @@ export class WeatherService {
 
       for (const log of logs) {
         await this.weatherLogModel.updateOne(
-          { location: log.location, timestamp: log.timestamp, isForecast: true },
+          {
+            location: log.location,
+            timestamp: log.timestamp,
+            isForecast: true,
+          },
           { $set: log },
-          { upsert: true }
+          { upsert: true },
         );
       }
-      
+
       this.logger.log('5-day forecast successfully logged.');
     } catch (error) {
       this.logger.error(`Failed to fetch 5-day forecast: ${error.message}`);

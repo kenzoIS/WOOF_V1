@@ -5,14 +5,18 @@ import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
 import { HttpService } from '@nestjs/axios';
 import { lastValueFrom } from 'rxjs';
-import { HolidayCache, HolidayCacheDocument } from './schemas/holiday-cache.schema';
+import {
+  HolidayCache,
+  HolidayCacheDocument,
+} from './schemas/holiday-cache.schema';
 
 @Injectable()
 export class HolidayService {
   private readonly logger = new Logger(HolidayService.name);
 
   constructor(
-    @InjectModel(HolidayCache.name) private holidayCacheModel: Model<HolidayCacheDocument>,
+    @InjectModel(HolidayCache.name)
+    private holidayCacheModel: Model<HolidayCacheDocument>,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {}
@@ -24,34 +28,38 @@ export class HolidayService {
     try {
       const apiKey = this.configService.get<string>('HOLIDAY_API_KEY');
       if (!apiKey) {
-        this.logger.warn('HOLIDAY_API_KEY is not defined. Skipping holiday fetch.');
+        this.logger.warn(
+          'HOLIDAY_API_KEY is not defined. Skipping holiday fetch.',
+        );
         return;
       }
 
       const year = new Date().getFullYear();
-      
+
       const url = `https://holidays.abstractapi.com/v1/?api_key=${apiKey}&country=PH&year=${year}`;
       const response = await lastValueFrom(this.httpService.get(url));
-      
+
       const holidays = response.data;
 
       for (const holiday of holidays) {
         // holiday date format is usually YYYY-MM-DD
-        const dateString = holiday.date; 
-        
+        const dateString = holiday.date;
+
         await this.holidayCacheModel.updateOne(
           { date: dateString, location: 'PH' },
-          { 
+          {
             $set: {
               name: holiday.name,
               type: holiday.type, // Usually 'National' or 'Local'
-            } 
+            },
           },
-          { upsert: true }
+          { upsert: true },
         );
       }
 
-      this.logger.log(`Successfully cached ${holidays.length} holidays for ${year}.`);
+      this.logger.log(
+        `Successfully cached ${holidays.length} holidays for ${year}.`,
+      );
     } catch (error) {
       this.logger.error(`Failed to fetch holidays: ${error.message}`);
     }

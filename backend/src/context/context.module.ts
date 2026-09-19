@@ -2,7 +2,10 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HttpModule } from '@nestjs/axios';
 import { WeatherLog, WeatherLogSchema } from './schemas/weather-log.schema';
-import { HolidayCache, HolidayCacheSchema } from './schemas/holiday-cache.schema';
+import {
+  HolidayCache,
+  HolidayCacheSchema,
+} from './schemas/holiday-cache.schema';
 import { WeatherService } from './weather.service';
 import { HolidayService } from './holiday.service';
 import { WeatherController } from './weather.controller';

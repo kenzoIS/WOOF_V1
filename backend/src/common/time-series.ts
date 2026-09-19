@@ -97,7 +97,10 @@ export function buildDailyValuesFromTransactionLines(
       } satisfies TransactionAccumulator);
 
     current.quantity += safeNumber(line.quantity, 0);
-    current.revenue += safeNumber(line.netSales, safeNumber(line.totalAmount, 0));
+    current.revenue += safeNumber(
+      line.netSales,
+      safeNumber(line.totalAmount, 0),
+    );
     current.discountAmount += safeNumber(line.discount, 0);
     current.lineItems += 1;
     const item = String(line.productName || '').trim();
@@ -202,7 +205,8 @@ export function normalizeDailySeries(
       discountAmount: round(discountAmount),
       promoTransactions,
       avgBasketSize:
-        existing?.avgBasketSize ?? (orders > 0 ? round(basketItems / orders) : 0),
+        existing?.avgBasketSize ??
+        (orders > 0 ? round(basketItems / orders) : 0),
       avgOrderValue:
         existing?.avgOrderValue ?? (orders > 0 ? round(revenue / orders) : 0),
       averageUnitPrice:
@@ -215,7 +219,9 @@ export function normalizeDailySeries(
       isObservedDemand,
       rawActual: round(actual),
       cappedActual: round(cappedActual),
-      isOutlier: Boolean(existing && outlierCap !== null && actual > outlierCap),
+      isOutlier: Boolean(
+        existing && outlierCap !== null && actual > outlierCap,
+      ),
       outlierCap: outlierCap === null ? null : round(outlierCap),
       ...calendar,
       promoFlag: promoTransactions > 0 || discountAmount > 0 ? 1 : 0,

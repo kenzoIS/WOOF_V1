@@ -140,8 +140,14 @@ export class ExogenousDataService {
       await this.upsertWeatherRecord(lat, lng, record);
     }
 
-    const hasRealData = apiFetchCount > 0 || Array.from(results.values()).some((r) => !r.isSynthetic);
-    this.lastWeatherSource = hasRealData ? (apiFetchCount > 0 ? 'api' : 'cache') : 'synthetic';
+    const hasRealData =
+      apiFetchCount > 0 ||
+      Array.from(results.values()).some((r) => !r.isSynthetic);
+    this.lastWeatherSource = hasRealData
+      ? apiFetchCount > 0
+        ? 'api'
+        : 'cache'
+      : 'synthetic';
 
     return dates.map(
       (date) =>
@@ -164,7 +170,10 @@ export class ExogenousDataService {
       return cached.map((holiday: any) => ({
         date: holiday.date,
         name: holiday.name,
-        isNational: String(holiday.type || '').toLowerCase().includes('national') || true,
+        isNational:
+          String(holiday.type || '')
+            .toLowerCase()
+            .includes('national') || true,
       }));
     }
 
@@ -238,7 +247,9 @@ export class ExogenousDataService {
     rainFlag: number,
     humidity: number,
   ): Pick<ExogenousRow, 'isHotDay' | 'isCoolRainyDay' | 'comfortIndex'> {
-    const temp = Number.isFinite(tempCelsius) ? tempCelsius : DEFAULT_TEMP_CELSIUS;
+    const temp = Number.isFinite(tempCelsius)
+      ? tempCelsius
+      : DEFAULT_TEMP_CELSIUS;
     const relativeHumidity = Number.isFinite(humidity) ? humidity : 60;
     const rain = rainFlag === 1 ? 1 : 0;
     const comfortIndex =
@@ -285,57 +296,91 @@ export class ExogenousDataService {
       const targetDate = new Date(date).getTime();
       const now = Date.now();
       const daysAhead = (targetDate - now) / (1000 * 60 * 60 * 24);
-      
+
       if (daysAhead > 14) {
-        this.logger.log(`Skipping Open-Meteo API for ${date} (>${Math.round(daysAhead)} days in future exceeds API limit). Returning default.`);
+        this.logger.log(
+          `Skipping Open-Meteo API for ${date} (>${Math.round(daysAhead)} days in future exceeds API limit). Returning default.`,
+        );
         return null;
       }
 
       // Use Archive API for historical data. It supports fetching exactly 1 day.
       const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean&timezone=Asia%2FManila`;
-      
+
       const response = await fetch(url, {
         headers: { 'User-Agent': 'WOOF-App/1.0' },
       });
-      
+
       let body: any = null;
       if (response.ok) {
         body = await response.json();
-        this.logger.log(`Open-Meteo Archive response for ${date}: ${JSON.stringify(body).substring(0, 200)}`);
+        this.logger.log(
+          `Open-Meteo Archive response for ${date}: ${JSON.stringify(body).substring(0, 200)}`,
+        );
       } else {
-        this.logger.warn(`Open-Meteo Archive API returned ${response.status} ${response.statusText} for ${date}`);
+        this.logger.warn(
+          `Open-Meteo Archive API returned ${response.status} ${response.statusText} for ${date}`,
+        );
       }
-      
-      if (!body || !body.daily || !body.daily.time || body.daily.time.length === 0) {
-          this.logger.log(`Falling back to forecast API for ${date}`);
-          // If Archive API returns nothing (e.g. for today or future dates) or an error, fallback to Forecast API
-          const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean&timezone=Asia%2FManila`;
-          const forecastResponse = await fetch(forecastUrl, { headers: { 'User-Agent': 'WOOF-App/1.0' } });
-          
-          if (!forecastResponse.ok) {
-              this.logger.error(`Open-Meteo Forecast API also failed for ${date}: ${forecastResponse.status}`);
-              return null;
-          }
-          
-          const forecastBody = (await forecastResponse.json()) as any;
-          this.logger.log(`Open-Meteo Forecast response for ${date}: ${JSON.stringify(forecastBody).substring(0, 200)}`);
-          
-          if (!forecastBody.daily || !forecastBody.daily.time || forecastBody.daily.time.length === 0) return null;
-          
-          return {
-            date,
-            tempCelsius: round(Number(forecastBody.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS)),
-            rainfallMm: round(Number(forecastBody.daily.precipitation_sum[0] ?? 0)),
-            relativeHumidity: round(Number(forecastBody.daily.relative_humidity_2m_mean[0] ?? 60)),
-            isSynthetic: false,
-          };
+
+      if (
+        !body ||
+        !body.daily ||
+        !body.daily.time ||
+        body.daily.time.length === 0
+      ) {
+        this.logger.log(`Falling back to forecast API for ${date}`);
+        // If Archive API returns nothing (e.g. for today or future dates) or an error, fallback to Forecast API
+        const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&start_date=${date}&end_date=${date}&daily=temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean&timezone=Asia%2FManila`;
+        const forecastResponse = await fetch(forecastUrl, {
+          headers: { 'User-Agent': 'WOOF-App/1.0' },
+        });
+
+        if (!forecastResponse.ok) {
+          this.logger.error(
+            `Open-Meteo Forecast API also failed for ${date}: ${forecastResponse.status}`,
+          );
+          return null;
+        }
+
+        const forecastBody = await forecastResponse.json();
+        this.logger.log(
+          `Open-Meteo Forecast response for ${date}: ${JSON.stringify(forecastBody).substring(0, 200)}`,
+        );
+
+        if (
+          !forecastBody.daily ||
+          !forecastBody.daily.time ||
+          forecastBody.daily.time.length === 0
+        )
+          return null;
+
+        return {
+          date,
+          tempCelsius: round(
+            Number(
+              forecastBody.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS,
+            ),
+          ),
+          rainfallMm: round(
+            Number(forecastBody.daily.precipitation_sum[0] ?? 0),
+          ),
+          relativeHumidity: round(
+            Number(forecastBody.daily.relative_humidity_2m_mean[0] ?? 60),
+          ),
+          isSynthetic: false,
+        };
       }
 
       return {
         date,
-        tempCelsius: round(Number(body.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS)),
+        tempCelsius: round(
+          Number(body.daily.temperature_2m_mean[0] ?? DEFAULT_TEMP_CELSIUS),
+        ),
         rainfallMm: round(Number(body.daily.precipitation_sum[0] ?? 0)),
-        relativeHumidity: round(Number(body.daily.relative_humidity_2m_mean[0] ?? 60)),
+        relativeHumidity: round(
+          Number(body.daily.relative_humidity_2m_mean[0] ?? 60),
+        ),
         isSynthetic: false,
       };
     } catch (error) {
@@ -420,7 +465,11 @@ function buildPhilippineNationalHolidays(year: number): HolidayRecord[] {
   const holyWeek = calculateHolyWeek(year);
   return [
     { date: `${year}-01-01`, name: "New Year's Day", isNational: true },
-    { date: holyWeek.maundyThursday, name: 'Maundy Thursday', isNational: true },
+    {
+      date: holyWeek.maundyThursday,
+      name: 'Maundy Thursday',
+      isNational: true,
+    },
     { date: holyWeek.goodFriday, name: 'Good Friday', isNational: true },
     { date: `${year}-05-01`, name: 'Labor Day', isNational: true },
     { date: `${year}-06-12`, name: 'Independence Day', isNational: true },

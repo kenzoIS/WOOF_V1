@@ -24,21 +24,21 @@ import {
 
 // Map POS categories to sectors
 const SECTOR_MAP: Record<string, string> = {
-  'Coffee': 'Cafe',
+  Coffee: 'Cafe',
   'Non-Caffeine': 'Cafe',
   'Pasta/Snacks': 'Cafe',
   'Rice Meals': 'Cafe',
   'Pet Bakery': 'Cafe',
   'Pet Menu': 'Cafe',
-  'Cafe': 'Cafe',
-  'Grooming': 'Services',
-  'Events': 'Services',
+  Cafe: 'Cafe',
+  Grooming: 'Services',
+  Events: 'Services',
   'Pet Hotel': 'Services',
-  'Boarding': 'Services',
-  'Services': 'Services',
+  Boarding: 'Services',
+  Services: 'Services',
   'Pet Supplies': 'Retail',
   'Pet Shop': 'Retail',
-  'Retail': 'Retail',
+  Retail: 'Retail',
 };
 
 function mapCategoryToSector(category: string): string {
@@ -53,9 +53,10 @@ function mapCategoryToSector(category: string): string {
 function detectChannel(filename: string, buffer?: Buffer): string {
   const lower = filename.toLowerCase();
   if (lower.includes('shopee')) return 'Shopee';
-  if (lower.includes('tiktok') || lower.includes('tiktokshop')) return 'TikTok Shop';
+  if (lower.includes('tiktok') || lower.includes('tiktokshop'))
+    return 'TikTok Shop';
   if (lower.includes('pethub') || lower.includes('pet-hub')) return 'PetHub';
-  
+
   if (buffer) {
     const head = buffer.toString('utf-8', 0, 1024).toLowerCase();
     if (head.includes('sku platform discount') || head.includes('tiktok')) {
@@ -92,7 +93,8 @@ export class CsvService {
 
   constructor(
     private supabaseService: SupabaseService,
-    @InjectModel(Transaction.name) private transactionModel: Model<TransactionDocument>,
+    @InjectModel(Transaction.name)
+    private transactionModel: Model<TransactionDocument>,
     private etlService: EtlService,
     private dataValidationService: DataValidationService,
     private analyticsService: AnalyticsService,
@@ -101,7 +103,10 @@ export class CsvService {
     private auditService: AuditService,
   ) {}
 
-  async processUpload(file: Express.Multer.File, userChannel?: string): Promise<any> {
+  async processUpload(
+    file: Express.Multer.File,
+    userChannel?: string,
+  ): Promise<any> {
     let channel = normalizeUploadChannel(
       userChannel || detectChannel(file.originalname, file.buffer),
     );
@@ -110,12 +115,15 @@ export class CsvService {
     if (channel === 'POS' && file.buffer) {
       const detected = detectChannel(file.originalname, file.buffer);
       if (detected !== 'POS') {
-        this.logger.log(`Auto-corrected channel from POS to ${detected} based on file headers`);
+        this.logger.log(
+          `Auto-corrected channel from POS to ${detected} based on file headers`,
+        );
         channel = detected;
       }
     }
 
-    const isExcel = file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls');
+    const isExcel =
+      file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls');
 
     let transactions: Partial<Transaction>[];
 
@@ -157,42 +165,68 @@ export class CsvService {
 
     // Shopee and TikTok Shop are always Retail — override any product-name-based inference
     if (channel === 'Shopee' || channel === 'TikTok Shop') {
-      transactions = transactions.map(t => ({ ...t, sector: 'Retail' }));
+      transactions = transactions.map((t) => ({ ...t, sector: 'Retail' }));
     }
 
     // Create upload record
-    const uniqueTransactionIds = new Set(transactions.map(t => t.transactionId));
-    const categories: string[] = [...new Set(transactions.map(t => t.category).filter((c): c is string => Boolean(c)))];
-    const totalRevenue = transactions.reduce((sum, t) => sum + (t.netSales || t.totalAmount || 0), 0);
-    const totalQuantity = transactions.reduce((sum, t) => sum + (t.quantity || 0), 0);
+    const uniqueTransactionIds = new Set(
+      transactions.map((t) => t.transactionId),
+    );
+    const categories: string[] = [
+      ...new Set(
+        transactions
+          .map((t) => t.category)
+          .filter((c): c is string => Boolean(c)),
+      ),
+    ];
+    const totalRevenue = transactions.reduce(
+      (sum, t) => sum + (t.netSales || t.totalAmount || 0),
+      0,
+    );
+    const totalQuantity = transactions.reduce(
+      (sum, t) => sum + (t.quantity || 0),
+      0,
+    );
 
-    const { data: uploadRows, error: insertError } = await this.supabaseService.client
-      .from('csv_uploads')
-      .insert({
-        filename: file.originalname,
-        channel,
-        record_count: transactions.length,
-        total_revenue: Math.round(totalRevenue * 100) / 100,
-        total_quantity: totalQuantity,
-        total_transactions: uniqueTransactionIds.size,
-        categories,
-        uploaded_at: new Date().toISOString(),
-      })
-      .select();
+    const { data: uploadRows, error: insertError } =
+      await this.supabaseService.client
+        .from('csv_uploads')
+        .insert({
+          filename: file.originalname,
+          channel,
+          record_count: transactions.length,
+          total_revenue: Math.round(totalRevenue * 100) / 100,
+          total_quantity: totalQuantity,
+          total_transactions: uniqueTransactionIds.size,
+          categories,
+          uploaded_at: new Date().toISOString(),
+        })
+        .select();
 
     if (insertError || !uploadRows || uploadRows.length === 0) {
-        throw new InternalServerErrorException('Failed to create upload record in Supabase: ' + insertError?.message);
+      throw new InternalServerErrorException(
+        'Failed to create upload record in Supabase: ' + insertError?.message,
+      );
     }
     const upload = uploadRows[0];
     void this.auditService.record({
-      actor: 'Owner', actorType: 'user', action: 'Uploaded new data', module: 'data_ingestion',
-      category: 'workflow', target: file.originalname, stateAfter: 'Uploaded',
-      metadata: { channel, uploadId: upload.id, recordCount: transactions.length },
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Uploaded new data',
+      module: 'data_ingestion',
+      category: 'workflow',
+      target: file.originalname,
+      stateAfter: 'Uploaded',
+      metadata: {
+        channel,
+        uploadId: upload.id,
+        recordCount: transactions.length,
+      },
     });
 
     // Add csvUploadId and channel to each transaction, then bulk insert
     const uploadId = upload.id;
-    const transactionsWithUploadId = transactions.map(t => ({
+    const transactionsWithUploadId = transactions.map((t) => ({
       ...t,
       csvUploadId: uploadId,
       channel,
@@ -200,20 +234,33 @@ export class CsvService {
 
     let reportPayload: any = null;
     try {
-      const { cleanedTransactions, report } = this.dataValidationService.validateBatch(transactionsWithUploadId, channel);
+      const { cleanedTransactions, report } =
+        this.dataValidationService.validateBatch(
+          transactionsWithUploadId,
+          channel,
+        );
       reportPayload = report;
 
-      const cleanedCategories = [...new Set(cleanedTransactions.map(t => t.category).filter((c): c is string => Boolean(c)))];
+      const cleanedCategories = [
+        ...new Set(
+          cleanedTransactions
+            .map((t) => t.category)
+            .filter((c): c is string => Boolean(c)),
+        ),
+      ];
 
-      await this.supabaseService.client.from('csv_uploads').update({
-        record_count: cleanedTransactions.length,
-        categories: cleanedCategories,
-        etl_report: {
-          stage1_droppedCount: report.stage1_droppedCount,
-          stage1_duplicateCount: report.stage1_duplicateCount,
-          stage1_dropReasons: report.stage1_dropReasons,
-        }
-      }).eq('id', uploadId);
+      await this.supabaseService.client
+        .from('csv_uploads')
+        .update({
+          record_count: cleanedTransactions.length,
+          categories: cleanedCategories,
+          etl_report: {
+            stage1_droppedCount: report.stage1_droppedCount,
+            stage1_duplicateCount: report.stage1_duplicateCount,
+            stage1_dropReasons: report.stage1_dropReasons,
+          },
+        })
+        .eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
       this.realtimeService.emit({
@@ -226,7 +273,7 @@ export class CsvService {
           recordCount: cleanedTransactions.length,
         },
       });
-      
+
       // Run ETL to Supabase in the background
       this.realtimeService.emit({
         type: 'etl_started',
@@ -247,8 +294,11 @@ export class CsvService {
             uploadId: uploadId.toString(),
           });
         })
-        .catch(err => {
-          this.logger.error('Background ETL process failed for upload ' + uploadId, err.stack);
+        .catch((err) => {
+          this.logger.error(
+            'Background ETL process failed for upload ' + uploadId,
+            err.stack,
+          );
           this.realtimeService.emit({
             type: 'etl_failed',
             title: 'Warehouse sync failed',
@@ -256,14 +306,24 @@ export class CsvService {
             uploadId: uploadId.toString(),
           });
         });
-      this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions);
+      this.warmForecastCacheAfterUpload(
+        uploadId.toString(),
+        cleanedTransactions,
+      );
 
       // Archive raw CSV to AWS S3 Data Lake (fire-and-forget)
-      this.awsService.uploadRawArchive(
-        file.originalname, file.buffer, channel, uploadId.toString(),
-      ).catch(err => {
-        this.logger.warn(`S3 raw archive failed for upload ${uploadId}: ${err}`);
-      });
+      this.awsService
+        .uploadRawArchive(
+          file.originalname,
+          file.buffer,
+          channel,
+          uploadId.toString(),
+        )
+        .catch((err) => {
+          this.logger.warn(
+            `S3 raw archive failed for upload ${uploadId}: ${err}`,
+          );
+        });
     } catch (error) {
       await this.rollbackUpload(uploadId);
       if (error instanceof BadRequestException) {
@@ -283,7 +343,7 @@ export class CsvService {
     return {
       success: true,
       upload,
-      report: reportPayload
+      report: reportPayload,
     } as any;
   }
 
@@ -319,52 +379,68 @@ export class CsvService {
       0,
     );
 
-    const { data: uploadRows, error: insertError } = await this.supabaseService.client
-      .from('csv_uploads')
-      .insert({
-        filename: file.originalname,
-        channel: 'POS',
-        purpose: 'historical-forecast',
-        module,
-        record_count: parsed.transactions.length,
-        excluded_record_count: parsed.excludedRecordCount,
-        repaired_date_count: parsed.repairedDateCount,
-        total_revenue: Math.round(totalRevenue * 100) / 100,
-        total_quantity: totalQuantity,
-        total_transactions: uniqueTransactionIds.size,
-        categories,
-        uploaded_at: new Date().toISOString(),
-      })
-      .select();
+    const { data: uploadRows, error: insertError } =
+      await this.supabaseService.client
+        .from('csv_uploads')
+        .insert({
+          filename: file.originalname,
+          channel: 'POS',
+          purpose: 'historical-forecast',
+          module,
+          record_count: parsed.transactions.length,
+          excluded_record_count: parsed.excludedRecordCount,
+          repaired_date_count: parsed.repairedDateCount,
+          total_revenue: Math.round(totalRevenue * 100) / 100,
+          total_quantity: totalQuantity,
+          total_transactions: uniqueTransactionIds.size,
+          categories,
+          uploaded_at: new Date().toISOString(),
+        })
+        .select();
 
     if (insertError || !uploadRows || uploadRows.length === 0) {
-        throw new InternalServerErrorException('Failed to create upload record in Supabase: ' + insertError?.message);
+      throw new InternalServerErrorException(
+        'Failed to create upload record in Supabase: ' + insertError?.message,
+      );
     }
     const upload = uploadRows[0];
 
     const uploadId = upload.id;
     const transactionsWithUploadId = parsed.transactions.map((transaction) => ({
-        ...transaction,
-        csvUploadId: uploadId,
-        channel: 'POS',
-      }));
+      ...transaction,
+      csvUploadId: uploadId,
+      channel: 'POS',
+    }));
 
     let reportPayload: any = null;
     try {
-      const { cleanedTransactions, report } = this.dataValidationService.validateBatch(transactionsWithUploadId, 'POS');
+      const { cleanedTransactions, report } =
+        this.dataValidationService.validateBatch(
+          transactionsWithUploadId,
+          'POS',
+        );
       reportPayload = report;
 
-      const cleanedCategories = [...new Set(cleanedTransactions.map(t => t.category).filter((c): c is string => Boolean(c)))];
+      const cleanedCategories = [
+        ...new Set(
+          cleanedTransactions
+            .map((t) => t.category)
+            .filter((c): c is string => Boolean(c)),
+        ),
+      ];
 
-      await this.supabaseService.client.from('csv_uploads').update({
-        record_count: cleanedTransactions.length,
-        categories: cleanedCategories,
-        etl_report: {
-          stage1_droppedCount: report.stage1_droppedCount,
-          stage1_duplicateCount: report.stage1_duplicateCount,
-          stage1_dropReasons: report.stage1_dropReasons,
-        }
-      }).eq('id', uploadId);
+      await this.supabaseService.client
+        .from('csv_uploads')
+        .update({
+          record_count: cleanedTransactions.length,
+          categories: cleanedCategories,
+          etl_report: {
+            stage1_droppedCount: report.stage1_droppedCount,
+            stage1_duplicateCount: report.stage1_duplicateCount,
+            stage1_dropReasons: report.stage1_dropReasons,
+          },
+        })
+        .eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
       this.realtimeService.emit({
@@ -378,7 +454,7 @@ export class CsvService {
           recordCount: cleanedTransactions.length,
         },
       });
-      
+
       // Run ETL to Supabase in the background
       this.realtimeService.emit({
         type: 'etl_started',
@@ -401,8 +477,11 @@ export class CsvService {
             uploadId: uploadId.toString(),
           });
         })
-        .catch(err => {
-          this.logger.error('Background ETL process failed for historical upload ' + uploadId, err.stack);
+        .catch((err) => {
+          this.logger.error(
+            'Background ETL process failed for historical upload ' + uploadId,
+            err.stack,
+          );
           this.realtimeService.emit({
             type: 'etl_failed',
             title: 'Historical warehouse sync failed',
@@ -411,7 +490,11 @@ export class CsvService {
             uploadId: uploadId.toString(),
           });
         });
-      this.warmForecastCacheAfterUpload(uploadId.toString(), cleanedTransactions, [module]);
+      this.warmForecastCacheAfterUpload(
+        uploadId.toString(),
+        cleanedTransactions,
+        [module],
+      );
     } catch (error) {
       await this.rollbackUpload(uploadId);
       if (error instanceof BadRequestException) {
@@ -463,8 +546,9 @@ export class CsvService {
           new Set(
             transactions
               .map((transaction) => transaction.sector)
-              .filter((sector): sector is ForecastModule =>
-                sector === 'Cafe' || sector === 'Services',
+              .filter(
+                (sector): sector is ForecastModule =>
+                  sector === 'Cafe' || sector === 'Services',
               ),
           ),
         );
@@ -522,8 +606,14 @@ export class CsvService {
               uploadId,
             });
             void this.auditService.record({
-              actor: 'System', actorType: 'system', action: 'Retrained forecasting system', module: 'forecasting',
-              category: 'ai_system', target: module, stateBefore: 'Stale', stateAfter: 'Updated',
+              actor: 'System',
+              actorType: 'system',
+              action: 'Retrained forecasting system',
+              module: 'forecasting',
+              category: 'ai_system',
+              target: module,
+              stateBefore: 'Stale',
+              stateAfter: 'Updated',
               metadata: { uploadId, trigger: 'new_data_upload' },
             });
           }
@@ -631,7 +721,17 @@ export class CsvService {
     let excludedRecordCount = 0;
     let repairedDateCount = 0;
     const validDates = records
-      .map((row) => this.parseDate(this.getValue(row, ['transaction date', 'date', 'order date', 'created at', 'timestamp'])))
+      .map((row) =>
+        this.parseDate(
+          this.getValue(row, [
+            'transaction date',
+            'date',
+            'order date',
+            'created at',
+            'timestamp',
+          ]),
+        ),
+      )
       .filter((date): date is Date => Boolean(date));
     let lastValidDate: Date | null = validDates[0] || new Date();
 
@@ -735,13 +835,15 @@ export class CsvService {
     try {
       const rows = parse(content, {
         columns: (headers: string[]) =>
-          headers.map((header, index) => header.trim() || `column_${index + 1}`),
+          headers.map(
+            (header, index) => header.trim() || `column_${index + 1}`,
+          ),
         skip_empty_lines: true,
         trim: true,
         relax_column_count: true,
         relax_quotes: true,
         bom: true,
-      }) as Record<string, string>[];
+      });
       if (rows.length > 0) return rows;
 
       const rawRows = parse(content, {
@@ -750,7 +852,7 @@ export class CsvService {
         relax_column_count: true,
         relax_quotes: true,
         bom: true,
-      }) as string[][];
+      });
       return rawRows.map((values) =>
         Object.fromEntries(
           values.map((value, index) => [`column_${index + 1}`, value]),
@@ -802,7 +904,9 @@ export class CsvService {
         'service',
         'name',
         'description',
-      ]) || this.firstMeaningfulValue(row) || `Imported row ${options.fallbackId}`;
+      ]) ||
+      this.firstMeaningfulValue(row) ||
+      `Imported row ${options.fallbackId}`;
     const category =
       this.getValue(row, [
         'category',
@@ -812,7 +916,9 @@ export class CsvService {
         'department',
         'revenue category',
         'type',
-      ]) || options.forcedModule || 'Uncategorized';
+      ]) ||
+      options.forcedModule ||
+      'Uncategorized';
     const explicitSector = this.getValue(row, [
       'sector',
       'module',
@@ -828,7 +934,12 @@ export class CsvService {
     ]);
     const sector =
       options.forcedModule ||
-      this.inferFlexibleSector(category, explicitSector, productName, sourceType);
+      this.inferFlexibleSector(
+        category,
+        explicitSector,
+        productName,
+        sourceType,
+      );
     const quantity = Math.max(
       0,
       this.toNumber(
@@ -950,11 +1061,42 @@ export class CsvService {
         'payment method',
         'payment',
       ]),
-      costOfGoods: this.toNumber(this.getValue(row, ['cost of goods', 'cost_of_goods', 'cogs', 'item cost', 'cost']), 0),
-      grossProfit: this.toNumber(this.getValue(row, ['gross profit', 'gross_profit', 'profit', 'earnings']), 0),
-      margin: this.toNumber(this.getValue(row, ['margin', 'profit margin', 'profit_margin']), 0),
-      refunds: this.toNumber(this.getValue(row, ['refunds', 'refund_amount', 'refund amount']), 0),
-      itemsRefunded: this.toNumber(this.getValue(row, ['items refunded', 'items_refunded', 'refunded quantity', 'refund qty']), 0),
+      costOfGoods: this.toNumber(
+        this.getValue(row, [
+          'cost of goods',
+          'cost_of_goods',
+          'cogs',
+          'item cost',
+          'cost',
+        ]),
+        0,
+      ),
+      grossProfit: this.toNumber(
+        this.getValue(row, [
+          'gross profit',
+          'gross_profit',
+          'profit',
+          'earnings',
+        ]),
+        0,
+      ),
+      margin: this.toNumber(
+        this.getValue(row, ['margin', 'profit margin', 'profit_margin']),
+        0,
+      ),
+      refunds: this.toNumber(
+        this.getValue(row, ['refunds', 'refund_amount', 'refund amount']),
+        0,
+      ),
+      itemsRefunded: this.toNumber(
+        this.getValue(row, [
+          'items refunded',
+          'items_refunded',
+          'refunded quantity',
+          'refund qty',
+        ]),
+        0,
+      ),
     };
   }
 
@@ -966,7 +1108,8 @@ export class CsvService {
   ): string {
     const sector = explicitSector.trim().toLowerCase();
     if (sector.includes('cafe') || sector.includes('coffee')) return 'Cafe';
-    if (sector.includes('service') || sector.includes('groom')) return 'Services';
+    if (sector.includes('service') || sector.includes('groom'))
+      return 'Services';
     if (sector.includes('retail')) return 'Retail';
 
     const source = sourceType.trim().toLowerCase();
@@ -978,10 +1121,7 @@ export class CsvService {
       : this.inferSectorFromProduct(productName, category);
   }
 
-  private getValue(
-    row: Record<string, unknown>,
-    aliases: string[],
-  ): string {
+  private getValue(row: Record<string, unknown>, aliases: string[]): string {
     const valuesByHeader = new Map<string, string>();
     for (const [key, value] of Object.entries(row)) {
       if (value !== undefined && value !== null) {
@@ -1086,7 +1226,9 @@ export class CsvService {
     ) {
       return null;
     }
-    return new Date(Date.UTC(year, month - 1, day, hour - 8, minute, second, 0));
+    return new Date(
+      Date.UTC(year, month - 1, day, hour - 8, minute, second, 0),
+    );
   }
 
   private parseExcelSerialDate(value: string): Date | null {
@@ -1101,18 +1243,23 @@ export class CsvService {
     const excelEpoch = Date.UTC(1899, 11, 30);
     const millis = Math.round(fraction * 24 * 60 * 60 * 1000);
     return new Date(
-      excelEpoch + wholeDays * 24 * 60 * 60 * 1000 + millis - 8 * 60 * 60 * 1000,
+      excelEpoch +
+        wholeDays * 24 * 60 * 60 * 1000 +
+        millis -
+        8 * 60 * 60 * 1000,
     );
   }
 
   private cleanCell(value: unknown): string {
-    return String(value ?? '').replace(/\t/g, '').trim();
+    return String(value ?? '')
+      .replace(/\t/g, '')
+      .trim();
   }
 
   private parseTikTok(buffer: Buffer): Partial<Transaction>[] {
     // TikTok CSV may have BOM
     let content = buffer.toString('utf-8');
-    if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+    if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
     content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
     const records = parse(content, {
@@ -1126,7 +1273,12 @@ export class CsvService {
     return records
       .filter((row: any) => {
         const status = (row['Order Status'] || '').toLowerCase().trim();
-        return status === 'completed' || status === 'delivered' || status === 'to ship' || status === 'shipped';
+        return (
+          status === 'completed' ||
+          status === 'delivered' ||
+          status === 'to ship' ||
+          status === 'shipped'
+        );
       })
       .map((row: any) => {
         const productCategory = this.cleanCell(row['Product Category']);
@@ -1136,7 +1288,10 @@ export class CsvService {
           variation && variation.toLowerCase() !== 'default'
             ? `${productName} (${variation})`
             : productName;
-        const sector = this.inferSectorFromProduct(productName, productCategory);
+        const sector = this.inferSectorFromProduct(
+          productName,
+          productCategory,
+        );
         const quantity = this.toNumber(row['Quantity'], 1);
         const unitPrice = this.toNumber(row['SKU Unit Original Price'], 0);
         const subtotalBeforeDiscount = this.toNumber(
@@ -1149,10 +1304,13 @@ export class CsvService {
         );
         const platformDiscount = this.toNumber(row['SKU Platform Discount'], 0);
         const sellerDiscount = this.toNumber(row['SKU Seller Discount'], 0);
-        const paymentDiscount = this.toNumber(row['Payment platform discount'], 0);
+        const paymentDiscount = this.toNumber(
+          row['Payment platform discount'],
+          0,
+        );
 
         // Parse date - TikTok uses "MM/DD/YYYY HH:mm:ss AM/PM" format
-        let dateStr = this.cleanCell(row['Created Time']);
+        const dateStr = this.cleanCell(row['Created Time']);
         let date: Date;
         try {
           date = new Date(dateStr);
@@ -1165,7 +1323,8 @@ export class CsvService {
           date,
           transactionId: this.cleanCell(row['Order ID']),
           productName: displayName,
-          sku: this.cleanCell(row['Seller SKU']) || this.cleanCell(row['SKU ID']),
+          sku:
+            this.cleanCell(row['Seller SKU']) || this.cleanCell(row['SKU ID']),
           category: productCategory,
           sector,
           quantity,
@@ -1192,7 +1351,9 @@ export class CsvService {
       .map((row: any) => {
         const productName = this.cleanCell(row['Product Name']);
         const variation = this.cleanCell(row['Variation Name']);
-        const displayName = variation ? `${productName} (${variation})` : productName;
+        const displayName = variation
+          ? `${productName} (${variation})`
+          : productName;
         const sector = this.inferSectorFromProduct(productName, '');
         const quantity = this.toNumber(row['Quantity'], 1);
         const dealPrice = this.toNumber(
@@ -1208,7 +1369,9 @@ export class CsvService {
 
         let date: Date;
         try {
-          const dateStr = this.cleanCell(row['Order Creation Date']) || this.cleanCell(row['Order Paid Time']);
+          const dateStr =
+            this.cleanCell(row['Order Creation Date']) ||
+            this.cleanCell(row['Order Paid Time']);
           date = new Date(dateStr);
           if (isNaN(date.getTime())) date = new Date();
         } catch {
@@ -1219,7 +1382,9 @@ export class CsvService {
           date,
           transactionId: this.cleanCell(row['Order ID']),
           productName: displayName,
-          sku: this.cleanCell(row['SKU Reference No.']) || this.cleanCell(row['Parent SKU Reference No.']),
+          sku:
+            this.cleanCell(row['SKU Reference No.']) ||
+            this.cleanCell(row['Parent SKU Reference No.']),
           category: this.inferCategoryFromProduct(productName),
           sector,
           quantity,
@@ -1236,14 +1401,25 @@ export class CsvService {
     return this.parseFlexibleCsv(buffer, 'shopee.csv', 'Shopee');
   }
 
-  private inferSectorFromProduct(productName: string, category: string): string {
+  private inferSectorFromProduct(
+    productName: string,
+    category: string,
+  ): string {
     const lower = (productName + ' ' + category).toLowerCase();
     // Cafe items
-    if (/coffee|latte|cappuccino|mocha|espresso|frappe|matcha|tea|smoothie|cake|pastry|bread|cookie|muffin|rice meal|pasta|snack|bakery|cupcake/.test(lower)) {
+    if (
+      /coffee|latte|cappuccino|mocha|espresso|frappe|matcha|tea|smoothie|cake|pastry|bread|cookie|muffin|rice meal|pasta|snack|bakery|cupcake/.test(
+        lower,
+      )
+    ) {
       return 'Cafe';
     }
     // Services
-    if (/grooming|groom|bath|nail|paw.?dicure|boarding|hotel|pet hotel|birthday|party|trim|haircut|spa/.test(lower)) {
+    if (
+      /grooming|groom|bath|nail|paw.?dicure|boarding|hotel|pet hotel|birthday|party|trim|haircut|spa/.test(
+        lower,
+      )
+    ) {
       return 'Services';
     }
     // Default to Retail (pet supplies, food, accessories, etc.)
@@ -1252,15 +1428,22 @@ export class CsvService {
 
   private inferCategoryFromProduct(productName: string): string {
     const lower = productName.toLowerCase();
-    if (/food|kibble|treat|chew|snack|fattener|vitamins|supplement/.test(lower)) return 'Pet Supplies';
-    if (/shampoo|conditioner|soap|spray|cologne|powder/.test(lower)) return 'Pet Supplies';
-    if (/collar|leash|harness|bowl|bed|cage|carrier|toy/.test(lower)) return 'Pet Supplies';
-    if (/medicine|tablet|capsule|syrup|dewormer|worm|flea|tick/.test(lower)) return 'Pet Supplies';
+    if (/food|kibble|treat|chew|snack|fattener|vitamins|supplement/.test(lower))
+      return 'Pet Supplies';
+    if (/shampoo|conditioner|soap|spray|cologne|powder/.test(lower))
+      return 'Pet Supplies';
+    if (/collar|leash|harness|bowl|bed|cage|carrier|toy/.test(lower))
+      return 'Pet Supplies';
+    if (/medicine|tablet|capsule|syrup|dewormer|worm|flea|tick/.test(lower))
+      return 'Pet Supplies';
     return 'Pet Supplies';
   }
 
   async getUploads(): Promise<any[]> {
-    const { data } = await this.supabaseService.client.from('csv_uploads').select('*').order('uploaded_at', { ascending: false });
+    const { data } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('*')
+      .order('uploaded_at', { ascending: false });
     return (data || []).map((upload: any) => ({
       ...upload,
       _id: upload._id || upload.id,
@@ -1269,7 +1452,9 @@ export class CsvService {
       recordCount: Number(upload.record_count ?? upload.recordCount ?? 0),
       totalRevenue: Number(upload.total_revenue ?? upload.totalRevenue ?? 0),
       totalQuantity: Number(upload.total_quantity ?? upload.totalQuantity ?? 0),
-      totalTransactions: Number(upload.total_transactions ?? upload.totalTransactions ?? 0),
+      totalTransactions: Number(
+        upload.total_transactions ?? upload.totalTransactions ?? 0,
+      ),
       uploadedAt: upload.uploaded_at || upload.uploadedAt || upload.created_at,
       etlReport: upload.etl_report || upload.etlReport || null,
     }));
@@ -1343,21 +1528,32 @@ export class CsvService {
   }
 
   private async rollbackUpload(uploadId: string): Promise<void> {
-    const transactions = await this.transactionModel.find({ csvUploadId: uploadId }, { transactionId: 1 }).exec();
-    const transactionIds = Array.from(new Set(transactions.map(t => t.transactionId)));
-    
+    const transactions = await this.transactionModel
+      .find({ csvUploadId: uploadId }, { transactionId: 1 })
+      .exec();
+    const transactionIds = Array.from(
+      new Set(transactions.map((t) => t.transactionId)),
+    );
+
     if (transactionIds.length > 0) {
       await this.etlService.deleteTransactions(transactionIds);
     }
 
     await this.transactionModel.deleteMany({ csvUploadId: uploadId }).exec();
-    await this.supabaseService.client.from('csv_uploads').delete().eq('id', uploadId);
+    await this.supabaseService.client
+      .from('csv_uploads')
+      .delete()
+      .eq('id', uploadId);
   }
 
   async deleteUpload(id: string): Promise<{ deleted: boolean }> {
-    const transactions = await this.transactionModel.find({ csvUploadId: id }, { transactionId: 1 }).exec();
-    const transactionIds = Array.from(new Set(transactions.map(t => t.transactionId)));
-    
+    const transactions = await this.transactionModel
+      .find({ csvUploadId: id }, { transactionId: 1 })
+      .exec();
+    const transactionIds = Array.from(
+      new Set(transactions.map((t) => t.transactionId)),
+    );
+
     if (transactionIds.length > 0) {
       await this.etlService.deleteTransactions(transactionIds);
     }
@@ -1368,10 +1564,18 @@ export class CsvService {
   }
 
   async getMetrics(): Promise<any> {
-    const { data: uploads } = await this.supabaseService.client.from('csv_uploads').select('id');
+    const { data: uploads } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('id');
     const [channelAgg, totalAgg] = await Promise.all([
       this.transactionModel.aggregate([
-        { $group: { _id: '$channel', count: { $sum: 1 }, revenue: { $sum: '$netSales' } } },
+        {
+          $group: {
+            _id: '$channel',
+            count: { $sum: 1 },
+            revenue: { $sum: '$netSales' },
+          },
+        },
       ]),
       this.transactionModel.aggregate([
         {
@@ -1386,15 +1590,25 @@ export class CsvService {
       ]),
     ]);
 
-    const totals = totalAgg[0] || { totalRecords: 0, totalTransactions: [], totalQuantity: 0, totalRevenue: 0 };
+    const totals = totalAgg[0] || {
+      totalRecords: 0,
+      totalTransactions: [],
+      totalQuantity: 0,
+      totalRevenue: 0,
+    };
     const channels: Record<string, { count: number; revenue: number }> = {};
     channelAgg.forEach((c: any) => {
-      channels[c._id] = { count: c.count, revenue: Math.round(c.revenue * 100) / 100 };
+      channels[c._id] = {
+        count: c.count,
+        revenue: Math.round(c.revenue * 100) / 100,
+      };
     });
 
     return {
       totalRecords: totals.totalRecords,
-      totalTransactions: Array.isArray(totals.totalTransactions) ? totals.totalTransactions.length : 0,
+      totalTransactions: Array.isArray(totals.totalTransactions)
+        ? totals.totalTransactions.length
+        : 0,
       totalQuantity: totals.totalQuantity,
       totalRevenue: Math.round(totals.totalRevenue * 100) / 100,
       channels,

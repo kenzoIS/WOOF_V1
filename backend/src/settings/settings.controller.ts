@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Patch, Post } from '@nestjs/common';
 import { SettingsService } from './settings.service';
-import type { AlertEvaluationMetrics, AlertThresholds } from './settings.service';
+import type {
+  AlertEvaluationMetrics,
+  AlertThresholds,
+} from './settings.service';
 
 @Controller('settings')
 export class SettingsController {

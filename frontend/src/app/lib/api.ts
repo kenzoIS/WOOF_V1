@@ -196,12 +196,12 @@ export interface DataRange {
 
 export interface ChannelStatus {
   serverNow: string;
-  connectionMode: string;
   channels: Array<{
     channel: string;
     label: string;
     connected: boolean;
     status: 'active' | 'pending';
+    connectionMode: string;
     rowCount: number;
     uploadCount: number;
     latestTransactionAt: string | null;

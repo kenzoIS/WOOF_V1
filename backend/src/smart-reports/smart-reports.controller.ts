@@ -1,4 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { SmartReportsService } from './smart-reports.service';
 
 class GenerateReportDto {
@@ -41,7 +50,8 @@ export class SmartReportsController {
   @Put(':id/feedback')
   async submitFeedback(
     @Param('id') id: string,
-    @Body() dto: {
+    @Body()
+    dto: {
       accuracyRating: number;
       usefulnessRating: number;
       ownerApproved: boolean;

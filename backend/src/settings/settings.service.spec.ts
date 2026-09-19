@@ -1,7 +1,4 @@
-import {
-  DEFAULT_ALERT_THRESHOLDS,
-  SettingsService,
-} from './settings.service';
+import { DEFAULT_ALERT_THRESHOLDS, SettingsService } from './settings.service';
 
 describe('SettingsService', () => {
   let service: SettingsService;

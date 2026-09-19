@@ -5,8 +5,14 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Transaction } from './schemas/transaction.schema';
-import { HolidayCache, HolidayCacheDocument } from '../context/schemas/holiday-cache.schema';
-import { WeatherLog, WeatherLogDocument } from '../context/schemas/weather-log.schema';
+import {
+  HolidayCache,
+  HolidayCacheDocument,
+} from '../context/schemas/holiday-cache.schema';
+import {
+  WeatherLog,
+  WeatherLogDocument,
+} from '../context/schemas/weather-log.schema';
 import { ExogenousDataService } from '../common/exogenous-data.service';
 import { AwsService } from '../aws/aws.service';
 
@@ -17,20 +23,24 @@ export class EtlService {
 
   constructor(
     private configService: ConfigService,
-    @InjectModel(HolidayCache.name) private holidayCacheModel: Model<HolidayCacheDocument>,
-    @InjectModel(WeatherLog.name) private weatherLogModel: Model<WeatherLogDocument>,
+    @InjectModel(HolidayCache.name)
+    private holidayCacheModel: Model<HolidayCacheDocument>,
+    @InjectModel(WeatherLog.name)
+    private weatherLogModel: Model<WeatherLogDocument>,
     private exogenousDataService: ExogenousDataService,
     private awsService: AwsService,
   ) {
     const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
-    const supabaseKey = this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY');
+    const supabaseKey = this.configService.getOrThrow<string>(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
     this.supabase = createClient(supabaseUrl, supabaseKey);
   }
 
   // -----------------------------
   // Helpers
   // -----------------------------
-  
+
   private getLocalDateString(date: Date): string {
     const year = date.getUTCFullYear();
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
@@ -51,11 +61,15 @@ export class EtlService {
   }
 
   private getWeekOfYear(date: Date): number {
-    const tempDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const tempDate = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
+    );
     const dayNum = tempDate.getUTCDay() || 7;
     tempDate.setUTCDate(tempDate.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(tempDate.getUTCFullYear(), 0, 1));
-    return Math.ceil((((tempDate.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return Math.ceil(
+      ((tempDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+    );
   }
 
   private getSeason(month: number): string {
@@ -65,24 +79,59 @@ export class EtlService {
 
   private normalizeChannel(sourcePlatform: string) {
     const platform = String(sourcePlatform || '').toLowerCase();
-    if (platform.includes('shopee')) return { channel_id: 'CH_SHOPEE', channel_name: 'Shopee', channel_type: 'E-Commerce' };
-    if (platform.includes('tiktok')) return { channel_id: 'CH_TIKTOK', channel_name: 'TikTok Shop', channel_type: 'E-Commerce' };
-    if (platform.includes('pethub')) return { channel_id: 'CH_PETHUB', channel_name: 'PetHub', channel_type: 'Internal Digital Platform' };
-    return { channel_id: 'CH_POS', channel_name: 'POS', channel_type: 'Physical Store' };
+    if (platform.includes('shopee'))
+      return {
+        channel_id: 'CH_SHOPEE',
+        channel_name: 'Shopee',
+        channel_type: 'E-Commerce',
+      };
+    if (platform.includes('tiktok'))
+      return {
+        channel_id: 'CH_TIKTOK',
+        channel_name: 'TikTok Shop',
+        channel_type: 'E-Commerce',
+      };
+    if (platform.includes('pethub'))
+      return {
+        channel_id: 'CH_PETHUB',
+        channel_name: 'PetHub',
+        channel_type: 'Internal Digital Platform',
+      };
+    return {
+      channel_id: 'CH_POS',
+      channel_name: 'POS',
+      channel_type: 'Physical Store',
+    };
   }
 
   private normalizeSegment(sector: string) {
     const name = String(sector || 'Retail').toLowerCase();
-    if (name.includes('service') || name.includes('grooming')) return { segment_id: 'SEG_SERVICE', segment_name: 'Service', segment_type: 'Service' };
-    if (name.includes('cafe') || name.includes('food')) return { segment_id: 'SEG_CAFE', segment_name: 'Cafe', segment_type: 'Food and Beverage' };
-    return { segment_id: 'SEG_RETAIL', segment_name: 'Retail', segment_type: 'Product' };
+    if (name.includes('service') || name.includes('grooming'))
+      return {
+        segment_id: 'SEG_SERVICE',
+        segment_name: 'Service',
+        segment_type: 'Service',
+      };
+    if (name.includes('cafe') || name.includes('food'))
+      return {
+        segment_id: 'SEG_CAFE',
+        segment_name: 'Cafe',
+        segment_type: 'Food and Beverage',
+      };
+    return {
+      segment_id: 'SEG_RETAIL',
+      segment_name: 'Retail',
+      segment_type: 'Product',
+    };
   }
 
   // -----------------------------
   // Main Processor (Bulk)
   // -----------------------------
   async processTransactions(transactions: Transaction[], uploadId?: string) {
-    this.logger.log(`Starting bulk ETL to Supabase for ${transactions.length} transactions...`);
+    this.logger.log(
+      `Starting bulk ETL to Supabase for ${transactions.length} transactions...`,
+    );
 
     try {
       const datesMap = new Map<number, any>();
@@ -113,13 +162,16 @@ export class EtlService {
 
       // Pre-fetch/cache weather logs using ExogenousDataService
       const defaultCoords = this.exogenousDataService.getDefaultCoordinates();
-      this.logger.log(`Pre-population: Ingesting weather from ${minDate} to ${maxDate}...`);
-      const weatherRecords = await this.exogenousDataService.fetchWeatherHistory(
-        defaultCoords.lat,
-        defaultCoords.lng,
-        minDate,
-        maxDate,
+      this.logger.log(
+        `Pre-population: Ingesting weather from ${minDate} to ${maxDate}...`,
       );
+      const weatherRecords =
+        await this.exogenousDataService.fetchWeatherHistory(
+          defaultCoords.lat,
+          defaultCoords.lng,
+          minDate,
+          maxDate,
+        );
       const weatherMap = new Map(weatherRecords.map((w) => [w.date, w]));
 
       // Pre-fetch/cache holidays using ExogenousDataService
@@ -176,10 +228,14 @@ export class EtlService {
             date_id: dateId,
             full_date: this.getLocalDateString(orderDate),
             day_of_week: dayOfWeek,
-            day_name: orderDate.toLocaleDateString('en-US', { weekday: 'long' }),
+            day_name: orderDate.toLocaleDateString('en-US', {
+              weekday: 'long',
+            }),
             week_of_year: this.getWeekOfYear(orderDate),
             month,
-            month_name: orderDate.toLocaleDateString('en-US', { month: 'long' }),
+            month_name: orderDate.toLocaleDateString('en-US', {
+              month: 'long',
+            }),
             quarter: Math.ceil(month / 3),
             year: orderDate.getFullYear(),
             is_weekend: dayOfWeek === 6 || dayOfWeek === 7,
@@ -195,7 +251,11 @@ export class EtlService {
         }
 
         // Product / Service
-        const syntheticId = crypto.createHash('md5').update((t.productName || '').trim().toLowerCase()).digest('hex').substring(0, 16);
+        const syntheticId = crypto
+          .createHash('md5')
+          .update((t.productName || '').trim().toLowerCase())
+          .digest('hex')
+          .substring(0, 16);
         let productId: string | null = null;
         let serviceId: string | null = null;
 
@@ -204,9 +264,11 @@ export class EtlService {
           if (!servicesMap.has(serviceId)) {
             servicesMap.set(serviceId, {
               service_id: serviceId,
-              service_name: t.productName ? t.productName.trim() : 'Unnamed Service',
+              service_name: t.productName
+                ? t.productName.trim()
+                : 'Unnamed Service',
               service_type: t.category || 'Uncategorized',
-              base_price: Number(t.unitPrice || 0)
+              base_price: Number(t.unitPrice || 0),
             });
           }
         } else {
@@ -215,7 +277,9 @@ export class EtlService {
             productsMap.set(productId, {
               product_id: productId,
               sku: t.sku ? t.sku.toUpperCase().trim() : null,
-              product_name: t.productName ? t.productName.trim() : 'Unnamed Product',
+              product_name: t.productName
+                ? t.productName.trim()
+                : 'Unnamed Product',
               category: t.category || 'Uncategorized',
               brand: null,
               unit_cost: 0,
@@ -228,7 +292,7 @@ export class EtlService {
         const transactionLineId = `${t.transactionId}-${productId || serviceId}-${i + 1}`;
         const grossVal = Number(t.totalAmount || 0);
         const discountVal = Number(t.discount || 0);
-        const discountDepth = grossVal > 0 ? (discountVal / grossVal) : 0;
+        const discountDepth = grossVal > 0 ? discountVal / grossVal : 0;
 
         factRows.push({
           transaction_line_id: transactionLineId,
@@ -262,16 +326,24 @@ export class EtlService {
       // Helper to chunk arrays for bulk upsert
       const chunkArray = (array: any[], size: number) => {
         const chunks: any[][] = [];
-        for (let i = 0; i < array.length; i += size) chunks.push(array.slice(i, i + size));
+        for (let i = 0; i < array.length; i += size)
+          chunks.push(array.slice(i, i + size));
         return chunks;
       };
 
-      const upsertTable = async (table: string, data: any[], conflictKey: string) => {
+      const upsertTable = async (
+        table: string,
+        data: any[],
+        conflictKey: string,
+      ) => {
         if (data.length === 0) return;
         const chunks = chunkArray(data, 2000); // 2000 per request
         for (const chunk of chunks) {
-          const { error } = await this.supabase.from(table).upsert(chunk, { onConflict: conflictKey });
-          if (error) throw new Error(`${table} bulk upsert failed: ${error.message}`);
+          const { error } = await this.supabase
+            .from(table)
+            .upsert(chunk, { onConflict: conflictKey });
+          if (error)
+            throw new Error(`${table} bulk upsert failed: ${error.message}`);
         }
       };
 
@@ -279,14 +351,16 @@ export class EtlService {
       const productsToIngest = Array.from(productsMap.values());
       const finalProductsToInsert: any[] = [];
       if (productsToIngest.length > 0) {
-        const productIds = productsToIngest.map(p => p.product_id);
+        const productIds = productsToIngest.map((p) => p.product_id);
         const { data: existingProducts, error: fetchErr } = await this.supabase
           .from('product_dim')
           .select('*')
           .in('product_id', productIds);
 
         if (fetchErr) {
-          this.logger.error(`Failed to fetch existing products for SCD: ${fetchErr.message}`);
+          this.logger.error(
+            `Failed to fetch existing products for SCD: ${fetchErr.message}`,
+          );
         }
 
         const existingProductsMap = new Map<string, any[]>();
@@ -310,14 +384,21 @@ export class EtlService {
               updated_at: new Date().toISOString(),
             });
           } else {
-            const currentVersion = versions.find(v => v.is_current === true || v.valid_to === null);
+            const currentVersion = versions.find(
+              (v) => v.is_current === true || v.valid_to === null,
+            );
             if (currentVersion) {
-              if (Number(currentVersion.selling_price) !== Number(p.selling_price)) {
+              if (
+                Number(currentVersion.selling_price) !== Number(p.selling_price)
+              ) {
                 // Price changed! Versioning.
                 // 1. Close current version
                 await this.supabase
                   .from('product_dim')
-                  .update({ is_current: false, valid_to: new Date().toISOString() })
+                  .update({
+                    is_current: false,
+                    valid_to: new Date().toISOString(),
+                  })
                   .eq('product_id', p.product_id)
                   .eq('valid_from', currentVersion.valid_from);
 
@@ -355,49 +436,79 @@ export class EtlService {
 
       await Promise.all([
         upsertTable('date_dim', Array.from(datesMap.values()), 'date_id'),
-        upsertTable('channel_dim', Array.from(channelsMap.values()), 'channel_id'),
-        upsertTable('business_segment_dim', Array.from(segmentsMap.values()), 'segment_id'),
-        upsertTable('service_dim', Array.from(servicesMap.values()), 'service_id'),
+        upsertTable(
+          'channel_dim',
+          Array.from(channelsMap.values()),
+          'channel_id',
+        ),
+        upsertTable(
+          'business_segment_dim',
+          Array.from(segmentsMap.values()),
+          'segment_id',
+        ),
+        upsertTable(
+          'service_dim',
+          Array.from(servicesMap.values()),
+          'service_id',
+        ),
       ]);
 
       if (finalProductsToInsert.length > 0) {
-        await upsertTable('product_dim', finalProductsToInsert, 'product_id,valid_from');
+        await upsertTable(
+          'product_dim',
+          finalProductsToInsert,
+          'product_id,valid_from',
+        );
       }
 
       this.logger.log(`Upserting ${factRows.length} Fact Rows in chunks...`);
-      await upsertTable('fact_cross_channel_transactions', factRows, 'transaction_line_id');
+      await upsertTable(
+        'fact_cross_channel_transactions',
+        factRows,
+        'transaction_line_id',
+      );
 
-      this.logger.log(`ETL Process completed successfully for ${transactions.length} transactions.`);
+      this.logger.log(
+        `ETL Process completed successfully for ${transactions.length} transactions.`,
+      );
 
       // Archive processed fact rows to AWS S3 Data Lake (fire-and-forget)
       if (uploadId) {
         const channel = transactions[0]?.channel || 'unknown';
-        this.awsService.uploadProcessedArchive(
-          uploadId, factRows, channel,
-        ).catch(err => {
-          this.logger.warn(`S3 processed archive failed for upload ${uploadId}: ${err}`);
-        });
+        this.awsService
+          .uploadProcessedArchive(uploadId, factRows, channel)
+          .catch((err) => {
+            this.logger.warn(
+              `S3 processed archive failed for upload ${uploadId}: ${err}`,
+            );
+          });
       }
 
       if (uploadId) {
-        await this.supabase.from('csv_uploads').update({
-          etl_report: {
-            stage2_droppedCount: 0,
-            stage2_dropReasons: []
-          }
-        }).eq('id', uploadId);
+        await this.supabase
+          .from('csv_uploads')
+          .update({
+            etl_report: {
+              stage2_droppedCount: 0,
+              stage2_dropReasons: [],
+            },
+          })
+          .eq('id', uploadId);
       }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Critical ETL Failure: ${errMsg}`);
 
       if (uploadId) {
-        await this.supabase.from('csv_uploads').update({
-          etl_report: {
-            stage2_droppedCount: transactions.length,
-            stage2_dropReasons: [`Supabase Error: ${errMsg}`]
-          }
-        }).eq('id', uploadId);
+        await this.supabase
+          .from('csv_uploads')
+          .update({
+            etl_report: {
+              stage2_droppedCount: transactions.length,
+              stage2_dropReasons: [`Supabase Error: ${errMsg}`],
+            },
+          })
+          .eq('id', uploadId);
       }
     }
   }
@@ -410,7 +521,9 @@ export class EtlService {
   async deleteTransactions(transactionIds: string[]): Promise<void> {
     if (!transactionIds || transactionIds.length === 0) return;
 
-    this.logger.log(`Deleting ${transactionIds.length} transactions from Supabase...`);
+    this.logger.log(
+      `Deleting ${transactionIds.length} transactions from Supabase...`,
+    );
     const chunkSize = 1000;
 
     for (let i = 0; i < transactionIds.length; i += chunkSize) {
@@ -423,7 +536,9 @@ export class EtlService {
           .in('transaction_id', chunk);
 
         if (error) {
-          this.logger.error(`Error deleting chunk from Supabase: ${error.message}`);
+          this.logger.error(
+            `Error deleting chunk from Supabase: ${error.message}`,
+          );
         }
       } catch (err: any) {
         this.logger.error(`Exception during Supabase delete: ${err.message}`);

@@ -150,7 +150,10 @@ export class ChatbotService {
     private readonly llmService: LlmService,
   ) {}
 
-  async answer(question: string, history: ChatHistoryItem[] = []): Promise<any> {
+  async answer(
+    question: string,
+    history: ChatHistoryItem[] = [],
+  ): Promise<any> {
     const cleanedQuestion = String(question || '').trim();
     if (!cleanedQuestion) {
       throw new BadRequestException('Question is required.');
@@ -180,7 +183,10 @@ export class ChatbotService {
       cleanedQuestion,
       conversationContext,
     );
-    let plan = await this.planQuestion(questionForPlanning, conversationContext);
+    let plan = await this.planQuestion(
+      questionForPlanning,
+      conversationContext,
+    );
     const fallbackClarification = this.getClarificationQuestion(
       questionForPlanning,
       plan,
@@ -196,8 +202,7 @@ export class ChatbotService {
         needsClarification: true,
         clarificationQuestion:
           plan.clarificationQuestion || fallbackClarification,
-        analysisSteps:
-          plan.analysisSteps || this.defaultAnalysisSteps(plan),
+        analysisSteps: plan.analysisSteps || this.defaultAnalysisSteps(plan),
       };
     }
     if (plan.intent === 'out_of_scope') {
@@ -283,7 +288,8 @@ export class ChatbotService {
         feature: 'business_assistant',
         prompt: this.buildPlannerPrompt(question, history),
       });
-      if (!response.configured) return this.enrichFallbackPlan(fallback, question);
+      if (!response.configured)
+        return this.enrichFallbackPlan(fallback, question);
       const parsed = this.parseJsonObject(response.text);
       return this.validateClaudePlan(parsed, fallback, question);
     } catch {
@@ -292,12 +298,14 @@ export class ChatbotService {
   }
 
   private enrichFallbackPlan(plan: QueryPlan, question: string): QueryPlan {
-    const narrativeGoal = plan.narrativeGoal || this.inferNarrativeGoal(question, plan.intent);
+    const narrativeGoal =
+      plan.narrativeGoal || this.inferNarrativeGoal(question, plan.intent);
     return {
       ...plan,
       narrativeGoal,
       includeComparison:
-        plan.includeComparison ?? this.shouldIncludeComparison(question, narrativeGoal),
+        plan.includeComparison ??
+        this.shouldIncludeComparison(question, narrativeGoal),
       classifier: 'fallback',
     };
   }
@@ -308,7 +316,10 @@ export class ChatbotService {
   ): string {
     const recentContext = history.length
       ? history
-          .map((item) => `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`)
+          .map(
+            (item) =>
+              `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`,
+          )
           .join('\n')
       : 'None';
     return [
@@ -383,8 +394,7 @@ export class ChatbotService {
       explicitRange?.dateEnd ||
       this.safeIsoDate(value.dateEnd) ||
       fallback.dateEnd;
-    const normalizedDateRange =
-      dateStart && dateEnd ? 'custom' : dateRange;
+    const normalizedDateRange = dateStart && dateEnd ? 'custom' : dateRange;
     const metric = this.allowedMetric(value.metric)
       ? value.metric
       : fallback.metric;
@@ -476,7 +486,11 @@ export class ChatbotService {
   private classifyQuestion(question: string): QueryPlan {
     const q = this.normalizeQuestion(question);
     if (!this.isDashboardQuestion(q)) {
-      return { intent: 'out_of_scope', dateRange: 'all', answerMode: 'unsupported' };
+      return {
+        intent: 'out_of_scope',
+        dateRange: 'all',
+        answerMode: 'unsupported',
+      };
     }
 
     const dateRange = this.extractRange(q);
@@ -486,19 +500,33 @@ export class ChatbotService {
     const explicitRange = this.extractExplicitDateRange(q) || {};
     const filters = { dateRange, sector, channel, ...explicitRange };
 
-    if (/\b(forecast|predict|projection|projected|tomorrow|next week)\b/.test(q)) {
+    if (
+      /\b(forecast|predict|projection|projected|tomorrow|next week)\b/.test(q)
+    ) {
       return { intent: 'forecast_overview', answerMode: 'compute', ...filters };
     }
-    if (/\b(bundle|cross[- ]?sell|market basket|pair|recommendation)\b/.test(q)) {
-      return { intent: 'cross_sell_overview', answerMode: 'compute', ...filters };
+    if (
+      /\b(bundle|cross[- ]?sell|market basket|pair|recommendation)\b/.test(q)
+    ) {
+      return {
+        intent: 'cross_sell_overview',
+        answerMode: 'compute',
+        ...filters,
+      };
     }
     if (/\btop|best selling|highest selling|most sold|popular\b/.test(q)) {
       return { intent: 'top_items', answerMode: 'compute', ...filters, limit };
     }
-    if (/\bsector|cafe|retail|service|services\b/.test(q) && /\bbreakdown|mix|compare|by\b/.test(q)) {
+    if (
+      /\bsector|cafe|retail|service|services\b/.test(q) &&
+      /\bbreakdown|mix|compare|by\b/.test(q)
+    ) {
       return { intent: 'sector_breakdown', answerMode: 'compute', ...filters };
     }
-    if (/\bchannel|pos|shopee|tiktok|pethub\b/.test(q) && /\bbreakdown|mix|compare|by\b/.test(q)) {
+    if (
+      /\bchannel|pos|shopee|tiktok|pethub\b/.test(q) &&
+      /\bbreakdown|mix|compare|by\b/.test(q)
+    ) {
       return { intent: 'channel_breakdown', answerMode: 'compute', ...filters };
     }
     if (/\b(best|highest|leading|top)\b/.test(q) && /\bsector\b/.test(q)) {
@@ -645,25 +673,46 @@ export class ChatbotService {
     return ['POS', 'Shopee', 'TikTok Shop', 'PetHub'].includes(String(value));
   }
 
-  private inferNarrativeGoal(question: string, intent: DashboardIntent): NarrativeGoal {
+  private inferNarrativeGoal(
+    question: string,
+    intent: DashboardIntent,
+  ): NarrativeGoal {
     const q = this.normalizeQuestion(question);
     if (intent === 'out_of_scope') return 'out_of_scope';
-    if (/\b(is this accurate|is that accurate|accurate ba|tama ba|verify|check that|check this|sure ka|are you sure)\b/.test(q)) {
+    if (
+      /\b(is this accurate|is that accurate|accurate ba|tama ba|verify|check that|check this|sure ka|are you sure)\b/.test(
+        q,
+      )
+    ) {
       return 'verification';
     }
-    if (/^(how about|what about|and|then|next|same for|paano naman|eh yung|yung|for)\b/.test(q)) {
+    if (
+      /^(how about|what about|and|then|next|same for|paano naman|eh yung|yung|for)\b/.test(
+        q,
+      )
+    ) {
       return 'follow_up';
     }
     if (/\b(why|bakit|reason|cause|diagnose|explain)\b/.test(q)) {
       return 'diagnostic';
     }
-    if (/\b(recommend|suggest|what should|ano dapat|action|campaign|promo)\b/.test(q)) {
+    if (
+      /\b(recommend|suggest|what should|ano dapat|action|campaign|promo)\b/.test(
+        q,
+      )
+    ) {
       return 'recommendation';
     }
-    if (/\b(compare|versus|vs\.?|difference|growth|increase|decrease|trend|better|worse)\b/.test(q)) {
+    if (
+      /\b(compare|versus|vs\.?|difference|growth|increase|decrease|trend|better|worse)\b/.test(
+        q,
+      )
+    ) {
       return 'comparison';
     }
-    if (/\b(insight|overview|performance|performing|kumusta|status)\b/.test(q)) {
+    if (
+      /\b(insight|overview|performance|performing|kumusta|status)\b/.test(q)
+    ) {
       return 'business_explanation';
     }
     return 'direct_answer';
@@ -715,7 +764,9 @@ export class ChatbotService {
     }
 
     const monthRange = q.match(
-      new RegExp(`\\b(${monthNames})\\s+(?:to|until|through|hanggang|-)\\s+(${monthNames})\\s+(20\\d{2})\\b`),
+      new RegExp(
+        `\\b(${monthNames})\\s+(?:to|until|through|hanggang|-)\\s+(${monthNames})\\s+(20\\d{2})\\b`,
+      ),
     );
     if (monthRange) {
       const startMonth = MONTHS[monthRange[1]];
@@ -727,7 +778,9 @@ export class ChatbotService {
       };
     }
 
-    const monthYear = q.match(new RegExp(`\\b(${monthNames})\\s+(20\\d{2})\\b`));
+    const monthYear = q.match(
+      new RegExp(`\\b(${monthNames})\\s+(20\\d{2})\\b`),
+    );
     if (monthYear) {
       const month = MONTHS[monthYear[1]];
       const year = Number(monthYear[2]);
@@ -738,7 +791,9 @@ export class ChatbotService {
     }
 
     const monthDayYear = q.match(
-      new RegExp(`\\b(${monthNames})\\s*(\\d{1,2})(?:st|nd|rd|th)?[,]?\\s+(20\\d{2})\\b`),
+      new RegExp(
+        `\\b(${monthNames})\\s*(\\d{1,2})(?:st|nd|rd|th)?[,]?\\s+(20\\d{2})\\b`,
+      ),
     );
     if (monthDayYear) {
       const month = MONTHS[monthDayYear[1]];
@@ -751,7 +806,9 @@ export class ChatbotService {
     }
 
     const dayMonthYear = q.match(
-      new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthNames})[,]?\\s+(20\\d{2})\\b`),
+      new RegExp(
+        `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthNames})[,]?\\s+(20\\d{2})\\b`,
+      ),
     );
     if (dayMonthYear) {
       const day = Number(dayMonthYear[1]);
@@ -796,7 +853,10 @@ export class ChatbotService {
   private normalizeQuestion(question: string): string {
     let normalized = question.toLowerCase();
     Object.entries(MONTH_ALIASES).forEach(([local, english]) => {
-      normalized = normalized.replace(new RegExp(`\\b${local}\\b`, 'g'), english);
+      normalized = normalized.replace(
+        new RegExp(`\\b${local}\\b`, 'g'),
+        english,
+      );
     });
     return normalized
       .replace(/\bbenta\b/g, 'sales')
@@ -884,7 +944,9 @@ export class ChatbotService {
     }
 
     if (
-      /\b(compare|versus|vs\.?|difference|growth|increase|decrease|trend)\b/.test(q) &&
+      /\b(compare|versus|vs\.?|difference|growth|increase|decrease|trend)\b/.test(
+        q,
+      ) &&
       !/\b(breakdown|by sector|by channel)\b/.test(q)
     ) {
       return 'I can compute one dashboard metric at a time right now. Which exact comparison do you want, and what date ranges should I compare?';
@@ -972,14 +1034,12 @@ export class ChatbotService {
 
     rows.forEach((row) => {
       const itemId = row.product_id || row.service_id || 'unknown';
-      const current =
-        grouped.get(itemId) ||
-        {
-          name: itemNames.get(itemId) || itemId || 'Unknown item',
-          revenue: 0,
-          quantity: 0,
-          orders: new Set<string>(),
-        };
+      const current = grouped.get(itemId) || {
+        name: itemNames.get(itemId) || itemId || 'Unknown item',
+        revenue: 0,
+        quantity: 0,
+        orders: new Set<string>(),
+      };
       current.revenue += Number(row.net_sales) || 0;
       current.quantity += Number(row.quantity_sold) || 0;
       if (row.transaction_id) current.orders.add(row.transaction_id);
@@ -997,7 +1057,10 @@ export class ChatbotService {
       }));
   }
 
-  private async getBreakdown(match: WarehouseFilters, groupBy: 'sector' | 'channel') {
+  private async getBreakdown(
+    match: WarehouseFilters,
+    groupBy: 'sector' | 'channel',
+  ) {
     const rows = await this.getWarehouseRows(match);
     const grouped = new Map<
       string,
@@ -1010,9 +1073,12 @@ export class ChatbotService {
           ? row.business_segment_dim?.segment_name
           : row.channel_dim?.channel_name;
       const label = this.toDisplaySector(rawLabel || 'Unknown');
-      const current =
-        grouped.get(label) ||
-        { label, revenue: 0, quantity: 0, orders: new Set<string>() };
+      const current = grouped.get(label) || {
+        label,
+        revenue: 0,
+        quantity: 0,
+        orders: new Set<string>(),
+      };
       current.revenue += Number(row.net_sales) || 0;
       current.quantity += Number(row.quantity_sold) || 0;
       if (row.transaction_id) current.orders.add(row.transaction_id);
@@ -1062,7 +1128,9 @@ export class ChatbotService {
           'date_dim',
           'channel_dim',
           'business_segment_dim',
-          ...(plan.intent === 'top_items' ? ['product_dim', 'service_dim'] : []),
+          ...(plan.intent === 'top_items'
+            ? ['product_dim', 'service_dim']
+            : []),
         ],
         aggregations: this.getAuditAggregations(plan.intent),
         rowsUsed:
@@ -1072,7 +1140,8 @@ export class ChatbotService {
               ? result.length
               : undefined,
         confidence:
-          plan.intent === 'forecast_overview' || plan.intent === 'cross_sell_overview'
+          plan.intent === 'forecast_overview' ||
+          plan.intent === 'cross_sell_overview'
             ? 'limited'
             : 'verified',
       },
@@ -1089,7 +1158,10 @@ export class ChatbotService {
         rowCount: result.length,
       };
     }
-    if (plan.intent === 'forecast_overview' || plan.intent === 'cross_sell_overview') {
+    if (
+      plan.intent === 'forecast_overview' ||
+      plan.intent === 'cross_sell_overview'
+    ) {
       return {
         message: result?.message || 'Dashboard detail is currently limited.',
       };
@@ -1116,19 +1188,22 @@ export class ChatbotService {
     filters: WarehouseFilters,
     result: any,
   ): Promise<Record<string, unknown> | undefined> {
-    if (!filters.dateStart || !filters.dateEnd || typeof result?.revenue !== 'number') {
+    if (
+      !filters.dateStart ||
+      !filters.dateEnd ||
+      typeof result?.revenue !== 'number'
+    ) {
       return undefined;
     }
 
     const currentStart = new Date(`${filters.dateStart}T00:00:00.000Z`);
     const currentEnd = new Date(`${filters.dateEnd}T00:00:00.000Z`);
-    const periodDays =
-      Math.max(
-        1,
-        Math.round(
-          (currentEnd.getTime() - currentStart.getTime()) / (24 * 60 * 60 * 1000),
-        ) + 1,
-      );
+    const periodDays = Math.max(
+      1,
+      Math.round(
+        (currentEnd.getTime() - currentStart.getTime()) / (24 * 60 * 60 * 1000),
+      ) + 1,
+    );
 
     const previousEnd = new Date(currentStart);
     previousEnd.setDate(previousEnd.getDate() - 1);
@@ -1168,7 +1243,10 @@ export class ChatbotService {
       trailingSevenDayAverage: {
         revenuePerDay: dailyAverageRevenue,
         requestedRevenuePerDay: this.money(currentDailyRevenue),
-        differencePercent: this.percentChange(currentDailyRevenue, dailyAverageRevenue),
+        differencePercent: this.percentChange(
+          currentDailyRevenue,
+          dailyAverageRevenue,
+        ),
       },
     };
   }
@@ -1181,7 +1259,10 @@ export class ChatbotService {
       byDate.set(date, (byDate.get(date) || 0) + (Number(row.net_sales) || 0));
     });
     if (!byDate.size) return 0;
-    const total = Array.from(byDate.values()).reduce((sum, value) => sum + value, 0);
+    const total = Array.from(byDate.values()).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
     return this.money(total / byDate.size);
   }
 
@@ -1226,11 +1307,15 @@ export class ChatbotService {
   private renderAnswer(plan: QueryPlan, result: any, latestDate: Date): string {
     const rangeLabel = this.rangeLabel(plan, latestDate);
     const filters = this.filterLabel(plan);
-    if (plan.intent === 'forecast_overview' || plan.intent === 'cross_sell_overview') {
+    if (
+      plan.intent === 'forecast_overview' ||
+      plan.intent === 'cross_sell_overview'
+    ) {
       return result.message;
     }
     if (plan.intent === 'top_items') {
-      if (!result.length) return `No item sales found for ${rangeLabel}${filters}.`;
+      if (!result.length)
+        return `No item sales found for ${rangeLabel}${filters}.`;
       const items = result
         .slice(0, plan.limit || 5)
         .map(
@@ -1240,8 +1325,12 @@ export class ChatbotService {
         .join('\n');
       return `Top items for ${rangeLabel}${filters}:\n${items}`;
     }
-    if (plan.intent === 'sector_breakdown' || plan.intent === 'channel_breakdown') {
-      if (!result.length) return `No breakdown data found for ${rangeLabel}${filters}.`;
+    if (
+      plan.intent === 'sector_breakdown' ||
+      plan.intent === 'channel_breakdown'
+    ) {
+      if (!result.length)
+        return `No breakdown data found for ${rangeLabel}${filters}.`;
       return result
         .map(
           (row: any) =>
@@ -1324,7 +1413,9 @@ export class ChatbotService {
     return { ...filters, dateStart: this.isoDate(start), dateEnd: end };
   }
 
-  private async getWarehouseRows(filters: WarehouseFilters): Promise<WarehouseRow[]> {
+  private async getWarehouseRows(
+    filters: WarehouseFilters,
+  ): Promise<WarehouseRow[]> {
     const pageSize = 1000;
     const rows: WarehouseRow[] = [];
     let from = 0;
@@ -1332,7 +1423,8 @@ export class ChatbotService {
     while (true) {
       let query = this.supabaseService.client
         .from('fact_cross_channel_transactions')
-        .select(`
+        .select(
+          `
           net_sales,
           quantity_sold,
           transaction_id,
@@ -1341,7 +1433,8 @@ export class ChatbotService {
           channel_dim:channel_id!inner(channel_name),
           date_dim:date_id!inner(full_date),
           business_segment_dim:segment_id!inner(segment_name)
-        `)
+        `,
+        )
         .range(from, from + pageSize - 1);
 
       if (filters.dateStart) {
@@ -1439,7 +1532,9 @@ export class ChatbotService {
     })}`;
   }
 
-  private buildConversationContext(history: ChatHistoryItem[]): ChatHistoryItem[] {
+  private buildConversationContext(
+    history: ChatHistoryItem[],
+  ): ChatHistoryItem[] {
     if (!Array.isArray(history)) return [];
     return history
       .filter(
@@ -1477,7 +1572,7 @@ export class ChatbotService {
     ) {
       return hasPriorDashboardContext
         ? 'Hi! I am still here. Want me to check another WOOF metric or continue from the last dashboard result?'
-        : 'Hi! I am WOOF. You can ask me things like today\'s sales, orders for a specific date, top items, channel performance, sector breakdowns, forecasts, or bundle recommendations.';
+        : "Hi! I am WOOF. You can ask me things like today's sales, orders for a specific date, top items, channel performance, sector breakdowns, forecasts, or bundle recommendations.";
     }
 
     if (
@@ -1583,7 +1678,10 @@ export class ChatbotService {
         prompt: [
           'Recent chat context:',
           input.history
-            .map((item) => `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`)
+            .map(
+              (item) =>
+                `${item.sender === 'user' ? 'User' : 'WOOF'}: ${item.text}`,
+            )
             .join('\n') || 'None',
           `Latest user question: ${input.question}`,
           `Validated planning question: ${input.questionForPlanning}`,
@@ -1654,7 +1752,10 @@ export class ChatbotService {
       return 'Breakdown: summarize that this is a warehouse breakdown, then present each row compactly without inventing percentages.';
     }
 
-    if (input.plan.intent === 'best_sector' || input.plan.intent === 'best_channel') {
+    if (
+      input.plan.intent === 'best_sector' ||
+      input.plan.intent === 'best_channel'
+    ) {
       return 'Best performer: answer directly with the leading sector/channel and the exact supporting revenue, orders, and units.';
     }
 
