@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { MessageSquareHeart, TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Box } from "lucide-react";
+import { MessageSquareHeart, TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Box, ChevronRight } from "lucide-react";
+import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
@@ -18,6 +19,7 @@ export function Feedback() {
   const [promotions, setPromotions] = useState<FeedbackPromotion[]>([]);
   const [summary, setSummary] = useState<FeedbackSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
   const [isRecalibrating, setIsRecalibrating] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
 
@@ -179,14 +181,32 @@ export function Feedback() {
         </Button>
       </div>
 
+      <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
+
       {/* SYSTEM PERFORMANCE OVERVIEW */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 lg:gap-6">
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4">
+        <div
+          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
+          onClick={() => setSelectedKpi({
+            title: "Total Deployed Campaigns",
+            current: promotions.length,
+            formatter: (v) => `${v} Campaigns`,
+            icon: <MessageSquareHeart className="w-5 h-5 text-[#F53799]" />,
+            description: "Total count of AI-generated promotional campaigns deployed across retail channels, cafe offers, and service bundles.",
+            extraStats: [
+              { label: "Active Promotions", value: `${activePromotions.length} active` },
+              { label: "Completed Promotions", value: `${completedPromotions.length} completed` },
+            ],
+          })}
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
               Total Deployed
             </h3>
-            <MessageSquareHeart className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />
+            <div className="flex items-center gap-1">
+              <MessageSquareHeart className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />
+              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+            </div>
           </div>
           <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
             {promotions.length}
@@ -196,12 +216,28 @@ export function Feedback() {
           </p>
         </div>
 
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4">
+        <div
+          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
+          onClick={() => setSelectedKpi({
+            title: "Avg Promotion Accuracy",
+            current: `${avgAccuracy.toFixed(1)}%`,
+            formatter: (v) => String(v),
+            icon: <TrendingUp className="w-5 h-5 text-[#06B6D4]" />,
+            description: "Average accuracy rate of revenue predictions for deployed promotions vs actual sales realized in POS history.",
+            extraStats: [
+              { label: "Accuracy Target", value: "85.0%" },
+              { label: "Variance", value: `+${(avgAccuracy - 85).toFixed(1)}%` },
+            ],
+          })}
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
               Avg Accuracy
             </h3>
-            <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
+            <div className="flex items-center gap-1">
+              <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
+              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+            </div>
           </div>
           <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
             {avgAccuracy.toFixed(1)}%
@@ -209,12 +245,29 @@ export function Feedback() {
           <Progress value={avgAccuracy} className="h-2 hidden md:block" />
         </div>
 
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4">
+        <div
+          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
+          onClick={() => setSelectedKpi({
+            title: "Helpful Feedback Score",
+            current: helpfulCount,
+            formatter: (v) => `${v} Upvotes`,
+            icon: <ThumbsUp className="w-5 h-5 text-[#F53799]" />,
+            description: "Number of deployed recommendations marked as helpful by store managers and decision makers.",
+            extraStats: [
+              { label: "Helpful", value: `${helpfulCount} ratings` },
+              { label: "Not Helpful", value: `${notHelpfulCount} ratings` },
+              { label: "Pending Review", value: `${pendingFeedback} promotions` },
+            ],
+          })}
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
               Helpful Feedback
             </h3>
-            <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />
+            <div className="flex items-center gap-1">
+              <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />
+              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+            </div>
           </div>
           <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
             {helpfulCount}
@@ -224,12 +277,28 @@ export function Feedback() {
           </p>
         </div>
 
-        <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4">
+        <div
+          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
+          onClick={() => setSelectedKpi({
+            title: "Model Learning Rate",
+            current: summary?.positiveRatio ? `${summary.positiveRatio}%` : "High",
+            formatter: (v) => String(v),
+            icon: <RefreshCw className="w-5 h-5 text-[#06B6D4]" />,
+            description: "Continuous model retraining rate driven by human feedback loops, recalibrating Prophet and FP-Growth association models.",
+            extraStats: [
+              { label: "Recalibrations Synced", value: `${summary?.recalibrationsTriggered ?? 0} cycles` },
+              { label: "Status", value: "Active Learning" },
+            ],
+          })}
+        >
           <div className="flex items-center justify-between">
             <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
               Learning Rate
             </h3>
-            <RefreshCw className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
+            <div className="flex items-center gap-1">
+              <RefreshCw className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
+              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+            </div>
           </div>
           <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
             {summary?.positiveRatio ? `${summary.positiveRatio}%` : "High"}

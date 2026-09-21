@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { useRouter } from "next/router";
-import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight } from "lucide-react";
+import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight, ChevronRight } from "lucide-react";
+import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -21,6 +22,7 @@ import {
   countDays,
 } from "../lib/dateRanges";
 import { getSettingsPreferences, onSettingsPreferencesChanged } from "../lib/preferences";
+import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 import {
   LineChart,
   Line,
@@ -225,6 +227,7 @@ export function Services() {
     });
   }, []);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
+  const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
 
   // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
   useEffect(() => {
@@ -634,7 +637,16 @@ export function Services() {
       totalRevenue: forecastRun?.kpis?.totalRevenue || 0,
       totalOrders: forecastRun?.kpis?.totalOrders || 0,
       avgOrderValue: forecastRun?.kpis?.avgOrderValue || 0,
+      prevRevenue: 0,
+      prevOrders: 0,
+      prevAvgOrderValue: 0,
+      rangeStart: "",
+      rangeEnd: "",
+      prevRangeStart: "",
+      prevRangeEnd: "",
       revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
+      ordersGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
+      checkGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
     };
     if (!forecastRun?.historical?.length) {
       return defaultKpis;
@@ -655,12 +667,23 @@ export function Services() {
     const prevRange = { start: previousStart, end: previousEnd, isCustom: range.isCustom };
     const prevSliced = filterByDateRange(forecastRun.historical, prevRange);
     const prevRevenue = prevSliced.reduce((sum, d) => sum + getHistoricalRevenue(d), 0);
+    const prevOrders = prevSliced.reduce((sum, d) => sum + (d.orders || 0), 0);
+    const prevAvgOrderValue = prevOrders > 0 ? Math.round(prevRevenue / prevOrders) : 0;
 
     return {
       totalRevenue,
       totalOrders,
       avgOrderValue,
+      prevRevenue,
+      prevOrders,
+      prevAvgOrderValue,
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      prevRangeStart: previousStart,
+      prevRangeEnd: previousEnd,
       revenueGrowth: formatGrowth(totalRevenue, prevRevenue),
+      ordersGrowth: formatGrowth(totalOrders, prevOrders),
+      checkGrowth: formatGrowth(avgOrderValue, prevAvgOrderValue),
     };
   }, [forecastRun, globalDateRange]);
 
@@ -902,11 +925,45 @@ export function Services() {
         </Badge>
       </div>
 
+      {forecastRun && (
+        <GenAiExplanationCard
+          feature="descriptive_explanation"
+          title="Gen AI Services Performance Explanation"
+          prompt="Explain the observed Services performance using the verified historical data. Highlight the strongest services, booking or revenue patterns, and meaningful changes. Do not invent values or make unsupported forecasts."
+          context={{
+            sector: "Services",
+            kpis: forecastRun.kpis,
+            historical: forecastRun.historical?.slice(-14),
+            topItems: forecastRun.topItems?.slice(0, 8),
+            itemHistory: forecastRun.itemHistory?.slice(-20),
+          }}
+        />
+      )}
+
+      <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
+
       {/* KPI ROW */}
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Services Revenue Today */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Historical Services Revenue",
+              current: aggregatedKpis.totalRevenue,
+              previous: aggregatedKpis.prevRevenue,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: aggregatedKpis.prevRangeStart || "",
+              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              formatter: (v) => `₱${Number(v).toLocaleString()}`,
+              icon: <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />,
+              growth: aggregatedKpis.revenueGrowth,
+              description: "Total gross revenue generated from pet grooming, boarding, daycare, and wellness service bookings in the selected period. Compared against the prior equivalent timeframe.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -918,10 +975,28 @@ export function Services() {
               <div className="text-base md:text-xl font-bold text-[#223047]">{servicesRevenue}</div>
               <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Active Bookings */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Active Bookings",
+              current: aggregatedKpis.totalOrders,
+              previous: aggregatedKpis.prevOrders,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: aggregatedKpis.prevRangeStart || "",
+              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              formatter: (v) => Number(v).toLocaleString(),
+              icon: <Calendar className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />,
+              growth: aggregatedKpis.ordersGrowth,
+              description: "Total completed service bookings recorded across grooming stations and boarding suites.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <Calendar className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -931,11 +1006,30 @@ export function Services() {
                 <InfoTooltip label="Service bookings counted from the selected uploaded transaction history." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeBookings}</div>
+              <div className={aggregatedKpis.ordersGrowth.className}>{aggregatedKpis.ordersGrowth.text}</div>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Avg Utilization Rate */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Avg Booking Value",
+              current: aggregatedKpis.avgOrderValue,
+              previous: aggregatedKpis.prevAvgOrderValue,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: aggregatedKpis.prevRangeStart || "",
+              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              formatter: (v) => `₱${Number(v).toLocaleString()}`,
+              icon: <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />,
+              growth: aggregatedKpis.checkGrowth,
+              description: "Average revenue realized per individual service appointment (total service revenue ÷ total service bookings).",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -945,11 +1039,28 @@ export function Services() {
                 <InfoTooltip label="Average revenue earned per service booking." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">₱{aggregatedKpis.avgOrderValue.toLocaleString()}</div>
+              <div className={aggregatedKpis.checkGrowth.className}>{aggregatedKpis.checkGrowth.text}</div>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Peak Capacity Alert */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Peak Forecast Date",
+              current: peakForecast?.time || "N/A",
+              previous: 0,
+              currentLabel: "Peak Date",
+              formatter: (v) => String(v),
+              icon: <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />,
+              description: "The upcoming date forecasted by WOOF AI model to experience maximum suite utilization and highest grooming appointment volume.",
+              extraStats: [
+                { label: "Queued Service", value: peakForecast ? String(peakForecast.service) : "—" },
+                { label: "Capacity Utilization", value: peakForecast ? `${peakForecast.capacity}%` : "—" },
+              ],
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <AlertTriangle className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -959,10 +1070,8 @@ export function Services() {
                 <InfoTooltip label="The date WOOF expects the highest service demand based on the current forecast." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{peakForecast?.time || "—"}</div>
-              <Button size="sm" className="bg-[#06B6D4] hover:bg-[#06B6D4] text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex">
-                View Alerts
-              </Button>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
         </div>
       </div>

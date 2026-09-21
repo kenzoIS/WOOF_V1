@@ -355,7 +355,7 @@ async function getForecastHistory(db, moduleName) {
       },
     },
     { $sort: { _id: 1 } },
-  ]).toArray();
+  ], { allowDiskUse: true }).toArray();
 
   const dailyValues = rows.map((row) => {
     const quantity = Number(row.quantity) || 0;
@@ -407,7 +407,7 @@ async function getSegmentHistories(db, moduleName, aggregateHistorical) {
         grossProfit: { $ifNull: ['$grossProfit', 0] },
       },
     },
-  ]).toArray();
+  ], { allowDiskUse: true }).toArray();
 
   const transactionMap = new Map();
   for (const line of lines) {

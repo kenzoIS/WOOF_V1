@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics } from "../components/ThreeZoneForecastChart";
 import { getForecast, ForecastRun } from "../lib/api";
 import { SpatialMerchandisingPanel } from "../components/SpatialMerchandisingPanel";
+import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 
 export function DemandForecasts() {
   const router = useRouter();
@@ -108,6 +109,27 @@ export function DemandForecasts() {
         <h1 className="text-2xl font-bold text-slate-900">Demand Forecasts</h1>
         <p className="text-sm text-slate-600 mt-1">Predictive analytics for operational planning</p>
       </div>
+
+      {forecastRun && (
+        <GenAiExplanationCard
+          feature="predictive_explanation"
+          title="Gen AI Forecast Explanation"
+          prompt={`Explain the ${forecastSector} forecast in plain business language. Describe the direction of the forecast, the confidence or limitations, and what the owner should understand operationally. Do not change or invent any values.`}
+          context={{
+            sector: forecastSector,
+            metrics: {
+              mae: forecastRun.mae,
+              rmse: forecastRun.rmse,
+              mape: forecastRun.mape,
+              mase: forecastRun.mase,
+              wape: (forecastRun as any).wape,
+            },
+            historical: forecastRun.historical?.slice(-14),
+            forecast: forecastRun.forecast?.slice(0, 14),
+            metadata: forecastRun.modelMetadata,
+          }}
+        />
+      )}
 
       <div className="grid grid-cols-3 gap-6">
         {/* Main: Predictive Floorplan Simulator */}

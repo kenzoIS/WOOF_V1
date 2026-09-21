@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { useRouter } from "next/router";
-import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart, ThumbsUp, ThumbsDown, Sparkles, RefreshCw, CheckCircle2, Clock } from "lucide-react";
+import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, ChevronRight, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart, ThumbsUp, ThumbsDown, Sparkles, RefreshCw, CheckCircle2, Clock, X, ExternalLink, Tag, ShoppingCart, TrendingDown } from "lucide-react";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -21,6 +21,7 @@ import {
   countDays,
 } from "../lib/dateRanges";
 import { getSettingsPreferences, onSettingsPreferencesChanged } from "../lib/preferences";
+import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 import cafeMascot from "../../imports/no_bg_Cafe-2.png";
 import {
   LineChart,
@@ -172,8 +173,48 @@ const aggregateItemHistory = (
       trend: [...item.byDate.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([, value]) => Math.round(value)),
+      trendByDate: [...item.byDate.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, value]) => ({ date, value: Math.round(value) })),
     }))
     .sort((a, b) => b.revenue - a.revenue);
+};
+
+// Aggregate daily trend points into weekly or monthly buckets for charting
+const aggregateTrend = (
+  trendByDate: { date: string; value: number }[],
+  granularity: "daily" | "weekly" | "monthly",
+): { label: string; sales: number }[] => {
+  if (granularity === "daily") {
+    return trendByDate.map((p) => ({
+      label: new Date(`${p.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      sales: p.value,
+    }));
+  }
+  const buckets = new Map<string, number>();
+  const labels = new Map<string, string>();
+  for (const p of trendByDate) {
+    const d = new Date(`${p.date}T00:00:00`);
+    let key: string;
+    let label: string;
+    if (granularity === "monthly") {
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      label = d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    } else {
+      // weekly: bucket by ISO week start (Monday)
+      const dayOfWeek = d.getDay(); // 0=Sun
+      const diff = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+      const weekStart = new Date(d);
+      weekStart.setDate(d.getDate() + diff);
+      key = weekStart.toISOString().slice(0, 10);
+      label = `Wk of ${weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    }
+    buckets.set(key, (buckets.get(key) || 0) + p.value);
+    if (!labels.has(key)) labels.set(key, label);
+  }
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, sales]) => ({ label: labels.get(key) || key, sales }));
 };
 
 const formatGrowth = (current: number, previous: number) => {
@@ -208,6 +249,22 @@ export function Cafe() {
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [selectedMenuItem, setSelectedMenuItem] = useState<{ name: string; qtySold: number; category: string; equilibrium: string; trend: number[]; trendByDate?: { date: string; value: number }[]; revenue: number } | null>(null);
+  const [selectedKpi, setSelectedKpi] = useState<{
+    title: string;
+    current: number;
+    previous: number;
+    currentLabel: string;
+    previousLabel: string;
+    rangeStart: string;
+    rangeEnd: string;
+    prevRangeStart: string;
+    prevRangeEnd: string;
+    formatter: (v: number) => string;
+    icon: React.ReactNode;
+    growth: { text: string; className: string };
+    description: string;
+  } | null>(null);
   const [menuFilter, setMenuFilter] = useState("all");
   const [menuPerformanceMode, setMenuPerformanceMode] = useState<"overall" | "header">("overall");
   const [discountValue, setDiscountValue] = useState([15]);
@@ -565,6 +622,13 @@ export function Cafe() {
           )
         : [toNumber(item.revenue)];
       const trend = item.trend.length ? item.trend : fallbackTrend;
+      const trendByDate: { date: string; value: number }[] =
+        (item as any).trendByDate?.length
+          ? (item as any).trendByDate
+          : last7Days.map((day, i) => ({
+              date: day.date || "",
+              value: Math.max(0, Math.round(getHistoricalRevenue(day, unitPrice) * itemProportion)),
+            }));
 
       // Determine status based on quantity thresholds from actual dataset
       const equilibrium =
@@ -580,6 +644,7 @@ export function Cafe() {
         category: item.category || "Cafe",
         equilibrium,
         trend,
+        trendByDate,
         revenue: Math.round(toNumber(item.revenue)),
       };
     });
@@ -616,6 +681,13 @@ export function Cafe() {
       totalRevenue: toNumber(forecastRun?.kpis?.totalRevenue),
       totalOrders: toNumber(forecastRun?.kpis?.totalOrders),
       avgOrderValue: toNumber(forecastRun?.kpis?.avgOrderValue),
+      prevRevenue: 0,
+      prevOrders: 0,
+      prevAvgOrderValue: 0,
+      rangeStart: "",
+      rangeEnd: "",
+      prevRangeStart: "",
+      prevRangeEnd: "",
       revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
       ordersGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
       checkGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
@@ -648,6 +720,13 @@ export function Cafe() {
       totalRevenue,
       totalOrders,
       avgOrderValue,
+      prevRevenue,
+      prevOrders,
+      prevAvgOrderValue,
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      prevRangeStart: previousStart,
+      prevRangeEnd: previousEnd,
       revenueGrowth: formatGrowth(totalRevenue, prevRevenue),
       ordersGrowth: formatGrowth(totalOrders, prevOrders),
       checkGrowth: formatGrowth(avgOrderValue, prevAvgOrderValue),
@@ -1141,11 +1220,44 @@ export function Cafe() {
         </div>
       </div>
 
+      {forecastRun && (
+        <GenAiExplanationCard
+          feature="descriptive_explanation"
+          title="Gen AI Cafe Performance Explanation"
+          prompt="Explain the observed Cafe performance using the verified historical data. Highlight the strongest items, revenue or order patterns, and meaningful changes. Do not invent values or make unsupported forecasts."
+          context={{
+            sector: "Cafe",
+            kpis: forecastRun.kpis,
+            historical: forecastRun.historical?.slice(-14),
+            topItems: forecastRun.topItems?.slice(0, 8),
+            itemHistory: forecastRun.itemHistory?.slice(-20),
+          }}
+        />
+      )}
+
       {/* KPI ROW */}
+      {/* KPI CARDS */}
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          {/* Cafe Revenue Today */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          {/* Cafe Revenue */}
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Historical Cafe Revenue",
+              current: aggregatedKpis.totalRevenue,
+              previous: aggregatedKpis.prevRevenue,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: aggregatedKpis.prevRangeStart || "",
+              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              formatter: formatCurrency,
+              icon: <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: aggregatedKpis.revenueGrowth,
+              description: "Total Cafe revenue from uploaded transaction history. Compared against the equivalent prior period of the same length.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -1157,10 +1269,28 @@ export function Cafe() {
               <div className="text-base md:text-xl font-bold text-[#223047]">{cafeRevenue}</div>
               <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Total Orders */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Total Orders",
+              current: aggregatedKpis.totalOrders,
+              previous: aggregatedKpis.prevOrders,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: aggregatedKpis.prevRangeStart || "",
+              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              formatter: (v) => v.toLocaleString(),
+              icon: <Coffee className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: aggregatedKpis.ordersGrowth,
+              description: "Number of Cafe transactions counted in the selected period. Compared against the equivalent prior period.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <Coffee className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -1169,13 +1299,31 @@ export function Cafe() {
                 <span>Total Orders</span>
                 <InfoTooltip label="Number of Cafe transactions counted in the selected period." />
               </div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{totalOrders}</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{totalOrders.toLocaleString()}</div>
               <div className={aggregatedKpis.ordersGrowth.className}>{aggregatedKpis.ordersGrowth.text}</div>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Avg Check Size */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Avg Check Size",
+              current: aggregatedKpis.avgOrderValue,
+              previous: aggregatedKpis.prevAvgOrderValue,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: aggregatedKpis.prevRangeStart || "",
+              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              formatter: formatCurrency,
+              icon: <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: aggregatedKpis.checkGrowth,
+              description: "Average Cafe spend per order (revenue ÷ orders). Compared against the equivalent prior period.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -1187,12 +1335,30 @@ export function Cafe() {
               <div className="text-base md:text-xl font-bold text-[#223047]">{avgCheck}</div>
               <div className={aggregatedKpis.checkGrowth.className}>{aggregatedKpis.checkGrowth.text}</div>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
-          {/* Active Menu Items */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          {/* Active Menu Items — no prev comparison, just info modal */}
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Active Menu Items",
+              current: activeItems,
+              previous: 0,
+              currentLabel: "Items in Data",
+              previousLabel: "—",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: "",
+              prevRangeEnd: "",
+              formatter: (v) => v.toLocaleString(),
+              icon: <LucidePieChart className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: { text: "", className: "" },
+              description: "Distinct menu items currently represented in the uploaded Cafe transaction data. This is a catalog count, not a period comparison.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
-              <PieChart className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              <LucidePieChart className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
@@ -1204,6 +1370,7 @@ export function Cafe() {
                 All Active
               </Badge>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
         </div>
       </div>
@@ -1664,7 +1831,7 @@ export function Cafe() {
         </div>
 
         {/* 2. CATEGORY REVENUE CONTRIBUTION (7 cols) */}
-        <div className="lg:col-span-7 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 flex flex-col justify-between space-y-4">
+        <div className="lg:col-span-7 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 flex flex-col space-y-4">
           <div>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -1683,12 +1850,12 @@ export function Cafe() {
           </div>
 
           {cafeCategoryRevenueData.length === 0 ? (
-            <div className="py-8 text-center text-sm text-slate-400">
+            <div className="flex-1 flex items-center justify-center py-8 text-center text-sm text-slate-400">
               No category data available. Upload Cafe transaction data to populate category ranking.
             </div>
           ) : (
-            <div className="flex-1 flex items-center">
-              <ResponsiveContainer width="100%" height={280}>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%" minHeight={260}>
                 <BarChart
                   data={cafeCategoryRevenueData}
                   layout="vertical"
@@ -1794,76 +1961,37 @@ export function Cafe() {
               </TableHeader>
               <TableBody>
                 {paginatedMenuItems.map((item: any, itemIndex: number) => (
-                  <React.Fragment key={`menu-item-${item.name}-${itemIndex}`}>
-                    <TableRow
-                      className="cursor-pointer hover:bg-[#FFF2FA]"
-                      onClick={() => setExpandedRow(expandedRow === item.name ? null : item.name)}
-                    >
-                      <TableCell className="font-semibold">{item.name}</TableCell>
-                      <TableCell className="text-center">{item.qtySold}</TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-[#FFF2FA] text-[#223047] opacity-80">{item.category}</span>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-center h-8">
-                          <LineChart width={80} height={30} data={item.trend.map((v: any, idx: number) => ({ value: v, index: idx }))}>
-                            <Line
-                              key={`line-trend-${item.name}`}
-                              type="monotone"
-                              dataKey="value"
-                              stroke="#F53799"
-                              strokeWidth={2}
-                              dot={false}
-                            />
-                          </LineChart>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-center font-semibold">{formatCurrency(item.revenue)}</TableCell>
-                      <TableCell className="text-center">
-                        <div className="inline-flex items-center justify-center p-1 rounded hover:bg-[#FFF2FA] text-[#F53799] transition-colors">
-                          {expandedRow === item.name ? (
-                            <ChevronUp className="w-5 h-5" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5" />
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    {expandedRow === item.name && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="bg-[#FFF7FB]">
-                          <div className="p-4 space-y-3">
-                            <ResponsiveContainer width="100%" height={120} className="md:!h-[150px]">
-                              <LineChart data={item.trend.map((sales: number, index: number) => ({
-                                day: `Day ${index + 1}`,
-                                sales,
-                              }))}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" />
-                                <XAxis dataKey="day" style={{ fontSize: "10px" }} />
-                                <YAxis style={{ fontSize: "10px" }} />
-                                <Tooltip />
-                                <Line
-                                  key={`line-sales-${item.name}`}
-                                  type="monotone"
-                                  dataKey="sales"
-                                  stroke="#F53799"
-                                  strokeWidth={2}
-                                />
-                              </LineChart>
-                            </ResponsiveContainer>
-                            <Button
-                              size="sm"
-                              onClick={() => router.push(`/ai-simulation?tab=bundle&itemA=${encodeURIComponent(item.name)}`)}
-                              className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm flex items-center gap-1.5"
-                            >
-                              <span>Promote in Bundle Simulator</span>
-                              <ArrowRight className="w-3.5 h-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </React.Fragment>
+                  <TableRow
+                    key={`menu-item-${item.name}-${itemIndex}`}
+                    className="cursor-pointer hover:bg-[#FFF2FA] transition-colors"
+                    onClick={() => setSelectedMenuItem(item)}
+                  >
+                    <TableCell className="font-semibold">{item.name}</TableCell>
+                    <TableCell className="text-center">{item.qtySold}</TableCell>
+                    <TableCell className="text-center">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-[#FFF2FA] text-[#223047] opacity-80">{item.category}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-center h-8">
+                        <LineChart width={80} height={30} data={item.trend.map((v: any, idx: number) => ({ value: v, index: idx }))}>
+                          <Line
+                            key={`line-trend-${item.name}`}
+                            type="monotone"
+                            dataKey="value"
+                            stroke="#F53799"
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        </LineChart>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center font-semibold">{formatCurrency(item.revenue)}</TableCell>
+                    <TableCell className="text-center">
+                      <div className="inline-flex items-center justify-center p-1 rounded hover:bg-[#FFF2FA] text-[#F53799] transition-colors">
+                        <ExternalLink className="w-4 h-4" />
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 ))}
               </TableBody>
             </Table>
@@ -2143,6 +2271,288 @@ export function Cafe() {
           </div>
         </div>
       )}
+
+      {/* KPI Detail Modal */}
+      {selectedKpi && (() => {
+        const kpi = selectedKpi;
+        const isUp = kpi.growth.text.startsWith("+");
+        const isDown = kpi.growth.text.startsWith("-");
+        const hasPrev = kpi.previous > 0;
+        const maxBar = Math.max(kpi.current, kpi.previous, 1);
+        const currentPct = Math.round((kpi.current / maxBar) * 100);
+        const prevPct = Math.round((kpi.previous / maxBar) * 100);
+        const diff = kpi.current - kpi.previous;
+
+        return (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setSelectedKpi(null)}
+          >
+            <div
+              className="bg-white border border-[#FFD9EC] rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                className="flex items-start justify-between p-5 pb-4"
+                style={{ background: "linear-gradient(135deg, #FFF7FB 0%, #FFF0F8 100%)", borderBottom: "1px solid #FFD9EC" }}
+              >
+                <div className="flex-1 min-w-0 pr-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#223047]/40 mb-1">KPI Breakdown</p>
+                  <h3 className="text-lg font-bold text-[#223047] leading-tight">{kpi.title}</h3>
+                  {kpi.growth.text && (
+                    <span className={`inline-flex items-center gap-1 mt-1.5 text-xs font-bold px-2 py-0.5 rounded-full border ${
+                      isUp ? "bg-green-50 border-green-200 text-green-700" :
+                      isDown ? "bg-red-50 border-red-200 text-red-700" :
+                      "bg-slate-50 border-slate-200 text-slate-600"
+                    }`}>
+                      {isUp ? <TrendingUp className="w-3 h-3" /> : isDown ? <TrendingDown className="w-3 h-3" /> : null}
+                      {kpi.growth.text} vs prior period
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setSelectedKpi(null)}
+                  className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#FFD9EC]/60 text-[#223047]/40 hover:text-[#F53799] transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Big value display */}
+                <div className="text-4xl font-black text-[#223047] leading-none">
+                  {kpi.formatter(kpi.current)}
+                </div>
+
+                {/* Comparison bars */}
+                {hasPrev && (
+                  <div className="space-y-3">
+                    {/* Current */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-xs font-semibold text-[#223047]/70">{kpi.currentLabel}</span>
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-[#F53799]">{kpi.formatter(kpi.current)}</span>
+                          {kpi.rangeStart && (
+                            <span className="text-[10px] text-[#223047]/40 ml-1.5">{kpi.rangeStart} – {kpi.rangeEnd}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="h-2.5 bg-[#FFD9EC] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-[#F53799] rounded-full transition-all duration-500"
+                          style={{ width: `${currentPct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Previous */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-xs font-semibold text-[#223047]/50">{kpi.previousLabel}</span>
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-[#223047]/60">{kpi.formatter(kpi.previous)}</span>
+                          {kpi.prevRangeStart && (
+                            <span className="text-[10px] text-[#223047]/30 ml-1.5">{kpi.prevRangeStart} – {kpi.prevRangeEnd}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-[#223047]/30 rounded-full transition-all duration-500"
+                          style={{ width: `${prevPct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Net difference */}
+                    <div className={`flex items-center justify-between text-xs px-3 py-2 rounded-xl border ${
+                      diff >= 0 ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"
+                    }`}>
+                      <span className="font-medium">Net change vs. prior period</span>
+                      <span className="font-bold">
+                        {diff >= 0 ? "+" : ""}{kpi.formatter(Math.abs(diff))}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Description */}
+                <p className="text-xs text-[#223047]/60 leading-relaxed border-t border-[#FFD9EC] pt-3">
+                  {kpi.description}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Menu Item Performance Detail Modal */}
+      {selectedMenuItem && (() => {
+        const item = selectedMenuItem as any;
+        const granularity: "daily" | "weekly" | "monthly" =
+          globalDateRange === "last-12-months"
+            ? "monthly"
+            : globalDateRange === "last-90-days"
+              ? "weekly"
+              : "daily";
+        const granularityLabel =
+          granularity === "monthly" ? "Monthly" : granularity === "weekly" ? "Weekly" : "Daily";
+
+        const chartData: { label: string; sales: number }[] =
+          item.trendByDate?.length
+            ? aggregateTrend(item.trendByDate, granularity)
+            : item.trend?.length
+              ? item.trend.map((v: number, i: number) => ({ label: `Day ${i + 1}`, sales: v }))
+              : [];
+
+        const totalRevenue: number = chartData.reduce((s: number, p: { label: string; sales: number }) => s + p.sales, 0);
+        const maxSales: number = chartData.length ? Math.max(...chartData.map((p: { label: string; sales: number }) => p.sales)) : 0;
+        const peakPoint = chartData.find((p: { label: string; sales: number }) => p.sales === maxSales);
+        const equilibriumColors: Record<string, string> = {
+          balanced: "text-emerald-600 bg-emerald-50 border-emerald-200",
+          diverging: "text-amber-600 bg-amber-50 border-amber-200",
+          critical: "text-rose-600 bg-rose-50 border-rose-200",
+        };
+        const equilibriumLabels: Record<string, string> = {
+          balanced: "Balanced",
+          diverging: "Diverging",
+          critical: "Needs Attention",
+        };
+
+        return (
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setSelectedMenuItem(null)}
+          >
+            <div
+              className="bg-white border border-[#FFD9EC] rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden"
+              style={{ maxHeight: "90vh", overflowY: "auto" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div
+                className="flex items-start justify-between p-5 pb-4"
+                style={{ background: "linear-gradient(135deg, #FFF7FB 0%, #FFF0F8 100%)", borderBottom: "1px solid #FFD9EC" }}
+              >
+                <div className="flex-1 min-w-0 pr-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${equilibriumColors[item.equilibrium] || "text-slate-600 bg-slate-50 border-slate-200"}`}
+                    >
+                      {equilibriumLabels[item.equilibrium] || item.equilibrium}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FFF2FA] text-[#223047] border border-[#FFD9EC] font-medium">
+                      {item.category}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-[#223047] leading-tight">{item.name}</h3>
+                  <p className="text-xs text-[#223047]/50 mt-0.5">{granularityLabel} revenue trend</p>
+                </div>
+                <button
+                  onClick={() => setSelectedMenuItem(null)}
+                  className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#FFD9EC]/60 text-[#223047]/50 hover:text-[#F53799] transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* KPI Cards */}
+              <div className="grid grid-cols-3 gap-3 p-5 pb-0">
+                <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3 text-center">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/50 mb-1">Revenue</div>
+                  <div className="text-base font-bold text-[#F53799]">{formatCurrency(item.revenue)}</div>
+                </div>
+                <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3 text-center">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/50 mb-1">Qty Sold</div>
+                  <div className="text-base font-bold text-[#223047]">{formatNumber(item.qtySold)}</div>
+                </div>
+                <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3 text-center">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/50 mb-1">Peak Period</div>
+                  <div className="text-sm font-bold text-[#223047] truncate">{peakPoint ? peakPoint.label : "—"}</div>
+                </div>
+              </div>
+
+              {/* Trend Chart */}
+              <div className="p-5 pb-0">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-[#223047]/70">Revenue Trend</span>
+                  <span className="text-[10px] text-[#223047]/40 font-medium uppercase tracking-wide">{granularityLabel} granularity</span>
+                </div>
+                {chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="menuItemGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#F53799" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="#F53799" stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        style={{ fontSize: "9px" }}
+                        tick={{ fill: "#223047", opacity: 0.5 }}
+                        tickLine={false}
+                        axisLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        style={{ fontSize: "9px" }}
+                        tick={{ fill: "#223047", opacity: 0.5 }}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(v) => `₱${(v / 1000).toFixed(0)}k`}
+                        width={40}
+                      />
+                      <Tooltip
+                        formatter={(value: number) => [formatCurrency(value), "Revenue"]}
+                        contentStyle={{
+                          background: "#fff",
+                          border: "1px solid #FFD9EC",
+                          borderRadius: "10px",
+                          fontSize: "11px",
+                          padding: "6px 10px",
+                        }}
+                        labelStyle={{ color: "#223047", fontWeight: 600 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="sales"
+                        stroke="#F53799"
+                        strokeWidth={2.5}
+                        fill="url(#menuItemGradient)"
+                        dot={false}
+                        activeDot={{ r: 4, fill: "#F53799", strokeWidth: 0 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[180px] flex items-center justify-center text-sm text-[#223047]/40">
+                    No trend data available for this item.
+                  </div>
+                )}
+              </div>
+
+              {/* Footer CTA */}
+              <div className="p-5 pt-4">
+                <Button
+                  className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-white text-sm font-semibold flex items-center justify-center gap-2 rounded-xl h-10 transition-all"
+                  onClick={() => {
+                    setSelectedMenuItem(null);
+                    router.push(`/ai-simulation?tab=bundle&itemA=${encodeURIComponent(item.name)}`);
+                  }}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Promote in Bundle Simulator</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

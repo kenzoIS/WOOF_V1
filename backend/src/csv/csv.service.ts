@@ -844,7 +844,7 @@ export class CsvService {
         relax_quotes: true,
         bom: true,
       });
-      if (rows.length > 0) return rows;
+      if (rows.length > 0) return rows as Record<string, string>[];
 
       const rawRows = parse(content, {
         skip_empty_lines: true,
@@ -1576,23 +1576,31 @@ export class CsvService {
             revenue: { $sum: '$netSales' },
           },
         },
-      ]),
+      ], { allowDiskUse: true }).allowDiskUse(true),
       this.transactionModel.aggregate([
         {
           $group: {
-            _id: null,
-            totalRecords: { $sum: 1 },
-            totalTransactions: { $addToSet: '$transactionId' },
-            totalQuantity: { $sum: '$quantity' },
-            totalRevenue: { $sum: '$netSales' },
+            _id: '$transactionId',
+            txQuantity: { $sum: '$quantity' },
+            txRevenue: { $sum: '$netSales' },
+            txLineItems: { $sum: 1 },
           },
         },
-      ]),
+        {
+          $group: {
+            _id: null,
+            totalTransactions: { $sum: 1 },
+            totalRecords: { $sum: '$txLineItems' },
+            totalQuantity: { $sum: '$txQuantity' },
+            totalRevenue: { $sum: '$txRevenue' },
+          },
+        },
+      ], { allowDiskUse: true }).allowDiskUse(true),
     ]);
 
     const totals = totalAgg[0] || {
       totalRecords: 0,
-      totalTransactions: [],
+      totalTransactions: 0,
       totalQuantity: 0,
       totalRevenue: 0,
     };
@@ -1605,12 +1613,15 @@ export class CsvService {
     });
 
     return {
-      totalRecords: totals.totalRecords,
-      totalTransactions: Array.isArray(totals.totalTransactions)
-        ? totals.totalTransactions.length
-        : 0,
-      totalQuantity: totals.totalQuantity,
-      totalRevenue: Math.round(totals.totalRevenue * 100) / 100,
+      totalRecords: totals.totalRecords || 0,
+      totalTransactions:
+        typeof totals.totalTransactions === 'number'
+          ? totals.totalTransactions
+          : Array.isArray(totals.totalTransactions)
+          ? totals.totalTransactions.length
+          : 0,
+      totalQuantity: totals.totalQuantity || 0,
+      totalRevenue: Math.round((totals.totalRevenue || 0) * 100) / 100,
       channels,
       uploadCount: uploads ? uploads.length : 0,
     };

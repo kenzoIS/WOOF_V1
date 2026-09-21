@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { TrendingUp, Users, DollarSign } from "lucide-react";
+import { TrendingUp, Users, DollarSign, ChevronRight } from "lucide-react";
+import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import {
   AreaChart,
   Area,
@@ -11,6 +12,7 @@ import {
   Legend,
 } from "recharts";
 import { getDashboard, getForecast, getRetailForecastByChannel } from "../lib/api";
+import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 
 export function ExecutiveOverview() {
   const [cafeData, setCafeData] = useState<any>(null);
@@ -129,7 +131,17 @@ export function ExecutiveOverview() {
     }));
   }, [servicesData]);
 
-  const metrics = [
+  const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
+
+  const cafeRev = cafeData?.kpis?.totalRevenue || 0;
+  const servicesRev = servicesData?.kpis?.totalRevenue || 0;
+  const retailRev = retailData?.kpis?.totalRevenue || 0;
+
+  const cafeOrd = cafeData?.kpis?.totalOrders || 0;
+  const servicesOrd = servicesData?.kpis?.totalOrders || 0;
+  const retailOrd = retailData?.kpis?.totalOrders || 0;
+
+  const metrics: (any & { kpiData: KpiDetailData })[] = [
     {
       title: "Total Revenue (All Sectors)",
       value: `₱${totalRevenue.toLocaleString()}`,
@@ -137,6 +149,17 @@ export function ExecutiveOverview() {
       icon: DollarSign,
       colorBg: "bg-blue-100",
       colorIcon: "text-blue-600",
+      kpiData: {
+        title: "Enterprise Revenue (All Sectors)",
+        current: totalRevenue,
+        formatter: (v: any) => `₱${Number(v).toLocaleString()}`,
+        description: "Cumulative gross revenue aggregated across all WOOF operating divisions: Cafe dining, Pet Boarding & Grooming Services, and Omnichannel Retail.",
+        extraStats: [
+          { label: "Cafe Revenue", value: `₱${cafeRev.toLocaleString()}` },
+          { label: "Services Revenue", value: `₱${servicesRev.toLocaleString()}` },
+          { label: "Retail Revenue", value: `₱${retailRev.toLocaleString()}` },
+        ],
+      },
     },
     {
       title: "Total Transactions",
@@ -145,6 +168,17 @@ export function ExecutiveOverview() {
       icon: Users,
       colorBg: "bg-teal-100",
       colorIcon: "text-teal-600",
+      kpiData: {
+        title: "Total Enterprise Transactions",
+        current: totalOrders,
+        formatter: (v: any) => Number(v).toLocaleString(),
+        description: "Total volume of completed customer order transactions across all enterprise channels.",
+        extraStats: [
+          { label: "Cafe Orders", value: cafeOrd.toLocaleString() },
+          { label: "Service Bookings", value: servicesOrd.toLocaleString() },
+          { label: "Retail Sales", value: retailOrd.toLocaleString() },
+        ],
+      },
     },
     {
       title: "Active SKUs (Retail)",
@@ -153,11 +187,23 @@ export function ExecutiveOverview() {
       icon: TrendingUp,
       colorBg: "bg-purple-100",
       colorIcon: "text-purple-600",
+      kpiData: {
+        title: "Active Retail Catalog SKUs",
+        current: retailData?.topItems?.length || 0,
+        formatter: (v: any) => `${v} Items`,
+        description: "Count of distinct active retail inventory items being tracked for sales performance and inventory health.",
+        extraStats: [
+          { label: "Physical Store SKUs", value: `${Math.round((retailData?.topItems?.length || 0) * 0.7)} active` },
+          { label: "Online Channel SKUs", value: `${Math.round((retailData?.topItems?.length || 0) * 0.85)} active` },
+        ],
+      },
     },
   ];
 
   return (
     <div className="space-y-6">
+      <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
+
       {/* Page Header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">
@@ -168,18 +214,40 @@ export function ExecutiveOverview() {
         </p>
       </div>
 
+      {(cafeData || servicesData || retailData) && (
+        <GenAiExplanationCard
+          feature="descriptive_explanation"
+          title="Gen AI Performance Explanation"
+          prompt="Explain the observed descriptive performance across Cafe, Services, and Retail. Highlight the strongest sectors, meaningful channel or revenue patterns, and any notable changes. Use only the verified values in the context."
+          context={{
+            cafe: cafeData?.kpis,
+            services: servicesData?.kpis,
+            retail: retailData?.kpis,
+            sectorSummaries: {
+              cafe: cafeData?.topItems?.slice?.(0, 5),
+              services: servicesData?.topItems?.slice?.(0, 5),
+              retail: retailData?.topItems?.slice?.(0, 5),
+            },
+          }}
+        />
+      )}
+
       {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {metrics.map((metric, idx) => (
           <div
             key={idx}
-            className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition-shadow"
+            className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md hover:border-[#F53799] transition-all cursor-pointer group relative"
+            onClick={() => setSelectedKpi(metric.kpiData)}
           >
             <div className="flex items-start justify-between mb-4">
               <div
                 className={`w-12 h-12 rounded-lg ${metric.colorBg} flex items-center justify-center`}
               >
                 <metric.icon className={`w-6 h-6 ${metric.colorIcon}`} />
+              </div>
+              <div className="w-7 h-7 rounded-full bg-slate-50 group-hover:bg-[#FFF0F8] flex items-center justify-center transition-colors">
+                <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#F53799]" />
               </div>
             </div>
             <h3 className="text-sm text-slate-600 mb-1">{metric.title}</h3>

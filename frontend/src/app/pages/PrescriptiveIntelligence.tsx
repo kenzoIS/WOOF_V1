@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Lightbulb, Lock, Check, X } from "lucide-react";
 import { getHomeOverview } from "../lib/api";
+import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 
 interface Suggestion {
   id: number;
@@ -48,6 +49,18 @@ export function PrescriptiveIntelligence() {
           AI-generated business recommendations with approval workflow
         </p>
       </div>
+
+      {suggestions.length > 0 && (
+        <GenAiExplanationCard
+          feature="prescriptive_explanation"
+          title="Gen AI Recommendation Explanation"
+          prompt="Explain the active and suppressed WOOF recommendations. For each important recommendation, describe the evidence, confidence, expected lift, and operational action. Clearly distinguish recommendations from observed facts."
+          context={{
+            activeSuggestions,
+            suppressedSuggestions,
+          }}
+        />
+      )}
 
       {/* Active Trigger Suggestions */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">

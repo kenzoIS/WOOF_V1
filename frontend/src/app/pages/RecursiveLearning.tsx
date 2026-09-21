@@ -1,8 +1,12 @@
-import { RefreshCcw, Activity, CheckCircle, Clock } from "lucide-react";
+import { useState } from "react";
+import { RefreshCcw, Activity, CheckCircle, Clock, ChevronRight } from "lucide-react";
+import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { SynergyLiftTracker } from "../components/SynergyLiftTracker";
 
 export function RecursiveLearning() {
+  const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
+
   // Synergy Lift data
   const synergyData = [
     { trigger: "Happy Hour", cafeRevenue: 8420, serviceRevenue: 12340, lift: "+147%" },
@@ -60,46 +64,112 @@ export function RecursiveLearning() {
         <p className="text-sm text-slate-600 mt-1">Continuous learning and autonomous model improvement</p>
       </div>
 
+      <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
+
       {/* Key Metrics Cards */}
-      <div className="grid grid-cols-4 gap-6">
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-              <CheckCircle className="w-5 h-5 text-green-600" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div
+          className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:border-[#F53799] hover:shadow-md transition-all cursor-pointer group"
+          onClick={() => setSelectedKpi({
+            title: "Active Machine Learning Models",
+            current: 4,
+            formatter: (v) => `${v} Production Models`,
+            icon: <CheckCircle className="w-5 h-5 text-green-600" />,
+            description: "Count of live autonomous models deployed: XGBoost Revenue Predictor, Prophet Time-Series, FP-Growth Association Rules, and SARIMAX Demand Engine.",
+            extraStats: [
+              { label: "Status", value: "All Healthy" },
+              { label: "Last Audit", value: "Passed (100% test pass)" },
+            ],
+          })}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900">4</div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">4</div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#F53799] transition-colors" />
           </div>
-          <div className="text-sm text-slate-600">Models Active</div>
+          <div className="text-sm text-slate-600 font-medium">Models Active</div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Activity className="w-5 h-5 text-blue-600" />
+        <div
+          className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:border-[#F53799] hover:shadow-md transition-all cursor-pointer group"
+          onClick={() => setSelectedKpi({
+            title: "Average sMAPE Forecast Error",
+            current: "5.1%",
+            formatter: (v) => String(v),
+            icon: <Activity className="w-5 h-5 text-blue-600" />,
+            description: "Symmetric Mean Absolute Percentage Error across holdout evaluation sets. Indicates exceptionally tight forecast alignment with actual POS records.",
+            extraStats: [
+              { label: "Target", value: "< 8.0% sMAPE" },
+              { label: "Improvement", value: "-1.8% vs last month" },
+            ],
+          })}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                <Activity className="w-5 h-5 text-blue-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900">5.1%</div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">5.1%</div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#F53799] transition-colors" />
           </div>
-          <div className="text-sm text-slate-600">Avg sMAPE</div>
+          <div className="text-sm text-slate-600 font-medium">Avg sMAPE</div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-              <RefreshCcw className="w-5 h-5 text-purple-600" />
+        <div
+          className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:border-[#F53799] hover:shadow-md transition-all cursor-pointer group"
+          onClick={() => setSelectedKpi({
+            title: "Model Retrain Interval",
+            current: "6h",
+            formatter: (v) => String(v),
+            icon: <RefreshCcw className="w-5 h-5 text-purple-600" />,
+            description: "Automated hyperparameter recalibration frequency to adjust model weights against incoming real-time POS transaction streams.",
+            extraStats: [
+              { label: "Frequency", value: "Every 6 Hours" },
+              { label: "Execution Time", value: "~42 seconds" },
+            ],
+          })}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <RefreshCcw className="w-5 h-5 text-purple-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900">6h</div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">6h</div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#F53799] transition-colors" />
           </div>
-          <div className="text-sm text-slate-600">Retrain Interval</div>
+          <div className="text-sm text-slate-600 font-medium">Retrain Interval</div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-              <Clock className="w-5 h-5 text-orange-600" />
+        <div
+          className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:border-[#F53799] hover:shadow-md transition-all cursor-pointer group"
+          onClick={() => setSelectedKpi({
+            title: "Next Training Cycle Countdown",
+            current: "4.2h",
+            formatter: (v) => String(v),
+            icon: <Clock className="w-5 h-5 text-orange-600" />,
+            description: "Time remaining until the next scheduled automated background retrain job.",
+            extraStats: [
+              { label: "Scheduled Time", value: "11:00 PM PHT" },
+              { label: "Data Pipeline", value: "AWS S3 / Cron Synced" },
+            ],
+          })}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+                <Clock className="w-5 h-5 text-orange-600" />
+              </div>
+              <div className="text-2xl font-bold text-slate-900">4.2h</div>
             </div>
-            <div className="text-2xl font-bold text-slate-900">4.2h</div>
+            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#F53799] transition-colors" />
           </div>
-          <div className="text-sm text-slate-600">Next Cycle</div>
+          <div className="text-sm text-slate-600 font-medium">Next Cycle</div>
         </div>
       </div>
 

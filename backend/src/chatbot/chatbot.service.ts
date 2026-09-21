@@ -179,6 +179,22 @@ export class ChatbotService {
       };
     }
 
+    if (this.hasUnsupportedEntityScope(cleanedQuestion)) {
+      return {
+        answer:
+          'I can only answer questions using WOOF dashboard data. Branch-, store-, location-, or external brand-specific data is not available in the current WOOF dataset, so I cannot compute that accurately.',
+        scope: 'out_of_scope',
+        queryPlan: {
+          intent: 'out_of_scope',
+          dateRange: 'all',
+          answerMode: 'unsupported',
+          classifier: 'backend_scope_guard',
+          analysisSteps: ['Detected unsupported entity or location scope'],
+        },
+        confidence: 'high',
+      };
+    }
+
     const questionForPlanning = this.resolveFollowUpQuestion(
       cleanedQuestion,
       conversationContext,
@@ -611,6 +627,13 @@ export class ChatbotService {
       ...Object.keys(MONTHS),
     ];
     return allowedTerms.some((term) => q.includes(term));
+  }
+
+  private hasUnsupportedEntityScope(question: string): boolean {
+    const q = this.normalizeQuestion(question);
+    return /\b(branch|branches|location|locations|store|stores|outlet|outlets|city|municipality|address|barangay|mall|restaurant|franchise|brand|jollibee|mcdonalds|starbucks)\b/.test(
+      q,
+    );
   }
 
   private allowedIntent(value: unknown): value is DashboardIntent {

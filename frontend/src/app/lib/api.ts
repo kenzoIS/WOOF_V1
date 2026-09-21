@@ -721,6 +721,9 @@ export async function askWoofChatbot(
 
 export async function generateLlmExplanation(input: {
   feature:
+    | 'descriptive_explanation'
+    | 'predictive_explanation'
+    | 'prescriptive_explanation'
     | 'manual_bundle_explanation'
     | 'business_assistant'
     | 'forecast_explanation'
@@ -908,4 +911,3 @@ export async function triggerModelRecalibration(params?: {
     body: JSON.stringify(params || {}),
   });
 }
-

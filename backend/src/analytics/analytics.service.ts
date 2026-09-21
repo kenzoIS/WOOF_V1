@@ -158,12 +158,16 @@ export class AnalyticsService {
     private readonly awsService: AwsService,
   ) {}
 
+  private aggregateWithDiskUse<T = any>(pipeline: any[]) {
+    return this.transactionModel.aggregate<T>(pipeline, { allowDiskUse: true }).allowDiskUse(true);
+  }
+
   /**
    * Get dashboard KPIs for a given sector
    */
   async getHomeOverview(range = 'week'): Promise<any> {
     const normalizedRange = this.normalizeHomeRange(range);
-    const latestRows = await this.transactionModel.aggregate([
+    const latestRows = await this.aggregateWithDiskUse([
       { $group: { _id: null, latestDate: { $max: '$date' } } },
     ]);
     const latestDate = latestRows[0]?.latestDate
@@ -184,7 +188,7 @@ export class AnalyticsService {
     };
 
     // Determine matched date window across active channels for like-for-like channel balance
-    const digitalBounds = await this.transactionModel.aggregate([
+    const digitalBounds = await this.aggregateWithDiskUse([
       {
         $match: {
           channel: { $in: ['Shopee', 'TikTok Shop'] },
@@ -240,7 +244,7 @@ export class AnalyticsService {
     ] = await Promise.all([
       this.aggregateHomeTotals(dateFilter),
       this.aggregateHomeTotals(previousDateFilter),
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: dateFilter },
         {
           $group: {
@@ -251,7 +255,7 @@ export class AnalyticsService {
         },
         { $addFields: { orderCount: { $size: '$orders' } } },
       ]),
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: dateFilter },
         {
           $group: {
@@ -262,7 +266,7 @@ export class AnalyticsService {
         },
       ]),
       this.aggregateHomeSeries(dateFilter, normalizedRange),
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         {
           $match: {
             ...matchedChannelDateFilter,
@@ -278,7 +282,7 @@ export class AnalyticsService {
         },
         { $sort: { _id: 1 } },
       ]),
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         {
           $match: { date: { $gte: this.getHeatmapStartDate(end), $lte: end } },
         },
@@ -321,7 +325,7 @@ export class AnalyticsService {
           },
         },
       ]),
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: dateFilter },
         {
           $group: {
@@ -406,7 +410,7 @@ export class AnalyticsService {
 
     const [kpis, topItems, dailyRevenue, channelBreakdown] = await Promise.all([
       // KPIs
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: sectorFilter },
         {
           $group: {
@@ -419,7 +423,7 @@ export class AnalyticsService {
         },
       ]),
       // Top items by revenue
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: sectorFilter },
         {
           $group: {
@@ -437,7 +441,7 @@ export class AnalyticsService {
         { $project: { transactions: 0 } },
       ]),
       // Daily revenue over time
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: sectorFilter },
         {
           $group: {
@@ -452,7 +456,7 @@ export class AnalyticsService {
         { $project: { orders: 0 } },
       ]),
       // Channel breakdown with full omnichannel economics
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: sectorFilter },
         {
           $group: {
@@ -576,7 +580,7 @@ export class AnalyticsService {
   }
 
   async getDataRange(): Promise<any> {
-    const rows = await this.transactionModel.aggregate([
+    const rows = await this.aggregateWithDiskUse([
       {
         $group: {
           _id: '$sector',
@@ -621,7 +625,7 @@ export class AnalyticsService {
   async getChannelStatus(): Promise<any> {
     const channels = ['POS', 'Shopee', 'TikTok Shop', 'PetHub'];
     const [transactionRows, { data: uploadRows }] = await Promise.all([
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         {
           $group: {
             _id: '$channel',
@@ -1259,102 +1263,133 @@ export class AnalyticsService {
     // Group items by transaction to build baskets
     const [baskets, rawSummaryRows, hourlyRows, sectorRows, itemPriceRows] =
       await Promise.all([
-        this.transactionModel
-          .aggregate([
-            ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
-            {
-              $group: {
-                _id: '$transactionId',
-                date: { $min: '$date' },
-                items: { $addToSet: '$productName' },
-                sectors: { $addToSet: '$sector' },
-                itemSectors: {
-                  $addToSet: {
-                    item: '$productName',
-                    sector: '$sector',
-                  },
-                },
-                totalAmount: { $sum: '$netSales' },
+        this.aggregateWithDiskUse([
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+          {
+            $group: {
+              _id: {
+                transactionId: '$transactionId',
+                item: '$productName',
+                sector: '$sector',
               },
+              date: { $min: '$date' },
+              netSales: { $sum: '$netSales' },
             },
-            { $match: { 'items.1': { $exists: true } } }, // Only baskets with 2+ items
-          ])
-          .allowDiskUse(true)
-          .exec(),
-        this.transactionModel
-          .aggregate([
-            ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
-            {
-              $group: {
-                _id: null,
-                totalLineItems: { $sum: 1 },
-                totalRevenue: { $sum: '$netSales' },
-                uniqueTransactions: { $addToSet: '$transactionId' },
-                uniqueItems: { $addToSet: '$productName' },
-              },
-            },
-            {
-              $project: {
-                _id: 0,
-                totalLineItems: 1,
-                totalRevenue: 1,
-                totalTransactions: { $size: '$uniqueTransactions' },
-                uniqueItemCount: { $size: '$uniqueItems' },
-              },
-            },
-          ])
-          .allowDiskUse(true)
-          .exec(),
-        this.transactionModel
-          .aggregate([
-            ...(hasSectorMatch ? [{ $match: sectorMatch }] : []),
-            {
-              $group: {
-                _id: {
-                  transactionId: '$transactionId',
-                  hour: {
-                    $hour: {
-                      date: '$date',
-                      timezone: 'Asia/Manila',
-                    },
-                  },
+          },
+          {
+            $group: {
+              _id: '$_id.transactionId',
+              date: { $min: '$date' },
+              items: { $push: '$_id.item' },
+              sectors: { $addToSet: '$_id.sector' },
+              itemSectors: {
+                $push: {
+                  item: '$_id.item',
+                  sector: '$_id.sector',
                 },
               },
+              totalAmount: { $sum: '$netSales' },
             },
-            {
-              $group: {
-                _id: '$_id.hour',
-                transactions: { $sum: 1 },
+          },
+          { $match: { 'items.1': { $exists: true } } }, // Only baskets with 2+ items
+        ]).exec(),
+        this.aggregateWithDiskUse([
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+          {
+            $facet: {
+              summary: [
+                {
+                  $group: {
+                    _id: '$transactionId',
+                    txRevenue: { $sum: '$netSales' },
+                    txLineItems: { $sum: 1 },
+                  },
+                },
+                {
+                  $group: {
+                    _id: null,
+                    totalTransactions: { $sum: 1 },
+                    totalLineItems: { $sum: '$txLineItems' },
+                    totalRevenue: { $sum: '$txRevenue' },
+                  },
+                },
+              ],
+              items: [
+                { $group: { _id: '$productName' } },
+                { $group: { _id: null, uniqueItemCount: { $sum: 1 } } },
+              ],
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              totalLineItems: {
+                $ifNull: [{ $arrayElemAt: ['$summary.totalLineItems', 0] }, 0],
+              },
+              totalRevenue: {
+                $ifNull: [{ $arrayElemAt: ['$summary.totalRevenue', 0] }, 0],
+              },
+              totalTransactions: {
+                $ifNull: [{ $arrayElemAt: ['$summary.totalTransactions', 0] }, 0],
+              },
+              uniqueItemCount: {
+                $ifNull: [{ $arrayElemAt: ['$items.uniqueItemCount', 0] }, 0],
               },
             },
-            { $sort: { _id: 1 } },
-          ])
-          .allowDiskUse(true)
-          .exec(),
-        this.transactionModel
-          .aggregate([
-            ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
-            {
-              $group: {
-                _id: '$sector',
-                lineItems: { $sum: 1 },
-                transactions: { $addToSet: '$transactionId' },
+          },
+        ]).exec(),
+        this.aggregateWithDiskUse([
+          ...(hasSectorMatch ? [{ $match: sectorMatch }] : []),
+          {
+            $group: {
+              _id: {
+                transactionId: '$transactionId',
+                hour: {
+                  $hour: {
+                    date: '$date',
+                    timezone: 'Asia/Manila',
+                  },
+                },
               },
             },
-            {
-              $project: {
-                _id: 0,
-                sector: '$_id',
-                lineItems: 1,
-                transactionCount: { $size: '$transactions' },
-              },
+          },
+          {
+            $group: {
+              _id: '$_id.hour',
+              transactions: { $sum: 1 },
             },
-            { $sort: { transactionCount: -1 } },
-          ])
-          .allowDiskUse(true)
-          .exec(),
-        this.transactionModel
-          .aggregate([
+          },
+          { $sort: { _id: 1 } },
+        ]).exec(),
+        this.aggregateWithDiskUse([
+          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+          {
+            $group: {
+              _id: {
+                sector: '$sector',
+                transactionId: '$transactionId',
+              },
+              txLineItems: { $sum: 1 },
+            },
+          },
+          {
+            $group: {
+              _id: '$_id.sector',
+              lineItems: { $sum: '$txLineItems' },
+              transactionCount: { $sum: 1 },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              sector: '$_id',
+              lineItems: 1,
+              transactionCount: 1,
+            },
+          },
+          { $sort: { transactionCount: -1 } },
+        ]).exec(),
+        this.aggregateWithDiskUse([
             {
               $match: {
                 ...(sector === 'all'
@@ -1398,9 +1433,7 @@ export class AnalyticsService {
                 avgMargin: { $avg: '$margin' },
               },
             },
-          ])
-          .allowDiskUse(true)
-          .exec(),
+          ]).exec(),
       ]);
 
     const itemPrices: Record<string, number> = {};
@@ -1583,71 +1616,75 @@ export class AnalyticsService {
       : { $gte: new Date('2026-01-01T00:00:00.000+08:00') };
 
     const [baskets, itemPriceRows] = await Promise.all([
-      this.transactionModel
-        .aggregate([
-          ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
-          {
-            $group: {
-              _id: '$transactionId',
-              date: { $min: '$date' },
-              items: { $addToSet: '$productName' },
-              sectors: { $addToSet: '$sector' },
-              itemSectors: {
-                $addToSet: {
-                  item: '$productName',
-                  sector: '$sector',
-                },
+      this.aggregateWithDiskUse([
+        ...(hasTransactionMatch ? [{ $match: transactionMatch }] : []),
+        {
+          $group: {
+            _id: {
+              transactionId: '$transactionId',
+              item: '$productName',
+              sector: '$sector',
+            },
+            date: { $min: '$date' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.transactionId',
+            date: { $min: '$date' },
+            items: { $push: '$_id.item' },
+            sectors: { $addToSet: '$_id.sector' },
+            itemSectors: {
+              $push: {
+                item: '$_id.item',
+                sector: '$_id.sector',
               },
             },
           },
-          { $match: { 'items.1': { $exists: true } } },
-        ])
-        .allowDiskUse(true)
-        .exec(),
-      this.transactionModel
-        .aggregate([
-          {
-            $match: {
-              ...(sector === 'all'
-                ? {}
-                : { sector: this.normalizeSector(sector) }),
-              date: pricingDateFilter,
-              unitPrice: { $gt: 0 },
-            },
+        },
+        { $match: { 'items.1': { $exists: true } } },
+      ]).exec(),
+      this.aggregateWithDiskUse([
+        {
+          $match: {
+            ...(sector === 'all'
+              ? {}
+              : { sector: this.normalizeSector(sector) }),
+            date: pricingDateFilter,
+            unitPrice: { $gt: 0 },
           },
-          {
-            $project: {
-              productName: 1,
-              unitPrice: { $ifNull: ['$unitPrice', 0] },
-              unitCost: {
-                $cond: [
-                  { $gt: ['$quantity', 0] },
-                  { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
-                  { $ifNull: ['$costOfGoods', 0] },
-                ],
-              },
-              unitGrossProfit: {
-                $cond: [
-                  { $gt: ['$quantity', 0] },
-                  { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
-                  { $ifNull: ['$grossProfit', 0] },
-                ],
-              },
-              margin: { $ifNull: ['$margin', 0] },
+        },
+        {
+          $project: {
+            productName: 1,
+            unitPrice: { $ifNull: ['$unitPrice', 0] },
+            unitCost: {
+              $cond: [
+                { $gt: ['$quantity', 0] },
+                { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
+                { $ifNull: ['$costOfGoods', 0] },
+              ],
             },
-          },
-          {
-            $group: {
-              _id: '$productName',
-              avgPrice: { $avg: '$unitPrice' },
-              avgUnitCost: { $avg: '$unitCost' },
-              avgUnitGrossProfit: { $avg: '$unitGrossProfit' },
-              avgMargin: { $avg: '$margin' },
+            unitGrossProfit: {
+              $cond: [
+                { $gt: ['$quantity', 0] },
+                { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
+                { $ifNull: ['$grossProfit', 0] },
+              ],
             },
+            margin: { $ifNull: ['$margin', 0] },
           },
-        ])
-        .allowDiskUse(true)
-        .exec(),
+        },
+        {
+          $group: {
+            _id: '$productName',
+            avgPrice: { $avg: '$unitPrice' },
+            avgUnitCost: { $avg: '$unitCost' },
+            avgUnitGrossProfit: { $avg: '$unitGrossProfit' },
+            avgMargin: { $avg: '$margin' },
+          },
+        },
+      ]).exec(),
     ]);
 
     const itemPrices: Record<string, number> = {};
@@ -1865,104 +1902,103 @@ export class AnalyticsService {
     }
 
     const [summaryRows, itemRows] = await Promise.all([
-      this.transactionModel
-        .aggregate([
-          { $match: match },
-          {
-            $group: {
-              _id: null,
-              transactions: { $addToSet: '$transactionId' },
-            },
+      this.aggregateWithDiskUse([
+        { $match: match },
+        {
+          $group: {
+            _id: '$transactionId',
           },
-          {
-            $project: {
-              _id: 0,
-              totalTransactions: { $size: '$transactions' },
-            },
+        },
+        {
+          $group: {
+            _id: null,
+            totalTransactions: { $sum: 1 },
           },
-        ])
-        .allowDiskUse(true)
-        .exec(),
-      this.transactionModel
-        .aggregate([
-          { $match: match },
-          {
-            $project: {
-              productName: 1,
-              sector: 1,
-              transactionId: 1,
-              quantity: { $ifNull: ['$quantity', 0] },
-              unitPrice: { $ifNull: ['$unitPrice', 0] },
-              unitCost: {
+        },
+        {
+          $project: {
+            _id: 0,
+            totalTransactions: 1,
+          },
+        },
+      ]).exec(),
+      this.aggregateWithDiskUse([
+        { $match: match },
+        {
+          $project: {
+            productName: 1,
+            sector: 1,
+            transactionId: 1,
+            quantity: { $ifNull: ['$quantity', 0] },
+            unitPrice: { $ifNull: ['$unitPrice', 0] },
+            unitCost: {
+              $cond: [
+                { $gt: ['$quantity', 0] },
+                { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
+                { $ifNull: ['$costOfGoods', 0] },
+              ],
+            },
+            unitGrossProfit: {
+              $cond: [
+                { $gt: ['$quantity', 0] },
+                { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
+                { $ifNull: ['$grossProfit', 0] },
+              ],
+            },
+            margin: { $ifNull: ['$margin', null] },
+          },
+        },
+        {
+          $group: {
+            _id: '$productName',
+            sectors: { $addToSet: '$sector' },
+            transactions: { $addToSet: '$transactionId' },
+            lineItems: { $sum: 1 },
+            totalQuantity: { $sum: '$quantity' },
+            avgPrice: {
+              $avg: {
+                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+              },
+            },
+            prices: {
+              $push: {
+                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
+              },
+            },
+            avgUnitCost: {
+              $avg: {
+                $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
+              },
+            },
+            avgUnitGrossProfit: {
+              $avg: {
                 $cond: [
-                  { $gt: ['$quantity', 0] },
-                  { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
-                  { $ifNull: ['$costOfGoods', 0] },
+                  { $ne: ['$unitGrossProfit', null] },
+                  '$unitGrossProfit',
+                  null,
                 ],
               },
-              unitGrossProfit: {
-                $cond: [
-                  { $gt: ['$quantity', 0] },
-                  { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
-                  { $ifNull: ['$grossProfit', 0] },
-                ],
-              },
-              margin: { $ifNull: ['$margin', null] },
             },
+            avgMargin: { $avg: '$margin' },
           },
-          {
-            $group: {
-              _id: '$productName',
-              sectors: { $addToSet: '$sector' },
-              transactions: { $addToSet: '$transactionId' },
-              lineItems: { $sum: 1 },
-              totalQuantity: { $sum: '$quantity' },
-              avgPrice: {
-                $avg: {
-                  $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
-                },
-              },
-              prices: {
-                $push: {
-                  $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
-                },
-              },
-              avgUnitCost: {
-                $avg: {
-                  $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
-                },
-              },
-              avgUnitGrossProfit: {
-                $avg: {
-                  $cond: [
-                    { $ne: ['$unitGrossProfit', null] },
-                    '$unitGrossProfit',
-                    null,
-                  ],
-                },
-              },
-              avgMargin: { $avg: '$margin' },
-            },
+        },
+        {
+          $project: {
+            _id: 0,
+            item: '$_id',
+            sectors: 1,
+            lineItems: 1,
+            totalQuantity: 1,
+            transactionCount: { $size: '$transactions' },
+            avgPrice: 1,
+            prices: 1,
+            avgUnitCost: 1,
+            avgUnitGrossProfit: 1,
+            avgMargin: 1,
           },
-          {
-            $project: {
-              _id: 0,
-              item: '$_id',
-              sectors: 1,
-              lineItems: 1,
-              totalQuantity: 1,
-              transactionCount: { $size: '$transactions' },
-              avgPrice: 1,
-              prices: 1,
-              avgUnitCost: 1,
-              avgUnitGrossProfit: 1,
-              avgMargin: 1,
-            },
-          },
-          { $sort: { transactionCount: -1, item: 1 } },
-        ])
-        .allowDiskUse(true)
-        .exec(),
+        },
+        { $sort: { transactionCount: -1, item: 1 } },
+      ]).exec(),
     ]);
 
     const totalTransactions = Number(summaryRows?.[0]?.totalTransactions || 0);
@@ -2089,8 +2125,7 @@ export class AnalyticsService {
       );
     });
 
-    const rows = await this.transactionModel
-      .aggregate([
+    const rows = await this.aggregateWithDiskUse([
         {
           $match: {
             date: { $gte: dateWindow.start, $lte: dateWindow.end },
@@ -2186,9 +2221,7 @@ export class AnalyticsService {
             visits: { $size: '$transactions' },
           },
         },
-      ])
-      .allowDiskUse(true)
-      .exec();
+      ]).exec();
 
     const dailyVisits = new Map<string, number>();
     const weekdayVisits = new Map<string, number>();
@@ -2792,7 +2825,7 @@ export class AnalyticsService {
 
     // Aggregate daily data split by physical POS vs online marketplace channels with profit metrics
     const [physicalData, onlineData] = await Promise.all([
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         { $match: { ...sectorFilter, channel: 'POS' } },
         {
           $group: {
@@ -2808,7 +2841,7 @@ export class AnalyticsService {
         { $sort: { _id: 1 } },
         { $project: { orders: 0 } },
       ]),
-      this.transactionModel.aggregate([
+      this.aggregateWithDiskUse([
         {
           $match: {
             ...sectorFilter,
@@ -3011,7 +3044,7 @@ export class AnalyticsService {
   async getWeatherImpact(sector = 'cafe', days = 30): Promise<any> {
     try {
       const sectorMatch = this.normalizeSector(sector);
-      const dailyRows = await this.transactionModel.aggregate([
+      const dailyRows = await this.aggregateWithDiskUse([
         { $match: { sector: sectorMatch } },
         {
           $group: {
@@ -3107,7 +3140,7 @@ export class AnalyticsService {
 
   async getCafeCoAttachment(): Promise<any> {
     try {
-      const baskets = await this.transactionModel.aggregate([
+      const baskets = await this.aggregateWithDiskUse([
         { $match: { sector: 'Cafe' } },
         {
           $group: {
@@ -3216,7 +3249,7 @@ export class AnalyticsService {
           ? Math.round(((dualSeg.aov - humanSeg.aov) / humanSeg.aov) * 100)
           : 0;
 
-      const categoryRows = await this.transactionModel.aggregate([
+      const categoryRows = await this.aggregateWithDiskUse([
         {
           $match: {
             sector: 'Cafe',
@@ -4191,7 +4224,7 @@ export class AnalyticsService {
     const aggregateDateSet = new Set(
       aggregateHistorical.map((point) => point.date),
     );
-    const rows = await this.transactionModel.aggregate([
+    const rows = await this.aggregateWithDiskUse([
       { $match: this.buildForecastTransactionMatch('Cafe') },
       {
         $project: {
@@ -4941,7 +4974,7 @@ export class AnalyticsService {
   private async getForecastModuleTransactionStamp(
     module: ForecastModule,
   ): Promise<{ count: number; latestTransactionTime: number | null }> {
-    const rows = await this.transactionModel.aggregate([
+    const rows = await this.aggregateWithDiskUse([
       { $match: { sector: module } },
       {
         $group: {
@@ -5157,7 +5190,7 @@ export class AnalyticsService {
   }
 
   private getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {
-    return this.transactionModel.aggregate([
+    return this.aggregateWithDiskUse([
       { $match: this.buildForecastTransactionMatch(module) },
       {
         $project: {
@@ -5659,7 +5692,7 @@ export class AnalyticsService {
   }
 
   private async getItemHistory(module: ForecastModule): Promise<any[]> {
-    const rows = await this.transactionModel.aggregate([
+    const rows = await this.aggregateWithDiskUse([
       {
         $match: {
           sector: module,
@@ -5930,7 +5963,7 @@ export class AnalyticsService {
     unitCost: number;
     source: string;
   }> {
-    const latestRows = await this.transactionModel.aggregate([
+    const latestRows = await this.aggregateWithDiskUse([
       {
         $match: {
           sector: module,
@@ -5949,7 +5982,7 @@ export class AnalyticsService {
     const minDate = latestDate
       ? new Date(latestDate.getTime() - 30 * 24 * 60 * 60 * 1000)
       : new Date('2026-01-01T00:00:00.000Z');
-    const rows = await this.transactionModel.aggregate([
+    const rows = await this.aggregateWithDiskUse([
       {
         $match: {
           sector: module,
@@ -6002,7 +6035,7 @@ export class AnalyticsService {
     const minDate = anchorDate
       ? new Date(`${anchorDate.slice(0, 4)}-01-01T00:00:00.000Z`)
       : new Date('2026-01-01T00:00:00.000Z');
-    const rows = await this.transactionModel.aggregate([
+    const rows = await this.aggregateWithDiskUse([
       {
         $match: {
           ...(module ? { sector: module } : {}),
@@ -6345,7 +6378,7 @@ export class AnalyticsService {
     totalQuantity: number;
     totalItems: number;
   }> {
-    const rows = await this.transactionModel.aggregate([
+    const rows = await this.aggregateWithDiskUse([
       { $match: match },
       {
         $group: {
@@ -6383,7 +6416,7 @@ export class AnalyticsService {
             channel: '$channel',
           };
 
-    return this.transactionModel.aggregate([
+    return this.aggregateWithDiskUse([
       { $match: match },
       {
         $group: {
@@ -6727,7 +6760,7 @@ export class AnalyticsService {
   private async getLegacyRetailForecast(
     overrides?: ForecastOverrides,
   ): Promise<any> {
-    const dailyData = await this.transactionModel.aggregate([
+    const dailyData = await this.aggregateWithDiskUse([
       { $match: { sector: 'Retail' } },
       {
         $group: {
@@ -7455,7 +7488,7 @@ export class AnalyticsService {
           const items = bundle.items?.map((i: any) => i.name) || [];
           if (items.length === 0) continue;
 
-          const promoSales = await this.transactionModel.aggregate([
+          const promoSales = await this.aggregateWithDiskUse([
             {
               $match: {
                 productName: { $in: items },
@@ -7465,7 +7498,7 @@ export class AnalyticsService {
             { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } },
           ]); // .allowDiskUse(true) is handled by schema pre-hook
 
-          const baselineSales = await this.transactionModel.aggregate([
+          const baselineSales = await this.aggregateWithDiskUse([
             {
               $match: {
                 productName: { $in: items },
@@ -7509,7 +7542,7 @@ export class AnalyticsService {
           const baselineStart = new Date(promoDate);
           baselineStart.setDate(baselineStart.getDate() - 7);
 
-          const promoSales = await this.transactionModel.aggregate([
+          const promoSales = await this.aggregateWithDiskUse([
             {
               $match: {
                 sector: 'Cafe',
@@ -7522,7 +7555,7 @@ export class AnalyticsService {
             { $group: { _id: null, totalAmount: { $sum: '$totalAmount' } } },
           ]);
 
-          const baselineSales = await this.transactionModel.aggregate([
+          const baselineSales = await this.aggregateWithDiskUse([
             {
               $match: {
                 sector: 'Cafe',

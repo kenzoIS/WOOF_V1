@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/router";
-import { DollarSign, TrendingUp, Package, AlertCircle, Target, ArrowRight, Percent, Store, ShoppingBag, TrendingDown, ShieldCheck, Scale } from "lucide-react";
+import { DollarSign, TrendingUp, Package, AlertCircle, Target, ArrowRight, Percent, Store, ShoppingBag, TrendingDown, ShieldCheck, Scale, ChevronRight } from "lucide-react";
+import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { InfoTooltip } from "../components/InfoTooltip";
+import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 import { getDashboard, getRetailForecastByChannel } from "../lib/api";
 import {
   HISTORY_START_DATE,
@@ -144,6 +146,7 @@ export function Retail() {
     type: null,
   });
   const [reorderAttempts, setReorderAttempts] = useState(0);
+  const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [channelRangeMode, setChannelRangeMode] = useState("last30days");
   const [channelMetricView, setChannelMetricView] = useState<"revenue" | "profit">("revenue");
@@ -584,6 +587,22 @@ export function Retail() {
         </Badge>
       </div>
 
+      {dashboardData && (
+        <GenAiExplanationCard
+          feature="descriptive_explanation"
+          title="Gen AI Retail Performance Explanation"
+          prompt="Explain the observed Retail performance using the verified dashboard and channel data. Highlight revenue, product, inventory, and channel patterns that are actually supported by the context. Do not invent values or recommendations."
+          context={{
+            sector: "Retail",
+            kpis: dashboardData.kpis,
+            topItems: dashboardData.topItems?.slice(0, 8),
+            channelBreakdown: dashboardData.channelBreakdown,
+            physicalHistory: channelForecast?.physical?.historical?.slice(-14),
+            onlineHistory: channelForecast?.online?.historical?.slice(-14),
+          }}
+        />
+      )}
+
       {/* KPI ROW */}
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
@@ -831,37 +850,104 @@ export function Retail() {
           </div>
         </div>
 
+        <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
+
         {/* TOP LEVEL ECONOMICS KPI STRIP */}
         <div className="woof-kpi-row grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          <div className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC]">
-            <div className="text-[11px] text-[#223047] opacity-70 font-medium">Gross Retail Sales</div>
+          <div
+            className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group relative"
+            onClick={() => setSelectedKpi({
+              title: "Gross Retail Sales",
+              current: channelEconomics.totalRevenue,
+              formatter: (v) => `₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              icon: <DollarSign className="w-4 h-4 text-[#F53799]" />,
+              description: "Total gross retail revenue generated across physical store POS, Shopee, and TikTok Shop channels before platform fees and discounts.",
+              extraStats: channelEconomics.channels.map(ch => ({
+                label: ch.channel,
+                value: `₱${ch.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              })),
+            })}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] text-[#223047] opacity-70 font-medium">Gross Retail Sales</div>
+              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+            </div>
             <div className="text-base md:text-xl font-bold text-[#223047] mt-0.5">
               ₱{channelEconomics.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-[10px] text-[#223047] opacity-60 mt-1">Across 3 active channels</div>
           </div>
 
-          <div className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC]">
-            <div className="text-[11px] text-[#223047] opacity-70 font-medium">Marketplace Take-Rates</div>
+          <div
+            className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group relative"
+            onClick={() => setSelectedKpi({
+              title: "Marketplace Take-Rates",
+              current: channelEconomics.totalCommission,
+              formatter: (v) => `-₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              icon: <Percent className="w-4 h-4 text-[#E11D48]" />,
+              description: "Total marketplace commission fees deducted by online platforms (Shopee 8.5%, TikTok Shop 9.0%, Physical POS 0%).",
+              extraStats: channelEconomics.channels.map(ch => ({
+                label: ch.channel,
+                value: `-₱${ch.commFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              })),
+            })}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] text-[#223047] opacity-70 font-medium">Marketplace Take-Rates</div>
+              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+            </div>
             <div className="text-base md:text-xl font-bold text-[#E11D48] mt-0.5">
               -₱{channelEconomics.totalCommission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-[10px] text-[#E11D48] opacity-80 mt-1 font-medium">8.5%–9.0% platform fees</div>
           </div>
 
-          <div className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC]">
-            <div className="text-[11px] text-[#223047] opacity-70 font-medium">Discounts Surrendered</div>
+          <div
+            className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group relative"
+            onClick={() => setSelectedKpi({
+              title: "Discounts Surrendered",
+              current: channelEconomics.totalDiscounts,
+              formatter: (v) => `-₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              icon: <Percent className="w-4 h-4 text-[#F59E0B]" />,
+              description: "Total promotional markdowns, bundle vouchers, and clearance discounts surrendered during the selected period.",
+              extraStats: channelEconomics.channels.map(ch => ({
+                label: ch.channel,
+                value: `-₱${ch.discount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              })),
+            })}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] text-[#223047] opacity-70 font-medium">Discounts Surrendered</div>
+              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+            </div>
             <div className="text-base md:text-xl font-bold text-[#F59E0B] mt-0.5">
               -₱{channelEconomics.totalDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div className="text-[10px] text-[#F59E0B] opacity-80 mt-1 font-medium">Promotional markdowns</div>
           </div>
 
-          <div className="p-3 md:p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0]">
-            <div className="text-[11px] text-[#166534] opacity-80 font-medium">Net Profit</div>
+          <div
+            className="p-3 md:p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] cursor-pointer hover:border-[#16A34A] hover:shadow-sm transition-all group relative"
+            onClick={() => setSelectedKpi({
+              title: "Net Retail Profit",
+              current: channelEconomics.totalProfit,
+              formatter: (v) => `₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              icon: <TrendingUp className="w-4 h-4 text-[#16A34A]" />,
+              description: "Net profit retained after deducting wholesale COGS, marketplace commissions, and promotional discounts.",
+              extraStats: channelEconomics.channels.map(ch => ({
+                label: ch.channel,
+                value: `₱${ch.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              })),
+            })}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] text-[#166534] opacity-80 font-medium">Net Profit</div>
+              <ChevronRight className="w-3.5 h-3.5 text-[#166534]/30 group-hover:text-[#16A34A] transition-colors" />
+            </div>
             <div className="text-base md:text-xl font-bold text-[#16A34A] mt-0.5">
               ₱{channelEconomics.totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
+            <div className="text-[10px] text-[#166534] opacity-70 mt-1">After COGS, fees & discounts</div>
           </div>
         </div>
 
@@ -1110,12 +1196,31 @@ export function Retail() {
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 md:gap-4">
             <div className="flex-1 min-w-0">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Inventory Health Monitor
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                  Inventory Health Monitor
+                </h2>
+                <InfoTooltip label="Tracks current stock levels vs. reorder thresholds and predicts how many days until stockout based on current sales velocity. Velocity color indicates how fast a product is being consumed." />
+              </div>
               <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
                 Stock levels and predicted stockout dates
               </p>
+              {/* Velocity Legend */}
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/40">Velocity:</span>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0" />
+                  <span className="text-[11px] text-[#223047]/70 font-medium">High — fast-selling, watch stock closely</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500 flex-shrink-0" />
+                  <span className="text-[11px] text-[#223047]/70 font-medium">Medium — moderate pace, needs attention</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0" />
+                  <span className="text-[11px] text-[#223047]/70 font-medium">Low — slow-moving stock</span>
+                </div>
+              </div>
             </div>
             <select
               value={filterVelocity}
@@ -1173,7 +1278,13 @@ export function Retail() {
                       </div>
                     </TableCell>
                     <TableCell className="text-center hidden md:table-cell">
-                      <div className={`w-2 h-2 rounded-full mx-auto ${getVelocityColor(item.velocity)}`} />
+                      <div className="flex items-center justify-center gap-1.5">
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${getVelocityColor(item.velocity)}`} />
+                        <span className={`text-xs font-semibold ${
+                          item.velocity === "High" ? "text-green-600" :
+                          item.velocity === "Medium" ? "text-yellow-600" : "text-red-600"
+                        }`}>{item.velocity}</span>
+                      </div>
                     </TableCell>
                     <TableCell className="text-center">
                       <span className={`text-sm md:text-base ${item.predictedStockout < 7 ? "text-red-600 font-bold" : ""}`}>
