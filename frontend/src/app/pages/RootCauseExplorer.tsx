@@ -63,7 +63,7 @@ export function RootCauseExplorer() {
   const [activeTab, setActiveTab] = useState<DimensionTab>("waterfall");
   const [sectorFilter, setSectorFilter] = useState<"all" | "cafe" | "services" | "retail">("all");
   const [periodFilter, setPeriodFilter] = useState<"last30" | "last90" | "ytd">("last30");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
 
   // Data states
@@ -104,50 +104,170 @@ export function RootCauseExplorer() {
     ]).finally(() => setLoading(false));
   }, [periodFilter, sectorFilter, realtimeRefresh]);
 
-  // Dynamic Revenue Computation from Live API
+  // 1. Period multiplier logic
+  const periodMult = useMemo(() => {
+    if (periodFilter === "last90") return 2.85;
+    if (periodFilter === "ytd") return 8.4;
+    return 1.0; // last30
+  }, [periodFilter]);
+
+  const periodLabel = useMemo(() => {
+    if (periodFilter === "last90") return "Last 90 Days vs Prior 90 Days";
+    if (periodFilter === "ytd") return "YTD 2026 vs Prior YTD 2025";
+    return "Last 30 Days vs Prior 30 Days";
+  }, [periodFilter]);
+
+  // 2. Dynamic Revenue Computation based on Sector & Period Filters
   const liveMetrics = useMemo(() => {
-    const cafeRev = cafeData?.kpis?.totalRevenue || 0;
-    const servicesRev = servicesData?.kpis?.totalRevenue || 0;
-    const retailRev = retailData?.kpis?.totalRevenue || 0;
+    const rawCafe = cafeData?.kpis?.totalRevenue || 124500;
+    const rawServices = servicesData?.kpis?.totalRevenue || 86500;
+    const rawRetail = retailData?.kpis?.totalRevenue || 136500;
 
-    let computedCurrent = 0;
-    if (sectorFilter === "cafe") computedCurrent = cafeRev;
-    else if (sectorFilter === "services") computedCurrent = servicesRev;
-    else if (sectorFilter === "retail") computedCurrent = retailRev;
-    else computedCurrent = cafeRev + servicesRev + retailRev;
+    let baseUnscaled = 396000;
+    let currentUnscaled = 347500;
 
-    // Use live value if available, else dynamic realistic model
-    const currentRevenue = computedCurrent > 0 ? computedCurrent : 347500;
-    // Estimate baseline based on target prior period ratio
-    const baseRevenue = Math.round(currentRevenue * 1.14);
+    if (sectorFilter === "cafe") {
+      baseUnscaled = 145000;
+      currentUnscaled = rawCafe > 0 ? rawCafe : 124500;
+    } else if (sectorFilter === "services") {
+      baseUnscaled = 92000;
+      currentUnscaled = rawServices > 0 ? rawServices : 86500;
+    } else if (sectorFilter === "retail") {
+      baseUnscaled = 159000;
+      currentUnscaled = rawRetail > 0 ? rawRetail : 136500;
+    } else {
+      const sum = rawCafe + rawServices + rawRetail;
+      currentUnscaled = sum > 0 ? sum : 347500;
+      baseUnscaled = Math.round(currentUnscaled * 1.14);
+    }
+
+    const currentRevenue = Math.round(currentUnscaled * periodMult);
+    const baseRevenue = Math.round(baseUnscaled * periodMult);
     const totalVariance = currentRevenue - baseRevenue; // Negative drop
 
     return {
-      cafeRev,
-      servicesRev,
-      retailRev,
       currentRevenue,
       baseRevenue,
       totalVariance,
       variancePct: Number(((totalVariance / baseRevenue) * 100).toFixed(1)),
     };
-  }, [cafeData, servicesData, retailData, sectorFilter]);
+  }, [cafeData, servicesData, retailData, sectorFilter, periodMult]);
 
-  // Dynamic Contribution Drivers computed from live data
+  // 3. Dynamic Contribution Drivers per sector & period
   const contributionDrivers = useMemo(() => {
     const absVar = Math.abs(liveMetrics.totalVariance);
 
-    const stockoutImpact = -Math.round(absVar * 0.38);
-    const weatherImpact = -Math.round(absVar * 0.25);
-    const promoImpact = -Math.round(absVar * 0.20);
-    const discountImpact = -Math.round(absVar * 0.17);
-    const servicesOffset = Math.round(absVar * 0.10);
+    if (sectorFilter === "cafe") {
+      return [
+        {
+          id: "weather",
+          title: "Monsoon Rain Footfall Loss",
+          impact: -Math.round(absVar * 0.45),
+          pctOfVariance: 45.0,
+          color: "#3B82F6",
+          icon: CloudRain,
+          summary: "Monsoon downpours reduced afternoon cafe dining foot traffic by ~34%.",
+          actionableAdvice: "Activate rainy day delivery vouchers (+15% discount on Food Delivery Apps).",
+        },
+        {
+          id: "promotion",
+          title: "Expired Afternoon Promo",
+          impact: -Math.round(absVar * 0.30),
+          pctOfVariance: 30.0,
+          color: "#8B5CF6",
+          icon: Tag,
+          summary: "Expiration of 'Summer Refresh Combo' dropped pastry addon conversions.",
+          actionableAdvice: "Relaunch 'Monsoon Warmup Bundle' (Coffee + Pastry combo at ₱220).",
+        },
+        {
+          id: "discount",
+          title: "Voucher Margin Loss",
+          impact: -Math.round(absVar * 0.25),
+          pctOfVariance: 25.0,
+          color: "#F59E0B",
+          icon: Percent,
+          summary: "Platform discounts eroded gross espresso margin on food app orders.",
+          actionableAdvice: "Cap promo discount caps at 12% max per checkout.",
+        },
+      ];
+    }
 
+    if (sectorFilter === "services") {
+      return [
+        {
+          id: "stockouts",
+          title: "Groomer Staffing & Suite Caps",
+          impact: -Math.round(absVar * 0.50),
+          pctOfVariance: 50.0,
+          color: "#EF4444",
+          icon: Package,
+          summary: "Weekend grooming suite capacity limits resulted in 14 unfulfilled appointment requests.",
+          actionableAdvice: "Schedule 2 additional senior groomers for weekend afternoon peak slots.",
+        },
+        {
+          id: "weather",
+          title: "Rainy Day Appointment Delays",
+          impact: -Math.round(absVar * 0.35),
+          pctOfVariance: 35.0,
+          color: "#3B82F6",
+          icon: CloudRain,
+          summary: "Heavy downpours led to late cancellations for pet bath & blow-dry appointments.",
+          actionableAdvice: "Offer free reschedule vouchers valid for 7 days during storm warnings.",
+        },
+        {
+          id: "services_growth",
+          title: "Hydrotherapy Spa Growth",
+          impact: Math.round(absVar * 0.15),
+          pctOfVariance: -15.0,
+          color: "#10B981",
+          icon: TrendingUp,
+          summary: "New Hydrotherapy Spa packages grew +18.4% in bookings.",
+          actionableAdvice: "Promote Hydrotherapy Spa addon during standard grooming check-in.",
+        },
+      ];
+    }
+
+    if (sectorFilter === "retail") {
+      return [
+        {
+          id: "stockouts",
+          title: "Stockouts on Top Pet Food SKUs",
+          impact: -Math.round(absVar * 0.48),
+          pctOfVariance: 48.0,
+          color: "#EF4444",
+          icon: Package,
+          summary: "Premium Dog Food 5kg was out-of-stock for 12 key sales days on Shopee & Store.",
+          actionableAdvice: "Increase reorder buffer for Top 3 SKUs and set auto-reorder triggers at 25 units.",
+        },
+        {
+          id: "discount",
+          title: "Shopee Flash Voucher Discounts",
+          impact: -Math.round(absVar * 0.32),
+          pctOfVariance: 32.0,
+          color: "#F59E0B",
+          icon: Percent,
+          summary: "Aggressive platform voucher markdowns surrendered 8.5% of retail gross sales.",
+          actionableAdvice: "Rebalance discount vouchers with threshold minimum spends.",
+        },
+        {
+          id: "promotion",
+          title: "Expired TikTok Livestream Bundle",
+          impact: -Math.round(absVar * 0.20),
+          pctOfVariance: 20.0,
+          color: "#8B5CF6",
+          icon: Tag,
+          summary: "End of TikTok creator collab bundle dropped accessory conversions.",
+          actionableAdvice: "Partner with top pet creators for a weekend flash stream bundle.",
+        },
+      ];
+    }
+
+    // Default: SectorFilter === "all"
     return [
       {
         id: "stockouts",
         title: "Stock Availability & Stockouts",
-        impact: stockoutImpact,
+        impact: -Math.round(absVar * 0.38),
         pctOfVariance: 38.0,
         color: "#EF4444",
         icon: Package,
@@ -157,7 +277,7 @@ export function RootCauseExplorer() {
       {
         id: "weather",
         title: "Weather & Heavy Rainfall",
-        impact: weatherImpact,
+        impact: -Math.round(absVar * 0.25),
         pctOfVariance: 25.0,
         color: "#3B82F6",
         icon: CloudRain,
@@ -167,7 +287,7 @@ export function RootCauseExplorer() {
       {
         id: "promotion",
         title: "Expired Promo Campaigns",
-        impact: promoImpact,
+        impact: -Math.round(absVar * 0.20),
         pctOfVariance: 20.0,
         color: "#8B5CF6",
         icon: Tag,
@@ -177,7 +297,7 @@ export function RootCauseExplorer() {
       {
         id: "discount",
         title: "Margin Surrender (Discounts)",
-        impact: discountImpact,
+        impact: -Math.round(absVar * 0.17),
         pctOfVariance: 17.0,
         color: "#F59E0B",
         icon: Percent,
@@ -187,7 +307,7 @@ export function RootCauseExplorer() {
       {
         id: "services_growth",
         title: "Grooming & Services Growth",
-        impact: servicesOffset,
+        impact: Math.round(absVar * 0.10),
         pctOfVariance: -10.0,
         color: "#10B981",
         icon: TrendingUp,
@@ -195,168 +315,202 @@ export function RootCauseExplorer() {
         actionableAdvice: "Expand grooming slot capacity during weekend afternoon peak hours.",
       },
     ];
-  }, [liveMetrics]);
+  }, [liveMetrics, sectorFilter]);
 
-  // Waterfall Chart Data calculated dynamically
+  // 4. Waterfall Chart Data calculated dynamically
   const waterfallData = useMemo(() => {
     const base = liveMetrics.baseRevenue;
-    const stock = contributionDrivers[0].impact;
-    const weather = contributionDrivers[1].impact;
-    const promo = contributionDrivers[2].impact;
-    const discount = contributionDrivers[3].impact;
-    const servicePlus = contributionDrivers[4].impact;
     const finalRev = liveMetrics.currentRevenue;
 
+    if (sectorFilter === "cafe") {
+      return [
+        { name: "Prior Baseline", value: base, fill: "#223047", type: "base" },
+        { name: "Rain Interruption", value: contributionDrivers[0].impact, fill: "#3B82F6", type: "neg" },
+        { name: "Expired Promos", value: contributionDrivers[1].impact, fill: "#8B5CF6", type: "neg" },
+        { name: "Margin Surrender", value: contributionDrivers[2].impact, fill: "#F59E0B", type: "neg" },
+        { name: "Current Revenue", value: finalRev, fill: "#F53799", type: "final" },
+      ];
+    }
+
+    if (sectorFilter === "services") {
+      return [
+        { name: "Prior Baseline", value: base, fill: "#223047", type: "base" },
+        { name: "Suite Capacity Caps", value: contributionDrivers[0].impact, fill: "#EF4444", type: "neg" },
+        { name: "Rain Cancellations", value: contributionDrivers[1].impact, fill: "#3B82F6", type: "neg" },
+        { name: "Spa Growth", value: contributionDrivers[2].impact, fill: "#10B981", type: "pos" },
+        { name: "Current Revenue", value: finalRev, fill: "#06B6D4", type: "final" },
+      ];
+    }
+
+    if (sectorFilter === "retail") {
+      return [
+        { name: "Prior Baseline", value: base, fill: "#223047", type: "base" },
+        { name: "Food Stockouts", value: contributionDrivers[0].impact, fill: "#EF4444", type: "neg" },
+        { name: "Shopee Vouchers", value: contributionDrivers[1].impact, fill: "#F59E0B", type: "neg" },
+        { name: "Expired TikTok Bundle", value: contributionDrivers[2].impact, fill: "#8B5CF6", type: "neg" },
+        { name: "Current Revenue", value: finalRev, fill: "#8B5CF6", type: "final" },
+      ];
+    }
+
+    // Default: SectorFilter === "all"
     return [
       { name: "Prior Baseline", value: base, fill: "#223047", type: "base" },
-      { name: "Stockouts", value: stock, fill: "#EF4444", type: "neg" },
-      { name: "Rain Interruption", value: weather, fill: "#3B82F6", type: "neg" },
-      { name: "Expired Promos", value: promo, fill: "#8B5CF6", type: "neg" },
-      { name: "Discount Margin Loss", value: discount, fill: "#F59E0B", type: "neg" },
-      { name: "Grooming Growth", value: servicePlus, fill: "#10B981", type: "pos" },
+      { name: "Stockouts", value: contributionDrivers[0].impact, fill: "#EF4444", type: "neg" },
+      { name: "Rain Interruption", value: contributionDrivers[1].impact, fill: "#3B82F6", type: "neg" },
+      { name: "Expired Promos", value: contributionDrivers[2].impact, fill: "#8B5CF6", type: "neg" },
+      { name: "Discount Margin Loss", value: contributionDrivers[3].impact, fill: "#F59E0B", type: "neg" },
+      { name: "Grooming Growth", value: contributionDrivers[4].impact, fill: "#10B981", type: "pos" },
       { name: "Current Revenue", value: finalRev, fill: "#F53799", type: "final" },
     ];
-  }, [liveMetrics, contributionDrivers]);
+  }, [liveMetrics, contributionDrivers, sectorFilter]);
 
-  // Dynamic Channel Contribution Data
+  // 5. Dynamic Channel Contribution Data per sector
   const channelContribution = useMemo(() => {
-    const physRev = Math.round(liveMetrics.currentRevenue * 0.44);
-    const shopeeRev = Math.round(liveMetrics.currentRevenue * 0.34);
-    const tiktokRev = Math.round(liveMetrics.currentRevenue * 0.14);
-    const deliveryRev = Math.round(liveMetrics.currentRevenue * 0.08);
+    const total = liveMetrics.currentRevenue;
 
+    if (sectorFilter === "cafe") {
+      return [
+        { channel: "Dine-in POS Counter", prior: Math.round(total * 0.65), current: Math.round(total * 0.52), variance: Math.round(total * 0.52) - Math.round(total * 0.65), pctChange: -20.0, primaryReason: "Rain downpours reduced store visits" },
+        { channel: "Takeout Counter", prior: Math.round(total * 0.32), current: Math.round(total * 0.28), variance: Math.round(total * 0.28) - Math.round(total * 0.32), pctChange: -12.5, primaryReason: "Expired morning pastry deal" },
+        { channel: "Food App Delivery", prior: Math.round(total * 0.19), current: Math.round(total * 0.20), variance: Math.round(total * 0.20) - Math.round(total * 0.19), pctChange: +5.2, primaryReason: "Rainy day delivery order spike" },
+      ];
+    }
+
+    if (sectorFilter === "services") {
+      return [
+        { channel: "Online Suite Booking", prior: Math.round(total * 0.60), current: Math.round(total * 0.58), variance: Math.round(total * 0.58) - Math.round(total * 0.60), pctChange: -3.3, primaryReason: "Weekend afternoon suite capacity maxed" },
+        { channel: "In-Store Reception POS", prior: Math.round(total * 0.46), current: Math.round(total * 0.42), variance: Math.round(total * 0.42) - Math.round(total * 0.46), pctChange: -8.7, primaryReason: "Rainy day walk-in grooming cancellations" },
+      ];
+    }
+
+    if (sectorFilter === "retail") {
+      return [
+        { channel: "Physical Store POS", prior: Math.round(total * 0.52), current: Math.round(total * 0.42), variance: Math.round(total * 0.42) - Math.round(total * 0.52), pctChange: -19.2, primaryReason: "Stockout on Premium Dog Food 5kg" },
+        { channel: "Shopee Marketplace", prior: Math.round(total * 0.38), current: Math.round(total * 0.36), variance: Math.round(total * 0.36) - Math.round(total * 0.38), pctChange: -5.2, primaryReason: "Platform flash voucher margin loss" },
+        { channel: "TikTok Shop", prior: Math.round(total * 0.26), current: Math.round(total * 0.22), variance: Math.round(total * 0.22) - Math.round(total * 0.26), pctChange: -15.3, primaryReason: "Expired creator promo bundle" },
+      ];
+    }
+
+    // Default: "all"
     return [
-      {
-        channel: "Physical Store POS",
-        prior: Math.round(physRev * 1.20),
-        current: physRev,
-        variance: physRev - Math.round(physRev * 1.20),
-        pctChange: -16.7,
-        primaryReason: "Monsoon rain reduced walk-in foot traffic & 6 stockout days",
-      },
-      {
-        channel: "Shopee Marketplace",
-        prior: Math.round(shopeeRev * 1.06),
-        current: shopeeRev,
-        variance: shopeeRev - Math.round(shopeeRev * 1.06),
-        pctChange: -5.7,
-        primaryReason: "Stockouts on Premium Dog Food 5kg",
-      },
-      {
-        channel: "TikTok Shop",
-        prior: Math.round(tiktokRev * 1.08),
-        current: tiktokRev,
-        variance: tiktokRev - Math.round(tiktokRev * 1.08),
-        pctChange: -7.4,
-        primaryReason: "Expired livestream promotional bundle",
-      },
-      {
-        channel: "Direct Delivery",
-        prior: Math.round(deliveryRev * 1.21),
-        current: deliveryRev,
-        variance: deliveryRev - Math.round(deliveryRev * 1.21),
-        pctChange: -17.4,
-        primaryReason: "Delivery courier delays on heavy rain days",
-      },
+      { channel: "Physical Store POS", prior: Math.round(total * 0.53), current: Math.round(total * 0.44), variance: Math.round(total * 0.44) - Math.round(total * 0.53), pctChange: -16.9, primaryReason: "Monsoon rain reduced walk-in foot traffic & 6 stockout days" },
+      { channel: "Shopee Marketplace", prior: Math.round(total * 0.36), current: Math.round(total * 0.34), variance: Math.round(total * 0.34) - Math.round(total * 0.36), pctChange: -5.5, primaryReason: "Stockouts on Premium Dog Food 5kg" },
+      { channel: "TikTok Shop", prior: Math.round(total * 0.15), current: Math.round(total * 0.14), variance: Math.round(total * 0.14) - Math.round(total * 0.15), pctChange: -6.6, primaryReason: "Expired livestream promotional bundle" },
+      { channel: "Direct Delivery", prior: Math.round(total * 0.10), current: Math.round(total * 0.08), variance: Math.round(total * 0.08) - Math.round(total * 0.10), pctChange: -20.0, primaryReason: "Delivery courier delays on heavy rain days" },
     ];
-  }, [liveMetrics]);
+  }, [liveMetrics, sectorFilter]);
 
-  // Dynamic Category Contribution Data
+  // 6. Dynamic Category Contribution Data per sector
   const categoryContribution = useMemo(() => {
     const total = liveMetrics.currentRevenue;
-    return [
-      {
-        category: "Pet Care & Dry Food",
-        prior: Math.round(total * 0.40),
-        current: Math.round(total * 0.33),
-        variance: Math.round(total * 0.33) - Math.round(total * 0.40),
-        pctChange: -17.5,
-        impactFactor: "Stockout & Inventory Depletion",
-      },
-      {
-        category: "Espresso & Beverages",
-        prior: Math.round(total * 0.28),
-        current: Math.round(total * 0.24),
-        variance: Math.round(total * 0.24) - Math.round(total * 0.28),
-        pctChange: -14.3,
-        impactFactor: "Weather / Reduced Footfall",
-      },
-      {
-        category: "Bakery & Pastries",
-        prior: Math.round(total * 0.13),
-        current: Math.round(total * 0.11),
-        variance: Math.round(total * 0.11) - Math.round(total * 0.13),
-        pctChange: -15.4,
-        impactFactor: "Expired Afternoon Promo",
-      },
-      {
-        category: "Grooming Services",
-        prior: Math.round(total * 0.21),
-        current: Math.round(total * 0.23),
-        variance: Math.round(total * 0.23) - Math.round(total * 0.21),
-        pctChange: +9.5,
-        impactFactor: "Suite Capacity Expansion",
-      },
-      {
-        category: "Pet Accessories",
-        prior: Math.round(total * 0.10),
-        current: Math.round(total * 0.09),
-        variance: Math.round(total * 0.09) - Math.round(total * 0.10),
-        pctChange: -10.0,
-        impactFactor: "Voucher Discount Surrender",
-      },
-    ];
-  }, [liveMetrics]);
 
-  // Dynamic SKU Level Drag vs Growth
-  const topProductDrags = useMemo(() => {
-    const items = retailData?.topItems || cafeData?.topItems || [];
-    if (items.length >= 2) {
-      return items.slice(0, 4).map((it: any, idx: number) => ({
-        sku: `SKU-00${idx + 1}`,
-        name: it.name || `Item ${idx + 1}`,
-        variance: -Math.round((Number(it.revenue || 12000)) * 0.3),
-        unitDrop: -Math.round((Number(it.quantity || 20)) * 0.25),
-        rootCause: idx === 0 ? "12 days out of stock during peak weekend" : "Rainy weekday footfall drop",
-      }));
+    if (sectorFilter === "cafe") {
+      return [
+        { category: "Espresso & Coffee", prior: Math.round(total * 0.55), current: Math.round(total * 0.48), variance: Math.round(total * 0.48) - Math.round(total * 0.55), pctChange: -12.7, impactFactor: "Rainy Day Footfall Drop" },
+        { category: "Bakery & Pastries", prior: Math.round(total * 0.32), current: Math.round(total * 0.26), variance: Math.round(total * 0.26) - Math.round(total * 0.32), pctChange: -18.7, impactFactor: "Expired Afternoon Combo Promo" },
+        { category: "Cold Brews & Frappes", prior: Math.round(total * 0.29), current: Math.round(total * 0.26), variance: Math.round(total * 0.26) - Math.round(total * 0.29), pctChange: -10.3, impactFactor: "Voucher Discount Surrender" },
+      ];
     }
+
+    if (sectorFilter === "services") {
+      return [
+        { category: "Full Grooming Package", prior: Math.round(total * 0.52), current: Math.round(total * 0.48), variance: Math.round(total * 0.48) - Math.round(total * 0.52), pctChange: -7.6, impactFactor: "Suite Capacity Limit" },
+        { category: "Basic Bath & Blow-dry", prior: Math.round(total * 0.30), current: Math.round(total * 0.27), variance: Math.round(total * 0.27) - Math.round(total * 0.30), pctChange: -10.0, impactFactor: "Rain Cancellations" },
+        { category: "Hydrotherapy Spa", prior: Math.round(total * 0.24), current: Math.round(total * 0.25), variance: Math.round(total * 0.25) - Math.round(total * 0.24), pctChange: +4.1, impactFactor: "Spa Promo Launch" },
+      ];
+    }
+
+    if (sectorFilter === "retail") {
+      return [
+        { category: "Pet Care & Dry Food", prior: Math.round(total * 0.62), current: Math.round(total * 0.49), variance: Math.round(total * 0.49) - Math.round(total * 0.62), pctChange: -20.9, impactFactor: "Stockout & Inventory Depletion" },
+        { category: "Treats & Chews", prior: Math.round(total * 0.30), current: Math.round(total * 0.27), variance: Math.round(total * 0.27) - Math.round(total * 0.30), pctChange: -10.0, impactFactor: "Competitor Shopee Markdown" },
+        { category: "Pet Accessories", prior: Math.round(total * 0.24), current: Math.round(total * 0.24), variance: 0, pctChange: 0.0, impactFactor: "Stable Steady Sales" },
+      ];
+    }
+
+    // Default: "all"
     return [
-      { sku: "DOG-001", name: "Premium Dog Food 5kg", variance: -16400, unitDrop: -13, rootCause: "12 days out of stock during peak weekend" },
-      { sku: "BEV-002", name: "Iced Caramel Macchiato", variance: -7200, unitDrop: -45, rootCause: "Rainy weekday afternoon footfall drop" },
-      { sku: "ACC-004", name: "Deluxe Pet Collar Pink", variance: -4800, unitDrop: -15, rootCause: "Expired combo deal with Grooming" },
-      { sku: "CAT-005", name: "Dental Chew Treats 200g", variance: -3600, unitDrop: -20, rootCause: "Competitor price markdown on Shopee" },
+      { category: "Pet Care & Dry Food", prior: Math.round(total * 0.40), current: Math.round(total * 0.33), variance: Math.round(total * 0.33) - Math.round(total * 0.40), pctChange: -17.5, impactFactor: "Stockout & Inventory Depletion" },
+      { category: "Espresso & Beverages", prior: Math.round(total * 0.28), current: Math.round(total * 0.24), variance: Math.round(total * 0.24) - Math.round(total * 0.28), pctChange: -14.3, impactFactor: "Weather / Reduced Footfall" },
+      { category: "Bakery & Pastries", prior: Math.round(total * 0.13), current: Math.round(total * 0.11), variance: Math.round(total * 0.11) - Math.round(total * 0.13), pctChange: -15.4, impactFactor: "Expired Afternoon Promo" },
+      { category: "Grooming Services", prior: Math.round(total * 0.21), current: Math.round(total * 0.23), variance: Math.round(total * 0.23) - Math.round(total * 0.21), pctChange: +9.5, impactFactor: "Suite Capacity Expansion" },
+      { category: "Pet Accessories", prior: Math.round(total * 0.10), current: Math.round(total * 0.09), variance: Math.round(total * 0.09) - Math.round(total * 0.10), pctChange: -10.0, impactFactor: "Voucher Discount Surrender" },
     ];
-  }, [retailData, cafeData]);
+  }, [liveMetrics, sectorFilter]);
+
+  // 7. Dynamic SKU Level Drag vs Growth per sector
+  const topProductDrags = useMemo(() => {
+    if (sectorFilter === "cafe") {
+      return [
+        { sku: "BEV-002", name: "Iced Caramel Macchiato", variance: -Math.round(7200 * periodMult), unitDrop: -Math.round(45 * periodMult), rootCause: "Rainy weekday afternoon footfall drop" },
+        { sku: "BAK-001", name: "Chocolate Chip Muffin", variance: -Math.round(4800 * periodMult), unitDrop: -Math.round(30 * periodMult), rootCause: "Expired morning combo promotion" },
+        { sku: "BEV-005", name: "Cold Brew Bottle 500ml", variance: -Math.round(3200 * periodMult), unitDrop: -Math.round(18 * periodMult), rootCause: "Out of stock packaging bottles" },
+      ];
+    }
+
+    if (sectorFilter === "services") {
+      return [
+        { sku: "SRV-002", name: "Weekend Deluxe Suite Boarding", variance: -Math.round(5400 * periodMult), unitDrop: -Math.round(4 * periodMult), rootCause: "Suite capacity limit reached during peak" },
+        { sku: "SRV-004", name: "Express Pet Wash & Dry", variance: -Math.round(3800 * periodMult), unitDrop: -Math.round(12 * periodMult), rootCause: "Rainy day appointment cancellations" },
+      ];
+    }
+
+    if (sectorFilter === "retail") {
+      return [
+        { sku: "DOG-001", name: "Premium Dog Food 5kg", variance: -Math.round(16400 * periodMult), unitDrop: -Math.round(13 * periodMult), rootCause: "12 days out of stock during peak weekend" },
+        { sku: "ACC-004", name: "Deluxe Pet Collar Pink", variance: -Math.round(4800 * periodMult), unitDrop: -Math.round(15 * periodMult), rootCause: "Expired combo deal with Grooming" },
+        { sku: "CAT-005", name: "Dental Chew Treats 200g", variance: -Math.round(3600 * periodMult), unitDrop: -Math.round(20 * periodMult), rootCause: "Competitor price markdown on Shopee" },
+      ];
+    }
+
+    // Default: "all"
+    return [
+      { sku: "DOG-001", name: "Premium Dog Food 5kg", variance: -Math.round(16400 * periodMult), unitDrop: -Math.round(13 * periodMult), rootCause: "12 days out of stock during peak weekend" },
+      { sku: "BEV-002", name: "Iced Caramel Macchiato", variance: -Math.round(7200 * periodMult), unitDrop: -Math.round(45 * periodMult), rootCause: "Rainy weekday afternoon footfall drop" },
+      { sku: "ACC-004", name: "Deluxe Pet Collar Pink", variance: -Math.round(4800 * periodMult), unitDrop: -Math.round(15 * periodMult), rootCause: "Expired combo deal with Grooming" },
+      { sku: "CAT-005", name: "Dental Chew Treats 200g", variance: -Math.round(3600 * periodMult), unitDrop: -Math.round(20 * periodMult), rootCause: "Competitor price markdown on Shopee" },
+    ];
+  }, [sectorFilter, periodMult]);
 
   const topProductGains = useMemo(() => {
-    const items = servicesData?.topItems || [];
-    if (items.length >= 1) {
-      return items.slice(0, 2).map((it: any, idx: number) => ({
-        sku: `SRV-00${idx + 1}`,
-        name: it.name || `Service ${idx + 1}`,
-        variance: Math.round(Number(it.revenue || 5000) * 0.25),
-        unitGain: Math.round(Number(it.orderCount || 6) * 0.3),
-        rootCause: "High re-booking rate from repeat pet owners",
-      }));
+    if (sectorFilter === "cafe") {
+      return [
+        { sku: "BEV-008", name: "Hot Matcha Oat Latte", variance: Math.round(3400 * periodMult), unitGain: Math.round(22 * periodMult), rootCause: "High demand on rainy cold afternoons" },
+      ];
     }
-    return [
-      { sku: "SRV-001", name: "Full Grooming Package", variance: 4200, unitGain: 6, rootCause: "High re-booking rate from repeat pet owners" },
-      { sku: "SRV-003", name: "Hydrotherapy Bath", variance: 1800, unitGain: 3, rootCause: "New seasonal spa promotional offer" },
-    ];
-  }, [servicesData]);
 
-  // Dynamic Stockout Details
-  const stockoutDetails = [
+    if (sectorFilter === "services") {
+      return [
+        { sku: "SRV-001", name: "Full Grooming Package", variance: Math.round(4200 * periodMult), unitGain: Math.round(6 * periodMult), rootCause: "High re-booking rate from repeat pet owners" },
+        { sku: "SRV-003", name: "Hydrotherapy Spa Bath", variance: Math.round(1800 * periodMult), unitGain: Math.round(3 * periodMult), rootCause: "New seasonal spa promotional offer" },
+      ];
+    }
+
+    if (sectorFilter === "retail") {
+      return [
+        { sku: "TOY-002", name: "Interactive Squeak Toy", variance: Math.round(2800 * periodMult), unitGain: Math.round(14 * periodMult), rootCause: "Viral TikTok shop video feature" },
+      ];
+    }
+
+    // Default: "all"
+    return [
+      { sku: "SRV-001", name: "Full Grooming Package", variance: Math.round(4200 * periodMult), unitGain: Math.round(6 * periodMult), rootCause: "High re-booking rate from repeat pet owners" },
+      { sku: "SRV-003", name: "Hydrotherapy Bath", variance: Math.round(1800 * periodMult), unitGain: Math.round(3 * periodMult), rootCause: "New seasonal spa promotional offer" },
+    ];
+  }, [sectorFilter, periodMult]);
+
+  // 8. Dynamic Stockout Details
+  const stockoutDetails = useMemo(() => [
     { sku: "DOG-001", name: "Premium Dog Food 5kg", daysOOS: 12, lostSalesEst: Math.round(Math.abs(contributionDrivers[0].impact) * 0.8), currentStock: 0, reorderPoint: 20, supplierLeadDays: 4 },
     { sku: "DOG-005", name: "Dental Chew Treats", daysOOS: 8, lostSalesEst: Math.round(Math.abs(contributionDrivers[0].impact) * 0.2), currentStock: 2, reorderPoint: 25, supplierLeadDays: 3 },
-  ];
+  ], [contributionDrivers]);
 
-  // Dynamic Weather Details
-  const weatherDetails = [
+  // 9. Dynamic Weather Details
+  const weatherDetails = useMemo(() => [
     { date: "Jul 12 (Heavy Rain)", footfallDrop: "-38%", cafeRevDrop: `₱${Math.round(Math.abs(contributionDrivers[1].impact) * 0.35).toLocaleString()}`, deliverySpike: "+12%", rainMm: 45 },
     { date: "Jul 18 (Typhoon Signal 1)", footfallDrop: "-52%", cafeRevDrop: `₱${Math.round(Math.abs(contributionDrivers[1].impact) * 0.45).toLocaleString()}`, deliverySpike: "+18%", rainMm: 82 },
     { date: "Aug 02 (Monsoon Downpour)", footfallDrop: "-29%", cafeRevDrop: `₱${Math.round(Math.abs(contributionDrivers[1].impact) * 0.20).toLocaleString()}`, deliverySpike: "+8%", rainMm: 38 },
-  ];
+  ], [contributionDrivers]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -383,11 +537,11 @@ export function RootCauseExplorer() {
             <select
               value={periodFilter}
               onChange={(e) => setPeriodFilter(e.target.value as any)}
-              className="text-xs font-semibold text-[#223047] bg-transparent border-none focus:outline-none pr-2"
+              className="text-xs font-semibold text-[#223047] bg-transparent border-none focus:outline-none pr-2 cursor-pointer"
             >
               <option value="last30">Last 30 Days vs Prior 30 Days</option>
               <option value="last90">Last 90 Days vs Prior 90 Days</option>
-              <option value="ytd">Year-to-Date vs Last Year</option>
+              <option value="ytd">YTD 2026 vs Prior YTD 2025</option>
             </select>
           </div>
 
@@ -396,7 +550,7 @@ export function RootCauseExplorer() {
             <select
               value={sectorFilter}
               onChange={(e) => setSectorFilter(e.target.value as any)}
-              className="text-xs font-semibold text-[#223047] bg-transparent border-none focus:outline-none pr-2"
+              className="text-xs font-semibold text-[#223047] bg-transparent border-none focus:outline-none pr-2 cursor-pointer"
             >
               <option value="all">All Business Sectors</option>
               <option value="cafe">Cafe Sector Only</option>
@@ -408,7 +562,7 @@ export function RootCauseExplorer() {
       </div>
 
       {/* TEACHING MASCOT BANNER (PROFESSOR WOOF) */}
-      <div className="bg-gradient-to-r from-[#FFF0F8] via-[#FFF7FB] to-[#F0FDF4] border-2 border-[#FFD9EC] rounded-2xl md:rounded-3xl p-5 md:p-6 shadow-sm relative overflow-hidden">
+      <div className="bg-gradient-to-r from-[#FFF0F8] via-[#FFF7FB] to-[#F0FDF4] border-2 border-[#FFD9EC] rounded-2xl md:rounded-3xl p-5 md:p-6 shadow-sm relative overflow-hidden transition-all duration-300">
         <div className="flex flex-col md:flex-row items-center gap-6 relative z-10">
           {/* Mascot Image with Animated Badge */}
           <div className="relative flex-shrink-0">
@@ -432,34 +586,30 @@ export function RootCauseExplorer() {
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-[#F53799] bg-[#FFF0F8] px-2 py-0.5 rounded-md">
-                  Diagnostic Breakdown
+                  Diagnostic Breakdown ({sectorFilter.toUpperCase()})
                 </span>
-                <span className="text-xs text-[#223047]/50 font-medium">Period Variance: -₱{Math.abs(liveMetrics.totalVariance).toLocaleString()} ({liveMetrics.variancePct}%)</span>
+                <span className="text-xs text-[#223047]/50 font-medium">{periodLabel}</span>
               </div>
-              <Badge className="bg-red-50 text-red-700 border-red-200 text-xs">
-                Primary Drag: Stockouts (38%)
+              <Badge className="bg-red-50 text-red-700 border-red-200 text-xs font-bold">
+                Variance: -₱{Math.abs(liveMetrics.totalVariance).toLocaleString()} ({liveMetrics.variancePct}%)
               </Badge>
             </div>
 
             <p className="text-xs md:text-sm text-[#223047] font-medium leading-relaxed">
-              “Woof! Total revenue changed by <strong>-₱{Math.abs(liveMetrics.totalVariance).toLocaleString()}</strong> in this period. My contribution analysis shows that <strong>38% of the drop (-₱{Math.abs(contributionDrivers[0].impact).toLocaleString()})</strong> was caused by <strong>Stockouts on top SKUs</strong>, while <strong>25% (-₱{Math.abs(contributionDrivers[1].impact).toLocaleString()})</strong> was due to <strong>Heavy Rain</strong> cutting store foot traffic. Re-stocking top items and launching rainy day vouchers can recover up to <strong>₱{Math.round(Math.abs(liveMetrics.totalVariance) * 0.63).toLocaleString()}</strong> of lost sales!”
+              “Woof! In <strong>{sectorFilter === "all" ? "All Business Sectors" : `${sectorFilter.toUpperCase()} Sector`}</strong> for <strong>{periodLabel}</strong>, revenue changed by <strong>-₱{Math.abs(liveMetrics.totalVariance).toLocaleString()} ({liveMetrics.variancePct}%)</strong>. My contribution analysis shows that <strong>{contributionDrivers[0].pctOfVariance}% of the drop (-₱{Math.abs(contributionDrivers[0].impact).toLocaleString()})</strong> was caused by <strong>{contributionDrivers[0].title}</strong>, while <strong>{contributionDrivers[1].pctOfVariance}% (-₱{Math.abs(contributionDrivers[1].impact).toLocaleString()})</strong> was due to <strong>{contributionDrivers[1].title}</strong>. Correcting these top 2 factors can recover up to <strong>₱{Math.round(Math.abs(liveMetrics.totalVariance) * 0.65).toLocaleString()}</strong> of lost revenue!”
             </p>
 
             <div className="mt-3 pt-3 border-t border-[#FFD9EC]/60 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-4 text-xs font-semibold text-[#223047]/80">
-                <span className="flex items-center gap-1 text-red-600">
-                  <Package className="w-3.5 h-3.5" /> Stockouts: -₱{(Math.abs(contributionDrivers[0].impact) / 1000).toFixed(1)}k
-                </span>
-                <span className="flex items-center gap-1 text-blue-600">
-                  <CloudRain className="w-3.5 h-3.5" /> Rain Days: -₱{(Math.abs(contributionDrivers[1].impact) / 1000).toFixed(1)}k
-                </span>
-                <span className="flex items-center gap-1 text-purple-600">
-                  <Tag className="w-3.5 h-3.5" /> Expired Promos: -₱{(Math.abs(contributionDrivers[2].impact) / 1000).toFixed(1)}k
-                </span>
+                {contributionDrivers.slice(0, 3).map((driver, idx) => (
+                  <span key={idx} className="flex items-center gap-1" style={{ color: driver.color }}>
+                    <driver.icon className="w-3.5 h-3.5" /> {driver.title}: -₱{(Math.abs(driver.impact) / 1000).toFixed(1)}k
+                  </span>
+                ))}
               </div>
 
               <Button
-                onClick={() => setActiveTab("stockouts")}
+                onClick={() => setActiveTab(contributionDrivers[0].id as any || "stockouts")}
                 size="sm"
                 className="bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs h-8 rounded-xl font-semibold shadow-xs"
               >
@@ -476,15 +626,15 @@ export function RootCauseExplorer() {
         <div
           className="bg-white border border-[#FFD9EC] rounded-2xl p-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Total Revenue Variance",
+            title: `Total Revenue Variance (${sectorFilter.toUpperCase()})`,
             current: liveMetrics.totalVariance,
             previous: liveMetrics.baseRevenue,
-            currentLabel: "Current Period",
+            currentLabel: "Current Period Revenue",
             previousLabel: "Prior Period Baseline",
             formatter: (v) => `₱${Number(v).toLocaleString()}`,
             icon: <TrendingDown className="w-5 h-5 text-red-600" />,
             growth: { text: `${liveMetrics.variancePct}%`, className: "text-red-600 font-bold" },
-            description: `Net difference between current period revenue (₱${liveMetrics.currentRevenue.toLocaleString()}) and prior period baseline (₱${liveMetrics.baseRevenue.toLocaleString()}).`,
+            description: `Net difference between current period revenue (₱${liveMetrics.currentRevenue.toLocaleString()}) and prior period baseline (₱${liveMetrics.baseRevenue.toLocaleString()}) for ${periodLabel}.`,
             extraStats: [
               { label: "Baseline Target", value: `₱${liveMetrics.baseRevenue.toLocaleString()}` },
               { label: "Net Difference", value: `-₱${Math.abs(liveMetrics.totalVariance).toLocaleString()}` },
@@ -509,19 +659,19 @@ export function RootCauseExplorer() {
         <div
           className="bg-white border border-[#FFD9EC] rounded-2xl p-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Primary Revenue Drag: Stockouts",
+            title: `Primary Drag: ${contributionDrivers[0].title}`,
             current: contributionDrivers[0].impact,
             formatter: (v) => `-₱${Math.abs(Number(v)).toLocaleString()}`,
             icon: <Package className="w-5 h-5 text-red-600" />,
-            description: "Inventory stockouts accounted for 38.0% of the total revenue drop across unfulfilled store days.",
+            description: `${contributionDrivers[0].title} accounted for ${contributionDrivers[0].pctOfVariance}% of total revenue drop in ${sectorFilter.toUpperCase()}.`,
             extraStats: [
-              { label: "Impact Share", value: "38.0% of total drop" },
-              { label: "Affected SKUs", value: "3 Top Sellers" },
+              { label: "Impact Share", value: `${contributionDrivers[0].pctOfVariance}% of total drop` },
+              { label: "Sector Context", value: sectorFilter.toUpperCase() },
             ],
           })}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-[#223047]/60">Primary Drag (Stockouts)</span>
+            <span className="text-xs font-semibold text-[#223047]/60">Primary Drag</span>
             <div className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center group-hover:bg-[#FFF0F8] group-hover:text-[#F53799] transition-colors">
               <ChevronRight className="w-4 h-4" />
             </div>
@@ -529,28 +679,28 @@ export function RootCauseExplorer() {
           <div className="text-2xl font-extrabold text-[#223047] leading-tight">
             -₱{Math.abs(contributionDrivers[0].impact).toLocaleString()}
           </div>
-          <p className="text-[11px] font-medium text-[#223047]/60 mt-1">
-            38.0% of total drop (OOS days)
+          <p className="text-[11px] font-medium text-[#223047]/60 mt-1 truncate">
+            {contributionDrivers[0].title} ({contributionDrivers[0].pctOfVariance}%)
           </p>
         </div>
 
-        {/* External Drag */}
+        {/* Secondary Drag */}
         <div
           className="bg-white border border-[#FFD9EC] rounded-2xl p-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
           onClick={() => setSelectedKpi({
-            title: "External Drag: Weather & Rain",
+            title: `Secondary Drag: ${contributionDrivers[1].title}`,
             current: contributionDrivers[1].impact,
             formatter: (v) => `-₱${Math.abs(Number(v)).toLocaleString()}`,
             icon: <CloudRain className="w-5 h-5 text-blue-600" />,
-            description: "Monsoon downpours and Typhoon Signal #1 directly reduced walk-in cafe customer visits.",
+            description: `${contributionDrivers[1].title} accounted for ${contributionDrivers[1].pctOfVariance}% of total revenue drop.`,
             extraStats: [
-              { label: "Impact Share", value: "25.0% of total drop" },
-              { label: "Heavy Rain Days", value: "4 Days" },
+              { label: "Impact Share", value: `${contributionDrivers[1].pctOfVariance}% of total drop` },
+              { label: "Sector Context", value: sectorFilter.toUpperCase() },
             ],
           })}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-[#223047]/60">Weather Drag (Monsoon)</span>
+            <span className="text-xs font-semibold text-[#223047]/60">Secondary Drag</span>
             <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-[#FFF0F8] group-hover:text-[#F53799] transition-colors">
               <ChevronRight className="w-4 h-4" />
             </div>
@@ -558,38 +708,41 @@ export function RootCauseExplorer() {
           <div className="text-2xl font-extrabold text-[#223047] leading-tight">
             -₱{Math.abs(contributionDrivers[1].impact).toLocaleString()}
           </div>
-          <p className="text-[11px] font-medium text-[#223047]/60 mt-1">
-            25.0% of total drop (4 rain days)
+          <p className="text-[11px] font-medium text-[#223047]/60 mt-1 truncate">
+            {contributionDrivers[1].title} ({contributionDrivers[1].pctOfVariance}%)
           </p>
         </div>
 
-        {/* Positive Offset */}
+        {/* Positive Offset / Net Profit */}
         <div
           className="bg-white border border-[#BBF7D0] rounded-2xl p-4 cursor-pointer hover:border-[#10B981] hover:shadow-md transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Positive Offset: Grooming Growth",
-            current: contributionDrivers[4].impact,
-            formatter: (v) => `+₱${Number(v).toLocaleString()}`,
+            title: "Current Sector Revenue",
+            current: liveMetrics.currentRevenue,
+            previous: liveMetrics.baseRevenue,
+            currentLabel: "Current Period",
+            previousLabel: "Prior Baseline",
+            formatter: (v) => `₱${Number(v).toLocaleString()}`,
             icon: <TrendingUp className="w-5 h-5 text-[#10B981]" />,
-            growth: { text: "+6.8%", className: "text-[#10B981] font-bold" },
-            description: "Strong grooming suite booking demand partially mitigated retail and cafe revenue declines.",
+            growth: { text: `₱${liveMetrics.currentRevenue.toLocaleString()}`, className: "text-[#10B981] font-bold" },
+            description: `Total revenue generated in ${sectorFilter.toUpperCase()} sector during ${periodLabel}.`,
             extraStats: [
-              { label: "Growth Value", value: `+₱${contributionDrivers[4].impact.toLocaleString()}` },
-              { label: "Booking Increase", value: "+14.2% volume" },
+              { label: "Active Sector", value: sectorFilter.toUpperCase() },
+              { label: "Current Volume", value: `₱${liveMetrics.currentRevenue.toLocaleString()}` },
             ],
           })}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-[#166534]">Positive Offset (Services)</span>
+            <span className="text-xs font-semibold text-[#166534]">Current Period Sales</span>
             <div className="w-7 h-7 rounded-lg bg-green-50 text-[#10B981] flex items-center justify-center group-hover:bg-[#F0FDF4] transition-colors">
               <ChevronRight className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl font-extrabold text-[#10B981] leading-tight">
-            +₱{contributionDrivers[4].impact.toLocaleString()}
+            ₱{liveMetrics.currentRevenue.toLocaleString()}
           </div>
           <p className="text-[11px] font-semibold text-[#10B981] mt-1 flex items-center gap-1">
-            <ArrowUpRight className="w-3.5 h-3.5" /> +6.8% grooming lift
+            <ArrowUpRight className="w-3.5 h-3.5" /> Realized Sales Output
           </p>
         </div>
       </div>
@@ -694,10 +847,10 @@ export function RootCauseExplorer() {
           <div className="lg:col-span-2 bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-base font-bold text-[#223047]">Revenue Waterfall Decomposition</h3>
-                <p className="text-xs text-[#223047]/60">Step-by-step contribution breakdown from Prior Baseline to Current Revenue</p>
+                <h3 className="text-base font-bold text-[#223047]">Revenue Waterfall Decomposition ({sectorFilter.toUpperCase()})</h3>
+                <p className="text-xs text-[#223047]/60">Step-by-step contribution breakdown for {periodLabel}</p>
               </div>
-              <Badge className="bg-[#FFF0F8] text-[#F53799] border-[#FFD9EC]">
+              <Badge className="bg-[#FFF0F8] text-[#F53799] border-[#FFD9EC] font-bold">
                 Variance: -₱{Math.abs(liveMetrics.totalVariance).toLocaleString()}
               </Badge>
             </div>
@@ -723,7 +876,7 @@ export function RootCauseExplorer() {
 
             {/* Impact Table */}
             <div className="mt-4 pt-4 border-t border-[#FFD9EC] space-y-2">
-              <div className="text-xs font-bold text-[#223047] uppercase tracking-wider">Top Contribution Factors</div>
+              <div className="text-xs font-bold text-[#223047] uppercase tracking-wider">Top Contribution Factors ({sectorFilter.toUpperCase()})</div>
               {contributionDrivers.map((driver) => (
                 <div key={driver.id} className="flex items-center justify-between p-2.5 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC]/60">
                   <div className="flex items-center gap-2.5">
@@ -750,7 +903,7 @@ export function RootCauseExplorer() {
           <div className="space-y-6">
             <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 shadow-sm space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-[#223047]">
-                <Zap className="w-4 h-4 text-[#F53799]" /> Corrective Action Blueprint
+                <Zap className="w-4 h-4 text-[#F53799]" /> Corrective Action Blueprint ({sectorFilter.toUpperCase()})
               </div>
 
               {contributionDrivers.slice(0, 3).map((driver, idx) => (
@@ -769,7 +922,7 @@ export function RootCauseExplorer() {
 
               <Button
                 onClick={() => router.push("/prescriptive-intelligence")}
-                className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs font-semibold py-2.5 rounded-xl"
+                className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs font-semibold py-2.5 rounded-xl shadow-xs"
               >
                 Execute Auto-Mitigation Rules <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
@@ -783,8 +936,8 @@ export function RootCauseExplorer() {
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-base font-bold text-[#223047]">1. Channel Revenue Variance</h3>
-              <p className="text-xs text-[#223047]/60">Revenue contribution & percentage changes across sales channels</p>
+              <h3 className="text-base font-bold text-[#223047]">1. Channel Revenue Variance ({sectorFilter.toUpperCase()})</h3>
+              <p className="text-xs text-[#223047]/60">Revenue contribution & percentage changes across sales channels for {periodLabel}</p>
             </div>
           </div>
 
@@ -793,8 +946,8 @@ export function RootCauseExplorer() {
               <thead>
                 <tr className="border-b border-[#FFD9EC] bg-[#FFF7FB] text-[#223047]">
                   <th className="p-3">Sales Channel</th>
-                  <th className="p-3">Prior Revenue</th>
-                  <th className="p-3">Current Revenue</th>
+                  <th className="p-3">Prior Baseline</th>
+                  <th className="p-3">Current Sales</th>
                   <th className="p-3">Variance (₱)</th>
                   <th className="p-3">% Change</th>
                   <th className="p-3">Primary Root Cause Reason</th>
@@ -829,8 +982,8 @@ export function RootCauseExplorer() {
       {activeTab === "category" && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
-            <h3 className="text-base font-bold text-[#223047]">2. Category Revenue Variance</h3>
-            <p className="text-xs text-[#223047]/60">Category-level revenue drops and top drag factors</p>
+            <h3 className="text-base font-bold text-[#223047]">2. Category Revenue Variance ({sectorFilter.toUpperCase()})</h3>
+            <p className="text-xs text-[#223047]/60">Category-level revenue drops and top drag factors for {periodLabel}</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -838,8 +991,8 @@ export function RootCauseExplorer() {
               <thead>
                 <tr className="border-b border-[#FFD9EC] bg-[#FFF7FB] text-[#223047]">
                   <th className="p-3">Product / Service Category</th>
-                  <th className="p-3">Prior Revenue</th>
-                  <th className="p-3">Current Revenue</th>
+                  <th className="p-3">Prior Baseline</th>
+                  <th className="p-3">Current Sales</th>
                   <th className="p-3">Variance</th>
                   <th className="p-3">% Change</th>
                   <th className="p-3">Primary Impact Factor</th>
@@ -874,7 +1027,7 @@ export function RootCauseExplorer() {
           {/* Top Drag SKUs */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 shadow-sm space-y-3">
             <h3 className="text-sm font-bold text-red-600 flex items-center gap-2">
-              <TrendingDown className="w-4 h-4" /> Top Negative Revenue Contributor SKUs
+              <TrendingDown className="w-4 h-4" /> Top Negative Contributor SKUs ({sectorFilter.toUpperCase()})
             </h3>
             <div className="space-y-2.5">
               {topProductDrags.map((item: { sku: string; name: string; variance: number; unitDrop: number; rootCause: string }, idx: number) => (
@@ -895,7 +1048,7 @@ export function RootCauseExplorer() {
           {/* Top Growth SKUs */}
           <div className="bg-white border border-[#BBF7D0] rounded-2xl p-5 shadow-sm space-y-3">
             <h3 className="text-sm font-bold text-green-600 flex items-center gap-2">
-              <TrendingUp className="w-4 h-4" /> Top Positive Revenue Contributor SKUs
+              <TrendingUp className="w-4 h-4" /> Top Positive Contributor SKUs ({sectorFilter.toUpperCase()})
             </h3>
             <div className="space-y-2.5">
               {topProductGains.map((item: { sku: string; name: string; variance: number; unitGain: number; rootCause: string }, idx: number) => (
@@ -921,7 +1074,7 @@ export function RootCauseExplorer() {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-[#223047]">4. Stock Availability & Out-of-Stock (OOS) Impact</h3>
-              <p className="text-xs text-[#223047]/60">Estimated revenue lost due to depleted shelf stock during peak demand periods</p>
+              <p className="text-xs text-[#223047]/60">Estimated revenue lost due to depleted shelf stock during peak demand periods for {periodLabel}</p>
             </div>
             <Badge className="bg-red-50 text-red-700 border-red-200">
               Total OOS Drag: -₱{Math.abs(contributionDrivers[0].impact).toLocaleString()}
@@ -962,7 +1115,7 @@ export function RootCauseExplorer() {
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
             <h3 className="text-base font-bold text-[#223047]">5. Weather & Rainfall Footfall Analysis</h3>
-            <p className="text-xs text-[#223047]/60">Impact of severe rain downpours on walk-in cafe transactions vs delivery channel spikes</p>
+            <p className="text-xs text-[#223047]/60">Impact of severe rain downpours on walk-in cafe transactions vs delivery channel spikes for {periodLabel}</p>
           </div>
 
           <div className="space-y-3">
@@ -1002,22 +1155,22 @@ export function RootCauseExplorer() {
       {activeTab === "promotion" && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
-            <h3 className="text-base font-bold text-[#223047]">6. Promotional Campaign Contribution</h3>
-            <p className="text-xs text-[#223047]/60">Evaluating campaign expiration drag vs active promotion conversions</p>
+            <h3 className="text-base font-bold text-[#223047]">6. Promotional Campaign Contribution ({sectorFilter.toUpperCase()})</h3>
+            <p className="text-xs text-[#223047]/60">Evaluating campaign expiration drag vs active promotion conversions for {periodLabel}</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/40 space-y-2">
-              <span className="text-xs font-bold text-purple-700">Expired Promo Drag: -₱{Math.abs(contributionDrivers[2].impact).toLocaleString()}</span>
+              <span className="text-xs font-bold text-purple-700">Expired Promo Drag: -₱{Math.abs(contributionDrivers[1]?.impact || contributionDrivers[0]?.impact).toLocaleString()}</span>
               <p className="text-xs text-[#223047]/80 leading-relaxed font-medium">
-                The 'Summer Refresh Bundle' ended on Jul 10, causing a 22% drop in beverage addon orders during weekday lunch hours.
+                The seasonal bundle promotion ended recently, causing a drop in addon orders during peak customer hours.
               </p>
             </div>
 
             <div className="p-4 rounded-xl border border-green-200 bg-green-50/40 space-y-2">
-              <span className="text-xs font-bold text-green-700">Active Campaign Lift: +₱14,200</span>
+              <span className="text-xs font-bold text-green-700">Active Campaign Lift: +₱{Math.round(liveMetrics.currentRevenue * 0.08).toLocaleString()}</span>
               <p className="text-xs text-[#223047]/80 leading-relaxed font-medium">
-                'Paw-Spa Weekend Grooming Combo' achieved 84% claim rate and generated +18 new client signups.
+                'Paw-Spa Weekend Grooming Combo' achieved high claim rates and generated new client signups.
               </p>
             </div>
           </div>
@@ -1028,8 +1181,8 @@ export function RootCauseExplorer() {
       {activeTab === "discount" && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
-            <h3 className="text-base font-bold text-[#223047]">7. Discount & Margin Surrender Analysis</h3>
-            <p className="text-xs text-[#223047]/60">Assessing voucher markdowns and margin erosion across platform channels</p>
+            <h3 className="text-base font-bold text-[#223047]">7. Discount & Margin Surrender Analysis ({sectorFilter.toUpperCase()})</h3>
+            <p className="text-xs text-[#223047]/60">Assessing voucher markdowns and margin erosion across platform channels for {periodLabel}</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1057,8 +1210,8 @@ export function RootCauseExplorer() {
       {/* INTEGRATED GEN AI ROOT CAUSE EXPLANATION CARD */}
       <GenAiExplanationCard
         feature="descriptive_explanation"
-        title="Gen AI Multi-Factor Root Cause Synthesis"
-        prompt="Synthesize why revenue fell during this period across channel, category, SKU, stockouts, weather, promotions, and discounts. Provide a clear executive summary and rank the top 3 corrective measures."
+        title={`Gen AI Multi-Factor Root Cause Synthesis (${sectorFilter.toUpperCase()})`}
+        prompt={`Synthesize why revenue fell during ${periodLabel} for ${sectorFilter.toUpperCase()} across channel, category, SKU, stockouts, weather, promotions, and discounts. Provide a clear executive summary and rank the top 3 corrective measures.`}
         context={{
           periodFilter,
           sectorFilter,
