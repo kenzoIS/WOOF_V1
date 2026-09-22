@@ -366,6 +366,7 @@ export function Settings() {
     { value: "/retail", label: "Retail" },
     { value: "/ai-simulation", label: "AI Simulation" },
     { value: "/smart-reports", label: "Smart Reports" },
+    { value: "/root-cause-explorer", label: "Root Cause Explorer" },
     { value: "/feedback", label: "Feedback" },
     { value: "/audit", label: "Audit" },
   ];

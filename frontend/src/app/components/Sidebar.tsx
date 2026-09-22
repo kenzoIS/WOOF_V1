@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  Compass,
 } from "lucide-react";
 import { Badge } from "./ui/badge";
 import logoImg from "../../imports/happytailslogo-removebg-preview-2.png";
@@ -25,6 +26,7 @@ const navItems = [
   { path: "/retail", label: "Retail", icon: ShoppingBag },
   { path: "/ai-simulation", label: "AI Simulation", icon: FlaskConical },
   { path: "/smart-reports", label: "Smart Reports", icon: TrendingUp },
+  { path: "/root-cause-explorer", label: "Root Cause Explorer", icon: Compass },
   { path: "/feedback", label: "Feedback", icon: MessageSquareHeart },
   { path: "/audit", label: "Audit", icon: FileText },
   { path: "/settings", label: "Settings", icon: Settings },

@@ -26,6 +26,7 @@ export type DashboardLandingPage =
   | "/retail"
   | "/ai-simulation"
   | "/smart-reports"
+  | "/root-cause-explorer"
   | "/feedback"
   | "/audit";
 
@@ -129,6 +130,7 @@ function normalizeLandingPage(value: unknown): DashboardLandingPage {
     "/retail",
     "/ai-simulation",
     "/smart-reports",
+    "/root-cause-explorer",
     "/feedback",
     "/audit",
   ];
