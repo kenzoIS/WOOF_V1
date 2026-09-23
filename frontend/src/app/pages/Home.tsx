@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { toast } from "sonner";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
@@ -227,7 +227,80 @@ export function Home() {
   }, [homeOverview]);
 
   const dynamicOmnichannelData = homeOverview?.omnichannelSeries || [];
-  const equilibriumData = homeOverview?.channelBalance || [];
+  const separatedEquilibriumData = useMemo(() => {
+    const raw = homeOverview?.channelBalance || [];
+    const flattened: Array<{
+      category: string;
+      revenue: number;
+      channel: string;
+      fill: string;
+    }> = [];
+
+    const getFill = (channel: string) => {
+      switch (channel) {
+        case "pos":
+          return "#D42A7D"; // Vibrant WOOF brand magenta/pink
+        case "shopee":
+          return "#F97316"; // Shopee Orange
+        case "tiktok":
+          return "#8B5CF6"; // TikTok Shop Purple
+        case "pethub":
+          return "#06B6D4"; // PetHub Cyan
+        default:
+          return "#06B6D4";
+      }
+    };
+
+    raw.forEach((item: any) => {
+      // If legacy/cached backend sent merged 'Digital Channels' row
+      if (item.category === "Digital Channels") {
+        if (Number(item.shopee) > 0) {
+          flattened.push({
+            category: "Shopee",
+            revenue: Number(item.shopee),
+            channel: "shopee",
+            fill: getFill("shopee"),
+          });
+        }
+        if (Number(item.tiktok) > 0) {
+          flattened.push({
+            category: "TikTok Shop",
+            revenue: Number(item.tiktok),
+            channel: "tiktok",
+            fill: getFill("tiktok"),
+          });
+        }
+        if (Number(item.pethub) > 0) {
+          flattened.push({
+            category: "PetHub",
+            revenue: Number(item.pethub),
+            channel: "pethub",
+            fill: getFill("pethub"),
+          });
+        }
+      } else {
+        const cat = item.category || "Offline Channel (POS)";
+        let ch = item.channel;
+        if (!ch) {
+          if (cat.toLowerCase().includes("pos")) ch = "pos";
+          else if (cat.toLowerCase().includes("shopee")) ch = "shopee";
+          else if (cat.toLowerCase().includes("tiktok")) ch = "tiktok";
+          else if (cat.toLowerCase().includes("pethub")) ch = "pethub";
+          else ch = "pos";
+        }
+        const rev = Number(item.revenue ?? item[ch] ?? item.pos ?? item.shopee ?? item.tiktok ?? item.pethub ?? 0);
+        flattened.push({
+          category: cat,
+          revenue: rev,
+          channel: ch,
+          fill: getFill(ch),
+        });
+      }
+    });
+
+    return flattened;
+  }, [homeOverview?.channelBalance]);
+  const equilibriumData = separatedEquilibriumData;
   const clientHeatmapDays = useMemo(
     () => buildHeatmapDaysFromAnchor(homeOverview?.anchorDate),
     [homeOverview?.anchorDate],
@@ -731,38 +804,39 @@ export function Home() {
             Offline vs. Online Channel Balance
           </h2>
           <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            POS compared like-for-like against Shopee, TikTok Shop, and PetHub revenue streams over matched active period
+            Total recorded revenue across POS, TikTok Shop, Shopee, and PetHub channels
           </p>
         </div>
 
-        {equilibriumData.length === 0 && (
+        {separatedEquilibriumData.length === 0 && (
           <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
             Upload POS, Shopee, TikTok, or PetHub transactions to compare channel revenue.
           </div>
         )}
-        <ResponsiveContainer width="100%" height={160} className="md:!h-[200px]">
+        <ResponsiveContainer width="100%" height={Math.max(180, separatedEquilibriumData.length * 55)} className="md:!h-[240px]">
           <BarChart
-            data={equilibriumData}
+            data={separatedEquilibriumData}
             layout="vertical"
             margin={{ top: 8, right: 40, bottom: 8, left: 32 }}
-            barSize={32}
+            barSize={26}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
-            <XAxis type="number" stroke="#223047" style={{ fontSize: "12px" }} />
+            <XAxis
+              type="number"
+              stroke="#223047"
+              style={{ fontSize: "12px" }}
+              tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
+            />
             <YAxis
               type="category"
               dataKey="category"
               stroke="#223047"
               width={160}
-              style={{ fontSize: "12px" }}
+              style={{ fontSize: "12px", fontWeight: 600 }}
             />
             <Tooltip
-              formatter={(value: number, name: string) => {
-                let label = name;
-                if (name === "pos") label = "Offline Channel (POS)";
-                if (name === "shopee") label = "Shopee";
-                if (name === "tiktok") label = "TikTok Shop";
-                if (name === "pethub") label = "PetHub";
+              formatter={(value: any, _name: string, item: any) => {
+                const label = item?.payload?.category || "Revenue";
                 return [formatCurrency(Number(value) || 0), label];
               }}
               contentStyle={{
@@ -771,21 +845,26 @@ export function Home() {
                 borderRadius: "12px",
               }}
             />
-            <Legend
-              formatter={(value) => {
-                if (value === "pos") return "POS (Offline)";
-                if (value === "shopee") return "Shopee";
-                if (value === "tiktok") return "TikTok Shop";
-                if (value === "pethub") return "PetHub";
-                return value;
-              }}
-            />
-            <Bar dataKey="pos" stackId="a" fill="#D42A7D" radius={[0, 4, 4, 0]} animationDuration={800} />
-            <Bar dataKey="shopee" stackId="a" fill="#06B6D4" animationDuration={800} />
-            <Bar dataKey="tiktok" stackId="a" fill="#06B6D4" animationDuration={800} />
-            <Bar dataKey="pethub" stackId="a" fill="#06B6D4" radius={[0, 4, 4, 0]} animationDuration={800} />
+            <Bar dataKey="revenue" radius={[0, 6, 6, 0]} animationDuration={800}>
+              {separatedEquilibriumData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.fill} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
+
+        <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 pt-3 border-t border-[#FFD9EC]/50">
+          {separatedEquilibriumData.map((item) => (
+            <div key={item.category} className="flex items-center gap-2 text-xs md:text-sm text-[#223047]">
+              <span
+                className="w-3 h-3 rounded-full inline-block flex-shrink-0"
+                style={{ backgroundColor: item.fill }}
+              />
+              <span className="font-semibold">{item.category}:</span>
+              <span className="font-bold text-[#223047]/80">{formatCurrency(item.revenue)}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* SECTION 6 — SALES INTENSITY HEATMAP & AUTONOMOUS SUGGESTIONS */}

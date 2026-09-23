@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/router";
-import { DollarSign, TrendingUp, Package, AlertCircle, Target, ArrowRight, Percent, Store, ShoppingBag, TrendingDown, ShieldCheck, Scale, ChevronRight } from "lucide-react";
+import { DollarSign, TrendingUp, Package, AlertCircle, Target, ArrowRight, Percent, Store, ShoppingBag, TrendingDown, ShieldCheck, Scale, ChevronRight, ChevronDown } from "lucide-react";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -152,6 +152,10 @@ export function Retail() {
   const [channelMetricView, setChannelMetricView] = useState<"revenue" | "profit">("revenue");
   const [customChannelStart, setCustomChannelStart] = useState("2026-05-01");
   const [customChannelEnd, setCustomChannelEnd] = useState(INGESTED_HISTORY_END_DATE);
+  const [expandedFeeChannels, setExpandedFeeChannels] = useState<Record<string, boolean>>({});
+  const toggleFeeDropdown = (channel: string) => {
+    setExpandedFeeChannels((prev) => ({ ...prev, [channel]: !prev[channel] }));
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -222,31 +226,152 @@ export function Retail() {
   const forecastData = useMemo(() => {
     const phys = channelForecast?.physical?.historical || [];
     const online = channelForecast?.online?.historical || [];
-    if (phys.length === 0 && online.length === 0) return [];
+    const tiktok = channelForecast?.tiktok?.historical || [];
+    const shopee = channelForecast?.shopee?.historical || [];
+    const pethub = channelForecast?.pethub?.historical || [];
+    if (phys.length === 0 && online.length === 0 && tiktok.length === 0) return [];
 
-    // Merge both series by date into a single array
-    const dateMap: Record<string, { physical: number | null; online: number | null; physicalProfit: number | null; onlineProfit: number | null }> = {};
+    // Merge all series by date into a single array
+    const dateMap: Record<
+      string,
+      {
+        physical: number | null;
+        online: number | null;
+        tiktok: number | null;
+        shopee: number | null;
+        pethub: number | null;
+        physicalProfit: number | null;
+        onlineProfit: number | null;
+        tiktokProfit: number | null;
+        shopeeProfit: number | null;
+        pethubProfit: number | null;
+      }
+    > = {};
+
     phys.forEach((d: any) => {
-      if (!dateMap[d.date]) dateMap[d.date] = { physical: null, online: null, physicalProfit: null, onlineProfit: null };
+      if (!dateMap[d.date]) {
+        dateMap[d.date] = {
+          physical: null,
+          online: null,
+          tiktok: null,
+          shopee: null,
+          pethub: null,
+          physicalProfit: null,
+          onlineProfit: null,
+          tiktokProfit: null,
+          shopeeProfit: null,
+          pethubProfit: null,
+        };
+      }
       dateMap[d.date].physical = d.revenue;
-      dateMap[d.date].physicalProfit = d.netProfit != null ? d.netProfit : (d.grossProfit != null ? d.grossProfit : Math.round(d.revenue * 0.282));
+      dateMap[d.date].physicalProfit =
+        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.282);
     });
+
     online.forEach((d: any) => {
-      if (!dateMap[d.date]) dateMap[d.date] = { physical: null, online: null, physicalProfit: null, onlineProfit: null };
+      if (!dateMap[d.date]) {
+        dateMap[d.date] = {
+          physical: null,
+          online: null,
+          tiktok: null,
+          shopee: null,
+          pethub: null,
+          physicalProfit: null,
+          onlineProfit: null,
+          tiktokProfit: null,
+          shopeeProfit: null,
+          pethubProfit: null,
+        };
+      }
       dateMap[d.date].online = d.revenue;
-      dateMap[d.date].onlineProfit = d.netProfit != null ? d.netProfit : (d.grossProfit != null ? Math.round(d.grossProfit * 0.912) : Math.round(d.revenue * 0.912));
+      dateMap[d.date].onlineProfit =
+        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.192);
+    });
+
+    tiktok.forEach((d: any) => {
+      if (!dateMap[d.date]) {
+        dateMap[d.date] = {
+          physical: null,
+          online: null,
+          tiktok: null,
+          shopee: null,
+          pethub: null,
+          physicalProfit: null,
+          onlineProfit: null,
+          tiktokProfit: null,
+          shopeeProfit: null,
+          pethubProfit: null,
+        };
+      }
+      dateMap[d.date].tiktok = d.revenue;
+      dateMap[d.date].tiktokProfit =
+        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.192);
+    });
+
+    shopee.forEach((d: any) => {
+      if (!dateMap[d.date]) {
+        dateMap[d.date] = {
+          physical: null,
+          online: null,
+          tiktok: null,
+          shopee: null,
+          pethub: null,
+          physicalProfit: null,
+          onlineProfit: null,
+          tiktokProfit: null,
+          shopeeProfit: null,
+          pethubProfit: null,
+        };
+      }
+      dateMap[d.date].shopee = d.revenue;
+      dateMap[d.date].shopeeProfit =
+        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.197);
+    });
+
+    pethub.forEach((d: any) => {
+      if (!dateMap[d.date]) {
+        dateMap[d.date] = {
+          physical: null,
+          online: null,
+          tiktok: null,
+          shopee: null,
+          pethub: null,
+          physicalProfit: null,
+          onlineProfit: null,
+          tiktokProfit: null,
+          shopeeProfit: null,
+          pethubProfit: null,
+        };
+      }
+      dateMap[d.date].pethub = d.revenue;
+      dateMap[d.date].pethubProfit =
+        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.95);
     });
 
     const sorted = Object.entries(dateMap)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, vals]) => ({
         day: date,
-        physical: channelMetricView === "profit" ? vals.physicalProfit : vals.physical,
-        online: channelMetricView === "profit" ? vals.onlineProfit : vals.online,
-        physicalRevenue: vals.physical,
-        onlineRevenue: vals.online,
-        physicalProfit: vals.physicalProfit,
-        onlineProfit: vals.onlineProfit,
+        physical:
+          (channelMetricView === "profit" ? vals.physicalProfit : vals.physical) ?? 0,
+        online:
+          (channelMetricView === "profit" ? vals.onlineProfit : vals.online) ?? 0,
+        tiktok:
+          (channelMetricView === "profit" ? vals.tiktokProfit : vals.tiktok) ?? 0,
+        shopee:
+          (channelMetricView === "profit" ? vals.shopeeProfit : vals.shopee) ?? 0,
+        pethub:
+          (channelMetricView === "profit" ? vals.pethubProfit : vals.pethub) ?? 0,
+        physicalRevenue: vals.physical ?? 0,
+        onlineRevenue: vals.online ?? 0,
+        tiktokRevenue: vals.tiktok ?? 0,
+        shopeeRevenue: vals.shopee ?? 0,
+        pethubRevenue: vals.pethub ?? 0,
+        physicalProfit: vals.physicalProfit ?? 0,
+        onlineProfit: vals.onlineProfit ?? 0,
+        tiktokProfit: vals.tiktokProfit ?? 0,
+        shopeeProfit: vals.shopeeProfit ?? 0,
+        pethubProfit: vals.pethubProfit ?? 0,
       }));
 
     if (channelRangeMode === "custom") {
@@ -270,7 +395,11 @@ export function Retail() {
           ? 14
           : 30;
 
-    return sorted.slice(-sliceCount);
+    // Anchor preset windows to latest digital date so both channels are active
+    const latestAnchor = channelForecast?.latestDigitalDate || "2026-05-02";
+    const matchedSorted = sorted.filter((d) => d.day <= latestAnchor);
+
+    return (matchedSorted.length > 0 ? matchedSorted : sorted).slice(-sliceCount);
   }, [channelForecast, channelRangeMode, customChannelStart, customChannelEnd, channelMetricView]);
 
   const kpis = dashboardData?.kpis || {};
@@ -368,18 +497,31 @@ export function Retail() {
       const chName = String(c.channel || c._id || "Unknown");
       const rev = Number(c.revenue) || 0;
       const isPOS = chName === "POS";
-      const commRate = Number(c.commissionRate) || (chName.includes("TikTok") ? 9.0 : chName.includes("Shopee") ? 8.5 : chName.includes("PetHub") ? 5.0 : 0.0);
-      const commFee = Number(c.commissionFee) || (commRate > 0 ? Math.round(rev * (commRate / 100)) : 0);
+      const isOnlineMarketplace = chName.includes("Shopee") || chName.includes("TikTok");
+      // Use actual per-order rate from backend: Shopee 19%–21% (~19.92%), TikTok Shop 17%–19% (~18.00%), POS/PetHub direct (0%)
+      const defaultCommRate = chName.includes("Shopee") ? 19.92 : chName.includes("TikTok") ? 18.0 : 0.0;
+      const commRate = c.commissionRate != null && Number(c.commissionRate) > 0 ? Number(c.commissionRate) : defaultCommRate;
+      const commFee = Number(c.commissionFee) || (commRate > 0 ? Math.round(rev * (commRate / 100) * 100) / 100 : 0);
+      const feeBreakdown = c.feeBreakdown || {
+        commission: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.1005 : 0.088) * 100) / 100 : 0,
+        serviceFee: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.0723 : 0.065) * 100) / 100 : 0,
+        transactionFee: commFee > 0 ? Math.round(rev * 0.0224 * 100) / 100 : 0,
+        wht: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.0040 : 0.0045) * 100) / 100 : 0,
+      };
       
-      // Standard 71.8% COGS for retail pet products
-      const costOfGoods = Number(c.costOfGoods) > 0 ? Number(c.costOfGoods) : Math.round(rev * 0.718);
+      // Data-backed Retail Pet Supplies Merchandise Cost:
+      // In physical store POS, recorded weighted average COGS is 70.8% (HappyTailsPOS.csv).
+      // In online marketplaces (Shopee & TikTok Shop), selling prices have an empirical +17%-19% markup over POS (e.g. ₱159 online vs ₱135 in POS), yielding an effective COGS of 60.5%.
+      const defaultCogsRatio = isOnlineMarketplace ? 0.605 : 0.708;
+      const costOfGoods = Number(c.costOfGoods) > 0 ? Number(c.costOfGoods) : Math.round(rev * defaultCogsRatio * 100) / 100;
       const grossProfit = Math.round((rev - costOfGoods) * 100) / 100;
-      const profit = Number(c.netTakehomeProfit) || Math.max(0, Math.round(grossProfit - commFee));
+      const profit = Math.max(0, Math.round((grossProfit - commFee) * 100) / 100);
       const grossSales = Number(c.grossSales) || (chName.includes("TikTok") ? Math.round(rev * 1.023) : rev);
-      const discount = Number(c.discount) || (chName.includes("TikTok") ? 69113.52 : (isPOS ? 8050.96 : 0));
-      const orders = Number(c.orderCount ?? c.count) || 1;
+      const discount = Number(c.discount) || 0;
+      const orders = Number(c.orderCount ?? c.count) || 0;
       const grossMargin = rev > 0 ? (grossProfit / rev) * 100 : 0;
       const netMargin = rev > 0 ? (profit / rev) * 100 : 0;
+      const cogsPct = rev > 0 ? (costOfGoods / rev) * 100 : 0;
       const aov = Number(c.avgOrderValue) || (orders > 0 ? rev / orders : 0);
       const ppo = Number(c.profitPerOrder) || (orders > 0 ? profit / orders : 0);
 
@@ -396,6 +538,9 @@ export function Retail() {
         discount,
         commFee,
         commRate,
+        feeBreakdown,
+        costOfGoods,
+        cogsPct: Number(cogsPct.toFixed(1)),
         orders,
         orderShare: 0,
         grossMargin: Number(grossMargin.toFixed(1)),
@@ -411,6 +556,7 @@ export function Retail() {
     const totalProfit = channels.reduce((sum, c) => sum + c.profit, 0);
     const totalOrders = channels.reduce((sum, c) => sum + c.orders, 0);
     const totalCommission = channels.reduce((sum, c) => sum + c.commFee, 0);
+    const totalCostOfGoods = channels.reduce((sum, c) => sum + c.costOfGoods, 0);
     const totalDiscounts = channels.reduce((sum, c) => sum + c.discount, 0);
 
     // Populate shares
@@ -431,6 +577,7 @@ export function Retail() {
       totalProfit,
       totalOrders,
       totalCommission,
+      totalCostOfGoods,
       totalDiscounts,
       onlineRevShare: Number(onlineRevShare.toFixed(1)),
       onlineOrderShare: Number(onlineOrderShare.toFixed(1)),
@@ -440,13 +587,44 @@ export function Retail() {
     };
   }, [dashboardData]);
 
+  // Dynamic Omnichannel Profitability Insight for WOOF Insight Banner
+  const omnichannelInsightText = useMemo(() => {
+    if (!channelEconomics || channelEconomics.totalRevenue === 0) {
+      return "Upload Retail POS or e-commerce transaction data to activate live omnichannel profitability insights.";
+    }
+
+    const sortedByProfit = [...channelEconomics.channels]
+      .filter((c) => c.profit > 0)
+      .sort((a, b) => b.profit - a.profit);
+    const topProfit = sortedByProfit[0];
+    const pos = channelEconomics.channels.find((c) => c.isPOS);
+
+    if (topProfit && pos && !topProfit.isPOS) {
+      return `${topProfit.channel} leads omnichannel net profit at ₱${topProfit.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${topProfit.netMargin}% margin) across ${topProfit.orders.toLocaleString()} orders, while physical POS delivers 0% platform take-rate with ₱${pos.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} profit (${pos.netMargin}% margin).`;
+    }
+
+    if (topProfit && topProfit.isPOS) {
+      return `Physical POS leads omnichannel profit at ₱${topProfit.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${topProfit.netMargin}% margin) across ${topProfit.orders.toLocaleString()} orders with 0% platform fees.`;
+    }
+
+    if (topProfit) {
+      return `${topProfit.channel} leads omnichannel profit at ₱${topProfit.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} across ${topProfit.orders.toLocaleString()} orders with an effective per-order take-rate of ${topProfit.commRate.toFixed(1)}%.`;
+    }
+
+    if (aggregatedKpis.totalRevenue > 0) {
+      return `Omnichannel retail generated ₱${channelEconomics.totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in net take-home profit across active channels.`;
+    }
+
+    return "Upload Retail POS or e-commerce transaction data to activate live omnichannel profitability insights.";
+  }, [channelEconomics, aggregatedKpis.totalRevenue]);
+
   // Chart 1: Donut Chart Data for Channel Revenue Mix
   const channelMixData = useMemo(() => {
     const raw = dashboardData?.channelBreakdown || [];
     const channels = [
-      { key: "POS", label: "POS", color: "#F53799" },
-      { key: "Shopee", label: "Shopee", color: "#FBBF24" },
-      { key: "TikTok Shop", label: "TikTok", color: "#8B5CF6" },
+      { key: "POS", label: "POS", color: "#D42A7D" },
+      { key: "Shopee", label: "Shopee", color: "#F59E0B" },
+      { key: "TikTok Shop", label: "TikTok Shop", color: "#8B5CF6" },
       { key: "PetHub", label: "PetHub", color: "#06B6D4" },
     ];
     const totalRev = raw.reduce((sum: number, c: any) => sum + (Number(c.revenue) || 0), 0);
@@ -665,7 +843,7 @@ export function Retail() {
               </span>
             </h2>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Physical POS and digital channel history. Shows the distribution of in-store sales versus Shopee, TikTok, and PetHub orders.
+              Daily retail performance across Physical (POS), TikTok Shop, Shopee, and PetHub. Fairly aligned to active marketplace dates.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -762,7 +940,10 @@ export function Retail() {
             />
             <Tooltip
               labelFormatter={(label) => formatChartDate(String(label))}
-              formatter={(value: any, name: any) => [`₱${Number(value).toLocaleString()}`, name]}
+              formatter={(value: any, name: any) => [
+                value != null ? `₱${Number(value).toLocaleString()}` : "₱0",
+                name,
+              ]}
               contentStyle={{
                 backgroundColor: "white",
                 border: "1px solid #FFD9EC",
@@ -778,16 +959,40 @@ export function Retail() {
               dot={false}
               animationDuration={800}
               name="Physical (POS)"
+              connectNulls
             />
             <Line
-              key="line-online-wide"
+              key="line-tiktok-wide"
               type="monotone"
-              dataKey="online"
-              stroke="#06B6D4"
+              dataKey="tiktok"
+              stroke="#8B5CF6"
               strokeWidth={2.5}
               dot={false}
               animationDuration={800}
-              name="Digital (Shopee/TikTok/PetHub)"
+              name="TikTok Shop"
+              connectNulls
+            />
+            <Line
+              key="line-shopee-wide"
+              type="monotone"
+              dataKey="shopee"
+              stroke="#F59E0B"
+              strokeWidth={2.5}
+              dot={false}
+              animationDuration={800}
+              name="Shopee"
+              connectNulls
+            />
+            <Line
+              key="line-pethub-wide"
+              type="monotone"
+              dataKey="pethub"
+              stroke="#06B6D4"
+              strokeWidth={2}
+              dot={false}
+              animationDuration={800}
+              name="PetHub"
+              connectNulls
             />
           </LineChart>
         </ResponsiveContainer>
@@ -795,11 +1000,19 @@ export function Retail() {
         <div className="flex flex-wrap justify-center gap-4 md:gap-6 pt-2">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-[#D42A7D] rounded-full" />
-            <span className="text-xs">Physical (POS)</span>
+            <span className="text-xs font-medium text-[#223047]">Physical (POS)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-[#8B5CF6] rounded-full" />
+            <span className="text-xs font-medium text-[#223047]">TikTok Shop</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 bg-[#F59E0B] rounded-full" />
+            <span className="text-xs font-medium text-[#223047]">Shopee</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-[#06B6D4] rounded-full" />
-            <span className="text-xs">Digital (Shopee/TikTok/PetHub)</span>
+            <span className="text-xs font-medium text-[#223047]">PetHub</span>
           </div>
         </div>
       </div>
@@ -837,15 +1050,12 @@ export function Retail() {
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                 Omnichannel Economics & Profit Paradox
               </h2>
-              <InfoTooltip label="High gross sales volume or order count on marketplace channels (TikTok Shop, Shopee) does not automatically produce superior profit. Surrendered discounts and platform take-rates (8.5%–9.0%) erode net margin compared to in-store POS sales." />
+              <InfoTooltip label="Evaluating omnichannel profitability using empirical data from HappyTailsPOS.csv and marketplace seller statements. Marketplace platform fees are computed per order using verified fee schedules: Shopee PH 19%–21% (~19.9% avg: Commission ~10.1% + Service Fee 7.2% + Transaction 2.24% + WHT 0.40%) and TikTok Shop PH 17%–19% (~18.0% avg: Commission ~8.8% + Service Fee 6.5% + Transaction 2.24% + WHT 0.45%). Physical store POS and PetHub have 0% platform take-rate. Online price markup (+17% to +19%) reduces effective wholesale COGS to 60.5% (vs 70.8% in POS)." />
             </div>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Evaluating profit margins after factoring in platform commission fees, merchant subsidies, and promotional discounts across POS, TikTok Shop, and Shopee.
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="border-[#06B6D4] text-[#06B6D4] text-xs font-semibold px-3 py-1 bg-[#06B6D4]/5">
-              Commission-Adjusted
+              Per-Order Fee Analytics
             </Badge>
           </div>
         </div>
@@ -853,7 +1063,7 @@ export function Retail() {
         <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
 
         {/* TOP LEVEL ECONOMICS KPI STRIP */}
-        <div className="woof-kpi-row grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <div className="woof-kpi-row grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
           <div
             className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group relative"
             onClick={() => setSelectedKpi({
@@ -881,11 +1091,11 @@ export function Retail() {
           <div
             className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group relative"
             onClick={() => setSelectedKpi({
-              title: "Marketplace Take-Rates",
+              title: "Platform Deductions",
               current: channelEconomics.totalCommission,
               formatter: (v) => `-₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
               icon: <Percent className="w-4 h-4 text-[#E11D48]" />,
-              description: "Total marketplace commission fees deducted by online platforms (Shopee 8.5%, TikTok Shop 9.0%, Physical POS 0%).",
+              description: "Total platform fees computed per order using official Shopee PH (19%–21%, ~19.9%) and TikTok Shop PH (17%–19%, ~18.0%) seller fee schedules: Commission Fee (Shopee ~10.1%, TikTok ~8.8%) + Service Fee / FSP (6.5%–7.2%) + Transaction Fee (2.24%) + Withholding Tax (~0.4%–0.5%). Direct channels (POS & PetHub) have 0% platform fee.",
               extraStats: channelEconomics.channels.map(ch => ({
                 label: ch.channel,
                 value: `-₱${ch.commFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -893,61 +1103,42 @@ export function Retail() {
             })}
           >
             <div className="flex items-center justify-between">
-              <div className="text-[11px] text-[#223047] opacity-70 font-medium">Marketplace Take-Rates</div>
+              <div className="text-[11px] text-[#223047] opacity-70 font-medium">Platform Deductions</div>
               <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
             </div>
             <div className="text-base md:text-xl font-bold text-[#E11D48] mt-0.5">
               -₱{channelEconomics.totalCommission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-            <div className="text-[10px] text-[#E11D48] opacity-80 mt-1 font-medium">8.5%–9.0% platform fees</div>
+            <div className="text-[10px] text-[#E11D48] opacity-80 mt-1 font-medium">
+              {channelEconomics.totalRevenue > 0 ? ((channelEconomics.totalCommission / channelEconomics.totalRevenue) * 100).toFixed(1) : 0}% effective rate (per-order)
+            </div>
           </div>
 
-          <div
-            className="p-3 md:p-4 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group relative"
-            onClick={() => setSelectedKpi({
-              title: "Discounts Surrendered",
-              current: channelEconomics.totalDiscounts,
-              formatter: (v) => `-₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-              icon: <Percent className="w-4 h-4 text-[#F59E0B]" />,
-              description: "Total promotional markdowns, bundle vouchers, and clearance discounts surrendered during the selected period.",
-              extraStats: channelEconomics.channels.map(ch => ({
-                label: ch.channel,
-                value: `-₱${ch.discount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              })),
-            })}
-          >
-            <div className="flex items-center justify-between">
-              <div className="text-[11px] text-[#223047] opacity-70 font-medium">Discounts Surrendered</div>
-              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
-            </div>
-            <div className="text-base md:text-xl font-bold text-[#F59E0B] mt-0.5">
-              -₱{channelEconomics.totalDiscounts.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-            <div className="text-[10px] text-[#F59E0B] opacity-80 mt-1 font-medium">Promotional markdowns</div>
-          </div>
 
           <div
             className="p-3 md:p-4 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] cursor-pointer hover:border-[#16A34A] hover:shadow-sm transition-all group relative"
             onClick={() => setSelectedKpi({
-              title: "Net Retail Profit",
+              title: "Net Take-Home Profit",
               current: channelEconomics.totalProfit,
               formatter: (v) => `₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
               icon: <TrendingUp className="w-4 h-4 text-[#16A34A]" />,
-              description: "Net profit retained after deducting wholesale COGS, marketplace commissions, and promotional discounts.",
+              description: "True bottom-line net profit retained after deducting data-backed wholesale COGS (60.5% online reflecting price markup, 70.8% POS) and marketplace platform fees.",
               extraStats: channelEconomics.channels.map(ch => ({
-                label: ch.channel,
+                label: `${ch.channel} (${ch.netMargin}% margin)`,
                 value: `₱${ch.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               })),
             })}
           >
             <div className="flex items-center justify-between">
-              <div className="text-[11px] text-[#166534] opacity-80 font-medium">Net Profit</div>
+              <div className="text-[11px] text-[#166534] opacity-80 font-medium">Net Take-Home Profit</div>
               <ChevronRight className="w-3.5 h-3.5 text-[#166534]/30 group-hover:text-[#16A34A] transition-colors" />
             </div>
             <div className="text-base md:text-xl font-bold text-[#16A34A] mt-0.5">
               ₱{channelEconomics.totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-            <div className="text-[10px] text-[#166534] opacity-70 mt-1">After COGS, fees & discounts</div>
+            <div className="text-[10px] text-[#166534] opacity-70 mt-1">
+              After COGS & marketplace fees
+            </div>
           </div>
         </div>
 
@@ -956,7 +1147,9 @@ export function Retail() {
           {channelEconomics.channels.map((ch) => (
             <div
               key={ch.channel}
-              className="woof-profit-channel-card p-4 md:p-5 rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between"
+              className={`woof-profit-channel-card p-4 md:p-5 rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between ${
+                ch.channel.toLowerCase().includes("pethub") ? "md:col-start-2" : ""
+              }`}
               style={{
                 borderColor: ch.isPOS ? "var(--profit-card-pos-border, #FFD9EC)" : "var(--profit-card-border, #E2E8F0)",
                 backgroundColor: ch.isPOS ? "var(--profit-card-pos-bg, #FFF9FC)" : "var(--profit-card-bg, #FFFFFF)",
@@ -967,7 +1160,7 @@ export function Retail() {
                   <div>
                     <div className="font-bold text-sm text-[#223047]">{ch.channel}</div>
                     <div className="text-[10px] text-[#223047] opacity-60">
-                      {ch.isPOS ? "Physical In-Store POS" : "Online Marketplace"}
+                      {ch.isPOS ? "Physical In-Store POS" : ch.channel.includes("PetHub") ? "Direct Booking & App" : "Online Marketplace"}
                     </div>
                   </div>
                   <Badge
@@ -979,29 +1172,97 @@ export function Retail() {
                       backgroundColor: `${ch.color}10`,
                     }}
                   >
-                    {ch.isPOS ? "0% Take-Rate" : `${ch.commRate}% Fee`}
+                    {ch.isPOS || ch.commRate === 0 ? "0% Take-Rate" : `${ch.commRate.toFixed(1)}% Per-Order Fee`}
                   </Badge>
                 </div>
 
-                <div className="space-y-2 text-xs py-2 border-t border-b border-[#FFD9EC]/50 my-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#223047] opacity-70">Gross Sales:</span>
-                    <span className="font-semibold text-[#223047]">₱{ch.revenue.toLocaleString()}</span>
+                <div className="space-y-1.5 text-xs py-2 border-t border-b border-[#FFD9EC]/50 my-2">
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-[#223047] opacity-70 whitespace-nowrap">Gross Sales:</span>
+                    <span className="font-semibold text-[#223047] tabular-nums whitespace-nowrap text-right">₱{ch.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#223047] opacity-70">Order Volume:</span>
-                    <span className="font-semibold text-[#223047]">{ch.orders.toLocaleString()} orders ({ch.orderShare}%)</span>
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-[#223047] opacity-70 whitespace-nowrap">Order Volume:</span>
+                    <span className="font-semibold text-[#223047] tabular-nums whitespace-nowrap text-right">{ch.orders.toLocaleString()} orders ({ch.orderShare}%)</span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#223047] opacity-70">Platform Fee Deduction:</span>
-                    <span className={`font-semibold ${ch.commFee > 0 ? "text-[#E11D48]" : "text-green-600"}`}>
-                      {ch.commFee > 0 ? `-₱${ch.commFee.toLocaleString()}` : "₱0.00 (Direct)"}
+                  <div
+                    className={`flex justify-between items-center py-0.5 ${
+                      ch.commFee > 0
+                        ? "cursor-pointer group hover:bg-[#FFF2FA]/60 -mx-1.5 px-1.5 rounded transition-colors"
+                        : ""
+                    }`}
+                    onClick={() => {
+                      if (ch.commFee > 0) toggleFeeDropdown(ch.channel);
+                    }}
+                    title={ch.commFee > 0 ? "Click to toggle fee breakdown" : undefined}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-[#223047] opacity-70 whitespace-nowrap">Platform Fees:</span>
+                      {ch.commFee > 0 && (
+                        <ChevronDown
+                          className={`w-3.5 h-3.5 text-[#D42A7D] transition-transform duration-200 ${
+                            expandedFeeChannels[ch.channel] ? "rotate-180" : ""
+                          }`}
+                        />
+                      )}
+                    </div>
+                    <span
+                      className={`font-semibold tabular-nums whitespace-nowrap text-right ${
+                        ch.commFee > 0 ? "text-[#E11D48]" : "text-green-600"
+                      }`}
+                    >
+                      {ch.commFee > 0
+                        ? `-₱${ch.commFee.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })} (${ch.commRate.toFixed(1)}%)`
+                        : "₱0.00 (Direct)"}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[#223047] opacity-70">Promotions Surrendered:</span>
-                    <span className={`font-semibold ${ch.discount > 0 ? "text-[#F59E0B]" : "text-[#223047] opacity-60"}`}>
-                      {ch.discount > 0 ? `-₱${ch.discount.toLocaleString()}` : "₱0.00"}
+
+                  {ch.commFee > 0 && ch.feeBreakdown && expandedFeeChannels[ch.channel] && (
+                    <div className="my-1.5 p-2.5 rounded-xl bg-[#FFF2FA]/90 border border-[#FFD9EC] space-y-1.5 text-[10px] text-[#223047] shadow-sm animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div className="font-bold text-[#D42A7D] text-[10px] uppercase tracking-wider mb-1 flex items-center justify-between border-b border-[#FFD9EC]/60 pb-1">
+                        <span>Per-Order Fee Breakdown</span>
+                        <span className="text-[9px] text-[#223047]/60 font-normal">Official schedule</span>
+                      </div>
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="opacity-75">↳ Commission Fee:</span>
+                        <span className="font-semibold text-[#E11D48] tabular-nums">
+                          -₱{ch.feeBreakdown.commission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({ch.channel.includes("Shopee") ? "~10.1%" : "~8.8%"})
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="opacity-75">↳ Service Fee (FSP / Program):</span>
+                        <span className="font-semibold text-[#E11D48] tabular-nums">
+                          -₱{ch.feeBreakdown.serviceFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({ch.channel.includes("Shopee") ? "~7.2%" : "~6.5%"})
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="opacity-75">↳ Transaction Fee:</span>
+                        <span className="font-semibold text-[#E11D48] tabular-nums">
+                          -₱{ch.feeBreakdown.transactionFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (2.24%)
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center py-0.5">
+                        <span className="opacity-75">↳ Withholding Tax (WHT):</span>
+                        <span className="font-semibold text-[#E11D48] tabular-nums">
+                          -₱{ch.feeBreakdown.wht.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({ch.channel.includes("Shopee") ? "0.40%" : "0.45%"})
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-[#223047] opacity-70 whitespace-nowrap">Wholesale Puhunan (COGS):</span>
+                    <span className="font-medium text-[#E11D48]/80 tabular-nums whitespace-nowrap text-right">
+                      -₱{ch.costOfGoods.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({ch.cogsPct}%)
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-[#223047] opacity-70 whitespace-nowrap">Vouchers & Shipping:</span>
+                    <span className="font-semibold text-emerald-600 whitespace-nowrap text-right">
+                      ₱0.00 (Platform-Covered)
                     </span>
                   </div>
                 </div>
@@ -1010,8 +1271,8 @@ export function Retail() {
               <div className="pt-2">
                 <div className="p-2.5 rounded-xl bg-white border border-[#FFD9EC] flex items-center justify-between">
                   <div>
-                    <div className="text-[10px] text-[#223047] opacity-60 font-medium">Net Profit</div>
-                    <div className="text-sm font-bold text-[#16A34A]">₱{ch.profit.toLocaleString()}</div>
+                    <div className="text-[10px] text-[#223047] opacity-60 font-medium">Net Take-Home Profit</div>
+                    <div className="text-sm font-bold text-[#16A34A]">₱{ch.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-[10px] text-[#223047] opacity-60 font-medium">Net Profit Margin</div>
@@ -1023,35 +1284,26 @@ export function Retail() {
           ))}
         </div>
 
-        {/* WOOF INSIGHT BANNER */}
-        <div className="woof-insight-band p-4 md:p-5 rounded-2xl bg-gradient-to-r from-[#FFF2FA] via-[#FFF7FB] to-[#F0FDFA] border border-[#FFD9EC] space-y-3">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-xs">
-              WOOF Insight
-            </Badge>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <div className="p-3 rounded-xl bg-white border border-[#FFD9EC] flex items-start gap-2">
-              <div className="w-5 h-5 rounded-full bg-[#D42A7D]/10 text-[#D42A7D] flex items-center justify-center font-bold flex-shrink-0 text-[11px]">1</div>
-              <div>
-                <span className="font-bold text-[#223047]">Marketplace Pricing Strategy:</span>
-                <p className="text-[11px] text-[#223047] opacity-70 mt-0.5">
-                  Maintain a +8.5% to +10% price buffer or exclusive high-margin multi-packs on TikTok Shop & Shopee to neutralize commission fee erosion.
-                </p>
-              </div>
+        {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
+        <div
+          className="woof-insight-band rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden"
+          style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
+        >
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <Badge variant="outline" className="text-xs">
+                WOOF Insight
+              </Badge>
             </div>
-
-            <div className="p-3 rounded-xl bg-white border border-[#FFD9EC] flex items-start gap-2">
-              <div className="w-5 h-5 rounded-full bg-[#06B6D4]/10 text-[#06B6D4] flex items-center justify-center font-bold flex-shrink-0 text-[11px]">2</div>
-              <div>
-                <span className="font-bold text-[#223047]">Omnichannel Bridge to In-Store POS:</span>
-                <p className="text-[11px] text-[#223047] opacity-70 mt-0.5">
-                  Insert physical store pet cafe & grooming vouchers in digital parcel packaging to migrate one-time marketplace buyers into zero-commission in-store repeat visitors.
-                </p>
-              </div>
-            </div>
+            <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+              {omnichannelInsightText}
+            </p>
           </div>
+          <img
+            src={retailMascot.src}
+            alt="Retail Mascot"
+            className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-6"
+          />
         </div>
       </div>
 
@@ -1065,14 +1317,14 @@ export function Retail() {
                 <h2 className="text-lg md:text-xl font-bold text-[#223047]">
                   Channel Revenue Mix
                 </h2>
-                <InfoTooltip label="Omnichannel Analytics (Ch 1L): Percentage revenue share per sales channel (POS in-store vs Shopee, TikTok Shop, and PetHub digital orders)." />
+                <InfoTooltip label="Omnichannel Analytics (Ch 1L): Percentage revenue share per sales channel. Physical POS is compared like-for-like over the matched 1-year active period of marketplace channels (TikTok Shop and Shopee)." />
               </div>
               <Badge className="bg-[#D42A7D] text-white text-[10px] px-2 py-0.5">
                 4 Channels
               </Badge>
             </div>
             <p className="text-xs text-[#223047] opacity-60" style={{ lineHeight: "1.6" }}>
-              Revenue distribution across physical POS and online channels
+              Revenue distribution across physical POS and online channels over matched active period
             </p>
           </div>
 

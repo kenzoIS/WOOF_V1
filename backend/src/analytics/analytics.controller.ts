@@ -74,9 +74,14 @@ export class AnalyticsController {
   }
 
   @Get('dashboard/:sector')
-  async getDashboard(@Param('sector') sector: string) {
-    return this.cached(this.key('dashboard', { sector }), () =>
-      this.analyticsService.getDashboard(sector),
+  async getDashboard(
+    @Param('sector') sector: string,
+    @Query('forceRefresh') forceRefresh?: string,
+  ) {
+    return this.cached(
+      this.key('dashboard', { sector }),
+      () => this.analyticsService.getDashboard(sector),
+      { forceRefresh },
     );
   }
 
@@ -170,8 +175,11 @@ export class AnalyticsController {
   }
 
   @Get('cafe/co-attachment')
-  async getCafeCoAttachment() {
-    return this.analyticsService.getCafeCoAttachment();
+  async getCafeCoAttachment(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.analyticsService.getCafeCoAttachment(startDate, endDate);
   }
 
   @Get('cross-sell')

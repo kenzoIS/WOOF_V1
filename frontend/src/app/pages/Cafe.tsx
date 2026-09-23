@@ -5,6 +5,7 @@ import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp,
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
@@ -324,17 +325,19 @@ export function Cafe() {
   const [pastHappyHours, setPastHappyHours] = useState<any[]>([]);
   const [weatherOverlayEnabled, setWeatherOverlayEnabled] = useState(false);
   const [coAttachmentData, setCoAttachmentData] = useState<any>(null);
+  const [isCoAttachmentLoading, setIsCoAttachmentLoading] = useState(false);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
   const [hoveredDonutIndex, setHoveredDonutIndex] = useState<number | null>(null);
 
   const donutSegments = useMemo(() => {
-    return (
-      coAttachmentData?.segments || [
-        { name: "Dual-Diner (Human + Pet)", share: 22.8, color: "#F53799", aov: 270, baskets: 8100, revenue: 2185568 },
-        { name: "Solo Human Dine-in", share: 70.2, color: "#06B6D4", aov: 253, baskets: 24974, revenue: 6310454 },
-        { name: "Solo Pet Treat Only", share: 7.0, color: "#F59E0B", aov: 89, baskets: 2483, revenue: 221537 },
-      ]
-    );
+    if (coAttachmentData?.segments?.length) {
+      return coAttachmentData.segments;
+    }
+    return [
+      { name: "Dual-Diner (Human + Pet)", share: 0, color: "#F53799", aov: 0, baskets: 0, revenue: 0 },
+      { name: "Solo Human Dine-in", share: 0, color: "#06B6D4", aov: 0, baskets: 0, revenue: 0 },
+      { name: "Solo Pet Treat Only", share: 0, color: "#F59E0B", aov: 0, baskets: 0, revenue: 0 },
+    ];
   }, [coAttachmentData]);
 
   const activeDonutSeg = hoveredDonutIndex !== null ? donutSegments[hoveredDonutIndex] : null;
@@ -363,8 +366,24 @@ export function Cafe() {
   useEffect(() => {
     getNextQuietPeriod().then(setQuietPeriod).catch(console.error);
     getPastHappyHours().then(setPastHappyHours).catch(console.error);
-    getCafeCoAttachment().then(setCoAttachmentData).catch(console.error);
   }, [realtimeRefresh]);
+
+  // Dynamically load Co-Attachment basket data filtered by globalDateRange
+  useEffect(() => {
+    const bounds = getItemHistoryBounds(forecastRun);
+    const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
+    const range = parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
+
+    setIsCoAttachmentLoading(true);
+    getCafeCoAttachment(range.start, range.end)
+      .then(setCoAttachmentData)
+      .catch((err) => {
+        console.error("Could not load cafe co-attachment:", err);
+      })
+      .finally(() => {
+        setIsCoAttachmentLoading(false);
+      });
+  }, [globalDateRange, forecastRun, realtimeRefresh]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -652,12 +671,40 @@ export function Cafe() {
 
   // Aggregate Category Revenue Contribution from backend or fallback to items
   const cafeCategoryRevenueData = useMemo(() => {
+    const STANDARD_CATEGORIES = [
+      "Coffee",
+      "Pasta/snacks",
+      "Rice meals",
+      "Pet bakery",
+      "Non-caffeine",
+    ];
+
     if (coAttachmentData?.categoryContribution?.length) {
-      return coAttachmentData.categoryContribution;
+      const existingMap = new Map(
+        coAttachmentData.categoryContribution.map((c: any) => [c.category, c]),
+      );
+      const list = [...coAttachmentData.categoryContribution];
+      STANDARD_CATEGORIES.forEach((cat) => {
+        if (!existingMap.has(cat)) {
+          list.push({ category: cat, revenue: 0, quantity: 0, orders: 0, share: 0 });
+        }
+      });
+      return list.sort((a: any, b: any) => b.revenue - a.revenue);
     }
     const items = forecastRun?.topItems?.length ? forecastRun.topItems : (menuItems || []);
-    if (!items.length) return [];
+    if (!items.length) {
+      return STANDARD_CATEGORIES.map((cat) => ({
+        category: cat,
+        revenue: 0,
+        quantity: 0,
+        orders: 0,
+        share: 0,
+      }));
+    }
     const map = new Map<string, { category: string; revenue: number; quantity: number }>();
+    STANDARD_CATEGORIES.forEach((cat) => {
+      map.set(cat, { category: cat, revenue: 0, quantity: 0 });
+    });
     items.forEach((item: any) => {
       const cat = item.category && item.category !== "Uncategorized" ? item.category : (item.category || "General Cafe");
       if (cat === "Uncategorized") return;
@@ -670,6 +717,7 @@ export function Cafe() {
     return Array.from(map.values())
       .map((c) => ({
         ...c,
+        orders: c.quantity,
         share: totalRev > 0 ? Math.round((c.revenue / totalRev) * 1000) / 10 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
@@ -868,6 +916,7 @@ export function Cafe() {
   }, [forecastRun, forecastRangeMode, customForecastStart, customForecastEnd, globalDateRange]);
 
   // ── 90-5-5 Backtesting multi-zone raw data ────────────────────────────────
+  // ── 90-5-5 Backtesting multi-zone raw data ────────────────────────────────
   const rawThreeZoneData = useMemo<ThreeZonePoint[]>(() => {
     if (!forecastRun?.historical?.length) return [];
     const unitPrice = getCafeForecastUnitPrice(forecastRun) || 130.59;
@@ -883,6 +932,7 @@ export function Cafe() {
         forecast: null,
       };
     });
+
     if (forecastRun.forecast?.length) {
       for (const fp of forecastRun.forecast) {
         const projRev = getProjectedRevenue(fp, unitPrice);
@@ -1379,18 +1429,68 @@ export function Cafe() {
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
           <div className="flex-1">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Cafe Revenue & Demand Forecast
-            </h2>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Cafe Revenue & Demand Forecast
+              </h2>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC] hover:bg-[#FFE5F4] transition-all cursor-pointer shadow-2xs"
+                  >
+                    <span>Active Model</span>
+                    <ChevronDown className="w-3 h-3 opacity-70" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="w-80 sm:w-96 p-3.5 bg-white/95 backdrop-blur-md border border-[#FFD9EC] rounded-2xl shadow-xl space-y-2.5 text-xs text-[#223047] z-50"
+                >
+                  <div className="flex items-center justify-between border-b border-[#FFD9EC]/60 pb-2">
+                    <span className="font-bold text-[#223047]">Forecasting Engine</span>
+                    <Badge className="bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC] text-[10px] font-semibold hover:bg-[#FFF2FA]">
+                      Auto-Selected
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-1 bg-[#FFF7FB] p-2.5 rounded-xl border border-[#FFD9EC]/50">
+                    <div className="text-[10px] font-bold text-[#223047]/60 uppercase tracking-wider">
+                      Selected Architecture
+                    </div>
+                    <div className="font-semibold text-[#F53799] text-xs break-words">
+                      {forecastRun?.modelName || "Prophet (multiplicative weekly×8 + monthly + yearly + weather/holiday exog)"}
+                    </div>
+                  </div>
+
+                  {forecastRun && (
+                    <div className="grid grid-cols-2 gap-2 pt-0.5">
+                      <div className="bg-[#FFF7FB] p-2 rounded-xl border border-[#FFD9EC]/50 text-center">
+                        <span className="text-[10px] text-[#223047]/60 block font-medium">Holdout MASE</span>
+                        <span className="text-sm font-extrabold text-[#223047]">
+                          {formatFixed(forecastRun.mase, 2)}
+                        </span>
+                      </div>
+                      <div className="bg-[#FFF7FB] p-2 rounded-xl border border-[#FFD9EC]/50 text-center">
+                        <span className="text-[10px] text-[#223047]/60 block font-medium">Backtest Accuracy</span>
+                        <span className="text-sm font-extrabold text-emerald-600">
+                          {formatFixed(forecastRun.accuracy, 1)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {forecastRun?.isFallback && (
+                    <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px]">
+                      <strong>SMA fallback active:</strong> {forecastRun.rejectionReason || "selected model could not run"}
+                    </div>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Cafe demand prediction." />: <span className="font-semibold text-[#F53799]">{forecastRun?.modelName || "Waiting for uploaded Cafe history"}</span>
-              {forecastRun && <span className="hidden sm:inline"> (MASE: {formatFixed(forecastRun.mase, 2)}, Accuracy: {formatFixed(forecastRun.accuracy, 1)}%)</span>}
+              Multi-zone revenue projections and out-of-sample backtest evaluation
             </p>
-            {forecastRun?.isFallback && (
-              <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
-                SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
-              </Badge>
-            )}
           </div>
 
           <div className="flex items-center gap-2 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1.5">
@@ -1668,16 +1768,11 @@ export function Cafe() {
         {/* 1. DUAL-DINER CO-ATTACHMENT INDEX (5 cols) */}
         <div className="lg:col-span-5 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 flex flex-col justify-between space-y-4">
           <div>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg md:text-xl font-bold text-[#223047]">
-                  Human vs. Pet Co-Attachment
-                </h2>
-                <InfoTooltip label="Cross-Species Basket Analysis: Measures how frequently pet parents purchase food for both themselves and their pets in a single ticket, and tracks AOV lift." />
-              </div>
-              <Badge className="bg-[#F53799] text-white hover:bg-[#F53799] px-2 py-0.5 text-[11px]">
-                +{coAttachmentData?.aovLiftPercent ?? 7}% AOV Lift
-              </Badge>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl font-bold text-[#223047]">
+                Human vs. Pet Co-Attachment
+              </h2>
+              <InfoTooltip label="Cross-Species Basket Analysis: Measures how frequently pet parents purchase food for both themselves and their pets in a single ticket, and tracks AOV lift." />
             </div>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
               Basket composition: Dual-Diner vs Solo Human vs Solo Pet dining
@@ -1707,7 +1802,7 @@ export function Cafe() {
                     <div className="flex justify-between gap-1">
                       <span className="text-[10px] text-[#223047]/50">Share</span>
                       <span className="font-extrabold" style={{ color: donutSegments[hoveredDonutIndex].color }}>
-                        {donutSegments[hoveredDonutIndex].share}%
+                        {Number(donutSegments[hoveredDonutIndex].share || 0).toFixed(1)}%
                       </span>
                     </div>
                     <div className="flex justify-between gap-1">
@@ -1724,7 +1819,9 @@ export function Cafe() {
                     </div>
                     <div className="flex justify-between gap-1 pt-1 border-t border-[#FFD9EC]">
                       <span className="text-[10px] text-[#223047]/50">AOV</span>
-                      <span className="font-extrabold text-[#F53799]">₱{donutSegments[hoveredDonutIndex].aov}</span>
+                      <span className="font-extrabold text-[#F53799]">
+                        ₱{Number(donutSegments[hoveredDonutIndex].aov || 0).toLocaleString()}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1779,8 +1876,8 @@ export function Cafe() {
                 }}
               >
                 {hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex]
-                  ? `${donutSegments[hoveredDonutIndex].share}%`
-                  : `${coAttachmentData?.coAttachmentRate ?? 22.8}%`}
+                  ? `${Number(donutSegments[hoveredDonutIndex].share || 0).toFixed(1)}%`
+                  : `${Number(coAttachmentData?.coAttachmentRate ?? donutSegments[0]?.share ?? 0).toFixed(1)}%`}
               </span>
               <span
                 className="text-[10px] font-bold mt-1 leading-tight text-center max-w-[80px] transition-colors duration-200"
@@ -1797,7 +1894,7 @@ export function Cafe() {
               <span className="text-[9px] font-semibold text-[#223047] opacity-60 mt-0.5 text-center">
                 {hoveredDonutIndex !== null && donutSegments[hoveredDonutIndex]
                   ? `${Number(donutSegments[hoveredDonutIndex].baskets || 0).toLocaleString()} orders`
-                  : `${Number(coAttachmentData?.segments?.[0]?.baskets || 8100).toLocaleString()} dual`}
+                  : `${Number(coAttachmentData?.segments?.[0]?.baskets || donutSegments[0]?.baskets || 0).toLocaleString()} dual`}
               </span>
             </div>
           </div>
@@ -1820,9 +1917,9 @@ export function Cafe() {
                   <span className="font-semibold text-[#223047] truncate">{seg.name}</span>
                 </div>
                 <div className="flex items-center gap-2.5 flex-shrink-0">
-                  <span className="font-extrabold text-[#223047]">{seg.share}%</span>
+                  <span className="font-extrabold text-[#223047]">{Number(seg.share || 0).toFixed(1)}%</span>
                   <span className="text-[11px] font-bold text-[#223047] bg-white px-2 py-0.5 rounded-md border border-[#FFD9EC] shadow-xs">
-                    ₱{seg.aov} AOV
+                    ₱{Number(seg.aov || 0).toLocaleString()} AOV
                   </span>
                 </div>
               </div>
@@ -1841,7 +1938,7 @@ export function Cafe() {
                 <InfoTooltip label="Category Management: Aggregates Cafe sales across beverage, food, and pet bakery categories to evaluate high-level product line performance." />
               </div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-2 py-0.5 text-[11px]">
-                {cafeCategoryRevenueData.length || 5} Categories
+                {cafeCategoryRevenueData.length} Categories
               </Badge>
             </div>
             <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
@@ -1892,6 +1989,7 @@ export function Cafe() {
                     name="Category Revenue"
                     fill="#F53799"
                     radius={[0, 6, 6, 0]}
+                    minPointSize={6}
                     animationDuration={800}
                   />
                 </BarChart>

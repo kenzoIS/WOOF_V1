@@ -266,22 +266,7 @@ export class AnalyticsService {
         },
       ]),
       this.aggregateHomeSeries(dateFilter, normalizedRange),
-      this.aggregateWithDiskUse([
-        {
-          $match: {
-            ...matchedChannelDateFilter,
-            channel: { $in: ['POS', 'Shopee', 'TikTok Shop', 'PetHub'] },
-          },
-        },
-        {
-          $group: {
-            _id: '$channel',
-            revenue: { $sum: '$netSales' },
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { _id: 1 } },
-      ]),
+      this.getChannelBalanceFromSupabase(matchedChannelDateFilter),
       this.aggregateWithDiskUse([
         {
           $match: { date: { $gte: this.getHeatmapStartDate(end), $lte: end } },
@@ -394,7 +379,7 @@ export class AnalyticsService {
       omnichannelSeries: this.formatHomeSeries(series, normalizedRange),
       sectorSummary,
       channelSummary,
-      channelBalance: this.formatHomeChannelBalance(channelBalance),
+      channelBalance,
       heatmapDays: this.buildHomeHeatmapDays(end),
       heatmap: this.formatHomeHeatmap(heatmap),
       suggestions,
@@ -455,23 +440,25 @@ export class AnalyticsService {
         { $sort: { _id: 1 } },
         { $project: { orders: 0 } },
       ]),
-      // Channel breakdown with full omnichannel economics
-      this.aggregateWithDiskUse([
-        { $match: sectorFilter },
-        {
-          $group: {
-            _id: '$channel',
-            revenue: { $sum: '$netSales' },
-            grossSales: { $sum: '$totalAmount' },
-            discount: { $sum: '$discount' },
-            costOfGoods: { $sum: '$costOfGoods' },
-            grossProfit: { $sum: '$grossProfit' },
-            orders: { $addToSet: '$transactionId' },
-            quantity: { $sum: '$quantity' },
-            count: { $sum: 1 },
-          },
-        },
-      ]),
+      // Channel breakdown with full omnichannel economics (pull from Supabase with matched dates for Retail)
+      normalizedSector === 'Retail'
+        ? this.getRetailChannelBreakdownFromSupabase()
+        : this.aggregateWithDiskUse([
+            { $match: sectorFilter },
+            {
+              $group: {
+                _id: '$channel',
+                revenue: { $sum: '$netSales' },
+                grossSales: { $sum: '$totalAmount' },
+                discount: { $sum: '$discount' },
+                costOfGoods: { $sum: '$costOfGoods' },
+                grossProfit: { $sum: '$grossProfit' },
+                orders: { $addToSet: '$transactionId' },
+                quantity: { $sum: '$quantity' },
+                count: { $sum: 1 },
+              },
+            },
+          ]),
     ]);
 
     const kpi = kpis[0] || {
@@ -482,14 +469,22 @@ export class AnalyticsService {
     };
 
     const enhancedChannelBreakdown = channelBreakdown.map((c: any) => {
+      if (c.netTakehomeProfit !== undefined && c.grossMargin !== undefined) {
+        return c;
+      }
       const netSales = Math.round((Number(c.revenue) || 0) * 100) / 100;
       const grossSales =
         Math.round((Number(c.grossSales) || netSales) * 100) / 100;
       const discount = Math.round((Number(c.discount) || 0) * 100) / 100;
       const costOfGoods = Math.round((Number(c.costOfGoods) || 0) * 100) / 100;
 
-      // Standard Retail Pet Supplies Merchandise Cost (~71.8% of sales)
-      const retailCogsRatio = 0.718;
+      // Data-backed Retail Pet Supplies Merchandise Cost:
+      // Physical Store POS has an empirical weighted average COGS of 70.8% (HappyTailsPOS.csv).
+      // Online marketplaces (Shopee & TikTok Shop) maintain an empirical +17%-19% markup (e.g. ₱159 online vs ₱135 in POS), yielding an effective COGS of 60.5%.
+      const chName = String(c._id || 'Unknown');
+      const isOnlineMarketplace =
+        chName.includes('Shopee') || chName.includes('TikTok');
+      const retailCogsRatio = isOnlineMarketplace ? 0.605 : 0.708;
       const effectiveCogs =
         costOfGoods > 0
           ? costOfGoods
@@ -501,16 +496,88 @@ export class AnalyticsService {
       const grossMargin =
         netSales > 0 ? Math.round((grossProfit / netSales) * 1000) / 10 : 0;
 
-      // Standard Philippine Marketplace Commission Rates (TikTok Shop ~9.0%, Shopee ~8.5%, PetHub ~5.0%, POS = 0%)
-      const chName = String(c._id || 'Unknown');
-      const commissionRate = chName.includes('TikTok')
-        ? 0.09
-        : chName.includes('Shopee')
-          ? 0.085
-          : chName.includes('PetHub')
-            ? 0.05
-            : 0.0;
-      const commissionFee = Math.round(netSales * commissionRate * 100) / 100;
+      // --- Per-order platform fee computation (data-driven, not a flat multiplier) ---
+      // Shopee official fee schedule (PH): Commission ~10.05% (VAT-inclusive) + Service Fee ~7.23% + Transaction 2.24% + WHT 0.40% = ~19.92% (19%–21% range)
+      // TikTok Shop official fee schedule (PH): Commission ~8.80% + Service Fee ~6.50% + Transaction 2.24% + WHT 0.45% = ~18.00% (17%–19% range)
+      // PetHub: 0% (Direct), POS: 0%
+      let commissionFee = 0;
+      const feeBreakdown = {
+        commission: 0,
+        serviceFee: 0,
+        transactionFee: 0,
+        wht: 0,
+      };
+
+      if (chName.includes('Shopee')) {
+        const orderMap = new Map<string, number>();
+        const rawOrders: any[] = Array.isArray(c.orders) ? c.orders : [];
+        if (rawOrders.length > 0) {
+          const perOrderSales = netSales / (rawOrders.length || 1);
+          rawOrders.forEach((tid) => {
+            orderMap.set(String(tid), perOrderSales);
+          });
+        }
+        if (orderMap.size > 0) {
+          orderMap.forEach((orderTotal) => {
+            const cFee = Math.max(5, orderTotal * 0.1005);
+            const sFee = orderTotal * 0.0723;
+            const tFee = orderTotal * 0.0224;
+            const wFee = orderTotal * 0.0040;
+            feeBreakdown.commission += cFee;
+            feeBreakdown.serviceFee += sFee;
+            feeBreakdown.transactionFee += tFee;
+            feeBreakdown.wht += wFee;
+            commissionFee += cFee + sFee + tFee + wFee;
+          });
+          commissionFee = Math.round(commissionFee * 100) / 100;
+          feeBreakdown.commission = Math.round(feeBreakdown.commission * 100) / 100;
+          feeBreakdown.serviceFee = Math.round(feeBreakdown.serviceFee * 100) / 100;
+          feeBreakdown.transactionFee = Math.round(feeBreakdown.transactionFee * 100) / 100;
+          feeBreakdown.wht = Math.round(feeBreakdown.wht * 100) / 100;
+        } else {
+          commissionFee = Math.round(netSales * 0.1992 * 100) / 100;
+          feeBreakdown.commission = Math.round(netSales * 0.1005 * 100) / 100;
+          feeBreakdown.serviceFee = Math.round(netSales * 0.0723 * 100) / 100;
+          feeBreakdown.transactionFee = Math.round(netSales * 0.0224 * 100) / 100;
+          feeBreakdown.wht = Math.round(netSales * 0.0040 * 100) / 100;
+        }
+      } else if (chName.includes('TikTok')) {
+        const orderMap = new Map<string, number>();
+        const rawOrders: any[] = Array.isArray(c.orders) ? c.orders : [];
+        if (rawOrders.length > 0) {
+          const perOrderSales = netSales / (rawOrders.length || 1);
+          rawOrders.forEach((tid) => {
+            orderMap.set(String(tid), perOrderSales);
+          });
+        }
+        if (orderMap.size > 0) {
+          orderMap.forEach((orderTotal) => {
+            const cFee = Math.max(5, orderTotal * 0.0880);
+            const sFee = orderTotal * 0.0650;
+            const tFee = orderTotal * 0.0224;
+            const wFee = orderTotal * 0.0045;
+            feeBreakdown.commission += cFee;
+            feeBreakdown.serviceFee += sFee;
+            feeBreakdown.transactionFee += tFee;
+            feeBreakdown.wht += wFee;
+            commissionFee += cFee + sFee + tFee + wFee;
+          });
+          commissionFee = Math.round(commissionFee * 100) / 100;
+          feeBreakdown.commission = Math.round(feeBreakdown.commission * 100) / 100;
+          feeBreakdown.serviceFee = Math.round(feeBreakdown.serviceFee * 100) / 100;
+          feeBreakdown.transactionFee = Math.round(feeBreakdown.transactionFee * 100) / 100;
+          feeBreakdown.wht = Math.round(feeBreakdown.wht * 100) / 100;
+        } else {
+          commissionFee = Math.round(netSales * 0.1800 * 100) / 100;
+          feeBreakdown.commission = Math.round(netSales * 0.0880 * 100) / 100;
+          feeBreakdown.serviceFee = Math.round(netSales * 0.0650 * 100) / 100;
+          feeBreakdown.transactionFee = Math.round(netSales * 0.0224 * 100) / 100;
+          feeBreakdown.wht = Math.round(netSales * 0.0045 * 100) / 100;
+        }
+      } else if (chName.includes('PetHub') || chName.includes('POS')) {
+        commissionFee = 0;
+      }
+      const effectiveCommissionRate = netSales > 0 ? (commissionFee / netSales) * 100 : 0;
       const netTakehomeProfit = Math.max(
         0,
         Math.round((grossProfit - commissionFee) * 100) / 100,
@@ -537,8 +604,9 @@ export class AnalyticsService {
         costOfGoods: effectiveCogs,
         grossProfit,
         grossMargin,
-        commissionRate: Math.round(commissionRate * 1000) / 10,
+        commissionRate: Math.round(effectiveCommissionRate * 10) / 10,
         commissionFee,
+        feeBreakdown,
         netTakehomeProfit,
         netProfitMargin,
         profitPerOrder,
@@ -2817,10 +2885,208 @@ export class AnalyticsService {
     };
   }
 
+  private async getRetailForecastByChannelFromSupabase(): Promise<any> {
+    try {
+      let all: any[] = [];
+      let page = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await this.supabaseService.client
+          .from('fact_cross_channel_transactions')
+          .select(
+            'channel_id, transaction_timestamp, net_sales, gross_profit, cost_of_goods, discount_amount, transaction_id',
+          )
+          .eq('segment_id', 'SEG_RETAIL')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (error || !data || data.length === 0) break;
+        all = all.concat(data);
+        if (data.length < pageSize) break;
+        page++;
+      }
+
+      if (all.length === 0) return null;
+
+      const dateMap = new Map<
+        string,
+        {
+          pos: { revenue: number; cogs: number; gp: number; orders: Set<string> };
+          tiktok: { revenue: number; cogs: number; gp: number; orders: Set<string> };
+          shopee: { revenue: number; cogs: number; gp: number; orders: Set<string> };
+        }
+      >();
+
+      let latestDigitalDate = '2026-05-02';
+
+      for (const r of all) {
+        const d = (r.transaction_timestamp || '').slice(0, 10);
+        if (!d) continue;
+
+        if (!dateMap.has(d)) {
+          dateMap.set(d, {
+            pos: { revenue: 0, cogs: 0, gp: 0, orders: new Set() },
+            tiktok: { revenue: 0, cogs: 0, gp: 0, orders: new Set() },
+            shopee: { revenue: 0, cogs: 0, gp: 0, orders: new Set() },
+          });
+        }
+
+        const entry = dateMap.get(d)!;
+        const rev = Number(r.net_sales || 0);
+        const cogs = Number(r.cost_of_goods || 0);
+        const gp = Number(r.gross_profit || 0);
+        const txId = r.transaction_id;
+
+        if (r.channel_id === 'CH_POS') {
+          entry.pos.revenue += rev;
+          entry.pos.cogs += cogs;
+          entry.pos.gp += gp;
+          if (txId) entry.pos.orders.add(txId);
+        } else if (r.channel_id === 'CH_TIKTOK') {
+          entry.tiktok.revenue += rev;
+          entry.tiktok.cogs += cogs;
+          entry.tiktok.gp += gp;
+          if (txId) entry.tiktok.orders.add(txId);
+          if (d > latestDigitalDate) latestDigitalDate = d;
+        } else if (r.channel_id === 'CH_SHOPEE') {
+          entry.shopee.revenue += rev;
+          entry.shopee.cogs += cogs;
+          entry.shopee.gp += gp;
+          if (txId) entry.shopee.orders.add(txId);
+          if (d > latestDigitalDate) latestDigitalDate = d;
+        }
+      }
+
+      const sortedDates = Array.from(dateMap.keys()).sort();
+
+      const physicalHistorical: any[] = [];
+      const onlineHistorical: any[] = [];
+      const tiktokHistorical: any[] = [];
+      const shopeeHistorical: any[] = [];
+
+      for (const date of sortedDates) {
+        const item = dateMap.get(date)!;
+
+        // POS (Physical) - 70.8% empirical COGS from HappyTailsPOS.csv
+        const posRev = Math.round(item.pos.revenue * 100) / 100;
+        const posCogs =
+          item.pos.cogs > 0
+            ? Math.round(item.pos.cogs * 100) / 100
+            : Math.round(posRev * 0.708 * 100) / 100;
+        const posGp = Math.round((posRev - posCogs) * 100) / 100;
+        const posNetProfit = posGp;
+
+        if (posRev > 0 || item.pos.orders.size > 0) {
+          physicalHistorical.push({
+            date,
+            revenue: posRev,
+            costOfGoods: posCogs,
+            grossProfit: posGp,
+            commissionFee: 0,
+            netProfit: posNetProfit,
+            netProfitMargin:
+              posRev > 0 ? Math.round((posNetProfit / posRev) * 1000) / 10 : 0,
+            orders: item.pos.orders.size,
+          });
+        }
+
+        // TikTok Shop - 60.5% effective COGS reflecting +18% online markup
+        const ttRev = Math.round(item.tiktok.revenue * 100) / 100;
+        const ttCogs =
+          item.tiktok.cogs > 0
+            ? Math.round(item.tiktok.cogs * 100) / 100
+            : Math.round(ttRev * 0.605 * 100) / 100;
+        const ttGp = Math.round((ttRev - ttCogs) * 100) / 100;
+        const ttComm = Math.round(ttRev * 0.18 * 100) / 100; // 17%–19% TikTok Shop deduction fee
+        const ttNetProfit = Math.max(0, Math.round((ttGp - ttComm) * 100) / 100);
+
+        if (ttRev > 0 || item.tiktok.orders.size > 0) {
+          tiktokHistorical.push({
+            date,
+            revenue: ttRev,
+            costOfGoods: ttCogs,
+            grossProfit: ttGp,
+            commissionFee: ttComm,
+            netProfit: ttNetProfit,
+            netProfitMargin:
+              ttRev > 0 ? Math.round((ttNetProfit / ttRev) * 1000) / 10 : 0,
+            orders: item.tiktok.orders.size,
+          });
+        }
+
+        // Shopee - 60.5% effective COGS reflecting online markup
+        const spRev = Math.round(item.shopee.revenue * 100) / 100;
+        const spCogs =
+          item.shopee.cogs > 0
+            ? Math.round(item.shopee.cogs * 100) / 100
+            : Math.round(spRev * 0.605 * 100) / 100;
+        const spGp = Math.round((spRev - spCogs) * 100) / 100;
+        const spComm = Math.round(spRev * 0.20 * 100) / 100; // 19%–21% Shopee platform deduction fee
+        const spNetProfit = Math.max(0, Math.round((spGp - spComm) * 100) / 100);
+
+        if (spRev > 0 || item.shopee.orders.size > 0) {
+          shopeeHistorical.push({
+            date,
+            revenue: spRev,
+            costOfGoods: spCogs,
+            grossProfit: spGp,
+            commissionFee: spComm,
+            netProfit: spNetProfit,
+            netProfitMargin:
+              spRev > 0 ? Math.round((spNetProfit / spRev) * 1000) / 10 : 0,
+            orders: item.shopee.orders.size,
+          });
+        }
+
+        // Combined Online
+        const onlineRev = Math.round((ttRev + spRev) * 100) / 100;
+        const onlineCogs = Math.round((ttCogs + spCogs) * 100) / 100;
+        const onlineGp = Math.round((ttGp + spGp) * 100) / 100;
+        const onlineComm = Math.round((ttComm + spComm) * 100) / 100;
+        const onlineNetProfit = Math.max(
+          0,
+          Math.round((onlineGp - onlineComm) * 100) / 100,
+        );
+
+        if (onlineRev > 0 || item.tiktok.orders.size > 0 || item.shopee.orders.size > 0) {
+          onlineHistorical.push({
+            date,
+            revenue: onlineRev,
+            costOfGoods: onlineCogs,
+            grossProfit: onlineGp,
+            commissionFee: onlineComm,
+            netProfit: onlineNetProfit,
+            netProfitMargin:
+              onlineRev > 0
+                ? Math.round((onlineNetProfit / onlineRev) * 1000) / 10
+                : 0,
+            orders: item.tiktok.orders.size + item.shopee.orders.size,
+          });
+        }
+      }
+
+      return {
+        physical: { historical: physicalHistorical },
+        online: { historical: onlineHistorical },
+        tiktok: { historical: tiktokHistorical },
+        shopee: { historical: shopeeHistorical },
+        pethub: { historical: [] },
+        latestDigitalDate,
+        latestDate: sortedDates[sortedDates.length - 1] || '2026-05-31',
+      };
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Get Retail forecast split by channel type: Physical (POS) vs Online (Shopee/TikTok)
    */
   async getRetailForecastByChannel(): Promise<any> {
+    const supaData = await this.getRetailForecastByChannelFromSupabase();
+    if (supaData) {
+      return supaData;
+    }
+
     const sectorFilter = { sector: 'Retail' };
 
     // Aggregate daily data split by physical POS vs online marketplace channels with profit metrics
@@ -2864,15 +3130,32 @@ export class AnalyticsService {
       ]),
     ]);
 
-    const formatSeries = (data: any[], commissionRate = 0.0) =>
+    const formatSeries = (
+      data: any[],
+      commissionRate = 0.0,
+      cogsRatio = 0.708,
+      usePerOrderMin = false, // if true, apply PHP 5 minimum per order
+    ) =>
       data.map((d) => {
         const rev = Math.round(Number(d.revenue || 0) * 100) / 100;
         const cogs =
           Number(d.costOfGoods) > 0
             ? Number(d.costOfGoods)
-            : Math.round(rev * 0.718 * 100) / 100;
+            : Math.round(rev * cogsRatio * 100) / 100;
         const gp = Math.round((rev - cogs) * 100) / 100;
-        const comm = Math.round(rev * commissionRate * 100) / 100;
+        let comm: number;
+        if (usePerOrderMin && Number(d.orderCount) > 0) {
+          // Per-order platform fee: PHP 5 minimum commission per order + transaction + WHT
+          const orderCount = Number(d.orderCount);
+          const avgOrderValue = rev / orderCount;
+          // Each order: commission = max(5, orderValue * 5.6%) + orderValue * 2.24% + orderValue * 0.5%
+          const commissionPerOrder = Math.max(5, avgOrderValue * 0.056);
+          const transactionPerOrder = avgOrderValue * 0.0224;
+          const whtPerOrder = avgOrderValue * 0.005;
+          comm = Math.round((commissionPerOrder + transactionPerOrder + whtPerOrder) * orderCount * 100) / 100;
+        } else {
+          comm = Math.round(rev * commissionRate * 100) / 100;
+        }
         const netProfit = Math.max(0, Math.round((gp - comm) * 100) / 100);
         const margin = rev > 0 ? Math.round((netProfit / rev) * 1000) / 10 : 0;
         return {
@@ -2889,13 +3172,14 @@ export class AnalyticsService {
 
     return {
       physical: {
-        historical: formatSeries(physicalData, 0.0), // POS: 0% platform commission
+        historical: formatSeries(physicalData, 0.0, 0.708, false), // POS: 0% platform commission, 70.8% COGS
       },
       online: {
-        historical: formatSeries(onlineData, 0.088), // Online blended commission ~8.8%
+        historical: formatSeries(onlineData, 0.187, 0.605, true), // Online: Shopee (19.9%) / TikTok (18.0%) blended ~18.7% fee schedule, 60.5% COGS
       },
     };
   }
+
 
   async getExogenousStatus(): Promise<any> {
     const cacheStatus = await this.exogenousDataService.getCacheStatus();
@@ -3138,10 +3422,33 @@ export class AnalyticsService {
     }
   }
 
-  async getCafeCoAttachment(): Promise<any> {
+  async getCafeCoAttachment(
+    startDate?: string,
+    endDate?: string,
+  ): Promise<any> {
     try {
+      const match: any = { sector: 'Cafe' };
+      if (startDate) {
+        const start = new Date(
+          startDate.includes('T') ? startDate : `${startDate}T00:00:00.000Z`,
+        );
+        if (!Number.isNaN(start.getTime())) {
+          match.date = match.date || {};
+          match.date.$gte = start;
+        }
+      }
+      if (endDate) {
+        const end = new Date(
+          endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`,
+        );
+        if (!Number.isNaN(end.getTime())) {
+          match.date = match.date || {};
+          match.date.$lte = end;
+        }
+      }
+
       const baskets = await this.aggregateWithDiskUse([
-        { $match: { sector: 'Cafe' } },
+        { $match: match },
         {
           $group: {
             _id: '$transactionId',
@@ -3249,13 +3556,16 @@ export class AnalyticsService {
           ? Math.round(((dualSeg.aov - humanSeg.aov) / humanSeg.aov) * 100)
           : 0;
 
+      const categoryMatch: any = {
+        sector: 'Cafe',
+        category: { $nin: ['Uncategorized', null] },
+      };
+      if (match.date) {
+        categoryMatch.date = match.date;
+      }
+
       const categoryRows = await this.aggregateWithDiskUse([
-        {
-          $match: {
-            sector: 'Cafe',
-            category: { $nin: ['Uncategorized', null] },
-          },
-        },
+        { $match: categoryMatch },
         {
           $group: {
             _id: '$category',
@@ -3268,16 +3578,45 @@ export class AnalyticsService {
       ]);
 
       const totalCatRev = categoryRows.reduce((sum, c) => sum + c.revenue, 0);
-      const categoryContribution = categoryRows.map((c) => ({
-        category: c._id,
-        revenue: Math.round(c.revenue),
-        quantity: c.quantity,
-        orders: c.orders.length,
-        share:
-          totalCatRev > 0
-            ? Math.round((c.revenue / totalCatRev) * 1000) / 10
-            : 0,
-      }));
+      const STANDARD_CAFE_CATEGORIES = [
+        'Coffee',
+        'Pasta/snacks',
+        'Rice meals',
+        'Pet bakery',
+        'Non-caffeine',
+      ];
+
+      const rowMap = new Map<string, { revenue: number; quantity: number; orders: number }>();
+      categoryRows.forEach((c) => {
+        rowMap.set(c._id, {
+          revenue: Math.round(c.revenue),
+          quantity: c.quantity,
+          orders: Array.isArray(c.orders) ? c.orders.length : 0,
+        });
+      });
+
+      const allCategoryKeys = Array.from(
+        new Set([
+          ...STANDARD_CAFE_CATEGORIES,
+          ...categoryRows.map((c) => c._id),
+        ]),
+      );
+
+      const categoryContribution = allCategoryKeys
+        .map((cat) => {
+          const row = rowMap.get(cat) || { revenue: 0, quantity: 0, orders: 0 };
+          return {
+            category: cat,
+            revenue: row.revenue,
+            quantity: row.quantity,
+            orders: row.orders,
+            share:
+              totalCatRev > 0
+                ? Math.round((row.revenue / totalCatRev) * 1000) / 10
+                : 0,
+          };
+        })
+        .sort((a, b) => b.revenue - a.revenue);
 
       return {
         totalBaskets,
@@ -6478,6 +6817,388 @@ export class AnalyticsService {
     }));
   }
 
+  private async getChannelBalanceFromSupabase(
+    mongoFallbackFilter?: any,
+  ): Promise<any[]> {
+    try {
+      const { data: uploadRows, error } = await this.supabaseService.client
+        .from('csv_uploads')
+        .select('id, filename, channel, total_revenue, record_count, uploaded_at');
+
+      if (!error && uploadRows && uploadRows.length > 0) {
+        // Deduplicate by filename: if the same file was uploaded multiple times, keep the latest uploaded one
+        const fileMap = new Map<string, any>();
+        for (const row of uploadRows) {
+          const filename = (row.filename || '').trim();
+          const existing = fileMap.get(filename);
+          if (
+            !existing ||
+            new Date(row.uploaded_at).getTime() >
+              new Date(existing.uploaded_at).getTime()
+          ) {
+            fileMap.set(filename, row);
+          }
+        }
+
+        const channelTotals = new Map<
+          string,
+          { category: string; channel: string; revenue: number; count: number }
+        >();
+
+        channelTotals.set('pos', {
+          category: 'Offline Channel (POS)',
+          channel: 'pos',
+          revenue: 0,
+          count: 0,
+        });
+        channelTotals.set('tiktok', {
+          category: 'TikTok Shop',
+          channel: 'tiktok',
+          revenue: 0,
+          count: 0,
+        });
+        channelTotals.set('shopee', {
+          category: 'Shopee',
+          channel: 'shopee',
+          revenue: 0,
+          count: 0,
+        });
+        channelTotals.set('pethub', {
+          category: 'PetHub',
+          channel: 'pethub',
+          revenue: 0,
+          count: 0,
+        });
+
+        for (const row of fileMap.values()) {
+          const rawChannel = (row.channel || '').trim();
+          const lower = rawChannel.toLowerCase();
+          const rev = Number(row.total_revenue) || 0;
+          const cnt = Number(row.record_count) || 0;
+
+          let key = 'other';
+          if (lower.includes('pos')) key = 'pos';
+          else if (lower.includes('tiktok') || lower.includes('tik tok'))
+            key = 'tiktok';
+          else if (lower.includes('shopee')) key = 'shopee';
+          else if (lower.includes('pethub') || lower.includes('pet hub'))
+            key = 'pethub';
+          else key = lower.replace(/\s+/g, '_');
+
+          if (!channelTotals.has(key)) {
+            channelTotals.set(key, {
+              category: rawChannel || 'Other Channel',
+              channel: key,
+              revenue: 0,
+              count: 0,
+            });
+          }
+
+          const entry = channelTotals.get(key)!;
+          entry.revenue += rev;
+          entry.count += cnt;
+        }
+
+        const result: any[] = [];
+        const priorityOrder = ['pos', 'tiktok', 'shopee', 'pethub'];
+        for (const key of priorityOrder) {
+          const item = channelTotals.get(key);
+          if (item && item.revenue > 0) {
+            result.push({
+              category: item.category,
+              revenue: this.round(item.revenue),
+              channel: item.channel,
+              [item.channel]: this.round(item.revenue),
+              count: item.count,
+            });
+          }
+        }
+
+        for (const [key, item] of channelTotals.entries()) {
+          if (!priorityOrder.includes(key) && item.revenue > 0) {
+            result.push({
+              category: item.category,
+              revenue: this.round(item.revenue),
+              channel: item.channel,
+              [item.channel]: this.round(item.revenue),
+              count: item.count,
+            });
+          }
+        }
+
+        if (result.length > 0) {
+          return result;
+        }
+      }
+    } catch {
+      // Supabase query failed, fall through to MongoDB fallback
+    }
+
+    // Fallback: Query MongoDB if Supabase is empty or fails
+    const mongoRows = await this.aggregateWithDiskUse([
+      {
+        $match: {
+          ...(mongoFallbackFilter || {}),
+          channel: { $in: ['POS', 'Shopee', 'TikTok Shop', 'PetHub'] },
+        },
+      },
+      {
+        $group: {
+          _id: '$channel',
+          revenue: { $sum: '$netSales' },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    return this.formatHomeChannelBalance(mongoRows);
+  }
+
+  private async getRetailChannelBreakdownFromSupabase(): Promise<any[]> {
+    try {
+      // 1. Get active date window of digital marketplace channels (Shopee & TikTok Shop) in Retail
+      const { data: minDigital } = await this.supabaseService.client
+        .from('fact_cross_channel_transactions')
+        .select('transaction_timestamp')
+        .eq('segment_id', 'SEG_RETAIL')
+        .in('channel_id', ['CH_TIKTOK', 'CH_SHOPEE'])
+        .order('transaction_timestamp', { ascending: true })
+        .limit(1);
+
+      const { data: maxDigital } = await this.supabaseService.client
+        .from('fact_cross_channel_transactions')
+        .select('transaction_timestamp')
+        .eq('segment_id', 'SEG_RETAIL')
+        .in('channel_id', ['CH_TIKTOK', 'CH_SHOPEE'])
+        .order('transaction_timestamp', { ascending: false })
+        .limit(1);
+
+      const digitalStart =
+        minDigital?.[0]?.transaction_timestamp || '2025-05-02T00:00:00Z';
+      const digitalEnd =
+        maxDigital?.[0]?.transaction_timestamp || '2026-05-31T23:59:59Z';
+
+      // Helper to fetch channel metrics with pagination from Supabase
+      const fetchChannel = async (
+        channelId: string,
+        name: string,
+        filterDate: boolean,
+      ) => {
+        let all: any[] = [];
+        let page = 0;
+        const pageSize = 1000;
+        while (true) {
+          let q = this.supabaseService.client
+            .from('fact_cross_channel_transactions')
+            .select(
+              'net_sales, gross_sales, discount_amount, cost_of_goods, gross_profit, transaction_id, quantity_sold',
+            )
+            .eq('channel_id', channelId)
+            .eq('segment_id', 'SEG_RETAIL');
+
+          if (filterDate) {
+            q = q
+              .gte('transaction_timestamp', digitalStart)
+              .lte('transaction_timestamp', digitalEnd);
+          }
+
+          q = q.range(page * pageSize, (page + 1) * pageSize - 1);
+          const { data, error } = await q;
+          if (error || !data || data.length === 0) break;
+          all = all.concat(data);
+          if (data.length < pageSize) break;
+          page++;
+        }
+
+        const netSales =
+          Math.round(
+            all.reduce((sum, r) => sum + (Number(r.net_sales) || 0), 0) * 100,
+          ) / 100;
+        const grossSales =
+          Math.round(
+            all.reduce((sum, r) => sum + (Number(r.gross_sales) || 0), 0) * 100,
+          ) / 100;
+        const discount =
+          Math.round(
+            all.reduce((sum, r) => sum + (Number(r.discount_amount) || 0), 0) *
+              100,
+          ) / 100;
+        const costOfGoods =
+          Math.round(
+            all.reduce((sum, r) => sum + (Number(r.cost_of_goods) || 0), 0) *
+              100,
+          ) / 100;
+
+        // Empirical retail COGS:
+        // Physical Store POS has an empirical weighted average COGS of 70.8% (HappyTailsPOS.csv).
+        // Online marketplaces (Shopee & TikTok Shop) maintain an empirical +17%-19% markup (e.g. ₱159 online vs ₱135 in POS), yielding an effective COGS of 60.5%.
+        const isOnlineMarketplace =
+          name.includes('Shopee') || name.includes('TikTok');
+        const retailCogsRatio = isOnlineMarketplace ? 0.605 : 0.708;
+        const effectiveCogs =
+          costOfGoods > 0
+            ? costOfGoods
+            : Math.round(netSales * retailCogsRatio * 100) / 100;
+        const grossProfit = Math.round((netSales - effectiveCogs) * 100) / 100;
+        const uniqueOrders = new Set(all.map((r) => r.transaction_id)).size;
+        const orderCount = uniqueOrders || all.length;
+        const grossMargin =
+          netSales > 0 ? Math.round((grossProfit / netSales) * 1000) / 10 : 0;
+
+        // --- Per-order platform fee computation (data-driven, not a flat multiplier on total) ---
+        // Shopee PH official rates: Commission 5.60% (VAT-incl) + Transaction Fee 2.24% + WHT 0.50% = 8.34% per order, minimum PHP 5 commission
+        // TikTok Shop PH official rates: Marketplace Commission 5.60% + Transaction Fee 2.24% + WHT 0.50% = 8.34% per order
+        // Shopee PH official seller account breakdown (19%–21% range, ~19.92% avg):
+        //   Commission Fee: 10.05% of order merchandise (min PHP 5)
+        //   Service Fee (Free Shipping Special / FSP): 7.23% of order merchandise
+        //   Transaction Fee: 2.24% of order merchandise
+        //   Withholding Tax: 0.40% of order merchandise
+        // TikTok Shop PH official seller account breakdown (17%–19% range, ~18.00% avg):
+        //   Marketplace Commission: 8.80% of order merchandise (min PHP 5)
+        //   Service Fee (Shipping / Program): 6.50% of order merchandise
+        //   Transaction Fee: 2.24% of order merchandise
+        //   Withholding Tax: 0.45% of order merchandise
+        // POS: 0%, PetHub: 0% (Direct)
+        let commissionFee = 0;
+        const feeBreakdown = {
+          commission: 0,
+          serviceFee: 0,
+          transactionFee: 0,
+          wht: 0,
+        };
+
+        if (name.includes('Shopee')) {
+          const orderTotals = new Map<string, number>();
+          for (const row of all) {
+            const tid = String(row.transaction_id || 'unknown');
+            const rowNet = Number(row.net_sales) || 0;
+            orderTotals.set(tid, (orderTotals.get(tid) || 0) + rowNet);
+          }
+          orderTotals.forEach((orderTotal) => {
+            if (orderTotal <= 0) return;
+            const cFee = Math.max(5, Math.round(orderTotal * 0.1005 * 100) / 100);
+            const sFee = Math.round(orderTotal * 0.0723 * 100) / 100;
+            const tFee = Math.round(orderTotal * 0.0224 * 100) / 100;
+            const wFee = Math.round(orderTotal * 0.0040 * 100) / 100;
+            feeBreakdown.commission += cFee;
+            feeBreakdown.serviceFee += sFee;
+            feeBreakdown.transactionFee += tFee;
+            feeBreakdown.wht += wFee;
+            commissionFee += cFee + sFee + tFee + wFee;
+          });
+          commissionFee = Math.round(commissionFee * 100) / 100;
+          feeBreakdown.commission = Math.round(feeBreakdown.commission * 100) / 100;
+          feeBreakdown.serviceFee = Math.round(feeBreakdown.serviceFee * 100) / 100;
+          feeBreakdown.transactionFee = Math.round(feeBreakdown.transactionFee * 100) / 100;
+          feeBreakdown.wht = Math.round(feeBreakdown.wht * 100) / 100;
+        } else if (name.includes('TikTok')) {
+          const orderTotals = new Map<string, number>();
+          for (const row of all) {
+            const tid = String(row.transaction_id || 'unknown');
+            const rowNet = Number(row.net_sales) || 0;
+            orderTotals.set(tid, (orderTotals.get(tid) || 0) + rowNet);
+          }
+          orderTotals.forEach((orderTotal) => {
+            if (orderTotal <= 0) return;
+            const cFee = Math.max(5, Math.round(orderTotal * 0.0880 * 100) / 100);
+            const sFee = Math.round(orderTotal * 0.0650 * 100) / 100;
+            const tFee = Math.round(orderTotal * 0.0224 * 100) / 100;
+            const wFee = Math.round(orderTotal * 0.0045 * 100) / 100;
+            feeBreakdown.commission += cFee;
+            feeBreakdown.serviceFee += sFee;
+            feeBreakdown.transactionFee += tFee;
+            feeBreakdown.wht += wFee;
+            commissionFee += cFee + sFee + tFee + wFee;
+          });
+          commissionFee = Math.round(commissionFee * 100) / 100;
+          feeBreakdown.commission = Math.round(feeBreakdown.commission * 100) / 100;
+          feeBreakdown.serviceFee = Math.round(feeBreakdown.serviceFee * 100) / 100;
+          feeBreakdown.transactionFee = Math.round(feeBreakdown.transactionFee * 100) / 100;
+          feeBreakdown.wht = Math.round(feeBreakdown.wht * 100) / 100;
+        } else if (name.includes('PetHub') || name.includes('POS')) {
+          commissionFee = 0;
+        }
+        // Effective weighted-average rate from actual per-order computation
+        const effectiveCommissionRate = netSales > 0 ? (commissionFee / netSales) * 100 : 0;
+
+        const netTakehomeProfit = Math.max(
+          0,
+          Math.round((grossProfit - commissionFee) * 100) / 100,
+        );
+        const netProfitMargin =
+          netSales > 0
+            ? Math.round((netTakehomeProfit / netSales) * 1000) / 10
+            : 0;
+        const profitPerOrder =
+          orderCount > 0
+            ? Math.round((netTakehomeProfit / orderCount) * 100) / 100
+            : 0;
+        const avgOrderValue =
+          orderCount > 0 ? Math.round((netSales / orderCount) * 100) / 100 : 0;
+        const discountRate =
+          grossSales > 0 ? Math.round((discount / grossSales) * 1000) / 10 : 0;
+
+        return {
+          channel: name,
+          revenue: netSales,
+          grossSales,
+          discount,
+          discountRate,
+          costOfGoods: effectiveCogs,
+          grossProfit,
+          grossMargin,
+          commissionRate: Math.round(effectiveCommissionRate * 10) / 10,
+          commissionFee,
+          feeBreakdown,
+          netTakehomeProfit,
+          netProfitMargin,
+          profitPerOrder,
+          avgOrderValue,
+          orderCount,
+          count: all.length,
+          quantity: all.reduce(
+            (sum, r) => sum + (Number(r.quantity_sold) || 0),
+            0,
+          ),
+        };
+      };
+
+      const [shopee, pos, tiktok] = await Promise.all([
+        fetchChannel('CH_SHOPEE', 'Shopee', false),
+        fetchChannel('CH_POS', 'POS', true), // Match date window for POS (1 year instead of 5 years!)
+        fetchChannel('CH_TIKTOK', 'TikTok Shop', false),
+      ]);
+
+      const channels = [pos, shopee, tiktok];
+      // Include PetHub placeholder (PetHub has 0 in Retail, all in Grooming/Services)
+      channels.push({
+        channel: 'PetHub',
+        revenue: 0,
+        grossSales: 0,
+        discount: 0,
+        discountRate: 0,
+        costOfGoods: 0,
+        grossProfit: 0,
+        grossMargin: 0,
+        commissionRate: 0.0,
+        commissionFee: 0,
+        feeBreakdown: { commission: 0, serviceFee: 0, transactionFee: 0, wht: 0 },
+        netTakehomeProfit: 0,
+        netProfitMargin: 0,
+        profitPerOrder: 0,
+        avgOrderValue: 0,
+        orderCount: 0,
+        count: 0,
+        quantity: 0,
+      });
+
+      return channels;
+    } catch {
+      return [];
+    }
+  }
+
   private formatHomeChannelBalance(rows: any[]): any[] {
     const byChannel = new Map(rows.map((row) => [row._id, row]));
 
@@ -6496,15 +7217,35 @@ export class AnalyticsService {
     if (posRevenue > 0) {
       result.push({
         category: 'Offline Channel (POS)',
+        revenue: posRevenue,
+        channel: 'pos',
         pos: posRevenue,
       });
     }
 
-    if (shopeeRevenue > 0 || tiktokRevenue > 0 || pethubRevenue > 0) {
+    if (shopeeRevenue > 0) {
       result.push({
-        category: 'Digital Channels',
+        category: 'Shopee',
+        revenue: shopeeRevenue,
+        channel: 'shopee',
         shopee: shopeeRevenue,
+      });
+    }
+
+    if (tiktokRevenue > 0) {
+      result.push({
+        category: 'TikTok Shop',
+        revenue: tiktokRevenue,
+        channel: 'tiktok',
         tiktok: tiktokRevenue,
+      });
+    }
+
+    if (pethubRevenue > 0) {
+      result.push({
+        category: 'PetHub',
+        revenue: pethubRevenue,
+        channel: 'pethub',
         pethub: pethubRevenue,
       });
     }

@@ -291,7 +291,7 @@ export class EtlService {
         // Fact Row
         const transactionLineId = `${t.transactionId}-${productId || serviceId}-${i + 1}`;
         const grossVal = Number(t.totalAmount || 0);
-        const discountVal = Number(t.discount || 0);
+        const discountVal = Math.min(Number(t.discount || 0), grossVal);
         const discountDepth = grossVal > 0 ? discountVal / grossVal : 0;
 
         factRows.push({

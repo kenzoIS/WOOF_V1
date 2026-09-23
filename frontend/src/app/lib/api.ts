@@ -665,8 +665,12 @@ export async function getExogenousStatus() {
   return fetchApi('/analytics/exogenous/status');
 }
 
-export async function getCafeCoAttachment() {
-  return fetchApi('/analytics/cafe/co-attachment');
+export async function getCafeCoAttachment(startDate?: string, endDate?: string) {
+  const params = new URLSearchParams();
+  if (startDate) params.set('startDate', startDate);
+  if (endDate) params.set('endDate', endDate);
+  const qs = params.toString();
+  return fetchApi(`/analytics/cafe/co-attachment${qs ? `?${qs}` : ''}`);
 }
 
 export async function getActivationRecommendations() {
