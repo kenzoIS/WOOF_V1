@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-// [MONGO_DISABLED] import { MongooseModule } from '@nestjs/mongoose';
+import { MongooseModule } from '@nestjs/mongoose';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { SupabaseModule } from '../common/supabase/supabase.module';
 import { RealtimeModule } from '../realtime/realtime.module';
@@ -15,9 +15,9 @@ import {
     AnalyticsModule,
     SupabaseModule,
     RealtimeModule,
-    // [MONGO_DISABLED] MongooseModule.forFeature([
-    // [MONGO_DISABLED] { name: CampaignActivation.name, schema: CampaignActivationSchema },
-    // [MONGO_DISABLED] ]),
+    MongooseModule.forFeature([
+      { name: CampaignActivation.name, schema: CampaignActivationSchema },
+    ]),
   ],
   controllers: [ActivationController],
   providers: [ActivationService],
