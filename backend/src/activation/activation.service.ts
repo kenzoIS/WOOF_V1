@@ -1,9 +1,7 @@
-import {
-  BadRequestException,
+import { BadRequestException,
   BadGatewayException,
   Injectable,
-  Logger,
-} from '@nestjs/common';
+  Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import axios from 'axios';
 import { Model } from 'mongoose';
@@ -65,6 +63,7 @@ export class ActivationService {
     private readonly supabaseService: SupabaseService,
     private readonly realtimeService: RealtimeService,
     private readonly auditService: AuditService,
+    @Optional()
     @InjectModel(CampaignActivation.name)
     private readonly campaignModel: Model<CampaignActivationDocument>,
   ) {}

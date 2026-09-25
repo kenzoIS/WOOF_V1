@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -150,6 +150,7 @@ export class AnalyticsService {
   private readonly backgroundForecastRefreshes = new Set<string>();
 
   constructor(
+    @Optional()
     @InjectModel(Transaction.name)
     private transactionModel: Model<TransactionDocument>,
     private supabaseService: SupabaseService,
@@ -735,6 +736,20 @@ export class AnalyticsService {
     return {
       serverNow: new Date().toISOString(),
       channels: channels.map((channel) => {
+        if (channel === 'PetHub') {
+          return {
+            channel: 'PetHub',
+            label: 'PetHub',
+            connected: false,
+            status: 'omitted',
+            connectionMode: 'disabled',
+            rowCount: 0,
+            uploadCount: 0,
+            latestTransactionAt: null,
+            latestUploadAt: null,
+            message: 'PetHub data ingestion is currently omitted.',
+          };
+        }
         const transaction = byTransactionChannel.get(channel) || {};
         const upload = byUploadChannel.get(channel) || {};
         const rowCount = Number(transaction.rows) || 0;

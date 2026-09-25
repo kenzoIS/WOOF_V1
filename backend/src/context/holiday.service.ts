@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +15,7 @@ export class HolidayService {
   private readonly logger = new Logger(HolidayService.name);
 
   constructor(
+    @Optional()
     @InjectModel(HolidayCache.name)
     private holidayCacheModel: Model<HolidayCacheDocument>,
     private readonly httpService: HttpService,

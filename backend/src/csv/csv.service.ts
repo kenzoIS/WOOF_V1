@@ -1,9 +1,7 @@
-import {
-  BadRequestException,
+import { BadRequestException,
   Injectable,
   InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
+  Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { SupabaseService } from '../common/supabase/supabase.service';
@@ -93,14 +91,15 @@ export class CsvService {
 
   constructor(
     private supabaseService: SupabaseService,
+    @Optional()
     @InjectModel(Transaction.name)
     private transactionModel: Model<TransactionDocument>,
     private etlService: EtlService,
     private dataValidationService: DataValidationService,
     private analyticsService: AnalyticsService,
-    private awsService: AwsService,
-    private realtimeService: RealtimeService,
-    private auditService: AuditService,
+    @Optional() private awsService?: AwsService,
+    @Optional() private realtimeService?: RealtimeService,
+    @Optional() private auditService?: AuditService,
   ) {}
 
   async processUpload(
@@ -168,6 +167,47 @@ export class CsvService {
       transactions = transactions.map((t) => ({ ...t, sector: 'Retail' }));
     }
 
+    // Omit PetHub data per user configuration
+    transactions = transactions.filter(
+      (t) =>
+        t.channel !== 'PetHub' &&
+        (t as any).source !== 'PetHub' &&
+        !String(t.channel || '').toLowerCase().includes('pethub') &&
+        !String((t as any).source || '').toLowerCase().includes('pethub'),
+    );
+
+    if (transactions.length === 0 && channel === 'PetHub') {
+      this.logger.log(
+        `PetHub upload ${file.originalname} omitted per configuration.`,
+      );
+      const { data: uploadRows } = await this.supabaseService.client
+        .from('csv_uploads')
+        .insert({
+          filename: file.originalname,
+          channel: 'PetHub',
+          record_count: 0,
+          total_revenue: 0,
+          total_quantity: 0,
+          total_transactions: 0,
+          categories: [],
+          uploaded_at: new Date().toISOString(),
+        })
+        .select();
+
+      const upload =
+        uploadRows && uploadRows.length > 0
+          ? uploadRows[0]
+          : { id: 'omitted-pethub' };
+
+      return {
+        upload,
+        recordCount: 0,
+        cleanedCount: 0,
+        omitted: true,
+        message: 'PetHub transactions are currently omitted from ingestion.',
+      };
+    }
+
     // Create upload record
     const uniqueTransactionIds = new Set(
       transactions.map((t) => t.transactionId),
@@ -209,7 +249,7 @@ export class CsvService {
       );
     }
     const upload = uploadRows[0];
-    void this.auditService.record({
+    void this.auditService?.record({
       actor: 'Owner',
       actorType: 'user',
       action: 'Uploaded new data',
@@ -263,7 +303,7 @@ export class CsvService {
         .eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
-      this.realtimeService.emit({
+      this.realtimeService?.emit({
         type: 'upload_processed',
         title: 'Upload processed',
         message: `${cleanedTransactions.length} ${channel} records were saved to staging.`,
@@ -275,7 +315,7 @@ export class CsvService {
       });
 
       // Run ETL to Supabase in the background
-      this.realtimeService.emit({
+      this.realtimeService?.emit({
         type: 'etl_started',
         title: 'Warehouse sync started',
         message: `${channel} upload is syncing to Supabase warehouse.`,
@@ -287,7 +327,7 @@ export class CsvService {
           uploadId.toString(),
         )
         .then(() => {
-          this.realtimeService.emit({
+          this.realtimeService?.emit({
             type: 'etl_completed',
             title: 'Warehouse sync complete',
             message: `${channel} upload is ready in Supabase warehouse.`,
@@ -299,7 +339,7 @@ export class CsvService {
             'Background ETL process failed for upload ' + uploadId,
             err.stack,
           );
-          this.realtimeService.emit({
+          this.realtimeService?.emit({
             type: 'etl_failed',
             title: 'Warehouse sync failed',
             message: err instanceof Error ? err.message : String(err),
@@ -313,13 +353,13 @@ export class CsvService {
 
       // Archive raw CSV to AWS S3 Data Lake (fire-and-forget)
       this.awsService
-        .uploadRawArchive(
+        ?.uploadRawArchive(
           file.originalname,
           file.buffer,
           channel,
           uploadId.toString(),
         )
-        .catch((err) => {
+        ?.catch((err) => {
           this.logger.warn(
             `S3 raw archive failed for upload ${uploadId}: ${err}`,
           );
@@ -443,7 +483,7 @@ export class CsvService {
         .eq('id', uploadId);
 
       await this.insertTransactionsInChunks(cleanedTransactions);
-      this.realtimeService.emit({
+      this.realtimeService?.emit({
         type: 'upload_processed',
         title: 'Historical upload processed',
         message: `${cleanedTransactions.length} ${module} forecast records were saved to staging.`,
@@ -456,7 +496,7 @@ export class CsvService {
       });
 
       // Run ETL to Supabase in the background
-      this.realtimeService.emit({
+      this.realtimeService?.emit({
         type: 'etl_started',
         title: 'Historical warehouse sync started',
         message: `${module} historical upload is syncing to Supabase warehouse.`,
@@ -469,7 +509,7 @@ export class CsvService {
           uploadId.toString(),
         )
         .then(() => {
-          this.realtimeService.emit({
+          this.realtimeService?.emit({
             type: 'etl_completed',
             title: 'Historical warehouse sync complete',
             message: `${module} historical data is ready in Supabase warehouse.`,
@@ -482,7 +522,7 @@ export class CsvService {
             'Background ETL process failed for historical upload ' + uploadId,
             err.stack,
           );
-          this.realtimeService.emit({
+          this.realtimeService?.emit({
             type: 'etl_failed',
             title: 'Historical warehouse sync failed',
             message: err instanceof Error ? err.message : String(err),
@@ -556,7 +596,7 @@ export class CsvService {
     if (modules.length === 0) return;
 
     modules.forEach((module) => {
-      this.realtimeService.emit({
+      this.realtimeService?.emit({
         type: 'forecast_warmup_started',
         title: 'Forecast precompute started',
         message: `${module} forecast cache is being refreshed from the new upload.`,
@@ -584,7 +624,7 @@ export class CsvService {
                   : String(result.reason)
               }`,
             );
-            this.realtimeService.emit({
+            this.realtimeService?.emit({
               type: 'forecast_failed',
               title: 'Forecast precompute failed',
               message:
@@ -598,14 +638,14 @@ export class CsvService {
             this.logger.log(
               `Forecast cache warmed for ${module} after upload ${uploadId}.`,
             );
-            this.realtimeService.emit({
+            this.realtimeService?.emit({
               type: 'forecast_ready',
               title: 'Forecast ready',
               message: `${module} forecast has been precomputed and cached.`,
               module,
               uploadId,
             });
-            void this.auditService.record({
+            void this.auditService?.record({
               actor: 'System',
               actorType: 'system',
               action: 'Retrained forecasting system',

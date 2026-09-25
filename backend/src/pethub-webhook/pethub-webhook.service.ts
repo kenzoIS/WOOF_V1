@@ -1,9 +1,7 @@
-import {
-  BadRequestException,
+import { BadRequestException,
   Injectable,
   Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+  UnauthorizedException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -63,6 +61,7 @@ export class PetHubWebhookService {
     private readonly analyticsService: AnalyticsService,
     private readonly realtimeService: RealtimeService,
     private readonly awsService: AwsService,
+    @Optional()
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
   ) {}
@@ -71,69 +70,15 @@ export class PetHubWebhookService {
     this.assertWebhookSecret(incomingSecret);
     const body = this.validatePayload(payload);
 
-    const existing = await this.transactionModel
-      .exists({ channel: 'PetHub', transactionId: body.transactionId })
-      .exec();
-    if (existing) {
-      return {
-        success: true,
-        duplicate: true,
-        transactionId: body.transactionId,
-        message: 'PetHub transaction already exists in WOOF staging.',
-      };
-    }
-
-    const transactions = this.mapPayloadToTransactions(body);
-    const upload = await this.createUploadAuditRow(body, transactions);
-    const uploadId = String(upload.id);
-    const transactionsWithUploadId = transactions.map((transaction) => ({
-      ...transaction,
-      csvUploadId: uploadId,
-    }));
-
-    await this.transactionModel.insertMany(transactionsWithUploadId, {
-      ordered: false,
-    });
-
-    this.realtimeService.emit({
-      type: 'upload_processed',
-      title: 'PetHub transaction synced',
-      message: `${body.transactionId} was saved to WOOF staging.`,
-      uploadId,
-      data: {
-        channel: 'PetHub',
-        transactionId: body.transactionId,
-        recordCount: transactionsWithUploadId.length,
-      },
-    });
-
-    this.runBackgroundProcessing(
-      uploadId,
-      body.transactionId,
-      transactionsWithUploadId as Transaction[],
+    this.logger.log(
+      `PetHub webhook received for transaction ${body.transactionId}, but PetHub data ingestion is currently omitted.`,
     );
-
-    // Archive the raw webhook payload to S3
-    const buffer = Buffer.from(JSON.stringify(payload, null, 2), 'utf-8');
-    this.awsService
-      .uploadRawArchive(
-        `pethub_webhook_${body.transactionId}.json`,
-        buffer,
-        'PetHub',
-        uploadId,
-      )
-      .catch((err) => {
-        this.logger.warn(
-          `S3 raw archive failed for PetHub webhook ${uploadId}: ${err}`,
-        );
-      });
 
     return {
       success: true,
-      duplicate: false,
-      uploadId,
+      omitted: true,
       transactionId: body.transactionId,
-      records: transactionsWithUploadId.length,
+      message: 'PetHub data ingestion is currently omitted per system configuration.',
     };
   }
 

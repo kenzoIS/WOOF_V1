@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
+// [MONGO_DISABLED] import { MongooseModule } from '@nestjs/mongoose';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { CommonModule } from '../common/common.module';
 import { SupabaseModule } from '../common/supabase/supabase.module';
@@ -26,11 +26,11 @@ import { PetHubWebhookService } from './pethub-webhook.service';
     CommonModule,
     SupabaseModule,
     RealtimeModule,
-    MongooseModule.forFeature([
-      { name: Transaction.name, schema: TransactionSchema },
-      { name: HolidayCache.name, schema: HolidayCacheSchema },
-      { name: WeatherLog.name, schema: WeatherLogSchema },
-    ]),
+    // [MONGO_DISABLED] MongooseModule.forFeature([
+    // [MONGO_DISABLED] { name: Transaction.name, schema: TransactionSchema },
+    // [MONGO_DISABLED] { name: HolidayCache.name, schema: HolidayCacheSchema },
+    // [MONGO_DISABLED] { name: WeatherLog.name, schema: WeatherLogSchema },
+    // [MONGO_DISABLED] ]),
   ],
   controllers: [PetHubWebhookController],
   providers: [PetHubWebhookService, EtlService],

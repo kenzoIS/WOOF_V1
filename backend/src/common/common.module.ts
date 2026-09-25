@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
+// [MONGO_DISABLED] import { MongooseModule } from '@nestjs/mongoose';
 import { ExogenousDataService } from './exogenous-data.service';
 import {
   HolidayCache,
@@ -12,10 +12,10 @@ import {
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: WeatherCache.name, schema: WeatherCacheSchema },
-      { name: HolidayCache.name, schema: HolidayCacheSchema },
-    ]),
+    // [MONGO_DISABLED] MongooseModule.forFeature([
+    // [MONGO_DISABLED] { name: WeatherCache.name, schema: WeatherCacheSchema },
+    // [MONGO_DISABLED] { name: HolidayCache.name, schema: HolidayCacheSchema },
+    // [MONGO_DISABLED] ]),
   ],
   providers: [ExogenousDataService],
   exports: [ExogenousDataService],

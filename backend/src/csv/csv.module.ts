@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
+// [MONGO_DISABLED] import { MongooseModule } from '@nestjs/mongoose';
 import { CsvController } from './csv.controller';
 import { CsvService } from './csv.service';
 import { Transaction, TransactionSchema } from './schemas/transaction.schema';
@@ -12,9 +12,9 @@ import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: Transaction.name, schema: TransactionSchema },
-    ]),
+    // [MONGO_DISABLED] MongooseModule.forFeature([
+    // [MONGO_DISABLED] { name: Transaction.name, schema: TransactionSchema },
+    // [MONGO_DISABLED] ]),
     ContextModule,
     CommonModule,
     AnalyticsModule,
@@ -22,6 +22,6 @@ import { RealtimeModule } from '../realtime/realtime.module';
   ],
   controllers: [CsvController],
   providers: [CsvService, EtlService, DataValidationService],
-  exports: [CsvService, EtlService, MongooseModule, DataValidationService],
+  // [MONGO_DISABLED] exports: [CsvService, EtlService, MongooseModule, DataValidationService],
 })
 export class CsvModule {}

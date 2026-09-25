@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Cron } from '@nestjs/schedule';
 import { Model } from 'mongoose';
@@ -15,6 +15,7 @@ export class WeatherService {
   private readonly lon = 121.6167;
 
   constructor(
+    @Optional()
     @InjectModel(WeatherLog.name)
     private weatherLogModel: Model<WeatherLogDocument>,
     private readonly httpService: HttpService,

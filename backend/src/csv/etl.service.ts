@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -23,8 +23,10 @@ export class EtlService {
 
   constructor(
     private configService: ConfigService,
+    @Optional()
     @InjectModel(HolidayCache.name)
     private holidayCacheModel: Model<HolidayCacheDocument>,
+    @Optional()
     @InjectModel(WeatherLog.name)
     private weatherLogModel: Model<WeatherLogDocument>,
     private exogenousDataService: ExogenousDataService,
@@ -129,6 +131,20 @@ export class EtlService {
   // Main Processor (Bulk)
   // -----------------------------
   async processTransactions(transactions: Transaction[], uploadId?: string) {
+    // Omit PetHub transactions from ETL
+    transactions = (transactions || []).filter(
+      (t) =>
+        t.channel !== 'PetHub' &&
+        !String(t.channel || '').toLowerCase().includes('pethub'),
+    );
+
+    if (transactions.length === 0) {
+      this.logger.log(
+        'All transactions in ETL batch are PetHub and have been omitted from data warehouse.',
+      );
+      return;
+    }
+
     this.logger.log(
       `Starting bulk ETL to Supabase for ${transactions.length} transactions...`,
     );
