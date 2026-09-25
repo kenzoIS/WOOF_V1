@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { getDashboard, getForecast, getRetailForecastByChannel } from "../lib/api";
 import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
+import { InfoTooltip } from "../components/InfoTooltip";
 
 export function ExecutiveOverview() {
   const [cafeData, setCafeData] = useState<any>(null);
@@ -205,13 +206,11 @@ export function ExecutiveOverview() {
       <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
 
       {/* Page Header */}
-      <div>
+      <div className="flex items-center gap-2">
         <h1 className="text-2xl font-bold text-slate-900">
           Enterprise Health Monitor
         </h1>
-        <p className="text-sm text-slate-600 mt-1">
-          Comprehensive performance overview across all business sectors
-        </p>
+        <InfoTooltip label="Comprehensive performance overview across all business sectors." />
       </div>
 
       {(cafeData || servicesData || retailData) && (
@@ -250,7 +249,10 @@ export function ExecutiveOverview() {
                 <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#F53799]" />
               </div>
             </div>
-            <h3 className="text-sm text-slate-600 mb-1">{metric.title}</h3>
+            <div className="mb-1 flex items-center gap-2 text-sm text-slate-600">
+              <h3>{metric.title}</h3>
+              <InfoTooltip label={metric.subtitle} />
+            </div>
             {loading ? (
               <div className="h-9 bg-slate-200 rounded animate-pulse w-2/3 mb-2" />
             ) : (
@@ -258,7 +260,6 @@ export function ExecutiveOverview() {
                 {metric.value}
               </p>
             )}
-            <p className="text-xs text-slate-500">{metric.subtitle}</p>
           </div>
         ))}
       </div>
@@ -266,12 +267,12 @@ export function ExecutiveOverview() {
       {/* Revenue Contributions Area Chart */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
         <div className="mb-6">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Revenue Contributions by Sector
-          </h2>
-          <p className="text-sm text-slate-600 mt-1">
-            Historical performance by year from ingested transaction data
-          </p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Revenue Contributions by Sector
+            </h2>
+            <InfoTooltip label="Historical performance by year from ingested transaction data." />
+          </div>
         </div>
 
         <div className="h-80">
@@ -380,12 +381,12 @@ export function ExecutiveOverview() {
       {/* Top Services Table — live from dashboard/services */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
         <div className="mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Top Services by Revenue
-          </h2>
-          <p className="text-sm text-slate-600 mt-1">
-            Highest-performing service offerings from transaction history
-          </p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Top Services by Revenue
+            </h2>
+            <InfoTooltip label="Highest-performing service offerings from transaction history." />
+          </div>
         </div>
 
         <div className="overflow-hidden">

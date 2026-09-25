@@ -14,6 +14,7 @@ import {
   submitFeedbackRating,
   triggerModelRecalibration,
 } from "../lib/api";
+import { InfoTooltip } from "../components/InfoTooltip";
 
 export function Feedback() {
   const [promotions, setPromotions] = useState<FeedbackPromotion[]>([]);
@@ -353,12 +354,12 @@ export function Feedback() {
       {activePromotions.length > 0 && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Active Promotions
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Currently running promotions awaiting results
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Active Promotions
+              </h2>
+              <InfoTooltip label="Currently running promotions awaiting results." />
+            </div>
           </div>
 
           <div className="grid gap-3 md:gap-4">
@@ -409,12 +410,12 @@ export function Feedback() {
       {/* COMPLETED PROMOTIONS - FEEDBACK SECTION */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div>
-          <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-            Completed Promotions
-          </h2>
-          <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            Review performance and provide feedback to improve future recommendations
-          </p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Completed Promotions
+            </h2>
+            <InfoTooltip label="Review performance and provide feedback to improve future recommendations." />
+          </div>
         </div>
 
         {loading ? (

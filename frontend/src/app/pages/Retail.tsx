@@ -753,12 +753,12 @@ export function Retail() {
       {/* PAGE HEADER */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-3 md:gap-4">
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
-            Retail Intelligence Center
-          </h1>
-          <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1 md:mt-2" style={{ lineHeight: "1.6" }}>
-            Inventory management and omnichannel performance tracking
-          </p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
+              Retail Intelligence Center
+            </h1>
+            <InfoTooltip label="Inventory management and omnichannel performance tracking." />
+          </div>
         </div>
         <Badge className="bg-[#D42A7D] text-white hover:bg-[#D42A7D] px-3 md:px-4 py-1 text-xs md:text-sm flex-shrink-0">
           Retail Sector
@@ -839,12 +839,9 @@ export function Retail() {
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               <span className="inline-flex items-center gap-2">
                 Retail Revenue by Channel
-                <InfoTooltip label="A channel is where the sale came from, such as POS, Shopee, TikTok, or PetHub." />
+                <InfoTooltip label="Daily retail performance across Physical (POS), TikTok Shop, Shopee, and PetHub. Fairly aligned to active marketplace dates. A channel is where the sale came from, such as POS, Shopee, TikTok, or PetHub." />
               </span>
             </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Daily retail performance across Physical (POS), TikTok Shop, Shopee, and PetHub. Fairly aligned to active marketplace dates.
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {/* Metric Toggle: Revenue vs Profit */}
@@ -1079,13 +1076,15 @@ export function Retail() {
             })}
           >
             <div className="flex items-center justify-between">
-              <div className="text-[11px] text-[#223047] opacity-70 font-medium">Gross Retail Sales</div>
+              <div className="flex items-center gap-1 text-[11px] text-[#223047] opacity-70 font-medium">
+                <span>Gross Retail Sales</span>
+                <InfoTooltip label="Across 3 active channels." />
+              </div>
               <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
             </div>
             <div className="text-base md:text-xl font-bold text-[#223047] mt-0.5">
               ₱{channelEconomics.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-            <div className="text-[10px] text-[#223047] opacity-60 mt-1">Across 3 active channels</div>
           </div>
 
           <div
@@ -1381,11 +1380,8 @@ export function Retail() {
                 <h2 className="text-lg md:text-xl font-bold text-[#223047]">
                   Category Revenue Contribution
                 </h2>
-                <InfoTooltip label="Category Management from Ch 1L: Ranks retail categories by sales volume to identify primary merchandising drivers." />
+                <InfoTooltip label="Total retail sales ranked by product category. Category Management from Ch 1L ranks retail categories by sales volume to identify primary merchandising drivers." />
               </div>
-              <p className="text-xs text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Total retail sales ranked by product category
-              </p>
             </div>
             <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-2.5 py-0.5 text-[11px]">
               {categoryRevenueData.length} Categories
@@ -1452,11 +1448,8 @@ export function Retail() {
                 <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                   Inventory Health Monitor
                 </h2>
-                <InfoTooltip label="Tracks current stock levels vs. reorder thresholds and predicts how many days until stockout based on current sales velocity. Velocity color indicates how fast a product is being consumed." />
+                <InfoTooltip label="Stock levels and predicted stockout dates. Tracks current stock levels vs. reorder thresholds and predicts how many days until stockout based on current sales velocity. Velocity color indicates how fast a product is being consumed." />
               </div>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Stock levels and predicted stockout dates
-              </p>
               {/* Velocity Legend */}
               <div className="flex items-center gap-3 mt-2 flex-wrap">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/40">Velocity:</span>

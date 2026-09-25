@@ -71,6 +71,31 @@ function mean(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function evaluateWapeAccuracy(actual, predicted) {
+  const pairs = actual
+    .map((value, index) => [Number(value), Number(predicted[index])])
+    .filter(([left, right]) => Number.isFinite(left) && Number.isFinite(right));
+  if (!pairs.length) {
+    return { wape: null, wapeAccuracy: null };
+  }
+  const actualTotal = pairs.reduce((sum, [left]) => sum + Math.abs(left), 0);
+  const absoluteErrorTotal = pairs.reduce(
+    (sum, [left, right]) => sum + Math.abs(left - right),
+    0,
+  );
+  if (actualTotal <= 0) {
+    return {
+      wape: absoluteErrorTotal === 0 ? 0 : null,
+      wapeAccuracy: absoluteErrorTotal === 0 ? 100 : null,
+    };
+  }
+  const wape = (absoluteErrorTotal / actualTotal) * 100;
+  return {
+    wape: round(wape),
+    wapeAccuracy: round(Math.max(0, 100 - wape)),
+  };
+}
+
 function evaluateForecastMetrics(actual, predicted, trainActual, seasonalPeriod = 7) {
   const pairs = actual
     .map((value, index) => [Number(value), Number(predicted[index])])
@@ -94,12 +119,64 @@ function evaluateForecastMetrics(actual, predicted, trainActual, seasonalPeriod 
     })
     .filter((value) => value !== null);
   const smape = smapeTerms.length ? mean(smapeTerms) * 100 : null;
+  const wapeMetrics = evaluateWapeAccuracy(actual, predicted);
   return {
     mase: maseDenominator > 0 ? round(mae / maseDenominator) : null,
     smape: smape === null ? null : round(smape),
-    accuracy: smape === null ? null : round(Math.max(0, 100 - smape)),
+    accuracy: wapeMetrics.wapeAccuracy,
     mae: round(mae),
+    ...wapeMetrics,
   };
+}
+
+function periodKey(dateKey, bucket) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  if (bucket === 'month') {
+    return dateKey.slice(0, 7);
+  }
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  date.setUTCDate(date.getUTCDate() + mondayOffset);
+  return date.toISOString().slice(0, 10);
+}
+
+function sumByPeriod(dates, actual, predicted, bucket) {
+  const buckets = new Map();
+  dates.forEach((date, index) => {
+    const key = periodKey(date, bucket);
+    if (!key) return;
+    const current = buckets.get(key) || { actual: 0, predicted: 0 };
+    current.actual += Number(actual[index]) || 0;
+    current.predicted += Number(predicted[index]) || 0;
+    buckets.set(key, current);
+  });
+  return [...buckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, value]) => value);
+}
+
+function sumTrainingByPeriod(dates, actual, bucket) {
+  const buckets = new Map();
+  dates.forEach((date, index) => {
+    const key = periodKey(date, bucket);
+    if (!key) return;
+    buckets.set(key, (buckets.get(key) || 0) + (Number(actual[index]) || 0));
+  });
+  return [...buckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, value]) => value);
+}
+
+function evaluateResampledForecastMetrics(dates, actual, predicted, trainDates, trainActual, bucket) {
+  const testBuckets = sumByPeriod(dates, actual, predicted, bucket);
+  const trainBuckets = sumTrainingByPeriod(trainDates, trainActual, bucket);
+  return evaluateForecastMetrics(
+    testBuckets.map((point) => point.actual),
+    testBuckets.map((point) => point.predicted),
+    trainBuckets,
+    1,
+  );
 }
 
 function isoDayOfWeek(dateKey) {
@@ -156,10 +233,12 @@ function classifyCafeSegment(row) {
 function classifyServicesSegment(row) {
   const text = textKey(row.category, row.productName);
   if (/(event|birthday|party|pawty|bday)/.test(text)) return 'Events';
-  if (/(hotel|boarding|overnight|lodging)/.test(text)) return 'Pet hotel';
-  if (/(daycare|day care|day-care)/.test(text)) return 'Daycare';
-  if (/(spa|bath|wash|shampoo)/.test(text)) return 'Spa/bath';
-  if (/(groom|grooming|trim|cut|nail)/.test(text)) return 'Grooming';
+  if (/(hotel|boarding|overnight|lodging|daycare|day care|day-care)/.test(text)) {
+    return 'Pet Hotel / Boarding';
+  }
+  if (/(spa|bath|wash|shampoo|groom|grooming|trim|cut|nail)/.test(text)) {
+    return 'Grooming';
+  }
   return 'Other Services';
 }
 
@@ -576,6 +655,9 @@ function runPython(scriptName, payload) {
 }
 
 function summarize(name, moduleName, result) {
+  const backtestWape = result.backtest?.actual?.length
+    ? evaluateWapeAccuracy(result.backtest.actual, result.backtest.predicted || [])
+    : { wape: null, wapeAccuracy: null };
   return {
     name,
     module: moduleName,
@@ -583,8 +665,14 @@ function summarize(name, moduleName, result) {
     mase: result.mase,
     smape: result.smape,
     accuracy: result.accuracy,
+    wape: backtestWape.wape,
+    wapeAccuracy: backtestWape.wapeAccuracy,
     weeklyMase: result.weeklyMetrics?.mase ?? null,
+    weeklyWape: result.weeklyMetrics?.wape ?? null,
+    weeklyWapeAccuracy: result.weeklyMetrics?.accuracy ?? null,
     monthlyMase: result.monthlyMetrics?.mase ?? null,
+    monthlyWape: result.monthlyMetrics?.wape ?? null,
+    monthlyWapeAccuracy: result.monthlyMetrics?.accuracy ?? null,
     exogenousVariables: result.modelMetadata?.exogenousVariables ?? [],
     scaledExogenousVariables: result.modelMetadata?.scaledExogenousVariables ?? [],
     highMulticollinearityVariables: result.modelMetadata?.highMulticollinearityVariables ?? [],
@@ -716,9 +804,11 @@ async function compareSegmentedModule(db, moduleName, scriptName, aggregateHisto
       );
     });
   }
-  const trainActual = [...trainActualByDate.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([, value]) => value);
+  const trainEntries = [...trainActualByDate.entries()].sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  const trainDates = trainEntries.map(([date]) => date);
+  const trainActual = trainEntries.map(([, value]) => value);
   const forecastDates = Array.from({ length: forecastDays }, (_, index) => addDays(lastDate, index + 1));
   const summedForecast = forecastDates.map((date) => ({
     date,
@@ -735,7 +825,7 @@ async function compareSegmentedModule(db, moduleName, scriptName, aggregateHisto
     segmentation:
       moduleName === 'Cafe'
         ? ['Coffee', 'Non-caffeine drinks', 'Snacks/waffles/pasta', 'Rice meals', 'Pet bakery', 'Other Cafe']
-        : ['Grooming', 'Pet hotel', 'Daycare', 'Spa/bath', 'Events', 'Other Services'],
+        : ['Grooming', 'Pet Hotel / Boarding', 'Events', 'Other Services'],
     modeledSegments: modeled.map((item) => ({
       segment: item.segment,
       observedRows: item.observedRows,
@@ -743,12 +833,30 @@ async function compareSegmentedModule(db, moduleName, scriptName, aggregateHisto
       mase: item.mase,
       smape: item.smape,
       accuracy: item.accuracy,
+      wape: item.wape,
+      wapeAccuracy: item.wapeAccuracy,
       weeklyMase: item.weeklyMase,
       monthlyMase: item.monthlyMase,
       modelName: item.modelName,
     })),
     skippedSegments: skipped,
     summedBacktestMetrics: evaluateForecastMetrics(summedActual, summedPredicted, trainActual),
+    summedWeeklyMetrics: evaluateResampledForecastMetrics(
+      testDates,
+      summedActual,
+      summedPredicted,
+      trainDates,
+      trainActual,
+      'week',
+    ),
+    summedMonthlyMetrics: evaluateResampledForecastMetrics(
+      testDates,
+      summedActual,
+      summedPredicted,
+      trainDates,
+      trainActual,
+      'month',
+    ),
     summedBacktestDays: testDates.length,
     summedForecastPreview: summedForecast.slice(0, 7),
   };
@@ -782,6 +890,7 @@ async function compareModule(db, moduleName, scriptName) {
     splitRatio: '90-5-5',
     exogenous,
     exogenousForecast,
+    includeBacktest: true,
     experimentConfig:
       moduleName === 'Cafe'
         ? {
@@ -797,11 +906,15 @@ async function compareModule(db, moduleName, scriptName) {
   const transformed = await runPython(scriptName, basePayload);
   const outputs = [summarize('transformed-weather-default', moduleName, transformed)];
 
-  if (moduleName === 'Cafe' && process.env.RUN_RAW_REFERENCE === '1') {
+  const shouldRunRawReference =
+    moduleName === 'Services' || process.env.RUN_RAW_REFERENCE === '1';
+
+  if (shouldRunRawReference) {
     console.error(`[compare] ${moduleName}: aggregate raw-weather reference run`);
     const rawFull = await runPython(scriptName, {
       ...basePayload,
       experimentConfig: {
+        ...(basePayload.experimentConfig || {}),
         exogColumns: [
           'tempCelsius',
           'rainFlag',

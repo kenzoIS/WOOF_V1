@@ -23,7 +23,7 @@ DEFAULT_SEASONAL_ORDER = (1, 1, 0, 7)
 DEFAULT_FORECAST_DAYS = 30
 MAX_FORECAST_DAYS = 90
 GRID_SEARCH_TIMEOUT_SECONDS = 15
-EXOG_COLUMNS = [
+DEFAULT_EXOG_COLUMNS = [
     "dayOfWeek",
     "dayOfWeekSin",
     "dayOfWeekCos",
@@ -85,6 +85,10 @@ def ordered_unique(values):
 def default_exog_value(column):
     if column == "comfortIndex":
         return 28.0
+    if column == "tempCelsius":
+        return 28.0
+    if column == "humidity":
+        return 60.0
     return 0.0
 
 
@@ -198,26 +202,25 @@ def fit_best(
     }
 
 
-def build_exog_matrix(rows, expected_length):
+def build_exog_matrix(rows, expected_length, exog_columns):
     if not isinstance(rows, list) or len(rows) != expected_length:
         return None
     matrix = []
     for row in rows:
         try:
             matrix.append(
-                [float(row.get(column, default_exog_value(column))) for column in EXOG_COLUMNS]
+                [float(row.get(column, default_exog_value(column))) for column in exog_columns]
             )
         except Exception:
             return None
     return np.asarray(matrix, dtype=float)
 
 
-def build_forecast_exog(payload, forecast_days):
-    matrix = build_exog_matrix(payload.get("exogenousForecast", []), forecast_days)
+def build_forecast_exog(payload, forecast_days, exog_columns):
+    matrix = build_exog_matrix(payload.get("exogenousForecast", []), forecast_days, exog_columns)
     if matrix is not None:
         return matrix
-    fallback_row = [0.0 for _ in EXOG_COLUMNS]
-    fallback_row[EXOG_COLUMNS.index("comfortIndex")] = 28.0
+    fallback_row = [default_exog_value(column) for column in exog_columns]
     return np.asarray(
         [fallback_row for _ in range(forecast_days)],
         dtype=float,
@@ -240,6 +243,9 @@ def run(payload):
     grid_search_timeout_seconds = int(
         experiment_config.get("gridSearchTimeoutSeconds", GRID_SEARCH_TIMEOUT_SECONDS)
     )
+    exog_columns = experiment_config.get("exogColumns", DEFAULT_EXOG_COLUMNS)
+    if not isinstance(exog_columns, list) or not all(isinstance(column, str) for column in exog_columns):
+        exog_columns = DEFAULT_EXOG_COLUMNS
 
     if not isinstance(data, list):
         raise ValueError("Input payload data must be an array")
@@ -261,7 +267,7 @@ def run(payload):
     exog_rows = payload.get("exogenous", [])
     if isinstance(exog_rows, list) and len(exog_rows) >= len(frame):
         exog_rows = [exog_rows[int(index)] for index in frame["_input_order"]]
-    exog = build_exog_matrix(exog_rows, len(frame))
+    exog = build_exog_matrix(exog_rows, len(frame), exog_columns)
     if "isObservedDemand" in frame.columns:
         observed_mask = frame["isObservedDemand"].astype(bool).to_numpy()
         frame = frame[observed_mask].reset_index(drop=True)
@@ -272,9 +278,9 @@ def run(payload):
     actual = target_values(frame, target_transformer)
     transformed_target = target_transformer.transform(actual)
     use_exog = exog is not None
-    forecast_exog_raw = build_forecast_exog(payload, forecast_days) if use_exog else None
+    forecast_exog_raw = build_forecast_exog(payload, forecast_days, exog_columns) if use_exog else None
     exog_diagnostics = (
-        compute_vif_diagnostics(exog, EXOG_COLUMNS)
+        compute_vif_diagnostics(exog, exog_columns)
         if use_exog
         else {"vifAvailable": False, "reason": "univariate_model"}
     )
@@ -284,7 +290,7 @@ def run(payload):
     train_exog_raw = exog[:train_idx] if use_exog else None
     validation_exog_raw = exog[train_idx:val_idx] if use_exog else None
     validation_standardizer = (
-        ExogenousStandardizer(EXOG_COLUMNS).fit(train_exog_raw) if use_exog else ExogenousStandardizer(EXOG_COLUMNS)
+        ExogenousStandardizer(exog_columns).fit(train_exog_raw) if use_exog else ExogenousStandardizer(exog_columns)
     )
     train_exog = validation_standardizer.transform(train_exog_raw) if use_exog else None
     validation_exog = (
@@ -317,9 +323,9 @@ def run(payload):
     if has_test:
         try:
             test_standardizer = (
-                ExogenousStandardizer(EXOG_COLUMNS).fit(exog[:val_idx])
+                ExogenousStandardizer(exog_columns).fit(exog[:val_idx])
                 if use_exog
-                else ExogenousStandardizer(EXOG_COLUMNS)
+                else ExogenousStandardizer(exog_columns)
             )
             test_exog = (
                 test_standardizer.transform(exog[:val_idx]) if use_exog else None
@@ -375,9 +381,9 @@ def run(payload):
 
     # Step 3: Fit Final Model on 100% of input data
     final_standardizer = (
-        ExogenousStandardizer(EXOG_COLUMNS).fit(exog)
+        ExogenousStandardizer(exog_columns).fit(exog)
         if use_exog
-        else ExogenousStandardizer(EXOG_COLUMNS)
+        else ExogenousStandardizer(exog_columns)
     )
     final_exog = final_standardizer.transform(exog) if use_exog else None
     forecast_exog = (
@@ -454,7 +460,7 @@ def run(payload):
             },
             "splitRatio": split_ratio,
             "univariate": not use_exog,
-            "exogenousVariables": EXOG_COLUMNS if use_exog else [],
+            "exogenousVariables": exog_columns if use_exog else [],
             **search_metadata,
         },
     }

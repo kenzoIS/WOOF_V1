@@ -2,6 +2,53 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-25 - Services Forecast WAPE Accuracy and Weather Comparison
+
+### Requested
+- Compare Services transformed-weather SARIMAX against transformed-weather segmented Services.
+- Replace the old `Accuracy = 100 - sMAPE` behavior with WAPE-based Accuracy if it is more appropriate for sparse Services demand.
+
+### Backend Changes
+- Updated `backend/src/analytics/python/model_metrics.py`.
+- Forecast metric output now includes WAPE and bias percent.
+- The existing `accuracy` field now uses `max(0, 100 - WAPE)` instead of `max(0, 100 - sMAPE)`.
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Mirrored WAPE Accuracy and bias calculations in TypeScript fallback and summed-segment evaluation paths.
+- Stored WAPE and bias in forecast metadata without requiring a Supabase schema change.
+- Bumped `FORECAST_REVENUE_PAYLOAD_VERSION` from `7` to `8` so stale cached forecast payloads regenerate with the new Accuracy definition.
+- Updated `backend/scripts/compare-weather-transform-models.js`.
+- Comparison output now reports WAPE Accuracy consistently for aggregate and summed segmented backtests.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts`.
+- Added forecast typing for `wape` and `biasPercent`.
+- Updated `frontend/src/app/pages/Services.tsx`, `frontend/src/app/pages/Cafe.tsx`, and `frontend/src/app/components/ModelDetailsModal.tsx`.
+- Forecast performance labels now say `WAPE Accuracy`, while sMAPE remains visible as a diagnostic metric.
+
+### Comparison Result
+- Backend comparison source: `node scripts\compare-weather-transform-models.js` from `backend`, using `woof_staging`.
+- Services transformed-weather SARIMAX:
+  - Daily MASE `1.47`, sMAPE `59.65%`, WAPE `48.24%`, WAPE Accuracy `51.76%`.
+  - Weekly MASE `1.57`, Weekly WAPE `41.03%`.
+  - Monthly MASE `0.95`, Monthly WAPE `36.14%`.
+- Services raw-weather reference:
+  - Daily MASE `1.84`, sMAPE `71.13%`, WAPE `60.59%`, WAPE Accuracy `39.41%`.
+  - Weekly MASE `1.81`, Weekly WAPE `47.24%`.
+  - Monthly MASE `1.24`, Monthly WAPE `47.47%`.
+- Services transformed-weather segmented candidate:
+  - Grooming: MASE `0.26`, sMAPE `176.11%`, WAPE `147.02%`, WAPE Accuracy `0%`, Weekly MASE `0.35`, Monthly MASE `0.12`.
+  - Pet Hotel / Boarding: MASE `0.29`, sMAPE `200%`, WAPE unavailable because holdout actual total was zero, Weekly MASE `0.60`, Monthly MASE `0.59`.
+  - Summed segmented Services daily: MASE `0.29`, sMAPE `166.86%`, MAE `1.32`, WAPE `244.35%`, WAPE Accuracy `0%`.
+  - Summed segmented Services weekly: MASE `0.41`, sMAPE `109.20%`, MAE `5.54`, WAPE `151.05%`, WAPE Accuracy `0%`.
+  - Summed segmented Services monthly: MASE `0.40`, sMAPE `98.16%`, MAE `17.63`, WAPE `128.20%`, WAPE Accuracy `0%`.
+  - Events skipped because `22` observed rows is below `MIN_SEGMENT_ROWS=30`.
+
+### Verification
+- Passed: `python -m py_compile backend\src\analytics\python\model_metrics.py backend\src\analytics\python\services_sarima.py backend\src\analytics\python\cafe_prophet.py`.
+- Passed: `node --check backend\scripts\compare-weather-transform-models.js`.
+- Passed: Backend production TypeScript build with `npm run build`.
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+
 ## 2026-09-14 - Settings Dashboard Preferences
 
 ### Requested
@@ -3073,6 +3120,21 @@ This file records requested revisions, implementation details, verification, and
 ### Verification
 
 - Passed: Backend production TypeScript build with `npm run build`.
+
+### Services Segmentation Normalizer Comparison (2026-09-25)
+
+- Updated the Services segmentation comparison normalizer so `Daycare` maps into `Pet Hotel / Boarding` and `Spa/Bath` maps into `Grooming`.
+- The normalizer now uses both `category` and `productName`, so mislabeled or `Uncategorized` incoming rows can still map to the proper modeling segment when the service name contains clear terms such as grooming, nail, bath, hotel, boarding, overnight, or daycare.
+- Kept `Events` as its own logical segment instead of merging it into Grooming or Pet Hotel / Boarding.
+- Ran the direct MongoDB/Python comparison against `woof_staging`; this does not write `forecast_runs`, archive to S3, or start the Nest backend.
+- Services aggregate transformed-weather SARIMAX remained at daily `MASE 1.47`, weekly `MASE 1.57`, monthly `MASE 0.95`.
+- Normalized segmented Services modeled `Grooming` and `Pet Hotel / Boarding`; `Events` was skipped because it had only `22` observed rows, below `MIN_SEGMENT_ROWS=30`.
+- Normalized segmented Services summed backtest result: daily `MASE 0.29`, `sMAPE 166.86%`, `Accuracy 0%`, MAE `1.32` over `102` holdout days.
+- Interpretation: segmentation greatly improves MASE, but the very poor sMAPE/accuracy indicates the segmented forecasts are still not production-safe by themselves and need additional sparse-demand handling before replacing the active fallback.
+
+### Verification
+
+- Passed: `node --check backend\scripts\compare-weather-transform-models.js`.
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
 - Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
 - Passed: Existing FP-Growth Python tests with `python src\analytics\python\test_cross_sell.py` (`7` tests passed).
@@ -3087,6 +3149,79 @@ This file records requested revisions, implementation details, verification, and
 ### Verification
 
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+
+### Services WAPE Accuracy Comparison (2026-09-25)
+
+- Added comparison-only WAPE and WAPE Accuracy calculations to `backend/scripts/compare-weather-transform-models.js`.
+- The comparison now requests Python holdout backtest arrays for aggregate runs and computes `WAPE = sum(abs(actual - predicted)) / sum(abs(actual)) * 100`, with `WAPE Accuracy = max(0, 100 - WAPE)`.
+- Added WAPE/WAPE Accuracy to aggregate summaries, segment summaries, and summed segmented backtest metrics in the comparison output.
+- Ran the direct MongoDB/Python comparison against `woof_staging`; this does not write `forecast_runs`, archive to S3, or start the Nest backend.
+- Services aggregate transformed-weather SARIMAX: `WAPE 48.24%`, `WAPE Accuracy 51.76%`, compared with `sMAPE 59.65%` and current sMAPE-derived Accuracy `40.35%`.
+- Services raw-weather SARIMAX: `WAPE 60.59%`, `WAPE Accuracy 39.41%`.
+- Normalized segmented Services summed backtest: `WAPE 244.35%`, `WAPE Accuracy 0%`, confirming that the low `MASE 0.29` is not enough to justify production use because total absolute forecast error is very high.
+- Interpretation: WAPE Accuracy is more interpretable than `100 - sMAPE` for sparse Services demand, but the current segmented Services model still fails under WAPE and should not replace the active forecast yet.
+
+### Verification
+
+- Passed: `node --check backend\scripts\compare-weather-transform-models.js`.
+
+### Services Forecast Weather Transform Comparison (2026-09-25)
+
+- Added an experiment-only `exogColumns` hook to `services_sarima.py` so backend comparisons can test raw weather variables against transformed weather variables without changing the default production Services exogenous column set.
+- Updated `backend/scripts/compare-weather-transform-models.js` so Services always runs both aggregate transformed-weather and aggregate raw-weather reference models.
+- Ran the direct MongoDB/Python comparison against `woof_staging`; this does not write `forecast_runs`, archive to S3, or start the Nest backend.
+- Services transformed-weather result: `MASE 1.47`, `sMAPE 59.65`, `Accuracy 40.35`, weekly `MASE 1.57`, monthly `MASE 0.95`.
+- Services raw-weather reference result: `MASE 1.84`, `sMAPE 71.13`, `Accuracy 28.87`, weekly `MASE 1.81`, monthly `MASE 1.24`.
+- Interpretation: transformed weather is better than raw weather for Services in this run, but the aggregate Services model still remains above the production acceptance threshold of `MASE < 1.2`, so no production selector change was applied yet.
+
+### Verification
+
+- Passed: `node --check backend\scripts\compare-weather-transform-models.js`.
+- Passed: `python -m py_compile backend\src\analytics\python\services_sarima.py`.
+- Passed: `python backend\src\analytics\python\test_services_sarimax.py`.
+
+### Services Fallback Granularity Metrics Fix (2026-09-25)
+
+- Fixed `SMA (7-day fallback)` forecast responses so they now include weekly and monthly aggregate evaluation metrics instead of only daily/base metrics.
+- This addresses the Services `Active Model Performance` card appearing fixed at the daily/base MASE, such as `1.34`, when switching between daily, weekly, and monthly granularity.
+- Kept the existing daily fallback metric calculation intact, then added weekly/monthly metrics from the fallback model's rolling validation predictions aggregated by week and month.
+- Bumped `FORECAST_REVENUE_PAYLOAD_VERSION` from `6` to `7` so stale cached forecast rows missing fallback aggregate metrics are regenerated on the next forecast request.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
+
+### Cafe & Services Forecast Chart Marker Styling (2026-09-25)
+
+- Updated the shared Cafe/Services `ThreeZoneForecastChart` temperature weather overlay line to render as a complete solid orange line instead of a dotted line.
+- Updated the weather overlay legend sample to match the solid orange temperature line.
+- Reduced monthly-only point marker sizes on the main Historical Actual, ML Holdout Fit, and Future Forecast revenue lines so the monthly trend points appear less bulky without changing weekly or daily granularity behavior.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### Cafe & Services Forecast Chart Weather Line Refinement (2026-09-25)
+
+- Further reduced the monthly-only point markers on the main Historical Actual, ML Holdout Fit, and Future Forecast revenue lines.
+- Removed all point markers from the temperature weather overlay line.
+- Kept the temperature weather overlay as a solid line, changed it to a lighter orange, and reduced the line opacity to 30% so it reads as a softer overlay.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### Cafe & Services Forecast Weather Overlay Opacity Adjustment (2026-09-25)
+
+- Increased the solid orange temperature weather overlay line opacity from 30% to 40%.
+- Updated the temperature overlay legend sample to match the 40% opacity line.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
 
 ### Cafe & Services Forecast Weather Overlay Toggle (2026-09-07)
 

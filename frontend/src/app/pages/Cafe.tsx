@@ -1246,12 +1246,12 @@ export function Cafe() {
       {/* PAGE HEADER */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-4">
         <div className="flex-1">
-          <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
-            Cafe Intelligence Hub
-          </h1>
-          <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1 md:mt-2" style={{ lineHeight: "1.6" }}>
-            Food & Beverage performance analytics and AI-powered demand forecasting
-          </p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
+              Cafe Intelligence Hub
+            </h1>
+            <InfoTooltip label="Food & Beverage performance analytics and AI-powered demand forecasting." />
+          </div>
         </div>
         <div className="flex items-center gap-2 md:gap-3 flex-wrap">
           <Badge className="bg-[#F53799] text-white hover:bg-[#F53799] px-3 md:px-4 py-1 text-xs md:text-sm">
@@ -1433,6 +1433,7 @@ export function Cafe() {
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                 Cafe Revenue & Demand Forecast
               </h2>
+              <InfoTooltip label="Multi-zone revenue projections and out-of-sample backtest evaluation." />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1472,7 +1473,7 @@ export function Cafe() {
                         </span>
                       </div>
                       <div className="bg-[#FFF7FB] p-2 rounded-xl border border-[#FFD9EC]/50 text-center">
-                        <span className="text-[10px] text-[#223047]/60 block font-medium">Backtest Accuracy</span>
+                        <span className="text-[10px] text-[#223047]/60 block font-medium">WAPE Accuracy</span>
                         <span className="text-sm font-extrabold text-emerald-600">
                           {formatFixed(forecastRun.accuracy, 1)}%
                         </span>
@@ -1488,9 +1489,6 @@ export function Cafe() {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Multi-zone revenue projections and out-of-sample backtest evaluation
-            </p>
           </div>
 
           <div className="flex items-center gap-2 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1.5">
@@ -1571,7 +1569,7 @@ export function Cafe() {
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">WAPE Accuracy</div>
                     <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
                   </div>
                   <div>
@@ -1772,11 +1770,8 @@ export function Cafe() {
               <h2 className="text-lg md:text-xl font-bold text-[#223047]">
                 Human vs. Pet Co-Attachment
               </h2>
-              <InfoTooltip label="Cross-Species Basket Analysis: Measures how frequently pet parents purchase food for both themselves and their pets in a single ticket, and tracks AOV lift." />
+              <InfoTooltip label="Basket composition: Dual-Diner vs Solo Human vs Solo Pet dining. Cross-Species Basket Analysis measures how frequently pet parents purchase food for both themselves and their pets in a single ticket, and tracks AOV lift." />
             </div>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Basket composition: Dual-Diner vs Solo Human vs Solo Pet dining
-            </p>
           </div>
 
           {/* DONUT CHART + LEFT TOOLTIP PANEL */}
@@ -1935,15 +1930,12 @@ export function Cafe() {
                 <h2 className="text-lg md:text-xl font-bold text-[#223047]">
                   Category Revenue Contribution
                 </h2>
-                <InfoTooltip label="Category Management: Aggregates Cafe sales across beverage, food, and pet bakery categories to evaluate high-level product line performance." />
+                <InfoTooltip label="Total cafe sales ranked by food, beverage, and pet bakery category. Category Management aggregates Cafe sales across beverage, food, and pet bakery categories to evaluate high-level product line performance." />
               </div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-2 py-0.5 text-[11px]">
                 {cafeCategoryRevenueData.length} Categories
               </Badge>
             </div>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Total cafe sales ranked by food, beverage, and pet bakery category
-            </p>
           </div>
 
           {cafeCategoryRevenueData.length === 0 ? (
@@ -2342,9 +2334,9 @@ export function Cafe() {
                 </p>
               </div>
               <div>
-                <strong className="text-sm text-[#F53799]">Accuracy</strong>
+                <strong className="text-sm text-[#F53799]">WAPE Accuracy</strong>
                 <p className="mt-1">
-                  The overall correctness rate of the AI's forecasts. For example, a **90% accuracy** means the system's daily sales projections are 90% close to the actual final sales numbers.
+                  Measures total absolute forecast error against total actual demand. For example, **90% WAPE Accuracy** means total forecast error is about 10% of actual demand volume.
                 </p>
               </div>
               <div>

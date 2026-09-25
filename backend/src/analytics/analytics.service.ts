@@ -33,6 +33,8 @@ interface ModelResult {
   mase: number;
   smape: number;
   accuracy: number;
+  wape?: number;
+  biasPercent?: number;
   mae?: number;
   rmse?: number;
   mape?: number;
@@ -41,6 +43,8 @@ interface ModelResult {
     mase: number;
     smape: number;
     accuracy: number;
+    wape?: number;
+    biasPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;
@@ -50,6 +54,8 @@ interface ModelResult {
     mase: number;
     smape: number;
     accuracy: number;
+    wape?: number;
+    biasPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;
@@ -136,7 +142,7 @@ interface TrafficColumn {
   weekday: number;
   date?: string;
 }
-const FORECAST_REVENUE_PAYLOAD_VERSION = 6;
+const FORECAST_REVENUE_PAYLOAD_VERSION = 8;
 const DEFAULT_FORECAST_DAYS = 30;
 const MAX_FORECAST_DAYS = 90;
 const PYTHON_TIMEOUT_MS = 120_000;
@@ -1134,9 +1140,11 @@ export class AnalyticsService {
           rmse: finalModel.rmse,
           mape: finalModel.mape,
           r2: finalModel.r2,
+          wape: finalModel.wape,
+          biasPercent: finalModel.biasPercent,
         },
         accuracyLabel:
-          'Forecast Score = max(0, 100 - sMAPE); sMAPE remains the primary percentage error metric.',
+          'Accuracy = max(0, 100 - WAPE). sMAPE remains available as a sparse-demand diagnostic.',
         targetEvaluationPolicy:
           'Primary Python models train and evaluate on outlier-capped demand using log1p/expm1 target transformation; raw actuals remain visible in history.',
         splitRatio,
@@ -1257,6 +1265,12 @@ export class AnalyticsService {
     const normalizedRun = {
       ...runSource,
       modelName: runSource.model_name || 'Prophet',
+      wape:
+        runSource.wape ??
+        runSource.model_metadata?.additionalRegressionMetrics?.wape,
+      biasPercent:
+        runSource.bias_percent ??
+        runSource.model_metadata?.additionalRegressionMetrics?.biasPercent,
       isFallback: runSource.is_fallback || false,
       rejectionReason: runSource.rejection_reason || null,
       volumeForecast: runSource.volume_forecast || [],
@@ -4513,6 +4527,8 @@ export class AnalyticsService {
           rmse: selectedModel.rmse,
           mape: selectedModel.mape,
           r2: selectedModel.r2,
+          wape: selectedModel.wape,
+          biasPercent: selectedModel.biasPercent,
         },
         priceCalibration: priceCostMatrix,
         forecastStartDate: calibratedForecast[0]?.date || null,
@@ -6613,15 +6629,45 @@ export class AnalyticsService {
 
     const validationActual: number[] = [];
     const validationPredicted: number[] = [];
+    const validationDates: string[] = [];
     for (let index = 7; index < actuals.length; index += 1) {
       validationActual.push(actuals[index]);
       validationPredicted.push(this.average(actuals.slice(index - 7, index)));
+      validationDates.push(historical[index].date);
     }
+    const trainingActual = actuals.slice(
+      0,
+      Math.max(1, actuals.length - validationActual.length),
+    );
+    const aggregateScaleActual = actuals;
+    const aggregateScaleDates = historical.map((point) => point.date);
     const metrics = this.calculateMetrics(
       validationActual,
       validationPredicted,
-      actuals.slice(0, Math.max(1, actuals.length - validationActual.length)),
+      trainingActual,
     );
+    const weeklyMetrics =
+      validationDates.length > 0
+        ? this.evaluateResampledForecastArrays(
+            validationDates,
+            validationActual,
+            validationPredicted,
+            aggregateScaleActual,
+            aggregateScaleDates,
+            'week',
+          )
+        : null;
+    const monthlyMetrics =
+      validationDates.length > 0
+        ? this.evaluateResampledForecastArrays(
+            validationDates,
+            validationActual,
+            validationPredicted,
+            aggregateScaleActual,
+            aggregateScaleDates,
+            'month',
+          )
+        : null;
 
     const fittedValues: number[] = [];
     for (let index = 0; index < actuals.length; index += 1) {
@@ -6637,6 +6683,8 @@ export class AnalyticsService {
     return {
       modelName: 'SMA (7-day fallback)',
       ...metrics,
+      weeklyMetrics,
+      monthlyMetrics,
       forecast,
       fittedValues,
       modelMetadata: {
@@ -7479,9 +7527,12 @@ export class AnalyticsService {
     actual: number[],
     predicted: number[],
     training: number[],
-  ): Pick<ModelResult, 'mase' | 'smape' | 'accuracy'> {
+  ): Pick<
+    ModelResult,
+    'mase' | 'smape' | 'accuracy' | 'wape' | 'biasPercent'
+  > {
     if (actual.length === 0) {
-      return { mase: 0, smape: 0, accuracy: 0 };
+      return { mase: 0, smape: 0, accuracy: 0, wape: 0, biasPercent: 0 };
     }
     const absoluteErrors = actual.map((value, index) =>
       Math.abs(
@@ -7506,10 +7557,34 @@ export class AnalyticsService {
         : (Math.abs(value - forecast) / denominator) * 100;
     });
     const smape = this.average(percentageErrors);
+    const actualTotal = actual.reduce((sum, value) => sum + Math.abs(value), 0);
+    const absoluteErrorTotal = absoluteErrors.reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+    const wape =
+      actualTotal > 0
+        ? (absoluteErrorTotal / actualTotal) * 100
+        : absoluteErrorTotal === 0
+          ? 0
+          : 100;
+    const signedActualTotal = actual.reduce((sum, value) => sum + value, 0);
+    const forecastTotal = predicted.reduce(
+      (sum, value) => sum + (Number.isFinite(value) ? value : 0),
+      0,
+    );
+    const biasPercent =
+      signedActualTotal !== 0
+        ? ((forecastTotal - signedActualTotal) / signedActualTotal) * 100
+        : forecastTotal === 0
+          ? 0
+          : 100;
     return {
       mase: this.round(naiveMae > 0 ? mae / naiveMae : mae === 0 ? 0 : 999),
       smape: this.round(smape),
-      accuracy: this.round(Math.max(0, 100 - smape)),
+      accuracy: this.round(Math.max(0, 100 - wape)),
+      wape: this.round(wape),
+      biasPercent: this.round(biasPercent),
     };
   }
 
@@ -7657,7 +7732,15 @@ export class AnalyticsService {
   ): Required<
     Pick<
       ModelResult,
-      'mase' | 'smape' | 'accuracy' | 'mae' | 'rmse' | 'mape' | 'r2'
+      | 'mase'
+      | 'smape'
+      | 'accuracy'
+      | 'wape'
+      | 'biasPercent'
+      | 'mae'
+      | 'rmse'
+      | 'mape'
+      | 'r2'
     >
   > {
     const pairs = actual
@@ -7670,6 +7753,8 @@ export class AnalyticsService {
         mase: 999,
         smape: 100,
         accuracy: 0,
+        wape: 100,
+        biasPercent: 0,
         mae: 0,
         rmse: 0,
         mape: 0,
@@ -7699,6 +7784,25 @@ export class AnalyticsService {
       .filter((value): value is number => value !== null);
     const smape = this.average(smapeTerms) * 100;
     const rmse = Math.sqrt(this.average(errors.map((value) => value ** 2)));
+    const actualTotal = pairs.reduce((sum, [left]) => sum + Math.abs(left), 0);
+    const absoluteErrorTotal = absoluteErrors.reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+    const wape =
+      actualTotal > 0
+        ? (absoluteErrorTotal / actualTotal) * 100
+        : absoluteErrorTotal === 0
+          ? 0
+          : 100;
+    const signedActualTotal = pairs.reduce((sum, [left]) => sum + left, 0);
+    const forecastTotal = pairs.reduce((sum, [, right]) => sum + right, 0);
+    const biasPercent =
+      signedActualTotal !== 0
+        ? ((forecastTotal - signedActualTotal) / signedActualTotal) * 100
+        : forecastTotal === 0
+          ? 0
+          : 100;
     const mapeTerms = pairs
       .filter(([left]) => left !== 0)
       .map(([left, right]) => Math.abs((left - right) / left) * 100);
@@ -7717,9 +7821,9 @@ export class AnalyticsService {
     return {
       mase: this.round(maseDenominator > 0 ? mae / maseDenominator : 999),
       smape: this.round(Number.isFinite(smape) ? smape : 100),
-      accuracy: this.round(
-        Math.max(0, 100 - (Number.isFinite(smape) ? smape : 100)),
-      ),
+      accuracy: this.round(Math.max(0, 100 - wape)),
+      wape: this.round(wape),
+      biasPercent: this.round(biasPercent),
       mae: this.round(mae),
       rmse: this.round(rmse),
       mape: this.round(Number.isFinite(mape) ? mape : 0),

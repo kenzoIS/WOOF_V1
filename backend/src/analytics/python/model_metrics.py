@@ -64,6 +64,22 @@ def _manual_smape(actual: np.ndarray, predicted: np.ndarray) -> float:
     return float(np.mean(terms)) if len(terms) else 0.0
 
 
+def _manual_wape(actual: np.ndarray, predicted: np.ndarray) -> float:
+    actual_total = float(np.sum(np.abs(actual)))
+    absolute_error_total = float(np.sum(np.abs(actual - predicted)))
+    if actual_total <= 0:
+        return 0.0 if absolute_error_total == 0 else 100.0
+    return (absolute_error_total / actual_total) * 100.0
+
+
+def _manual_bias_percent(actual: np.ndarray, predicted: np.ndarray) -> float:
+    actual_total = float(np.sum(actual))
+    if actual_total == 0:
+        forecast_total = float(np.sum(predicted))
+        return 0.0 if forecast_total == 0 else 100.0
+    return (float(np.sum(predicted - actual)) / actual_total) * 100.0
+
+
 def evaluate_forecast_metrics(
     actual: Iterable[float],
     predicted: Iterable[float],
@@ -80,6 +96,8 @@ def evaluate_forecast_metrics(
             "mase": 0.0,
             "smape": 0.0,
             "accuracy": 0.0,
+            "wape": 0.0,
+            "biasPercent": 0.0,
             "mae": 0.0,
             "rmse": 0.0,
             "mape": 0.0,
@@ -140,11 +158,19 @@ def evaluate_forecast_metrics(
         mase = 999.0
     if not math.isfinite(smape):
         smape = 100.0
+    wape = _manual_wape(y_true, y_pred)
+    bias_percent = _manual_bias_percent(y_true, y_pred)
+    if not math.isfinite(wape):
+        wape = 100.0
+    if not math.isfinite(bias_percent):
+        bias_percent = 0.0
 
     return {
         "mase": round(float(mase), 2),
         "smape": round(float(smape), 2),
-        "accuracy": round(float(max(0.0, 100.0 - smape)), 2),
+        "accuracy": round(float(max(0.0, 100.0 - wape)), 2),
+        "wape": round(float(wape), 2),
+        "biasPercent": round(float(bias_percent), 2),
         "mae": round(float(mae), 2),
         "rmse": round(float(rmse), 2),
         "mape": round(float(mape), 2),
@@ -195,6 +221,8 @@ def resample_and_evaluate(
             "mase": 0.0,
             "smape": 0.0,
             "accuracy": 0.0,
+            "wape": 0.0,
+            "biasPercent": 0.0,
             "mae": 0.0,
             "rmse": 0.0,
             "mape": 0.0,
@@ -220,6 +248,8 @@ def resample_and_evaluate(
             "mase": 0.0,
             "smape": 0.0,
             "accuracy": 0.0,
+            "wape": 0.0,
+            "biasPercent": 0.0,
             "mae": 0.0,
             "rmse": 0.0,
             "mape": 0.0,

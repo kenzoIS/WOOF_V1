@@ -5,6 +5,7 @@ import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics } from "../comp
 import { getForecast, ForecastRun } from "../lib/api";
 import { SpatialMerchandisingPanel } from "../components/SpatialMerchandisingPanel";
 import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
+import { InfoTooltip } from "../components/InfoTooltip";
 
 export function DemandForecasts() {
   const router = useRouter();
@@ -105,9 +106,9 @@ export function DemandForecasts() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div>
+      <div className="flex items-center gap-2">
         <h1 className="text-2xl font-bold text-slate-900">Demand Forecasts</h1>
-        <p className="text-sm text-slate-600 mt-1">Predictive analytics for operational planning</p>
+        <InfoTooltip label="Predictive analytics for operational planning." />
       </div>
 
       {forecastRun && (

@@ -743,7 +743,7 @@ export function ThreeZoneForecastChart({
               dataKey="actual"
               stroke="var(--forecast-actual-line, #223047)"
               strokeWidth={2.8}
-              dot={{ r: timeGrain === "monthly" ? 3.5 : 0, fill: "var(--forecast-actual-line, #223047)" }}
+              dot={{ r: timeGrain === "monthly" ? 1.75 : 0, fill: "var(--forecast-actual-line, #223047)" }}
               connectNulls={false}
               name="Historical Actual"
             />
@@ -755,7 +755,7 @@ export function ThreeZoneForecastChart({
               stroke={themeColor}
               strokeWidth={2.8}
               strokeDasharray="5 4"
-              dot={{ r: timeGrain === "monthly" ? 4.5 : 0, fill: themeColor }}
+              dot={{ r: timeGrain === "monthly" ? 2 : 0, fill: themeColor }}
               connectNulls={false}
               name="ML Holdout Fit"
             />
@@ -766,7 +766,7 @@ export function ThreeZoneForecastChart({
               dataKey="forecast"
               stroke="#10b981"
               strokeWidth={2.8}
-              dot={{ r: timeGrain === "monthly" ? 3.5 : 0, fill: "#10b981" }}
+              dot={{ r: timeGrain === "monthly" ? 1.75 : 0, fill: "#10b981" }}
               connectNulls={false}
               name="Future Forecast"
             />
@@ -776,10 +776,11 @@ export function ThreeZoneForecastChart({
                 yAxisId="temp"
                 type="monotone"
                 dataKey="tempCelsius"
-                stroke="#f97316"
+                stroke="#fb923c"
+                strokeOpacity={0.4}
                 strokeWidth={2}
-                strokeDasharray="2 4"
-                dot={{ r: timeGrain === "monthly" ? 3 : 0, fill: "#f97316" }}
+                dot={false}
+                activeDot={false}
                 connectNulls={false}
                 name="Temperature"
               />
@@ -819,7 +820,7 @@ export function ThreeZoneForecastChart({
                 <span className="font-semibold">Rainfall Overlay</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-5 h-0.5 border-b-2 border-dashed border-[#f97316]" />
+                <span className="w-5 h-0.5 bg-[#fb923c] opacity-40 rounded-full" />
                 <span className="font-semibold">Temperature Overlay</span>
               </div>
             </>

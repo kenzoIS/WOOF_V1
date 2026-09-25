@@ -381,12 +381,12 @@ export function Settings() {
       {/* PAGE HEADER */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
         <div className="flex-1">
-          <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
-            System Settings
-          </h1>
-          <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1 md:mt-2" style={{ lineHeight: "1.6" }}>
-            Configure WOOF system preferences and data management
-          </p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
+              System Settings
+            </h1>
+            <InfoTooltip label="Configure WOOF system preferences and data management." />
+          </div>
         </div>
         <Button onClick={handleSaveSettings} className="bg-[#F53799] hover:bg-[#D42A7D] w-full md:w-auto">
           Save All Settings
@@ -398,12 +398,12 @@ export function Settings() {
         <div className="flex items-center gap-2 md:gap-3">
           <Building2 className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Business Profile
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Maintain the operating defaults WOOF uses for reports, timestamps, and forecast windows
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Business Profile
+              </h2>
+              <InfoTooltip label="Maintain the operating defaults WOOF uses for reports, timestamps, and forecast windows." />
+            </div>
           </div>
         </div>
 
@@ -507,12 +507,12 @@ export function Settings() {
         <div className="flex items-center gap-2 md:gap-3">
           <Bell className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Notification Preferences
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Manage how and when you receive WOOF alerts
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Notification Preferences
+              </h2>
+              <InfoTooltip label="Manage how and when you receive WOOF alerts." />
+            </div>
           </div>
         </div>
 
@@ -528,8 +528,10 @@ export function Settings() {
               className="flex items-center justify-between gap-3 p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl"
             >
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm md:text-base text-[#223047]">{item.label}</div>
-                <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">{item.description}</div>
+                <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                  <span>{item.label}</span>
+                  <InfoTooltip label={item.description} />
+                </div>
               </div>
               <Switch
                 checked={notifications[item.key as NotificationPreferenceKey]}
@@ -547,11 +549,8 @@ export function Settings() {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-base md:text-lg text-[#223047]">Alert Thresholds</h3>
-                <InfoTooltip label="Trigger rules used to decide when WOOF should surface operational warnings." />
+                <InfoTooltip label="Tune the business rules that trigger capacity, inventory, model quality, and data freshness warnings." />
               </div>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Tune the business rules that trigger capacity, inventory, model quality, and data freshness warnings.
-              </p>
             </div>
           </div>
 
@@ -560,10 +559,10 @@ export function Settings() {
               <div key={item.key} className="rounded-xl border border-[#FFD9EC]/70 bg-white/70 p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="font-semibold text-sm md:text-base text-[#223047]">{item.label}</div>
-                    <p className="text-xs text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.5" }}>
-                      {item.description}
-                    </p>
+                    <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                      <span>{item.label}</span>
+                      <InfoTooltip label={item.description} />
+                    </div>
                   </div>
                   <span className="shrink-0 text-base md:text-lg font-bold text-[#F53799]">
                     {alertThresholds[item.key]}{item.suffix}
@@ -594,11 +593,8 @@ export function Settings() {
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                 AI & Model Configuration
               </h2>
-              <InfoTooltip label="Controls how WOOF retrains forecasting models and when AI recommendations should be shown for owner review." />
+              <InfoTooltip label="Control model behavior and prediction thresholds." />
             </div>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Control model behavior and prediction thresholds
-            </p>
           </div>
         </div>
 
@@ -610,9 +606,6 @@ export function Settings() {
                   <span>Automatic Model Retraining</span>
                   <InfoTooltip label="When enabled, WOOF can refresh forecasting models after new upload or webhook data is processed." />
                 </div>
-                <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
-                  Automatically retrain models when new data is available
-                </div>
               </div>
               <Switch checked={autoRetrain} onCheckedChange={handleAutoRetrainChange} />
             </div>
@@ -622,11 +615,9 @@ export function Settings() {
             <div>
               <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
                 <span>Confidence Threshold</span>
-                <InfoTooltip label="The minimum confidence level a recommendation needs before WOOF presents it as worth reviewing." />
+                <InfoTooltip label={`Minimum confidence level for AI suggestions: ${confidenceThreshold[0]}%.`} />
               </div>
-              <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-3 md:mb-4">
-                Minimum confidence level for AI suggestions: {confidenceThreshold[0]}%
-              </div>
+              <div className="mb-3 md:mb-4" />
               <div className="flex items-center gap-3 md:gap-4">
                 <Slider
                   value={confidenceThreshold}
@@ -656,12 +647,12 @@ export function Settings() {
         <div className="flex items-center gap-2 md:gap-3">
           <CloudSun className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              External API Connections & Diagnostics
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Configure forecasting data providers and check API cache health
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                External API Connections & Diagnostics
+              </h2>
+              <InfoTooltip label="Configure forecasting data providers and check API cache health." />
+            </div>
           </div>
         </div>
 
@@ -672,9 +663,8 @@ export function Settings() {
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="font-bold text-sm md:text-base text-[#223047]">OpenWeatherMap Integration</h3>
-                  <InfoTooltip label="Weather data is used as outside context for demand forecasting, especially Cafe and Services demand." />
+                  <InfoTooltip label="Exogenous weather feed for Cafe & Services. Weather data is used as outside context for demand forecasting, especially Cafe and Services demand." />
                 </div>
-                <p className="text-xs text-[#223047] opacity-60 mt-1">Exogenous weather feed for Cafe & Services</p>
               </div>
               {exogenousStatus?.weatherCache?.lastSource && exogenousStatus.weatherCache.lastSource !== "synthetic" ? (
                 <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
@@ -730,9 +720,8 @@ export function Settings() {
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="font-bold text-sm md:text-base text-[#223047]">Abstract Holidays Calendar</h3>
-                  <InfoTooltip label="Holiday context helps WOOF adjust demand expectations for dates that may affect customer behavior." />
+                  <InfoTooltip label="Philippine national holiday catalog provider. Holiday context helps WOOF adjust demand expectations for dates that may affect customer behavior." />
                 </div>
-                <p className="text-xs text-[#223047] opacity-60 mt-1">Philippine national holiday catalog provider</p>
               </div>
               {exogenousStatus?.holidayCache?.lastSource && exogenousStatus.holidayCache.lastSource !== "hardcoded" ? (
                 <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
@@ -786,12 +775,12 @@ export function Settings() {
         <div className="flex items-center gap-2 md:gap-3">
           <Shield className="w-5 h-5 md:w-6 md:h-6 text-[#D42A7D]" />
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Data Management
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Control operational retention rules, protected forecasting history, and export options
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Data Management
+              </h2>
+              <InfoTooltip label="Control operational retention rules, protected forecasting history, and export options." />
+            </div>
           </div>
         </div>
 
@@ -863,12 +852,12 @@ export function Settings() {
         <div className="flex items-center gap-2 md:gap-3">
           <Palette className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Appearance
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Customize dashboard display mode and system-wide accent colors
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Appearance
+              </h2>
+              <InfoTooltip label="Customize dashboard display mode and system-wide accent colors." />
+            </div>
           </div>
         </div>
 
@@ -919,10 +908,10 @@ export function Settings() {
               {customThemeFields.map((field) => (
                 <div key={field.key} className="rounded-xl border border-[#FFD9EC]/70 bg-white/70 p-3 space-y-3">
                   <div>
-                    <label className={profileLabelClass}>{field.label}</label>
-                    <p className="text-xs text-[#223047] opacity-60" style={{ lineHeight: "1.5" }}>
-                      {field.description}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <label className={profileLabelClass}>{field.label}</label>
+                      <InfoTooltip label={field.description} />
+                    </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <input
@@ -971,9 +960,9 @@ export function Settings() {
                   style={{ backgroundColor: theme.surface }}
                 />
               </div>
-              <div className="font-semibold text-sm md:text-base text-[#223047]">{theme.name}</div>
-              <div className="mt-1 text-xs text-[#223047] opacity-60" style={{ lineHeight: "1.5" }}>
-                {theme.description}
+              <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                <span>{theme.name}</span>
+                <InfoTooltip label={theme.description} />
               </div>
               {colorTheme === theme.key && (
                 <Badge className="mt-2 bg-[#F53799] text-white hover:bg-[#F53799] text-xs">
@@ -990,12 +979,12 @@ export function Settings() {
         <div className="flex items-center gap-2 md:gap-3">
           <LayoutDashboard className="w-5 h-5 md:w-6 md:h-6 text-[#06B6D4]" />
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Dashboard Preferences
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Set the default workspace behavior for daily monitoring
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Dashboard Preferences
+              </h2>
+              <InfoTooltip label="Set the default workspace behavior for daily monitoring." />
+            </div>
           </div>
         </div>
 
@@ -1087,8 +1076,10 @@ export function Settings() {
                       <Icon className="h-4 w-4 text-[#F53799]" />
                     </div>
                     <div className="min-w-0">
-                      <div className="font-semibold text-sm md:text-base text-[#223047]">{item.label}</div>
-                      <div className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">{item.description}</div>
+                      <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                        <span>{item.label}</span>
+                        <InfoTooltip label={item.description} />
+                      </div>
                     </div>
                   </div>
                   <Switch

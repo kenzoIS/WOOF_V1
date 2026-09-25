@@ -232,14 +232,11 @@ export function Audit() {
   return (
     <div className="space-y-4 md:space-y-6 lg:space-y-8">
       {/* Page Header */}
-      <div>
+      <div className="flex items-center gap-2">
         <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
           Audit &amp; Orchestration Logs
         </h1>
-        <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1">
-          Every API action is recorded with its actor, target, result, and execution time.
-          <span className="ml-2 text-[#F53799] font-medium">Click any row for full details.</span>
-        </p>
+        <InfoTooltip label="Every API action is recorded with its actor, target, result, and execution time. Click any row for full details." />
       </div>
 
       {/* KPI Cards */}

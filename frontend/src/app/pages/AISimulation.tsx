@@ -8,6 +8,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../com
 import { BundleArchive, BundlePlanningContext, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
+import { InfoTooltip } from "../components/InfoTooltip";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -4655,12 +4656,12 @@ export function AISimulation() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex-1">
-                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  Sector Traffic From Transactions
-                </h2>
-                <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Observed transaction-visits for Services, Cafe, and Retail within {selectedHeaderRangeLabel}
-                </p>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                    Sector Traffic From Transactions
+                  </h2>
+                  <InfoTooltip label={`Observed transaction-visits for Services, Cafe, and Retail within ${selectedHeaderRangeLabel}.`} />
+                </div>
               </div>
 
               <div className="text-left md:text-right">
@@ -4694,38 +4695,40 @@ export function AISimulation() {
             {/* Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Observed Visits (All Hours)</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalPredictedTraffic}</div>
-                <div className="text-[10px] text-[#223047] opacity-55 mt-0.5">
-                  All operating hours in {selectedHeaderRangeLabel}
+                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
+                  <span>Observed Visits (All Hours)</span>
+                  <InfoTooltip label={`All operating hours in ${selectedHeaderRangeLabel}.`} />
                 </div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalPredictedTraffic}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">High Demand Sectors</div>
+                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
+                  <span>High Demand Sectors</span>
+                  <InfoTooltip label="Sectors with elevated visit volume for the selected time and Header Filter range." />
+                </div>
                 <div className="text-xl md:text-2xl font-bold text-[#F53799]">{highDemandSectors}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Active Staff</div>
+                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
+                  <span>Active Staff</span>
+                  <InfoTooltip label="Client-provided static capacity baseline numbers, not a dynamic schedule pulled from a live roster system." />
+                </div>
                 <div className="text-xl md:text-2xl font-bold text-[#06B6D4]">{totalScheduledPlaceholderStaff}</div>
               </div>
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Recommended Staff</div>
+                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
+                  <span>Recommended Staff</span>
+                  <InfoTooltip label="Suggested staffing level based on transaction-visits, selected time, and sector demand." />
+                </div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalRecommendedStaff}</div>
               </div>
-            </div>
-            
-            <div className="text-xs text-[#223047] opacity-70 bg-slate-100 p-2 rounded-lg mt-2 flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-info"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-              Note: Active staff are client-provided static capacity baseline numbers, not a dynamic schedule pulled from a live roster system.
             </div>
 
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden mt-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
-                <div>
+                <div className="flex items-center gap-2">
                   <div className="text-sm font-bold text-[#223047]">Traffic Heatmap per Sector</div>
-                  <div className="text-xs text-[#223047] opacity-60 mt-1">
-                    {trafficVisitDefinition} Values are total visits for the selected range.
-                  </div>
+                  <InfoTooltip label={`${trafficVisitDefinition} Values are total visits for the selected range.`} />
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
                   <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Low</span>
@@ -4825,10 +4828,10 @@ export function AISimulation() {
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-base md:text-lg font-bold text-[#223047]">Staffing Recommendation</h3>
-                  <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
-                    Based on the busiest matching period in the selected Header Filter range, incorporating actual employee shift schedules.
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base md:text-lg font-bold text-[#223047]">Staffing Recommendation</h3>
+                    <InfoTooltip label="Based on the busiest matching period in the selected Header Filter range, incorporating actual employee shift schedules." />
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <select 
@@ -4895,18 +4898,19 @@ export function AISimulation() {
             </div>
 
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
-              <h3 className="text-base md:text-lg font-bold text-[#223047]">Live Cost Efficiency & Capacity Dashboard</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base md:text-lg font-bold text-[#223047]">Live Cost Efficiency & Capacity Dashboard</h3>
+                <InfoTooltip label="Live staffing cost, capacity, and commission indicators for the selected traffic period." />
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                 <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
                   <div className="flex items-center gap-2 mb-3">
                     <Zap className="h-5 w-5 text-[#F53799]" />
                     <div className="text-sm font-bold text-[#223047]">Live Labor Burn Rate</div>
+                    <InfoTooltip label="Combined hourly wage of scheduled staff." />
                   </div>
                   <div className="text-2xl font-black text-[#223047]">
                     {PHP_SYMBOL}{liveCostAndCapacity.totalHourlyCost.toFixed(2)}<span className="text-sm font-medium opacity-60">/hr</span>
-                  </div>
-                  <div className="text-xs text-[#223047] opacity-65 mt-1">
-                    Combined hourly wage of scheduled staff
                   </div>
                 </div>
 
@@ -4914,12 +4918,10 @@ export function AISimulation() {
                   <div className="flex items-center gap-2 mb-3">
                     <TrendingUp className="h-5 w-5 text-[#F53799]" />
                     <div className="text-sm font-bold text-[#223047]">Cost Per Visit (Efficiency)</div>
+                    <InfoTooltip label="Labor cost compared with total predicted traffic." />
                   </div>
                   <div className="text-2xl font-black text-[#223047]">
                     {PHP_SYMBOL}{liveCostAndCapacity.costPerVisit.toFixed(2)}<span className="text-sm font-medium opacity-60">/visit</span>
-                  </div>
-                  <div className="text-xs text-[#223047] opacity-65 mt-1">
-                    Labor cost vs. total predicted traffic
                   </div>
                 </div>
 
@@ -4927,12 +4929,10 @@ export function AISimulation() {
                   <div className="flex items-center gap-2 mb-3">
                     <Target className="h-5 w-5 text-[#F53799]" />
                     <div className="text-sm font-bold text-[#223047]">Grooming Capacity</div>
+                    <InfoTooltip label={liveCostAndCapacity.groomingMessage} />
                   </div>
                   <div className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold mb-2 ${liveCostAndCapacity.groomingColor}`}>
                     {liveCostAndCapacity.groomingStatus}
-                  </div>
-                  <div className="text-xs text-[#223047] opacity-65">
-                    {liveCostAndCapacity.groomingMessage}
                   </div>
                 </div>
 
@@ -4940,12 +4940,10 @@ export function AISimulation() {
                   <div className="flex items-center gap-2 mb-3">
                     <Users className="h-5 w-5 text-[#F53799]" />
                     <div className="text-sm font-bold text-[#223047]">Projected Commissions</div>
+                    <InfoTooltip label="Active commission multipliers for grooming/boarding." />
                   </div>
                   <div className="text-xl font-bold text-[#223047]">
                     {liveCostAndCapacity.activeCommissionStaff} Staff <span className="text-sm font-medium opacity-60">on 10% Tier</span>
-                  </div>
-                  <div className="text-xs text-[#223047] opacity-65 mt-1">
-                    Active commission multipliers for grooming/boarding
                   </div>
                 </div>
               </div>
@@ -4961,13 +4959,11 @@ export function AISimulation() {
 
           {/* Traffic Trend */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-            <div>
+            <div className="flex items-center gap-2">
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                 Traffic Trend
               </h2>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Total transaction-visit volume within {selectedHeaderRangeLabel}
-              </p>
+              <InfoTooltip label={`Total transaction-visit volume within ${selectedHeaderRangeLabel}.`} />
             </div>
 
             <ResponsiveContainer width="100%" height={250} className="md:!h-[300px]">

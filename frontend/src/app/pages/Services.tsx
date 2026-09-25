@@ -913,12 +913,12 @@ export function Services() {
       {/* PAGE HEADER */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
         <div className="flex-1">
-          <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
-            Pet Services Command Center
-          </h1>
-          <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1 md:mt-2" style={{ lineHeight: "1.6" }}>
-            Real-time capacity management and booking demand forecasting
-          </p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
+              Pet Services Command Center
+            </h1>
+            <InfoTooltip label="Real-time capacity management and booking demand forecasting." />
+          </div>
         </div>
         <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-4 py-1 self-start">
           Services Sector
@@ -1080,13 +1080,19 @@ export function Services() {
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Services Revenue & Demand Forecast
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Active model <InfoTooltip label="The forecasting model selected by WOOF for the current Services demand prediction." />: <span className="font-semibold text-[#06B6D4]">{forecastRun?.modelName || "Waiting for uploaded Services history"}</span>
-              {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, Accuracy: ${forecastRun.accuracy.toFixed(1)}%)`}
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Services Revenue & Demand Forecast
+              </h2>
+              <InfoTooltip
+                label={
+                  <>
+                    Active model: <span className="font-semibold">{forecastRun?.modelName || "Waiting for uploaded Services history"}</span>
+                    {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, WAPE Accuracy: ${forecastRun.accuracy.toFixed(1)}%).`}
+                  </>
+                }
+              />
+            </div>
             {forecastRun?.isFallback && (
               <Badge className="mt-2 bg-amber-500 text-white hover:bg-amber-500">
                 SMA fallback active: {forecastRun.rejectionReason || "selected model could not run"}
@@ -1176,7 +1182,7 @@ export function Services() {
                 </div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">WAPE Accuracy</div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
               </div>
               <div>
@@ -1375,12 +1381,12 @@ export function Services() {
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
             <div>
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Service Utilization Monitor
-              </h2>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Real-time capacity and booking status
-              </p>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                  Service Utilization Monitor
+                </h2>
+                <InfoTooltip label="Real-time capacity and booking status." />
+              </div>
             </div>
             <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
               {[
@@ -1529,8 +1535,10 @@ export function Services() {
           {/* Hourly Bookings */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3 md:space-y-4">
             <div>
-              <h3 className="text-base md:text-lg font-bold text-[#223047]">Recent Daily Bookings</h3>
-              <p className="text-xs text-[#223047] opacity-60 mt-1">Calculated from uploaded Services transactions</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base md:text-lg font-bold text-[#223047]">Recent Daily Bookings</h3>
+                <InfoTooltip label="Calculated from uploaded Services transactions." />
+              </div>
             </div>
 
             <ResponsiveContainer width="100%" height={180} className="md:!h-[200px]">
@@ -1554,10 +1562,10 @@ export function Services() {
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">Forecast Demand Alerts</h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Highest projected Services revenue days from the active forecast
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">Forecast Demand Alerts</h2>
+              <InfoTooltip label="Highest projected Services revenue days from the active forecast." />
+            </div>
           </div>
           <Badge className="bg-red-500 text-white hover:bg-red-500 self-start">{occupancyAlerts.length} Active Alerts</Badge>
         </div>
@@ -1638,15 +1646,15 @@ export function Services() {
                 </p>
               </div>
               <div>
-                <strong className="text-sm text-[#06B6D4]">Accuracy</strong>
+                <strong className="text-sm text-[#06B6D4]">WAPE Accuracy</strong>
                 <p className="mt-1">
-                  The overall correctness rate of the AI's forecasts. For example, a **90% accuracy** means the system's daily sales projections are 90% close to the actual final sales numbers.
+                  Measures total absolute forecast error against total actual demand. For example, **90% WAPE Accuracy** means total forecast error is about 10% of actual demand volume.
                 </p>
               </div>
               <div>
                 <strong className="text-sm text-[#06B6D4]">sMAPE (Symmetric Mean Absolute Percentage Error)</strong>
                 <p className="mt-1">
-                  The symmetric percentage error between forecasted and actual demand. It is more stable for low-volume Services days.
+                  The symmetric percentage error between forecasted and actual demand. For sparse Services days, it is useful as a diagnostic rather than the headline accuracy score.
                 </p>
               </div>
               <div>

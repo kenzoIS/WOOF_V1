@@ -101,11 +101,14 @@ export interface ForecastRun {
   rmse?: number;
   mape?: number;
   wape?: number;
+  biasPercent?: number;
   mpe?: number;
   weeklyMetrics?: {
     mase: number;
     smape: number;
     accuracy: number;
+    wape?: number;
+    biasPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;
@@ -115,6 +118,8 @@ export interface ForecastRun {
     mase: number;
     smape: number;
     accuracy: number;
+    wape?: number;
+    biasPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;
@@ -124,6 +129,8 @@ export interface ForecastRun {
     mase: number;
     smape: number;
     accuracy: number;
+    wape?: number;
+    biasPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;
@@ -133,6 +140,8 @@ export interface ForecastRun {
     mase: number;
     smape: number;
     accuracy: number;
+    wape?: number;
+    biasPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;

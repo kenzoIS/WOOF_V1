@@ -647,12 +647,9 @@ export function Home() {
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               <span className="inline-flex items-center gap-2">
                 Omnichannel Revenue Accumulation
-                <InfoTooltip label="Omnichannel means WOOF combines sales from different channels such as POS, Shopee, TikTok, and PetHub." />
+                <InfoTooltip label="Real-time revenue buildup across all sectors today. Omnichannel means WOOF combines sales from different channels such as POS, Shopee, TikTok, and PetHub." />
               </span>
             </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              Real-time revenue buildup across all sectors today
-            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -800,12 +797,12 @@ export function Home() {
       {/* SECTION 5 — CHANNEL EQUILIBRIUM */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7 mb-4 md:mb-6">
         <div>
-          <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-            Offline vs. Online Channel Balance
-          </h2>
-          <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-            Total recorded revenue across POS, TikTok Shop, Shopee, and PetHub channels
-          </p>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Offline vs. Online Channel Balance
+            </h2>
+            <InfoTooltip label="Total recorded revenue across POS, TikTok Shop, Shopee, and PetHub channels." />
+          </div>
         </div>
 
         {separatedEquilibriumData.length === 0 && (
@@ -874,12 +871,12 @@ export function Home() {
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 md:gap-6">
             <div className="flex-1 min-w-0">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Sales Intensity Map
-              </h2>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Past 7 uploaded-data dates
-              </p>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                  Sales Intensity Map
+                </h2>
+                <InfoTooltip label="Past 7 uploaded-data dates." />
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2 md:justify-end">
@@ -945,12 +942,12 @@ export function Home() {
         {/* WOOF Autonomous Suggestions */}
         <div ref={suggestionsRef} className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div>
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              WOOF Autonomous Suggestions — Pending Review
-            </h2>
-            <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-              AI-generated promotion recommendations based on real-time pattern analysis
-            </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                WOOF Autonomous Suggestions — Pending Review
+              </h2>
+              <InfoTooltip label="AI-generated promotion recommendations based on real-time pattern analysis." />
+            </div>
           </div>
 
           <div
