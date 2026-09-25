@@ -7,7 +7,72 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  IsString,
+  IsNotEmpty,
+  IsArray,
+  IsNumber,
+  IsOptional,
+  IsIn,
+  Min,
+  Max,
+} from 'class-validator';
+import { Throttle } from '@nestjs/throttler';
 import { AnalyticsService } from './analytics.service';
+
+// ── Validated DTOs ──────────────────────────────────────────────────
+
+class CreateCampaignDraftDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  items: string[];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  discount_pct?: number;
+
+  @IsOptional()
+  @IsString()
+  season?: string;
+
+  @IsOptional()
+  @IsString()
+  source?: string;
+}
+
+class CreateBundleArchiveDto {
+  @IsString()
+  @IsNotEmpty()
+  bundle_name: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  items: string[];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  discount_pct?: number;
+
+  @IsOptional()
+  @IsNumber()
+  price_override?: number;
+
+  @IsOptional()
+  @IsString()
+  source?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+}
 
 const ANALYTICS_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -95,6 +160,8 @@ export class AnalyticsController {
     return this.analyticsService.getChannelStatus();
   }
 
+  // ── Security: Strict rate limit on forecast (heavy Python + ML computation) ──
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Get('forecast/:sector')
   async getForecast(
     @Param('sector') sector: string,
@@ -243,7 +310,7 @@ export class AnalyticsController {
   }
 
   @Post('cross-sell/campaign-drafts')
-  async createCrossSellCampaignDraft(@Body() dto: any) {
+  async createCrossSellCampaignDraft(@Body() dto: CreateCampaignDraftDto) {
     return this.analyticsService.createCrossSellCampaignDraft(dto);
   }
 
@@ -257,7 +324,7 @@ export class AnalyticsController {
   }
 
   @Post('bundles')
-  async createBundleArchive(@Body() dto: any) {
+  async createBundleArchive(@Body() dto: CreateBundleArchiveDto) {
     return this.analyticsService.createBundleArchive(dto);
   }
 

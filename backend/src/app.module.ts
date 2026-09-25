@@ -1,6 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { GeoBlockMiddleware } from './common/middleware/geo-block.middleware';
 import { CsvModule } from './csv/csv.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SmartReportsModule } from './smart-reports/smart-reports.module';
@@ -20,6 +23,17 @@ import { AuditModule } from './audit/audit.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+
+    // ── Security: Global Rate Limiting ──────────────────────────────
+    // Default: 200 requests per 60 seconds per IP.
+    // Individual routes can override with @Throttle() decorator.
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 200,
+      },
+    ]),
+
     ConfigModule.forRoot({
       isGlobal: true,
       validate: (config: Record<string, unknown>) => {
@@ -74,5 +88,20 @@ import { AuditModule } from './audit/audit.module';
     SettingsModule,
     AuditModule,
   ],
+  providers: [
+    // ── Security: Apply ThrottlerGuard globally ─────────────────────
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  // ── Security: Geo-Blocking Middleware ─────────────────────────────
+  // Applies to all routes. Reads the cf-ipcountry header from Cloudflare
+  // and blocks traffic from outside the configured countries (default: PH).
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(GeoBlockMiddleware).forRoutes('*');
+  }
+}
+
