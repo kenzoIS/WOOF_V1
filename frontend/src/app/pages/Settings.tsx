@@ -1,6 +1,18 @@
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Database, Bell, Palette, Shield, Download, CloudSun, CheckCircle2, ShieldAlert, Moon, Sun, Building2, MapPin, Clock, CircleDollarSign, Archive, FileText, BellRing, MessageSquare, HardDrive, Gauge, LayoutDashboard, PanelLeftClose, Eye, BarChart3 } from "lucide-react";
-import { getAlertThresholds, getExogenousStatus, getForecast, saveAlertThresholds } from "../lib/api";
+import { Settings as SettingsIcon, Database, Download, CheckCircle2, ShieldAlert, Moon, Sun, MapPin, Clock, CircleDollarSign, Archive, FileText, BellRing, MessageSquare, HardDrive, LayoutDashboard, PanelLeftClose, Eye, EyeOff, BarChart3, KeyRound, Smartphone, History, TimerReset } from "lucide-react";
+import {
+  changeDashboardPassword,
+  disableTwoFactor,
+  enableTwoFactor,
+  getAlertThresholds,
+  getExogenousStatus,
+  getForecast,
+  getLoginActivity,
+  getTwoFactorStatus,
+  saveAlertThresholds,
+  setupTwoFactor,
+  type LoginActivityEntry,
+} from "../lib/api";
 import {
   DEFAULT_SETTINGS_PREFERENCES,
   applyDocumentColorTheme,
@@ -13,6 +25,7 @@ import {
   type AlertThresholdPreferences,
   type DashboardPreferences,
   type NotificationPreferenceKey,
+  type SecurityPreferences,
 } from "../lib/preferences";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -21,11 +34,29 @@ import { Slider } from "../components/ui/slider";
 import { toast } from "sonner";
 import { InfoTooltip } from "../components/InfoTooltip";
 
+const DASHBOARD_SECURITY_EMAIL = "woofdash@gmail.com";
+
 export function Settings() {
   const [businessProfile, setBusinessProfile] = useState(DEFAULT_SETTINGS_PREFERENCES.businessProfile);
   const [notifications, setNotifications] = useState(DEFAULT_SETTINGS_PREFERENCES.notifications);
   const [alertThresholds, setAlertThresholds] = useState(DEFAULT_SETTINGS_PREFERENCES.alertThresholds);
   const [dashboardPreferences, setDashboardPreferences] = useState(DEFAULT_SETTINGS_PREFERENCES.dashboard);
+  const [securityPreferences, setSecurityPreferences] = useState(DEFAULT_SETTINGS_PREFERENCES.security);
+  const [securityEmail, setSecurityEmail] = useState(DASHBOARD_SECURITY_EMAIL);
+  const [draftSessionTimeoutMinutes, setDraftSessionTimeoutMinutes] = useState(DEFAULT_SETTINGS_PREFERENCES.security.sessionTimeoutMinutes);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newSecurityPassword, setNewSecurityPassword] = useState("");
+  const [confirmSecurityPassword, setConfirmSecurityPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewSecurityPassword, setShowNewSecurityPassword] = useState(false);
+  const [showConfirmSecurityPassword, setShowConfirmSecurityPassword] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorSecret, setTwoFactorSecret] = useState("");
+  const [twoFactorUri, setTwoFactorUri] = useState("");
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [isUpdatingTwoFactor, setIsUpdatingTwoFactor] = useState(false);
+  const [loginActivity, setLoginActivity] = useState<LoginActivityEntry[]>([]);
 
   const [exogenousStatus, setExogenousStatus] = useState<any>(null);
 
@@ -48,12 +79,24 @@ export function Settings() {
     setNotifications(preferences.notifications);
     setAlertThresholds(preferences.alertThresholds);
     setDashboardPreferences(preferences.dashboard);
+    setSecurityPreferences(preferences.security);
     setAutoRetrain(preferences.autoRetrain);
     setConfidenceThreshold([preferences.confidenceThreshold]);
     setDataRetention([preferences.dataRetention]);
     setColorTheme(preferences.colorTheme);
     setCustomTheme(preferences.customTheme);
     setDarkMode(applyStoredTheme() === "dark");
+    setDraftSessionTimeoutMinutes(preferences.security.sessionTimeoutMinutes);
+    setSecurityEmail(DASHBOARD_SECURITY_EMAIL);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("userEmail", DASHBOARD_SECURITY_EMAIL);
+    }
+    getTwoFactorStatus(DASHBOARD_SECURITY_EMAIL)
+      .then((status) => setTwoFactorEnabled(status.enabled))
+      .catch(() => {});
+    getLoginActivity(DASHBOARD_SECURITY_EMAIL)
+      .then(setLoginActivity)
+      .catch(() => {});
 
     getAlertThresholds()
       .then((thresholds) => {
@@ -74,6 +117,7 @@ export function Settings() {
       notifications,
       alertThresholds,
       dashboard: dashboardPreferences,
+      security: securityPreferences,
       businessProfile,
       autoRetrain,
       confidenceThreshold: confidenceThreshold[0],
@@ -167,6 +211,28 @@ export function Settings() {
     }));
   };
 
+  const handleSecurityPreferenceChange = <K extends keyof SecurityPreferences>(
+    key: K,
+    value: SecurityPreferences[K],
+  ) => {
+    const nextSecurityPreferences = {
+      ...securityPreferences,
+      [key]: value,
+    };
+    setSecurityPreferences(nextSecurityPreferences);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      security: nextSecurityPreferences,
+    }));
+  };
+
+  const handleApplySessionTimeout = () => {
+    handleSecurityPreferenceChange("sessionTimeoutMinutes", draftSessionTimeoutMinutes);
+    toast.success("Session timeout updated", {
+      description: `Inactive sessions will expire after ${draftSessionTimeoutMinutes} minute${draftSessionTimeoutMinutes === 1 ? "" : "s"}.`,
+    });
+  };
+
   const handleBusinessProfileChange = (key: keyof BusinessProfilePreferences, value: string) => {
     const nextProfile = { ...businessProfile, [key]: value };
     setBusinessProfile(nextProfile);
@@ -207,6 +273,7 @@ export function Settings() {
       notifications,
       alertThresholds,
       dashboard: dashboardPreferences,
+      security: securityPreferences,
       autoRetrain,
       confidenceThreshold: confidenceThreshold[0],
       dataRetention: dataRetention[0],
@@ -217,6 +284,116 @@ export function Settings() {
     toast.success("Settings saved!", {
       description: "Your preferences have been updated.",
     });
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newSecurityPassword || !confirmSecurityPassword) {
+      toast.error("Please fill in all password fields");
+      return;
+    }
+    if (newSecurityPassword !== confirmSecurityPassword) {
+      toast.error("New passwords do not match");
+      return;
+    }
+    if (newSecurityPassword.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      await changeDashboardPassword({
+        email: securityEmail,
+        currentPassword,
+        newPassword: newSecurityPassword,
+      });
+      setCurrentPassword("");
+      setNewSecurityPassword("");
+      setConfirmSecurityPassword("");
+      setShowCurrentPassword(false);
+      setShowNewSecurityPassword(false);
+      setShowConfirmSecurityPassword(false);
+      toast.success("Password updated", {
+        description: "Use the new password the next time you sign in.",
+      });
+    } catch (error) {
+      toast.error("Unable to change password", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const refreshLoginActivity = () => {
+    getLoginActivity(securityEmail).then(setLoginActivity).catch(() => {});
+  };
+
+  const handleSetupTwoFactor = async () => {
+    setIsUpdatingTwoFactor(true);
+    try {
+      const setup = await setupTwoFactor(securityEmail);
+      setTwoFactorSecret(setup.secret);
+      setTwoFactorUri(setup.otpauthUri);
+      setTwoFactorCode("");
+      toast.success("Authenticator setup created");
+    } catch (error) {
+      toast.error("Unable to start 2FA setup", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setIsUpdatingTwoFactor(false);
+    }
+  };
+
+  const handleEnableTwoFactor = async () => {
+    if (twoFactorCode.length !== 6) {
+      toast.error("Enter the 6-digit authenticator code");
+      return;
+    }
+
+    setIsUpdatingTwoFactor(true);
+    try {
+      await enableTwoFactor(securityEmail, twoFactorCode);
+      setTwoFactorEnabled(true);
+      setTwoFactorCode("");
+      setTwoFactorSecret("");
+      setTwoFactorUri("");
+      toast.success("2FA enabled");
+    } catch (error) {
+      toast.error("Unable to enable 2FA", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setIsUpdatingTwoFactor(false);
+    }
+  };
+
+  const handleDisableTwoFactor = async () => {
+    if (twoFactorCode.length !== 6) {
+      toast.error("Enter the current 6-digit authenticator code");
+      return;
+    }
+
+    setIsUpdatingTwoFactor(true);
+    try {
+      await disableTwoFactor(securityEmail, twoFactorCode);
+      setTwoFactorEnabled(false);
+      setTwoFactorCode("");
+      setTwoFactorSecret("");
+      setTwoFactorUri("");
+      toast.success("2FA disabled");
+    } catch (error) {
+      toast.error("Unable to disable 2FA", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setIsUpdatingTwoFactor(false);
+    }
   };
 
   const handleExportData = () => {
@@ -395,15 +572,12 @@ export function Settings() {
 
       {/* BUSINESS PROFILE */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex items-center gap-2 md:gap-3">
-          <Building2 className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Business Profile
-              </h2>
-              <InfoTooltip label="Maintain the operating defaults WOOF uses for reports, timestamps, and forecast windows." />
-            </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Business Profile
+            </h2>
+            <InfoTooltip label="Maintain the operating defaults WOOF uses for reports, timestamps, and forecast windows." />
           </div>
         </div>
 
@@ -504,15 +678,12 @@ export function Settings() {
 
       {/* NOTIFICATION PREFERENCES */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex items-center gap-2 md:gap-3">
-          <Bell className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Notification Preferences
-              </h2>
-              <InfoTooltip label="Manage how and when you receive WOOF alerts." />
-            </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Notification Preferences
+            </h2>
+            <InfoTooltip label="Manage how and when you receive WOOF alerts." />
           </div>
         </div>
 
@@ -543,9 +714,6 @@ export function Settings() {
 
         <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 md:p-6 space-y-4">
           <div className="flex items-start gap-3">
-            <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
-              <Gauge className="h-5 w-5 text-[#F53799]" />
-            </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-base md:text-lg text-[#223047]">Alert Thresholds</h3>
@@ -586,15 +754,12 @@ export function Settings() {
 
       {/* AI & MODEL SETTINGS */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex items-center gap-2 md:gap-3">
-          <Database className="w-5 h-5 md:w-6 md:h-6 text-[#06B6D4]" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                AI & Model Configuration
-              </h2>
-              <InfoTooltip label="Control model behavior and prediction thresholds." />
-            </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              AI & Model Configuration
+            </h2>
+            <InfoTooltip label="Control model behavior and prediction thresholds." />
           </div>
         </div>
 
@@ -644,15 +809,12 @@ export function Settings() {
 
       {/* EXTERNAL API CONNECTIONS & DIAGNOSTICS */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex items-center gap-2 md:gap-3">
-          <CloudSun className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                External API Connections & Diagnostics
-              </h2>
-              <InfoTooltip label="Configure forecasting data providers and check API cache health." />
-            </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              External API Connections & Diagnostics
+            </h2>
+            <InfoTooltip label="Configure forecasting data providers and check API cache health." />
           </div>
         </div>
 
@@ -772,15 +934,12 @@ export function Settings() {
 
       {/* DATA MANAGEMENT */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex items-center gap-2 md:gap-3">
-          <Shield className="w-5 h-5 md:w-6 md:h-6 text-[#D42A7D]" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Data Management
-              </h2>
-              <InfoTooltip label="Control operational retention rules, protected forecasting history, and export options." />
-            </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Data Management
+            </h2>
+            <InfoTooltip label="Control operational retention rules, protected forecasting history, and export options." />
           </div>
         </div>
 
@@ -849,15 +1008,12 @@ export function Settings() {
 
       {/* APPEARANCE */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex items-center gap-2 md:gap-3">
-          <Palette className="w-5 h-5 md:w-6 md:h-6 text-[#F53799]" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Appearance
-              </h2>
-              <InfoTooltip label="Customize dashboard display mode and system-wide accent colors." />
-            </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Appearance
+            </h2>
+            <InfoTooltip label="Customize dashboard display mode and system-wide accent colors." />
           </div>
         </div>
 
@@ -976,15 +1132,12 @@ export function Settings() {
 
       {/* DASHBOARD PREFERENCES */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex items-center gap-2 md:gap-3">
-          <LayoutDashboard className="w-5 h-5 md:w-6 md:h-6 text-[#06B6D4]" />
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Dashboard Preferences
-              </h2>
-              <InfoTooltip label="Set the default workspace behavior for daily monitoring." />
-            </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Dashboard Preferences
+            </h2>
+            <InfoTooltip label="Set the default workspace behavior for daily monitoring." />
           </div>
         </div>
 
@@ -1089,6 +1242,252 @@ export function Settings() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      </div>
+
+      {/* SECURITY & SESSION */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Security & Session
+            </h2>
+            <InfoTooltip label="Manage dashboard password, session timeout, authenticator security, and login history." />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-2 md:pt-4">
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                <KeyRound className="h-5 w-5 text-[#F53799]" />
+              </div>
+              <div>
+                <div className="font-bold text-[#223047]">Change Password</div>
+                <div className="text-xs text-[#223047] opacity-60">Updates the Supabase Auth password for {securityEmail}.</div>
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {[
+                {
+                  value: currentPassword,
+                  setValue: setCurrentPassword,
+                  show: showCurrentPassword,
+                  setShow: setShowCurrentPassword,
+                  placeholder: "Current password",
+                  label: "current password",
+                },
+                {
+                  value: newSecurityPassword,
+                  setValue: setNewSecurityPassword,
+                  show: showNewSecurityPassword,
+                  setShow: setShowNewSecurityPassword,
+                  placeholder: "New password",
+                  label: "new password",
+                },
+                {
+                  value: confirmSecurityPassword,
+                  setValue: setConfirmSecurityPassword,
+                  show: showConfirmSecurityPassword,
+                  setShow: setShowConfirmSecurityPassword,
+                  placeholder: "Confirm new password",
+                  label: "confirmation password",
+                },
+              ].map((field) => (
+                <div key={field.placeholder} className="relative">
+                  <input
+                    type={field.show ? "text" : "password"}
+                    value={field.value}
+                    onChange={(event) => field.setValue(event.target.value)}
+                    placeholder={field.placeholder}
+                    className={`${profileInputClass} woof-password-field pr-12`}
+                    disabled={isChangingPassword}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => field.setShow((value) => !value)}
+                    className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[#223047] opacity-50 transition hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#F53799]/30"
+                    disabled={isChangingPassword}
+                    aria-label={field.show ? `Hide ${field.label}` : `Show ${field.label}`}
+                  >
+                    {field.show ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                onClick={handleChangePassword}
+                disabled={isChangingPassword}
+                className="bg-[#F53799] hover:bg-[#D42A7D]"
+              >
+                {isChangingPassword ? "Updating..." : "Update Password"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                <TimerReset className="h-5 w-5 text-[#06B6D4]" />
+              </div>
+              <div>
+                <div className="font-bold text-[#223047]">Session Timeout Duration</div>
+                <div className="text-xs text-[#223047] opacity-60">
+                  Current limit: {securityPreferences.sessionTimeoutMinutes} minute{securityPreferences.sessionTimeoutMinutes === 1 ? "" : "s"}.
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-[#FFD9EC]/70 bg-white/70 px-3 py-3 text-sm text-[#223047]">
+              Chosen limit: <span className="font-bold text-[#06B6D4]">{draftSessionTimeoutMinutes} minute{draftSessionTimeoutMinutes === 1 ? "" : "s"}</span>
+            </div>
+            <div className="flex items-center gap-3 md:gap-4">
+              <Slider
+                value={[draftSessionTimeoutMinutes]}
+                onValueChange={(value) =>
+                  setDraftSessionTimeoutMinutes(
+                    value[0] ?? DEFAULT_SETTINGS_PREFERENCES.security.sessionTimeoutMinutes,
+                  )
+                }
+                min={1}
+                max={120}
+                step={1}
+                className="flex-1"
+              />
+              <span className="text-base md:text-lg font-bold text-[#06B6D4] w-16">
+                {draftSessionTimeoutMinutes}m
+              </span>
+            </div>
+            <Button
+              type="button"
+              onClick={handleApplySessionTimeout}
+              disabled={draftSessionTimeoutMinutes === securityPreferences.sessionTimeoutMinutes}
+              className="w-full bg-[#06B6D4] hover:bg-[#0891B2]"
+            >
+              Apply New Timeout Limit
+            </Button>
+          </div>
+
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                  <Smartphone className="h-5 w-5 text-[#F53799]" />
+                </div>
+                <div>
+                  <div className="font-bold text-[#223047]">2FA Authenticator</div>
+                  <div className="text-xs text-[#223047] opacity-60">
+                    {twoFactorEnabled ? "Required during login." : "Add a 6-digit authenticator code to login."}
+                  </div>
+                </div>
+              </div>
+              <Badge className={twoFactorEnabled ? "bg-green-500 text-white hover:bg-green-500" : "bg-[#FFD9EC] text-[#223047] hover:bg-[#FFD9EC]"}>
+                {twoFactorEnabled ? "Enabled" : "Off"}
+              </Badge>
+            </div>
+
+            {!twoFactorEnabled && !twoFactorSecret && (
+              <Button
+                type="button"
+                onClick={handleSetupTwoFactor}
+                disabled={isUpdatingTwoFactor}
+                className="w-full bg-[#F53799] hover:bg-[#D42A7D]"
+              >
+                {isUpdatingTwoFactor ? "Preparing..." : "Set Up Authenticator"}
+              </Button>
+            )}
+
+            {twoFactorSecret && (
+              <div className="space-y-3 rounded-xl border border-[#FFD9EC] bg-white/70 p-4">
+                <div>
+                  <label className={profileLabelClass}>Authenticator Secret</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={twoFactorSecret}
+                    className={profileInputClass}
+                  />
+                </div>
+                <div>
+                  <label className={profileLabelClass}>Manual Setup URI</label>
+                  <textarea
+                    readOnly
+                    value={twoFactorUri}
+                    className={`${profileInputClass} min-h-[76px] resize-none`}
+                  />
+                </div>
+                <p className="text-xs text-[#223047] opacity-70">
+                  Add this secret in Google Authenticator, Microsoft Authenticator, or any TOTP app, then enter the generated 6-digit code below.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={twoFactorCode}
+                onChange={(event) =>
+                  setTwoFactorCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                }
+                placeholder="000000"
+                className={`${profileInputClass} text-center text-base font-bold tracking-widest`}
+                inputMode="numeric"
+                maxLength={6}
+              />
+              <Button
+                type="button"
+                onClick={twoFactorEnabled ? handleDisableTwoFactor : handleEnableTwoFactor}
+                disabled={isUpdatingTwoFactor || (!twoFactorEnabled && !twoFactorSecret)}
+                variant={twoFactorEnabled ? "outline" : "default"}
+                className={twoFactorEnabled ? "woof-security-outline-button border-[#FFD9EC]" : "woof-security-primary-button bg-[#F53799] hover:bg-[#D42A7D]"}
+              >
+                {twoFactorEnabled ? "Disable" : "Enable"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                  <History className="h-5 w-5 text-[#06B6D4]" />
+                </div>
+                <div>
+                  <div className="font-bold text-[#223047]">Login Activity</div>
+                  <div className="text-xs text-[#223047] opacity-60">Login, logout, and session timeout timestamps.</div>
+                </div>
+              </div>
+              <Button type="button" variant="outline" className="woof-security-outline-button border-[#FFD9EC]" onClick={refreshLoginActivity}>
+                Refresh
+              </Button>
+            </div>
+
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+              {loginActivity.length === 0 ? (
+                <div className="rounded-xl border border-[#FFD9EC]/70 bg-white/70 p-4 text-sm text-[#223047] opacity-70">
+                  No login activity recorded yet.
+                </div>
+              ) : (
+                loginActivity.map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between gap-3 rounded-xl border border-[#FFD9EC]/70 bg-white/70 px-3 py-3">
+                    <div>
+                      <div className="text-sm font-bold capitalize text-[#223047]">
+                        {entry.action.replace("_", " ")}
+                      </div>
+                      <div className="text-xs text-[#223047] opacity-60">{entry.email}</div>
+                    </div>
+                    <div className="text-right text-xs font-semibold text-[#223047] opacity-70">
+                      {new Date(entry.timestamp).toLocaleString()}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>

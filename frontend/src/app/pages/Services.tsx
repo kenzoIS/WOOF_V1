@@ -1168,7 +1168,7 @@ export function Services() {
               </div>
               <button
                 onClick={() => setShowInfoModal(true)}
-                className="p-1 hover:bg-[#FFF2FA] rounded-full transition-colors text-[#06B6D4]"
+                className="woof-info-tooltip inline-flex h-6 w-6 items-center justify-center rounded-full border transition-colors"
                 title="Explain metrics"
               >
                 <Info className="w-4 h-4" />

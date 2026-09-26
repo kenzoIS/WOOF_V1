@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Toaster } from "../components/ui/sonner";
+import { InfoTooltip } from "../components/InfoTooltip";
 import {
   generateSmartReport,
   getSmartReports,
@@ -270,13 +271,13 @@ export function SmartReports() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#FFD9EC] pb-6">
         <div>
-          <h1 className="text-2xl font-black text-[#223047] flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Sparkles className="w-6 h-6 text-[#F53799]" />
-            Smart Reports
-          </h1>
-          <p className="text-sm text-[#223047] opacity-60">
-            Generate full-stack ETL analytics, predictive trend projections, and automated NLG summaries.
-          </p>
+            <h1 className="text-2xl font-black text-[#223047]">
+              Smart Reports
+            </h1>
+            <InfoTooltip label="Generate full-stack ETL analytics, predictive trend projections, and automated NLG summaries." />
+          </div>
         </div>
       </div>
 
@@ -732,10 +733,10 @@ export function SmartReports() {
                 <FileText className="w-8 h-8 text-[#F53799] opacity-60" />
               </div>
               <div className="space-y-1 max-w-sm">
-                <h3 className="text-base font-extrabold text-[#223047]">No Report Selected</h3>
-                <p className="text-xs text-[#223047] opacity-50">
-                  Choose an existing report from the sidebar log, or input target parameters and generate a new intelligence report.
-                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <h3 className="text-base font-extrabold text-[#223047]">No Report Selected</h3>
+                  <InfoTooltip label="Choose an existing report from the sidebar log, or input target parameters and generate a new intelligence report." />
+                </div>
               </div>
             </div>
           )}

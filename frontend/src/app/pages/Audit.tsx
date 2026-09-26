@@ -250,7 +250,6 @@ export function Audit() {
               <div>
                 <div className="text-xs text-[#223047] opacity-80">
                   {label}
-                  <InfoTooltip label={`Live ${label.toLowerCase()} calculated from audit records.`} />
                 </div>
                 <div className="text-xl font-bold text-[#223047]">{value}</div>
               </div>

@@ -429,16 +429,23 @@ export interface LoginResponse {
   accessToken: string;
   email: string;
   expiresAt: string;
+  requiresTwoFactor?: false;
+}
+
+export interface TwoFactorRequiredResponse {
+  requiresTwoFactor: true;
+  email: string;
 }
 
 export async function loginDashboard(
   email: string,
   password: string,
-): Promise<LoginResponse> {
+  twoFactorCode?: string,
+): Promise<LoginResponse | TwoFactorRequiredResponse> {
   return fetchApi('/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, twoFactorCode }),
   });
 }
 
@@ -473,6 +480,90 @@ export async function resetDashboardPassword(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, otp, password }),
+  });
+}
+
+export async function changeDashboardPassword(input: {
+  email: string;
+  currentPassword: string;
+  newPassword: string;
+}): Promise<{ success: boolean }> {
+  return fetchApi('/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getTwoFactorStatus(email: string): Promise<{
+  enabled: boolean;
+  configured: boolean;
+}> {
+  return fetchApi('/auth/2fa/status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function setupTwoFactor(email: string): Promise<{
+  secret: string;
+  otpauthUri: string;
+}> {
+  return fetchApi('/auth/2fa/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function enableTwoFactor(
+  email: string,
+  code: string,
+): Promise<{ enabled: boolean }> {
+  return fetchApi('/auth/2fa/enable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+}
+
+export async function disableTwoFactor(
+  email: string,
+  code: string,
+): Promise<{ enabled: boolean }> {
+  return fetchApi('/auth/2fa/disable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+}
+
+export interface LoginActivityEntry {
+  id: string;
+  action: 'login' | 'logout' | 'session_timeout';
+  email: string;
+  timestamp: string;
+}
+
+export async function recordLoginActivity(
+  action: 'logout' | 'session_timeout',
+  email?: string,
+): Promise<{ success: boolean }> {
+  return fetchApi('/auth/activity', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, email }),
+  });
+}
+
+export async function getLoginActivity(
+  email: string,
+): Promise<LoginActivityEntry[]> {
+  return fetchApi('/auth/activity/list', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
   });
 }
 

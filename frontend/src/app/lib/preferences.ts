@@ -41,6 +41,10 @@ export type DashboardPreferences = {
   sidebarCollapsedByDefault: boolean;
 };
 
+export type SecurityPreferences = {
+  sessionTimeoutMinutes: number;
+};
+
 export type AlertThresholdPreferences = {
   capacityWarning: number;
   lowInventory: number;
@@ -53,6 +57,7 @@ export type SettingsPreferences = {
   notifications: NotificationPreferences;
   alertThresholds: AlertThresholdPreferences;
   dashboard: DashboardPreferences;
+  security: SecurityPreferences;
   autoRetrain: boolean;
   confidenceThreshold: number;
   dataRetention: number;
@@ -90,6 +95,9 @@ export const DEFAULT_SETTINGS_PREFERENCES: SettingsPreferences = {
     showTooltips: true,
     defaultChartView: "monthly",
     sidebarCollapsedByDefault: false,
+  },
+  security: {
+    sessionTimeoutMinutes: 10,
   },
   autoRetrain: true,
   confidenceThreshold: 80,
@@ -166,6 +174,14 @@ function normalizePreferences(value: Partial<SettingsPreferences> | null): Setti
       showTooltips: Boolean(value?.dashboard?.showTooltips ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.showTooltips),
       defaultChartView: normalizeChartView(value?.dashboard?.defaultChartView),
       sidebarCollapsedByDefault: Boolean(value?.dashboard?.sidebarCollapsedByDefault ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.sidebarCollapsedByDefault),
+    },
+    security: {
+      sessionTimeoutMinutes: normalizeNumber(
+        value?.security?.sessionTimeoutMinutes,
+        DEFAULT_SETTINGS_PREFERENCES.security.sessionTimeoutMinutes,
+        1,
+        120,
+      ),
     },
     businessProfile: {
       ...DEFAULT_SETTINGS_PREFERENCES.businessProfile,

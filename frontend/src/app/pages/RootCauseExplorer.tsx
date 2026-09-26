@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { InfoTooltip } from "../components/InfoTooltip";
 import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { getDashboard, getRetailForecastByChannel } from "../lib/api";
@@ -604,11 +605,9 @@ export function RootCauseExplorer() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-[#223047]">Root Cause Explorer</h1>
+            <InfoTooltip label='Multidimensional contribution analysis answering "Why did revenue change?" across 8 operational drivers' />
             <Badge className="bg-[#F53799]/10 text-[#F53799] border-[#FFD9EC] text-xs font-semibold px-2.5 py-0.5">Diagnostic AI Engine</Badge>
           </div>
-          <p className="text-sm text-[#223047]/70 mt-1">
-            Multidimensional contribution analysis answering <strong>"Why did revenue change?"</strong> across 8 operational drivers
-          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 bg-white border border-[#FFD9EC] rounded-xl p-1 shadow-sm">
@@ -751,9 +750,9 @@ export function RootCauseExplorer() {
                     <Activity className="w-4 h-4 text-[#F53799]" />
                   </div>
                   <h2 className="text-base font-bold text-[#223047]">Counterfactual Revenue Curve (Actual vs. Simulated Ideal)</h2>
+                  <InfoTooltip label={`Live comparison: realized actual sales curve vs. counterfactual trajectory without stockouts and storm disruptions (${periodLabel})`} />
                   <Badge className="bg-[#FFF0F8] text-[#F53799] border-[#FFD9EC] text-xs font-semibold">Simulation</Badge>
                 </div>
-                <p className="text-xs text-[#223047]/60 mt-1 ml-10">Live comparison: realized actual sales curve vs. counterfactual trajectory without stockouts and storm disruptions ({periodLabel})</p>
               </div>
               <div className="flex gap-4 text-xs font-semibold ml-10 md:ml-0 flex-shrink-0">
                 <span className="flex items-center gap-1.5 text-[#F53799]"><span className="w-5 h-0.5 bg-[#F53799] inline-block rounded" /> Actual</span>
@@ -810,8 +809,10 @@ export function RootCauseExplorer() {
             <div className="lg:col-span-2 bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-base font-bold text-[#223047]">Revenue Waterfall Decomposition ({sectorFilter.toUpperCase()})</h3>
-                  <p className="text-xs text-[#223047]/60">Hover each bar for mini rain gauge and 10-day trend microcharts — {periodLabel}</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-[#223047]">Revenue Waterfall Decomposition ({sectorFilter.toUpperCase()})</h3>
+                    <InfoTooltip label={`Hover each bar for mini rain gauge and 10-day trend microcharts - ${periodLabel}`} />
+                  </div>
                 </div>
                 <Badge className="bg-[#FFF0F8] text-[#F53799] border-[#FFD9EC] font-bold">Variance: -₱{Math.abs(liveMetrics.totalVariance).toLocaleString()}</Badge>
               </div>
@@ -878,8 +879,8 @@ export function RootCauseExplorer() {
                   <GitBranch className="w-4 h-4 text-[#F53799]" />
                 </div>
                 <h2 className="text-base font-bold text-[#223047]">Revenue Loss Flow (Sankey)</h2>
+                <InfoTooltip label={`How baseline revenue leaked into individual loss drivers - ${sectorFilter.toUpperCase()}`} />
               </div>
-              <p className="text-xs text-[#223047]/60 mb-4 ml-10">How baseline revenue leaked into individual loss drivers — {sectorFilter.toUpperCase()}</p>
               <SankeyDiagram totalVariance={liveMetrics.totalVariance} drivers={contributionDrivers} />
               <div className="mt-3 flex flex-wrap gap-2">
                 {contributionDrivers.filter((d) => d.impact < 0).map((d, i) => (
@@ -898,9 +899,9 @@ export function RootCauseExplorer() {
                   <Brain className="w-4 h-4 text-[#F53799]" />
                 </div>
                 <h2 className="text-base font-bold text-[#223047]">Shapley Value Attribution</h2>
+                <InfoTooltip label={`Fair game-theoretic allocation of variance to each operational driver - ${sectorFilter.toUpperCase()}`} />
                 <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs">Marginal Contribution</Badge>
               </div>
-              <p className="text-xs text-[#223047]/60 mb-4 ml-10">Fair game-theoretic allocation of variance to each operational driver — {sectorFilter.toUpperCase()}</p>
               <div className="space-y-2.5">
                 {shapleyData.map((d, i) => (
                   <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl" style={{ background: `${d.color}08`, border: `1px solid ${d.color}25` }}>
@@ -927,8 +928,10 @@ export function RootCauseExplorer() {
       {activeTab === "channel" && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
-            <h3 className="text-base font-bold text-[#223047]">1. Channel Revenue Variance ({sectorFilter.toUpperCase()})</h3>
-            <p className="text-xs text-[#223047]/60">Revenue contribution & percentage changes across sales channels for {periodLabel}</p>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-[#223047]">1. Channel Revenue Variance ({sectorFilter.toUpperCase()})</h3>
+              <InfoTooltip label={`Revenue contribution and percentage changes across sales channels for ${periodLabel}`} />
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
@@ -958,8 +961,10 @@ export function RootCauseExplorer() {
       {activeTab === "category" && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
-            <h3 className="text-base font-bold text-[#223047]">2. Category Revenue Variance ({sectorFilter.toUpperCase()})</h3>
-            <p className="text-xs text-[#223047]/60">Category-level revenue drops and top drag factors for {periodLabel}</p>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-[#223047]">2. Category Revenue Variance ({sectorFilter.toUpperCase()})</h3>
+              <InfoTooltip label={`Category-level revenue drops and top drag factors for ${periodLabel}`} />
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
@@ -1030,8 +1035,10 @@ export function RootCauseExplorer() {
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-base font-bold text-[#223047]">4. Stock & Out-of-Stock (OOS) Impact</h3>
-              <p className="text-xs text-[#223047]/60">Estimated revenue lost due to depleted shelf stock for {periodLabel}</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-[#223047]">4. Stock & Out-of-Stock (OOS) Impact</h3>
+                <InfoTooltip label={`Estimated revenue lost due to depleted shelf stock for ${periodLabel}`} />
+              </div>
             </div>
             <Badge className="bg-red-50 text-red-700 border-red-200">Total OOS Drag: -₱{Math.abs(contributionDrivers[0].impact).toLocaleString()}</Badge>
           </div>
@@ -1069,8 +1076,8 @@ export function RootCauseExplorer() {
                 <Grid3X3 className="w-4 h-4 text-[#F53799]" />
               </div>
               <h2 className="text-base font-bold text-[#223047]">Demand & Revenue Intensity Heatmap Matrix</h2>
+              <InfoTooltip label={`Day of week x Hour of day footfall intensity showing when weather disruptions hurt sales the most (${periodLabel})`} />
             </div>
-            <p className="text-xs text-[#223047]/60 mb-4 ml-10">Day of week × Hour of day footfall intensity showing when weather disruptions hurt sales the most ({periodLabel})</p>
             <div className="overflow-x-auto">
               <div style={{ minWidth: 520 }}>
                 <div className="flex mb-1">
@@ -1112,8 +1119,10 @@ export function RootCauseExplorer() {
           {/* Card: Severe Weather Log */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
             <div>
-              <h3 className="text-base font-bold text-[#223047]">5. Weather and Time Disruption Log</h3>
-              <p className="text-xs text-[#223047]/60">Impact of severe rain downpours on walk-in transactions vs delivery channel lift for {periodLabel}</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-[#223047]">5. Weather and Time Disruption Log</h3>
+                <InfoTooltip label={`Impact of severe rain downpours on walk-in transactions vs delivery channel lift for ${periodLabel}`} />
+              </div>
             </div>
             <div className="space-y-3">
               {weatherDetails.map((item, idx) => (
@@ -1141,8 +1150,10 @@ export function RootCauseExplorer() {
       {activeTab === "promotion" && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
-            <h3 className="text-base font-bold text-[#223047]">6. Promotional Campaign Contribution ({sectorFilter.toUpperCase()})</h3>
-            <p className="text-xs text-[#223047]/60">Evaluating campaign expiration drag vs active promotion conversions for {periodLabel}</p>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-[#223047]">6. Promotional Campaign Contribution ({sectorFilter.toUpperCase()})</h3>
+              <InfoTooltip label={`Evaluating campaign expiration drag vs active promotion conversions for ${periodLabel}`} />
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/40 space-y-2">
@@ -1161,8 +1172,10 @@ export function RootCauseExplorer() {
       {activeTab === "discount" && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl p-5 md:p-6 shadow-sm space-y-4">
           <div>
-            <h3 className="text-base font-bold text-[#223047]">7. Discount & Margin Surrender Analysis ({sectorFilter.toUpperCase()})</h3>
-            <p className="text-xs text-[#223047]/60">Assessing voucher markdowns and margin erosion across platform channels for {periodLabel}</p>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-[#223047]">7. Discount & Margin Surrender Analysis ({sectorFilter.toUpperCase()})</h3>
+              <InfoTooltip label={`Assessing voucher markdowns and margin erosion across platform channels for ${periodLabel}`} />
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="p-4 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB]">

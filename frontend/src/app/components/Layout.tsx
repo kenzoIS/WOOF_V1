@@ -7,6 +7,7 @@ import { ConnectionBanner } from "./ConnectionBanner";
 import { RealtimeListener } from "./RealtimeListener";
 import { Toaster } from "./ui/sonner";
 import { ErrorModal } from "./ErrorModal";
+import { recordLoginActivity } from "../lib/api";
 import {
   applyDocumentDashboardPreferences,
   applyStoredTheme,
@@ -14,8 +15,6 @@ import {
   onSettingsPreferencesChanged,
   saveSettingsPreferences,
 } from "../lib/preferences";
-
-const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -25,12 +24,14 @@ export function Layout({ children }: LayoutProps) {
   const [showSessionExpired, setShowSessionExpired] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(10);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     try {
       const preferences = getSettingsPreferences();
       setIsSidebarCollapsed(preferences.dashboard.sidebarCollapsedByDefault);
+      setSessionTimeoutMinutes(preferences.security.sessionTimeoutMinutes);
       applyStoredTheme();
     } catch {
       // Ignore localStorage errors
@@ -39,6 +40,7 @@ export function Layout({ children }: LayoutProps) {
     return onSettingsPreferencesChanged((preferences) => {
       applyDocumentDashboardPreferences(preferences.dashboard);
       setIsSidebarCollapsed(preferences.dashboard.sidebarCollapsedByDefault);
+      setSessionTimeoutMinutes(preferences.security.sessionTimeoutMinutes);
     });
   }, []);
 
@@ -67,7 +69,7 @@ export function Layout({ children }: LayoutProps) {
 
     timeoutRef.current = setTimeout(() => {
       setShowSessionExpired(true);
-    }, INACTIVITY_TIMEOUT);
+    }, sessionTimeoutMinutes * 60 * 1000);
   };
 
   useEffect(() => {
@@ -91,9 +93,11 @@ export function Layout({ children }: LayoutProps) {
         document.removeEventListener(event, resetInactivityTimer, true);
       });
     };
-  }, []);
+  }, [sessionTimeoutMinutes]);
 
   const handleSessionExpiredAction = () => {
+    const email = localStorage.getItem("userEmail") || undefined;
+    recordLoginActivity("session_timeout", email).catch(() => {});
     localStorage.removeItem("woofAuth");
     localStorage.removeItem("woofAuthToken");
     localStorage.removeItem("woofAuthExpiresAt");

@@ -135,4 +135,65 @@ describe('AuthService', () => {
       }),
     );
   });
+
+  it('changes the Supabase dashboard password after verifying the current password', async () => {
+    listUsers.mockResolvedValue({
+      data: {
+        users: [
+          {
+            id: 'user-1',
+            email: 'woofdash@gmail.com',
+            user_metadata: { twoFactor: { enabled: true } },
+          },
+        ],
+      },
+      error: null,
+    });
+
+    await expect(
+      service().changePassword(
+        'woofdash@gmail.com',
+        'current-password',
+        'new-password',
+      ),
+    ).resolves.toEqual({ success: true });
+
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: 'woofdash@gmail.com',
+      password: 'current-password',
+    });
+    expect(updateUserById).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({
+        password: 'new-password',
+        email_confirm: true,
+        user_metadata: expect.objectContaining({
+          role: 'dashboard_admin',
+          app: 'woof',
+          twoFactor: { enabled: true },
+        }),
+      }),
+    );
+  });
+
+  it('rejects change password when the current password is wrong', async () => {
+    listUsers.mockResolvedValue({
+      data: { users: [{ id: 'user-1', email: 'woofdash@gmail.com' }] },
+      error: null,
+    });
+    signInWithPassword.mockResolvedValueOnce({
+      data: { session: null },
+      error: { message: 'Invalid credentials' },
+    });
+
+    await expect(
+      service().changePassword(
+        'woofdash@gmail.com',
+        'wrong-password',
+        'new-password',
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(updateUserById).not.toHaveBeenCalled();
+  });
 });

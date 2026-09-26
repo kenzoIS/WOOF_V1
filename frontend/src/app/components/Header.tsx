@@ -13,7 +13,7 @@ import {
 } from "./ui/select";
 import { Button } from "./ui/button";
 import { DataIngestion } from "./DataIngestion";
-import { ChannelStatus, DataRange, getAlertThresholds, getChannelStatus, getCurrentWeather, getDataRange } from "../lib/api";
+import { ChannelStatus, DataRange, getAlertThresholds, getChannelStatus, getCurrentWeather, getDataRange, recordLoginActivity } from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -159,6 +159,7 @@ export function Header({ onMenuClick }: HeaderProps) {
     let cancelled = false;
 
   const handleSignOut = () => {
+    recordLoginActivity("logout", localStorage.getItem("userEmail") || undefined).catch(() => {});
     localStorage.removeItem("woofAuth");
     localStorage.removeItem("woofAuthToken");
     localStorage.removeItem("woofAuthExpiresAt");
@@ -428,6 +429,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   };
 
   const handleSignOut = () => {
+    recordLoginActivity("logout", localStorage.getItem("userEmail") || undefined).catch(() => {});
     localStorage.removeItem("woofAuth");
     localStorage.removeItem("woofAuthToken");
     localStorage.removeItem("woofAuthExpiresAt");

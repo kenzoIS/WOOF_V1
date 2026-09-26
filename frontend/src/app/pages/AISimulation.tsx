@@ -2583,12 +2583,12 @@ export function AISimulation() {
       {/* PAGE HEADER */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-3 md:gap-4">
         <div className="flex-1">
-          <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
-            AI Simulation Laboratory
-          </h1>
-          <p className="text-sm md:text-base text-[#223047] opacity-60 mt-1 md:mt-2" style={{ lineHeight: "1.6" }}>
-            Advanced predictive modeling and scenario testing environment
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
+              AI Simulation Laboratory
+            </h1>
+            <InfoTooltip label="Advanced predictive modeling and scenario testing environment" />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 md:gap-3">
           <TooltipProvider>
@@ -2749,12 +2749,12 @@ export function AISimulation() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex-1">
-                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  Raw Transaction Data Analysis
-                </h2>
-                <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Live transaction stream feeding AI pattern detection models for {selectedHeaderRangeLabel}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                    Raw Transaction Data Analysis
+                  </h2>
+                  <InfoTooltip label={`Live transaction stream feeding AI pattern detection models for ${selectedHeaderRangeLabel}`} />
+                </div>
               </div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm">
                 Real-Time Data
@@ -2859,12 +2859,12 @@ export function AISimulation() {
                   <Network className="w-5 h-5 md:w-6 md:h-6 text-white" />
                 </div>
                 <div className="flex-1">
-                  <h2 className="text-lg md:text-xl lg:text-[24px] font-bold text-[#223047]">
-                    Live Behavioral Web <span className="hidden md:inline">(FP-Growth Pattern Detection Engine)</span>
-                  </h2>
-                  <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                    Association rule mining and pattern visualization for {selectedHeaderRangeLabel}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg md:text-xl lg:text-[24px] font-bold text-[#223047]">
+                      Live Behavioral Web <span className="hidden md:inline">(FP-Growth Pattern Detection Engine)</span>
+                    </h2>
+                    <InfoTooltip label={`Association rule mining and pattern visualization for ${selectedHeaderRangeLabel}`} />
+                  </div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 md:gap-3">
@@ -3081,10 +3081,8 @@ export function AISimulation() {
                     <div className="flex items-center gap-2 mb-3 md:mb-4">
                       <Target className="w-4 h-4 md:w-5 md:h-5" />
                       <h3 className="text-sm md:text-base font-bold">Pattern Filters</h3>
+                      <InfoTooltip label="Choose how strict the graph should be when showing repeated item appearances and co-purchase links." />
                     </div>
-                    <p className="text-xs opacity-90 mb-4 md:mb-6">
-                      Choose how strict the graph should be when showing repeated item appearances and co-purchase links.
-                    </p>
 
                     <div className="grid grid-cols-3 gap-2 mb-5">
                       {[
@@ -3340,8 +3338,10 @@ export function AISimulation() {
                     <span className="text-white text-xs font-bold">Time</span>
                   </div>
                   <div className="flex-1">
-                    <div className="text-xs md:text-sm font-bold text-[#223047]">Time-Based Pattern Analysis</div>
-                    <div className="text-xs text-[#223047] opacity-60">View patterns across different hours of the day</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs md:text-sm font-bold text-[#223047]">Time-Based Pattern Analysis</div>
+                      <InfoTooltip label="View patterns across different hours of the day" />
+                    </div>
                   </div>
                 </div>
                 <div className="text-left sm:text-right">
@@ -3374,19 +3374,14 @@ export function AISimulation() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div className="flex-1">
-                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  AI-Predicted Bundle Opportunities
-                </h2>
-                <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  {bundleOpportunityMode === "seasonal" ? "Generated from weather-aware " : "Generated from "}
-                  <span
-                    className="cursor-help font-semibold text-[#223047] underline decoration-dotted decoration-[#F53799]"
-                    title="FP-Growth (Frequent Pattern Growth): An advanced AI data-mining algorithm that analyzes thousands of customer receipts to identify items frequently bought together."
-                  >
-                    FP-Growth AI pattern analysis
-                  </span>{" "}
-                  of {formatHour(dataTime[0])} transaction patterns for {selectedHeaderRangeLabel}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                    AI-Predicted Bundle Opportunities
+                  </h2>
+                  <InfoTooltip
+                    label={`${bundleOpportunityMode === "seasonal" ? "Generated from weather-aware " : "Generated from "}FP-Growth AI pattern analysis of ${formatHour(dataTime[0])} transaction patterns for ${selectedHeaderRangeLabel}`}
+                  />
+                </div>
               </div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs md:text-sm font-semibold">
                 Showing {filteredBundlePredictions.length > 0 ? (bundlePage - 1) * bundlesPerPage + 1 : 0}-{Math.min(bundlePage * bundlesPerPage, filteredBundlePredictions.length)} of {filteredBundlePredictions.length} Bundles
@@ -3763,12 +3758,12 @@ export function AISimulation() {
                   <PackagePlus className="w-4 h-4 md:w-5 md:h-5 text-white" />
                 </div>
                 <div>
-                  <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                    Manual Bundle Builder
-                  </h2>
-                  <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                    Create owner-defined bundles aside from WOOF-generated FP-Growth recommendations.
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                      Manual Bundle Builder
+                    </h2>
+                    <InfoTooltip label="Create owner-defined bundles aside from WOOF-generated FP-Growth recommendations." />
+                  </div>
                 </div>
               </div>
               <Badge className="bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC] hover:bg-[#FFF2FA] self-start">
@@ -3981,8 +3976,8 @@ export function AISimulation() {
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-5 h-5 text-[#16A34A]" />
                     <h2 className="text-lg font-bold text-[#223047]">Bundle Effectiveness Score</h2>
+                    <InfoTooltip label={`${createdManualBundleScore.bundleName} compared with current system-generated bundle opportunities.`} />
                   </div>
-                  <p className="text-xs text-[#223047] opacity-60 mt-1">{createdManualBundleScore.bundleName} compared with current system-generated bundle opportunities.</p>
                 </div>
                 <div className="text-3xl font-bold text-[#06B6D4]">{createdManualBundleScore.score}<span className="text-base opacity-60">/100</span></div>
               </div>
@@ -4012,7 +4007,10 @@ export function AISimulation() {
                   <Archive className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />
                 </div>
                 <div>
-                  <h2 className="text-lg md:text-xl font-bold text-[#223047]">Bundle Archives</h2>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg md:text-xl font-bold text-[#223047]">Bundle Archives</h2>
+                    <InfoTooltip label="Saved generated and manual bundles with active, archived, and deleted statuses." />
+                  </div>
                   <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1">
                     {bundleArchiveCounts.active ?? 0} active | {bundleArchiveCounts.generated ?? 0} generated | {bundleArchiveCounts.manual ?? 0} manual
                   </p>
@@ -4160,12 +4158,12 @@ export function AISimulation() {
                   <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
                 </div>
                 <div className="flex-1">
-                  <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                    Strategic Proximity Recommendations
-                  </h2>
-                  <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                    AI-driven merchandising intelligence for optimal product placement
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                      Strategic Proximity Recommendations
+                    </h2>
+                    <InfoTooltip label="AI-driven merchandising intelligence for optimal product placement" />
+                  </div>
                 </div>
               </div>
               <Badge className="bg-gradient-to-r from-[#F53799] to-[#06B6D4] text-white hover:opacity-90 text-xs md:text-sm">
@@ -4227,12 +4225,12 @@ export function AISimulation() {
                   <Sparkles className="w-5 h-5 text-[#F53799]" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm md:text-base text-[#223047]">
-                    Was the bundle recommendation engine helpful?
-                  </h3>
-                  <p className="text-xs text-[#223047] opacity-60 mt-0.5">
-                    Your feedback directly refines FP-Growth association scoring and is archived to AWS S3.
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm md:text-base text-[#223047]">
+                      Was the bundle recommendation engine helpful?
+                    </h3>
+                    <InfoTooltip label="Your feedback directly refines FP-Growth association scoring and is archived to AWS S3." />
+                  </div>
                 </div>
               </div>
 
@@ -4281,12 +4279,12 @@ export function AISimulation() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
               <div className="flex-1">
-                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  Choose Item To Price
-                </h2>
-                <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Search {pricingCatalogRangeLabel} and choose one product, item, or service to test.
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                    Choose Item To Price
+                  </h2>
+                  <InfoTooltip label={`Search ${pricingCatalogRangeLabel} and choose one product, item, or service to test.`} />
+                </div>
               </div>
               <div className="w-full lg:w-[360px] space-y-2">
                 <div className="relative">
@@ -4408,12 +4406,12 @@ export function AISimulation() {
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
               <div>
-                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  Dynamic Pricing Simulator
-                </h2>
-                <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                  Estimate sales, revenue, profit, and margin for {selectedPricingItem?.name || "a selected item"} using documented pricing assumptions.
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                    Dynamic Pricing Simulator
+                  </h2>
+                  <InfoTooltip label={`Estimate sales, revenue, profit, and margin for ${selectedPricingItem?.name || "a selected item"} using documented pricing assumptions.`} />
+                </div>
               </div>
               <Badge variant="outline" className="border-[#FFD9EC] text-[#223047] text-xs">
                 {selectedHeaderRangeLabel}
@@ -5027,12 +5025,12 @@ export function AISimulation() {
                   <Sparkles className="w-5 h-5 text-[#06B6D4]" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm md:text-base text-[#223047]">
-                    Was the traffic optimizer & quiet-period recommendation helpful?
-                  </h3>
-                  <p className="text-xs text-[#223047] opacity-60 mt-0.5">
-                    Ratings adjust Prophet regressors and are archived to AWS S3 Data Lake.
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm md:text-base text-[#223047]">
+                      Was the traffic optimizer & quiet-period recommendation helpful?
+                    </h3>
+                    <InfoTooltip label="Ratings adjust Prophet regressors and are archived to AWS S3 Data Lake." />
+                  </div>
                 </div>
               </div>
 
@@ -5080,12 +5078,12 @@ export function AISimulation() {
         <div className="space-y-4 md:space-y-6 lg:space-y-8">
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div>
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Business Scenario Builder & What-If Analysis
-              </h2>
-              <p className="text-xs md:text-sm text-[#223047] opacity-60 mt-1" style={{ lineHeight: "1.6" }}>
-                Test operational scenarios using forecast APIs, weather inputs, and the promo response model.
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                  Business Scenario Builder & What-If Analysis
+                </h2>
+                <InfoTooltip label="Test operational scenarios using forecast APIs, weather inputs, and the promo response model." />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 lg:gap-8">
@@ -5201,8 +5199,10 @@ export function AISimulation() {
                 <div className="p-4 md:p-6 bg-gradient-to-br from-[#F53799] to-[#D42A7D] rounded-xl md:rounded-2xl text-white">
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-3 md:mb-4">
                     <div>
-                      <h3 className="text-base md:text-lg font-bold">Predicted Outcomes</h3>
-                      <div className="text-xs opacity-75 mt-1">Source: {scenarioOutcome.sourceLabel}</div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base md:text-lg font-bold">Predicted Outcomes</h3>
+                        <InfoTooltip label={`Source: ${scenarioOutcome.sourceLabel}`} />
+                      </div>
                     </div>
                     <div className="text-xs bg-white/15 rounded-lg px-3 py-2">
                       Model confidence: {scenarioOutcome.confidence ? `${scenarioOutcome.confidence}%` : "Calibrating"}

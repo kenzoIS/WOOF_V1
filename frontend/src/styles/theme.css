@@ -72,6 +72,96 @@
   --sidebar-ring: #F53799;
 }
 
+.woof-password-field::-ms-reveal,
+.woof-password-field::-ms-clear {
+  display: none;
+}
+
+.woof-password-field::-webkit-credentials-auto-fill-button,
+.woof-password-field::-webkit-caps-lock-indicator {
+  visibility: hidden;
+  display: none;
+  pointer-events: none;
+}
+
+.woof-dark .woof-forgot-modal {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.woof-dark .woof-forgot-modal h2,
+.woof-dark .woof-forgot-modal label,
+.woof-dark .woof-forgot-modal p {
+  color: var(--foreground);
+}
+
+.woof-dark .woof-forgot-input {
+  background: var(--input-background);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.woof-dark .woof-forgot-input::placeholder {
+  color: rgba(248, 251, 255, 0.5);
+}
+
+.woof-dark .woof-forgot-modal svg,
+.woof-dark .woof-forgot-eye {
+  color: var(--foreground);
+}
+
+.woof-dark .woof-forgot-cancel {
+  background: rgba(248, 251, 255, 0.08);
+  border-color: rgba(255, 217, 236, 0.36);
+  color: var(--foreground);
+}
+
+.woof-dark .woof-forgot-cancel:hover {
+  background: rgba(248, 251, 255, 0.14);
+  color: var(--foreground);
+}
+
+.woof-dark .woof-security-outline-button {
+  background: rgba(248, 251, 255, 0.08);
+  border-color: rgba(255, 217, 236, 0.36);
+  color: var(--foreground);
+}
+
+.woof-dark .woof-security-outline-button:hover {
+  background: rgba(248, 251, 255, 0.14);
+  color: var(--foreground);
+}
+
+.woof-dark .woof-security-primary-button {
+  color: #ffffff;
+}
+
+.woof-info-tooltip {
+  border-color: rgba(107, 114, 128, 0.22);
+  background: rgba(255, 255, 255, 0.62);
+  color: rgba(107, 114, 128, 0.58);
+  box-shadow: none;
+}
+
+.woof-info-tooltip:hover {
+  border-color: rgba(107, 114, 128, 0.36);
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(75, 85, 99, 0.72);
+}
+
+.woof-dark .woof-info-tooltip {
+  border-color: rgba(248, 251, 255, 0.12);
+  background: rgba(248, 251, 255, 0.06);
+  color: rgba(248, 251, 255, 0.42);
+}
+
+.woof-dark .woof-info-tooltip:hover {
+  border-color: rgba(248, 251, 255, 0.22);
+  background: rgba(248, 251, 255, 0.1);
+  color: rgba(248, 251, 255, 0.62);
+}
+
 .woof-dark {
   color-scheme: dark;
   --background: #111827;

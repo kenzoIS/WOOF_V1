@@ -2,6 +2,235 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-27 - Settings Section Title Icon Removal
+
+### Requested
+- Remove the left-side decorative icons beside these Settings section titles: Business Profile, Notification Preferences, Alert Thresholds, AI & Model Configuration, External API Connections & Diagnostics, Data Management, Appearance, Dashboard Preferences, and Security & Session.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Removed the decorative leading title icons from the requested Settings section headers.
+- Kept the title text, muted information icons, nested control icons, form icons, buttons, and existing Settings behavior intact.
+- Removed now-unused icon imports from the Settings page.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Audit KPI Info Icon Removal
+
+### Requested
+- Remove the information icons from the four Audit & Orchestration Logs KPI cards: Pending Approvals, Average Duration, Failed Actions, and Automated Actions.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Audit.tsx`.
+- Removed the per-KPI `InfoTooltip` from the Audit KPI card label row.
+- Kept the page-level Audit & Orchestration Logs information icon and all KPI values/layout behavior intact.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Smart Reports and Root Cause Info Icon Subtitle Consolidation
+
+### Requested
+- Apply the same information icon subtitle treatment to the Smart Reports and Root Cause Explorer modules.
+- Move subtitles beside titles into the muted information icon pattern while preserving existing module behavior.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/SmartReports.tsx`.
+- Added shared `InfoTooltip` usage to the Smart Reports page header and empty-state title helper copy.
+- Updated `frontend/src/app/pages/RootCauseExplorer.tsx`.
+- Added shared `InfoTooltip` usage to the Root Cause page header and title/subtitle pairs across the diagnostic tabs, including the counterfactual curve, waterfall decomposition, Sankey flow, Shapley attribution, channel/category variance, stock impact, heatmap, weather log, promotion, and discount sections.
+- Kept metric values, badges, legends, table content, card body explanations, and operational status text visible.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - AI Simulation Info Icon Subtitle Consolidation
+
+### Requested
+- Start implementing the system-wide information icon pattern in the AI Simulation module.
+- For every title with a subtitle in AI Simulation tabs/pages, move the subtitle into the information icon beside the title.
+- Keep the icon styling consistent with the muted seamless information icon treatment already applied elsewhere.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Moved visible helper subtitles into shared `InfoTooltip` controls for the AI Simulation page header, bundle simulator sections, Live Behavioral Web, Time-Based Pattern Analysis, AI bundle opportunities, manual bundle builder, bundle effectiveness score, strategic proximity recommendations, pricing lab sections, traffic feedback, and scenario builder sections.
+- Added a contextual information icon to Bundle Archives while keeping live archive counts visible because they function as status data instead of static subtitle copy.
+- Preserved existing badges, filters, controls, charts, feedback actions, and status indicators.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Active Model Performance Info Icon Styling
+
+### Requested
+- Apply the muted information icon style to the remaining Active Model Performance icons in Cafe and Services.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Cafe.tsx`.
+- Updated `frontend/src/app/pages/Services.tsx`.
+- Replaced the accent-colored custom Active Model Performance info buttons with the shared `woof-info-tooltip` styling so they match the global muted information icon treatment.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Global Info Icon Muted Styling
+
+### Requested
+- Apply the muted information icon style to every page that uses the Information icon.
+- Keep the styling seamless across all preset themes and the manual theme picker.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Removed the Settings-only wrapper class because the behavior is now global.
+- Updated `frontend/src/styles/theme.css`.
+- Promoted muted gray styling to the shared `.woof-info-tooltip` class so all `InfoTooltip` icons use low-opacity neutral gray.
+- Kept hover states subtle and neutral instead of tying icon color to theme accent variables, so preset and manual themes do not make the icons visually distracting.
+- Added compatible dark-mode neutral styling for all information icons.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Settings Info Icon Muted Styling
+
+### Requested
+- Change the color of the information icons beside Settings titles to light gray or low-opacity gray so they are less distracting.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Added a scoped `woof-settings-page` wrapper class to the Settings page.
+- Updated `frontend/src/styles/theme.css`.
+- Muted only Settings-page `.woof-info-tooltip` icons to low-opacity gray with subtle hover states in light and dark mode.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Initial `npm.cmd run build` in `frontend` hit a transient Next.js page-data collection error for `/services`; the page file existed and a rerun completed successfully.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Security Buttons Dark Mode Contrast Fix
+
+### Requested
+- Apply the same dark-mode visibility fix to the 2FA Authenticator Enable/Disable button and Login Activity Refresh button in Security & Session.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Added scoped button classes for the 2FA Enable/Disable and Login Activity Refresh controls.
+- Updated `frontend/src/styles/theme.css`.
+- Added dark-mode styling for Security & Session outline buttons so text, border, background, and hover states remain readable.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Forgot Password Dark Mode Cancel Button Fix
+
+### Requested
+- Fix the Forgot Password modal Cancel button so it is visible in dark mode.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Login.tsx`.
+- Added scoped classes to the Forgot Password modal, inputs, eye buttons, and Cancel buttons.
+- Updated `frontend/src/styles/theme.css`.
+- Added dark-mode styling for the Forgot Password modal surface, text, inputs, icons, and Cancel button so contrast adapts to the active system theme.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Change Password Visibility Toggle Fix
+
+### Requested
+- Fix Change Password visibility icons disappearing after a while or after a few clicks.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Replaced browser-native password reveal behavior in the Change Password form with persistent custom Eye / EyeOff buttons.
+- Applied the existing `woof-password-field` class to hide native browser reveal/clear controls for the Settings password inputs.
+- Reset visibility states after a successful password update.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Security Settings Change Password and Timeout Apply Fix
+
+### Requested
+- Double-check and self-test Change Password.
+- Self-test Session Timeout Duration.
+- Show the current timeout limit before and while changing the chosen limit.
+- Add a button to apply the newly chosen timeout limit.
+
+### Backend Changes
+- Updated `backend/src/auth/auth.service.spec.ts`.
+- Added explicit Change Password coverage for successful password update after current-password verification.
+- Added explicit rejection coverage when the current password is incorrect.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Security settings now consistently use the configured dashboard Gmail account for password and 2FA operations instead of any stale browser `userEmail` value.
+- Session Timeout Duration now shows:
+  - the current saved timeout limit
+  - the chosen slider value
+  - an `Apply New Timeout Limit` button
+- Timeout changes are now staged until the user clicks Apply, then saved to preferences and picked up by the dashboard inactivity timer.
+
+### Verification
+- Passed: `npm.cmd test -- auth.service.spec.ts --runInBand` in `backend` (`6` tests passed).
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Settings Security and Session Module
+
+### Requested
+- Add a Security & Session section at the bottom of Settings.
+- Include Change Password, Session Timeout Duration, 2FA Authenticator, and Login Activity.
+
+### Backend Changes
+- Updated `backend/src/auth/dto/login.dto.ts`.
+- Added `backend/src/auth/dto/security.dto.ts`.
+- Updated `backend/src/auth/auth.controller.ts`.
+- Added endpoints for change password, TOTP 2FA setup/enable/disable/status, login activity recording, and login activity listing.
+- Updated `backend/src/auth/auth.service.ts`.
+- Login now supports an optional authenticator code when 2FA is enabled.
+- 2FA uses standard TOTP codes and stores the authenticator secret/status in Supabase user metadata.
+- Login events are recorded by the backend; logout and session timeout events can be posted by the frontend.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts` with Security & Session API helpers.
+- Updated `frontend/src/app/lib/preferences.ts` with a persisted `security.sessionTimeoutMinutes` setting.
+- Updated `frontend/src/app/components/Layout.tsx` so inactivity timeout uses the saved setting and records session timeout activity.
+- Updated `frontend/src/app/components/Header.tsx` so sign-out records logout activity.
+- Updated `frontend/src/app/pages/Login.tsx` so 2FA-enabled accounts receive an authenticator-code step during login.
+- Updated `frontend/src/app/pages/Settings.tsx` with a bottom Security & Session section for password changes, session timeout duration, 2FA authenticator setup, and login activity.
+
+### Verification
+- Passed: `npm.cmd test -- auth.service.spec.ts --runInBand` in `backend` (`4` tests passed).
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-27 - Forgot Password Duplicate Eye Icon Fix
+
+### Requested
+- Fix the Create New Password step so New Password and Confirm Password only show one password visibility icon.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Login.tsx`.
+- Added a scoped `woof-password-field` class to the login/reset password inputs that use the custom visibility toggle.
+- Updated `frontend/src/styles/theme.css`.
+- Hid browser-native password reveal/clear controls for `woof-password-field` inputs so only the custom lucide eye icon is visible.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
 ## 2026-09-26 - Gmail OTP Forgot Password Flow
 
 ### Requested
