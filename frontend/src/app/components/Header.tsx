@@ -160,6 +160,8 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const handleSignOut = () => {
     localStorage.removeItem("woofAuth");
+    localStorage.removeItem("woofAuthToken");
+    localStorage.removeItem("woofAuthExpiresAt");
     localStorage.removeItem("userType");
     localStorage.removeItem("userEmail");
     toast.success("Signed out successfully");
@@ -427,6 +429,8 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const handleSignOut = () => {
     localStorage.removeItem("woofAuth");
+    localStorage.removeItem("woofAuthToken");
+    localStorage.removeItem("woofAuthExpiresAt");
     localStorage.removeItem("userType");
     localStorage.removeItem("userEmail");
     toast.success("Signed out successfully");

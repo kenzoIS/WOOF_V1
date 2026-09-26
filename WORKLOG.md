@@ -2,6 +2,88 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-26 - Gmail OTP Forgot Password Flow
+
+### Requested
+- Use the newly created Gmail account as the dashboard login email.
+- Use the Gmail account to power the Forgot Password OTP flow.
+- Keep dashboard password reset connected to Supabase Auth.
+
+### Backend Changes
+- Installed `nodemailer` and `@types/nodemailer` in `backend`.
+- Updated `backend/.env` with the Gmail dashboard account and SMTP configuration.
+- Added `backend/src/auth/dto/password-reset.dto.ts`.
+- Updated `backend/src/auth/auth.controller.ts` with:
+  - `POST /api/auth/forgot-password`
+  - `POST /api/auth/verify-reset-otp`
+  - `POST /api/auth/reset-password`
+- Updated `backend/src/auth/auth.service.ts`.
+- Login now accepts the configured Gmail dashboard email and verifies the password against Supabase Auth.
+- First login/reset request creates the configured Gmail dashboard user in Supabase Auth if it does not exist yet.
+- Forgot Password now generates a 6-digit OTP, hashes it in memory, expires it after 10 minutes, limits invalid attempts, and sends it through Gmail SMTP.
+- Password reset verifies the OTP and updates the Supabase Auth user password through the Supabase Admin API.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts` with password reset API helpers.
+- Updated `frontend/src/app/pages/Login.tsx`.
+- The Forgot Password modal now calls the backend to send OTP, verify OTP, and reset the password.
+- Updated login and reset email placeholders to the Gmail dashboard address.
+
+### Verification
+- Passed: `npm.cmd test -- auth.service.spec.ts --runInBand` in `backend` (`4` tests passed).
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-26 - Login Password Visibility Toggle
+
+### Requested
+- Add an eye icon beside the password field so users can view or hide their password while typing.
+- Clarify how the Forgot Password OTP design can be implemented for real password changes.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Login.tsx`.
+- Added `Eye` / `EyeOff` icon toggles to the main login password field.
+- Added the same show/hide behavior to the Forgot Password modal's new password and confirm password fields.
+- Preserved the existing login card, modal layout, and form behavior.
+
+### Forgot Password Implementation Note
+- The current Forgot Password modal is still frontend-only and does not yet change the real Supabase password.
+- Recommended implementation: add backend endpoints that generate a short-lived OTP, email it to the dashboard admin address, verify the OTP, then call Supabase Admin `updateUserById` to set the new password.
+- Supabase also supports recovery-link email flows, but the current OTP screen fits better with a backend-managed OTP reset flow.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-26 - Supabase-Backed Dashboard Login
+
+### Requested
+- Make the dashboard login functionality work.
+- Accept a single dashboard credential: `woof@admin.ph` / `woofdash123`.
+- Use the project's Supabase setup for authentication support.
+
+### Backend Changes
+- Added `backend/src/auth/auth.module.ts`, `auth.controller.ts`, `auth.service.ts`, `dto/login.dto.ts`, and `auth.service.spec.ts`.
+- Registered `AuthModule` in `backend/src/app.module.ts`.
+- Added `POST /api/auth/login`.
+- Login now only accepts the configured dashboard admin credential, defaulting to `woof@admin.ph` / `woofdash123`.
+- The backend uses the existing Supabase service-role client to create or update the dashboard admin user in Supabase Auth with confirmed email metadata.
+- Successful login returns a dashboard session payload with email, access token, and expiry timestamp.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts` with `loginDashboard`.
+- Updated `frontend/src/app/pages/Login.tsx` so sign-in calls the backend instead of accepting any non-empty credentials.
+- Login now stores `woofAuthToken`, `woofAuthExpiresAt`, and the backend-returned admin email only after successful authentication.
+- Updated `frontend/pages/_app.tsx` so the route guard requires a valid token and future expiry timestamp.
+- Updated `frontend/src/app/components/Header.tsx` and `frontend/src/app/components/Layout.tsx` so sign-out and inactivity expiry clear all dashboard auth keys.
+
+### Verification
+- Passed: `npm.cmd test -- auth.service.spec.ts --runInBand` in `backend` (`3` tests passed).
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
 ## 2026-09-25 - Services Forecast WAPE Accuracy and Weather Comparison
 
 ### Requested

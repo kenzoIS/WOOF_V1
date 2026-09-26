@@ -425,6 +425,57 @@ export async function getAuditSummary() {
   return fetchApi('/audit/summary');
 }
 
+export interface LoginResponse {
+  accessToken: string;
+  email: string;
+  expiresAt: string;
+}
+
+export async function loginDashboard(
+  email: string,
+  password: string,
+): Promise<LoginResponse> {
+  return fetchApi('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function requestPasswordReset(email: string): Promise<{
+  success: boolean;
+  expiresInMinutes: number;
+}> {
+  return fetchApi('/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyResetOtp(
+  email: string,
+  otp: string,
+): Promise<{ success: boolean }> {
+  return fetchApi('/auth/verify-reset-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, otp }),
+  });
+}
+
+export async function resetDashboardPassword(
+  email: string,
+  otp: string,
+  password: string,
+): Promise<{ success: boolean }> {
+  return fetchApi('/auth/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, otp, password }),
+  });
+}
+
 export async function saveAlertThresholds(
   thresholds: Partial<AlertThresholds>,
 ): Promise<AlertThresholds> {

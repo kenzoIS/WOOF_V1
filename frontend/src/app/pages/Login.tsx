@@ -1,9 +1,15 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
-import { Lock, Mail } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Toaster } from "../components/ui/sonner";
+import {
+  loginDashboard,
+  requestPasswordReset,
+  resetDashboardPassword,
+  verifyResetOtp,
+} from "../lib/api";
 import { getSettingsPreferences } from "../lib/preferences";
 import logoImg from "../../imports/happytailslogo-removebg-preview.png";
 
@@ -25,6 +31,8 @@ function ForgotPasswordModal({
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const resetModal = () => {
@@ -32,6 +40,8 @@ function ForgotPasswordModal({
     setOtp("");
     setNewPassword("");
     setConfirmPassword("");
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
     setStep("email");
   };
 
@@ -40,7 +50,7 @@ function ForgotPasswordModal({
     onClose();
   };
 
-  const handleEmailSubmit = () => {
+  const handleEmailSubmit = async () => {
     if (!email.trim()) {
       toast.error("Please enter your email address");
       return;
@@ -48,16 +58,25 @@ function ForgotPasswordModal({
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
+    try {
+      await requestPasswordReset(email.trim());
       toast.success("OTP sent!", {
         description: "Check your email for the 6-digit OTP code.",
       });
-      setIsSubmitting(false);
       setStep("otp");
-    }, 1500);
+    } catch (error) {
+      toast.error("Unable to send OTP", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Please check the dashboard email and try again.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOtpSubmit = () => {
+  const handleOtpSubmit = async () => {
     if (otp.length !== 6) {
       toast.error("Please enter a valid 6-digit OTP");
       return;
@@ -65,14 +84,23 @@ function ForgotPasswordModal({
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
+    try {
+      await verifyResetOtp(email.trim(), otp);
       toast.success("OTP verified!");
-      setIsSubmitting(false);
       setStep("newPassword");
-    }, 1000);
+    } catch (error) {
+      toast.error("Unable to verify OTP", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Please check the OTP and try again.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handlePasswordSubmit = () => {
+  const handlePasswordSubmit = async () => {
     if (!newPassword || !confirmPassword) {
       toast.error("Please fill in all fields");
       return;
@@ -90,15 +118,24 @@ function ForgotPasswordModal({
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
+    try {
+      await resetDashboardPassword(email.trim(), otp, newPassword);
       toast.success("Password reset successful!", {
         description: "Please log in with your new password.",
       });
-      setIsSubmitting(false);
       resetModal();
       onClose();
       onPasswordReset();
-    }, 1500);
+    } catch (error) {
+      toast.error("Unable to reset password", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Please request a new OTP and try again.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!isOpen) {
@@ -129,7 +166,7 @@ function ForgotPasswordModal({
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  placeholder="your.email@example.com"
+                  placeholder="woofdash@gmail.com"
                   className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
                   disabled={isSubmitting}
                 />
@@ -226,13 +263,28 @@ function ForgotPasswordModal({
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
                   <input
-                    type="password"
+                    type={showNewPassword ? "text" : "password"}
                     value={newPassword}
                     onChange={(event) => setNewPassword(event.target.value)}
                     placeholder="Enter new password"
-                    className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
+                    className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-12 transition-colors focus:border-[#F53799] focus:outline-none"
                     disabled={isSubmitting}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((value) => !value)}
+                    className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[#223047] opacity-50 transition hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#F53799]/30"
+                    disabled={isSubmitting}
+                    aria-label={
+                      showNewPassword ? "Hide new password" : "Show new password"
+                    }
+                  >
+                    {showNewPassword ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
                 </div>
               </div>
 
@@ -243,15 +295,32 @@ function ForgotPasswordModal({
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
                   <input
-                    type="password"
+                    type={showConfirmPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(event) =>
                       setConfirmPassword(event.target.value)
                     }
                     placeholder="Confirm new password"
-                    className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
+                    className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-12 transition-colors focus:border-[#F53799] focus:outline-none"
                     disabled={isSubmitting}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((value) => !value)}
+                    className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[#223047] opacity-50 transition hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#F53799]/30"
+                    disabled={isSubmitting}
+                    aria-label={
+                      showConfirmPassword
+                        ? "Hide confirmation password"
+                        : "Show confirmation password"
+                    }
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -286,10 +355,11 @@ export function Login() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleLogin = (event: React.FormEvent) => {
+  const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
 
     if (!email.trim() || !password) {
@@ -299,15 +369,26 @@ export function Login() {
 
     setIsLoggingIn(true);
 
-    setTimeout(() => {
+    try {
+      const session = await loginDashboard(email.trim(), password);
       localStorage.removeItem("userType");
       localStorage.setItem("woofAuth", "true");
-      localStorage.setItem("userEmail", email.trim());
+      localStorage.setItem("woofAuthToken", session.accessToken);
+      localStorage.setItem("woofAuthExpiresAt", session.expiresAt);
+      localStorage.setItem("userEmail", session.email);
       toast.success("Welcome back!", {
         description: "Signed in to WOOF.",
       });
       router.push(getSettingsPreferences().dashboard.defaultLandingPage);
-    }, 1000);
+    } catch (error) {
+      toast.error("Unable to sign in", {
+        description:
+          error instanceof Error
+            ? error.message
+            : "Please check your dashboard credentials and try again.",
+      });
+      setIsLoggingIn(false);
+    }
   };
 
   const handlePasswordReset = () => {
@@ -346,7 +427,7 @@ export function Login() {
                   type="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  placeholder="your.email@example.com"
+                  placeholder="woofdash@gmail.com"
                   className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
                   disabled={isLoggingIn}
                 />
@@ -360,13 +441,26 @@ export function Login() {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#223047] opacity-40" />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="Enter your password"
-                  className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-4 transition-colors focus:border-[#F53799] focus:outline-none"
+                  className="w-full rounded-xl border-2 border-[#FFD9EC] py-3 pl-11 pr-12 transition-colors focus:border-[#F53799] focus:outline-none"
                   disabled={isLoggingIn}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[#223047] opacity-50 transition hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-[#F53799]/30"
+                  disabled={isLoggingIn}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-5 w-5" />
+                  ) : (
+                    <Eye className="h-5 w-5" />
+                  )}
+                </button>
               </div>
             </div>
 

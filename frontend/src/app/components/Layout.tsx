@@ -94,9 +94,13 @@ export function Layout({ children }: LayoutProps) {
   }, []);
 
   const handleSessionExpiredAction = () => {
-    // Simulate login redirect
+    localStorage.removeItem("woofAuth");
+    localStorage.removeItem("woofAuthToken");
+    localStorage.removeItem("woofAuthExpiresAt");
+    localStorage.removeItem("userType");
+    localStorage.removeItem("userEmail");
     setShowSessionExpired(false);
-    window.location.reload();
+    window.location.href = "/login";
   };
 
   return (

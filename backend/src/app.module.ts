@@ -19,6 +19,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ContextModule } from './context/context.module';
 import { LlmModule } from './llm/llm.module';
 import { AuditModule } from './audit/audit.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { AuditModule } from './audit/audit.module';
     LlmModule,
     SettingsModule,
     AuditModule,
+    AuthModule,
   ],
   providers: [
     // ── Security: Apply ThrottlerGuard globally ─────────────────────
