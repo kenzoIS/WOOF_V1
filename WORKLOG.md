@@ -2,6 +2,35 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-28 - Credential Exposure Hardening
+
+### Requested
+- Investigate the GitGuardian alert for a company email password exposed in GitHub.
+- Explain how to fix the exposure and bring the project closer to industry-standard secret handling.
+
+### Security Findings
+- `backend/.env` is currently ignored and not tracked in the working tree, but Git history shows it was previously committed and deleted.
+- Current local `backend/.env` contains real secrets and must remain local only.
+- The auth service still carried a hardcoded fallback dashboard password value in source code.
+- Older worklog/test text included a live-looking dashboard password string.
+
+### Backend Changes
+- Updated `backend/src/auth/auth.service.ts`.
+- Removed the hardcoded dashboard password fallback.
+- Dashboard user auto-creation now requires `WOOF_ADMIN_PASSWORD` from environment configuration and fails closed if it is missing.
+- Updated `backend/src/auth/auth.service.spec.ts`.
+- Replaced live-looking dashboard password literals with test-only placeholder values.
+- Added `backend/.env.example` with placeholder values so required variables are documented without committing real secrets.
+
+### Documentation Changes
+- Updated `WORKLOG.md`.
+- Replaced previous live-looking dashboard password references with environment-variable wording.
+
+### Verification
+- Passed: `npm.cmd test -- auth.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: tracked-file scans did not find the previously exposed dashboard password string or Gmail app-password prefix in tracked files.
+
 ## 2026-09-27 - Settings Section Title Icon Removal
 
 ### Requested
@@ -289,14 +318,14 @@ This file records requested revisions, implementation details, verification, and
 
 ### Requested
 - Make the dashboard login functionality work.
-- Accept a single dashboard credential: `woof@admin.ph` / `woofdash123`.
+- Accept a single configured dashboard credential, with the password supplied only through local environment variables.
 - Use the project's Supabase setup for authentication support.
 
 ### Backend Changes
 - Added `backend/src/auth/auth.module.ts`, `auth.controller.ts`, `auth.service.ts`, `dto/login.dto.ts`, and `auth.service.spec.ts`.
 - Registered `AuthModule` in `backend/src/app.module.ts`.
 - Added `POST /api/auth/login`.
-- Login now only accepts the configured dashboard admin credential, defaulting to `woof@admin.ph` / `woofdash123`.
+- Login now only accepts the configured dashboard admin credential, with the initial password supplied by environment configuration.
 - The backend uses the existing Supabase service-role client to create or update the dashboard admin user in Supabase Auth with confirmed email metadata.
 - Successful login returns a dashboard session payload with email, access token, and expiry timestamp.
 

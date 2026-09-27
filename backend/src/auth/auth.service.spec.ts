@@ -22,7 +22,7 @@ describe('AuthService', () => {
       {
         get: jest.fn((key: string) => {
           if (key === 'WOOF_ADMIN_EMAIL') return 'woofdash@gmail.com';
-          if (key === 'WOOF_ADMIN_PASSWORD') return 'woofdash123';
+          if (key === 'WOOF_ADMIN_PASSWORD') return 'test-initial-password';
           if (key === 'WOOF_SMTP_USER') return 'woofdash@gmail.com';
           if (key === 'WOOF_SMTP_APP_PASSWORD') return 'app password';
           return undefined;
@@ -64,27 +64,30 @@ describe('AuthService', () => {
 
   it('rejects credentials outside the dashboard admin account', async () => {
     await expect(
-      service().login('wrong@example.com', 'woofdash123'),
+      service().login('wrong@example.com', 'test-initial-password'),
     ).rejects.toBeInstanceOf(UnauthorizedException);
 
     expect(listUsers).not.toHaveBeenCalled();
   });
 
   it('creates the Supabase dashboard user before signing in when needed', async () => {
-    const result = await service().login('woofdash@gmail.com', 'woofdash123');
+    const result = await service().login(
+      'woofdash@gmail.com',
+      'test-initial-password',
+    );
 
     expect(result.email).toBe('woofdash@gmail.com');
     expect(result.accessToken).toBe('supabase-token');
     expect(createUser).toHaveBeenCalledWith(
       expect.objectContaining({
         email: 'woofdash@gmail.com',
-        password: 'woofdash123',
+        password: 'test-initial-password',
         email_confirm: true,
       }),
     );
     expect(signInWithPassword).toHaveBeenCalledWith({
       email: 'woofdash@gmail.com',
-      password: 'woofdash123',
+      password: 'test-initial-password',
     });
   });
 

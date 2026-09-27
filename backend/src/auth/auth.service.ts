@@ -25,7 +25,6 @@ export interface LoginActivityEntry {
 }
 
 const DEFAULT_ADMIN_EMAIL = 'woof@admin.ph';
-const DEFAULT_ADMIN_PASSWORD = 'woofdash123';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const OTP_TTL_MS = 10 * 60 * 1000;
 const MAX_OTP_ATTEMPTS = 5;
@@ -326,11 +325,18 @@ export class AuthService {
       .toLowerCase();
   }
 
-  private getDefaultAdminPassword() {
-    return (
-      this.configService.get<string>('WOOF_ADMIN_PASSWORD') ||
-      DEFAULT_ADMIN_PASSWORD
-    ).trim();
+  private getInitialAdminPassword() {
+    const password = this.configService
+      .get<string>('WOOF_ADMIN_PASSWORD')
+      ?.trim();
+
+    if (!password) {
+      throw new InternalServerErrorException(
+        'WOOF_ADMIN_PASSWORD must be configured before creating the dashboard user',
+      );
+    }
+
+    return password;
   }
 
   private async ensureSupabaseAdminUser(email: string) {
@@ -343,7 +349,7 @@ export class AuthService {
     const { data, error } =
       await this.supabaseService.client.auth.admin.createUser({
         email,
-        password: this.getDefaultAdminPassword(),
+        password: this.getInitialAdminPassword(),
         email_confirm: true,
         user_metadata: {
           role: 'dashboard_admin',

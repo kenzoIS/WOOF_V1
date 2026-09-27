@@ -554,19 +554,17 @@ export function Home() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Total Revenue Today */}
           <div
-            onClick={() => router.push("/demand-forecasts")}
-            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3"
           >
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
                   Total Revenue
                   <InfoTooltip label="Total money earned from uploaded transactions in the selected period." />
                 </span>
-                <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
               <div className={`text-xs ${scaledKPIs.revenueColorClass} font-medium hidden md:block`}>{scaledKPIs.revenuePercent}</div>
@@ -575,19 +573,17 @@ export function Home() {
 
           {/* Omnichannel Orders */}
           <div
-            onClick={() => router.push("/smart-reports")}
-            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#06B6D4] hover:shadow-sm transition-all group"
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3"
           >
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <ShoppingCart className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
                   Orders
                   <InfoTooltip label="Number of completed transactions or receipts counted by WOOF for the selected period." />
                 </span>
-                <ArrowRight className="w-3 h-3 text-[#06B6D4] opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
               <div className={`text-xs ${scaledKPIs.ordersColorClass} font-medium hidden md:block`}>{scaledKPIs.ordersPercent}</div>
@@ -596,19 +592,17 @@ export function Home() {
 
           {/* Retail Revenue */}
           <div
-            onClick={() => router.push("/retail")}
-            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3"
           >
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <PawPrint className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center justify-between">
+              <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
                   Retail
                   <InfoTooltip label="Revenue from pet shop, product, and retail transactions." />
                 </span>
-                <ArrowRight className="w-3 h-3 text-[#F53799] opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.retail}</div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs mt-1 hidden md:inline-flex">
