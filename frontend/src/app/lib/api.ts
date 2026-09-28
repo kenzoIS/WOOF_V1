@@ -975,10 +975,10 @@ export async function getPastHappyHours(): Promise<any[]> {
 }
 
 export async function activateHappyHour(dto: {
-  discountPercent: number;
+  items: Array<{ itemKey: string; discountPercent: number; probabilityScore?: number }>;
   targetDate: string;
   targetHour: number;
-  probabilityScore: number;
+  probabilityScore?: number;
 }): Promise<any> {
   return fetchApi('/analytics/promos/draft', {
     method: 'POST',

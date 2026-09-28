@@ -268,6 +268,7 @@ export function Cafe() {
   } | null>(null);
   const [menuFilter, setMenuFilter] = useState("all");
   const [menuPerformanceMode, setMenuPerformanceMode] = useState<"overall" | "header">("overall");
+  const [selectedItems, setSelectedItems] = useState<Record<string, { selected: boolean, discountPercent: number }>>({});
   const [discountValue, setDiscountValue] = useState([15]);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [currentPage, setCurrentPage] = useState(1);
@@ -364,7 +365,16 @@ export function Cafe() {
   }, []);
 
   useEffect(() => {
-    getNextQuietPeriod().then(setQuietPeriod).catch(console.error);
+    getNextQuietPeriod().then((qp) => {
+      setQuietPeriod(qp);
+      if (qp?.recommendedItems) {
+        const initial: Record<string, { selected: boolean, discountPercent: number }> = {};
+        qp.recommendedItems.forEach((item: any) => {
+          initial[item.itemKey] = { selected: true, discountPercent: item.recommendedDiscount || 15 };
+        });
+        setSelectedItems(initial);
+      }
+    }).catch(console.error);
     getPastHappyHours().then(setPastHappyHours).catch(console.error);
   }, [realtimeRefresh]);
 
@@ -1187,8 +1197,17 @@ export function Cafe() {
   const handleActivateHappyHour = async () => {
     if (!quietPeriod || quietPeriod.status !== 'success') return;
     try {
+      const itemsPayload = Object.entries(selectedItems)
+        .filter(([_, data]) => data.selected)
+        .map(([key, data]) => ({ itemKey: key, discountPercent: data.discountPercent, probabilityScore: quietPeriod.probabilityScore }));
+        
+      if (itemsPayload.length === 0) {
+        toast.error("Please select at least one item.");
+        return;
+      }
+      
       await activateHappyHour({
-        discountPercent: discountValue[0],
+        items: itemsPayload,
         targetDate: quietPeriod.targetDate,
         targetHour: quietPeriod.targetHour,
         probabilityScore: quietPeriod.probabilityScore,
@@ -2207,39 +2226,56 @@ export function Cafe() {
             </div>
 
             <div className="rounded-2xl border border-white/12 bg-white/[0.07] p-4 md:p-5">
-              <div className="flex flex-col md:flex-row md:items-center gap-4">
-                <div className="flex-1">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <label className="text-xs font-bold uppercase tracking-wide text-white/65">Discount %</label>
-                  <span className="text-xl md:text-2xl font-black text-white">{discountValue[0]}%</span>
+              <div className="text-xs font-semibold uppercase tracking-wide text-white/55 mb-4">Recommended Items</div>
+              {quietPeriod?.recommendedItems && quietPeriod.recommendedItems.length > 0 ? (
+                <div className="space-y-4 mb-6">
+                  {quietPeriod.recommendedItems.map((item: any) => (
+                    <div key={item.itemKey} className="flex flex-col md:flex-row md:items-center gap-4">
+                      <div className="flex-1">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <label className="flex items-center gap-2 cursor-pointer text-sm font-bold tracking-wide text-white">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedItems[item.itemKey]?.selected ?? false} 
+                              onChange={(e) => setSelectedItems(prev => ({...prev, [item.itemKey]: {...prev[item.itemKey], selected: e.target.checked}}))}
+                              className="w-4 h-4 rounded border-white/20 bg-transparent text-[#F53799] focus:ring-[#F53799]"
+                            />
+                            {item.itemKey}
+                          </label>
+                          <span className="text-lg font-black text-white">{selectedItems[item.itemKey]?.discountPercent || 15}%</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Slider
+                            defaultValue={[item.recommendedDiscount || 15]}
+                            value={[selectedItems[item.itemKey]?.discountPercent || 15]}
+                            onValueChange={(val) => setSelectedItems(prev => ({...prev, [item.itemKey]: {...prev[item.itemKey], discountPercent: val[0]}}))}
+                            max={80}
+                            min={5}
+                            step={5}
+                            className="flex-1"
+                            disabled={!quietPeriod || quietPeriod.status !== 'success' || !selectedItems[item.itemKey]?.selected}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center gap-3">
-                  <Slider
-                    defaultValue={[15]}
-                    value={discountValue}
-                    onValueChange={setDiscountValue}
-                    max={80}
-                    min={5}
-                    step={5}
-                    className="flex-1"
-                    disabled={!quietPeriod || quietPeriod.status !== 'success'}
-                  />
-                </div>
-              </div>
+              ) : (
+                <div className="mb-6 text-white/65 text-sm">No specific items recommended. Check backend.</div>
+              )}
 
-            <div className="flex flex-col sm:flex-row md:w-auto gap-2">
-              <Button onClick={handleActivateHappyHour} className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm px-6" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
-                Activate Happy Hour
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => router.push("/ai-simulation?tab=traffic-optimizer")}
-                className="border-white/25 bg-[#111827]/55 text-white hover:bg-white/10 text-xs md:text-sm flex items-center justify-center gap-1.5 px-5"
-              >
-                <span>Traffic Optimizer</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Button>
-            </div>
+              <div className="flex flex-col sm:flex-row md:w-auto gap-2">
+                <Button onClick={handleActivateHappyHour} className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm px-6" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
+                  Activate Happy Hour
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => router.push("/ai-simulation?tab=traffic-optimizer")}
+                  className="border-white/25 bg-[#111827]/55 text-white hover:bg-white/10 text-xs md:text-sm flex items-center justify-center gap-1.5 px-5"
+                >
+                  <span>Traffic Optimizer</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Button>
               </div>
             </div>
 

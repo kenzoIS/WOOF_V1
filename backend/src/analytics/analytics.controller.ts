@@ -470,17 +470,21 @@ export class AnalyticsController {
   async activateHappyHour(
     @Body()
     body: {
-      discountPercent: number;
+      items: Array<{
+        itemKey: string;
+        discountPercent: number;
+        probabilityScore?: number;
+      }>;
       targetDate: string;
       targetHour: number;
-      probabilityScore: number;
+      probabilityScore?: number;
     },
   ) {
     return this.analyticsService.activateHappyHour(
-      body.discountPercent,
+      body.items,
       body.targetDate,
       body.targetHour,
-      body.probabilityScore,
+      body.probabilityScore || 0,
     );
   }
 
