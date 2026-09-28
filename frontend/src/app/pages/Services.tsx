@@ -1088,7 +1088,7 @@ export function Services() {
                 label={
                   <>
                     Active model: <span className="font-semibold">{forecastRun?.modelName || "Waiting for uploaded Services history"}</span>
-                    {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, WAPE Accuracy: ${forecastRun.accuracy.toFixed(1)}%).`}
+                    {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, sMAPE: ${forecastRun.smape.toFixed(2)}%, MAE: ₱${Number(forecastRun.mae ?? 0).toFixed(2)}).`}
                   </>
                 }
               />
@@ -1182,12 +1182,12 @@ export function Services() {
                 </div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">WAPE Accuracy</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
-              </div>
-              <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.smape}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">MAE (₱)</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.mae !== "—" ? `₱${dynamicPerformanceMetrics.mae}` : "—"}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
@@ -1642,25 +1642,25 @@ export function Services() {
               <div>
                 <strong className="text-sm text-[#06B6D4]">MASE (Mean Absolute Scaled Error) — Target Threshold ≤ 0.20</strong>
                 <p className="mt-1">
-                  Measures the forecasting error scaled against a naive seasonal persistence benchmark. In our research methodology, a strict threshold of **MASE ≤ 0.20** indicates exceptional model precision, proving that AI error is tightly bounded within 20% of baseline seasonal variation.
-                </p>
-              </div>
-              <div>
-                <strong className="text-sm text-[#06B6D4]">WAPE Accuracy</strong>
-                <p className="mt-1">
-                  Measures total absolute forecast error against total actual demand. For example, **90% WAPE Accuracy** means total forecast error is about 10% of actual demand volume.
+                  Measures the forecasting error scaled against a naïve seasonal persistence benchmark. A MASE below 1.0 means the model outperforms a simple repeat-last-season baseline; our research target of <strong>MASE ≤ 0.20</strong> indicates the model's error is only 20% of the naïve baseline, demonstrating exceptional predictive precision for Services demand.
                 </p>
               </div>
               <div>
                 <strong className="text-sm text-[#06B6D4]">sMAPE (Symmetric Mean Absolute Percentage Error)</strong>
                 <p className="mt-1">
-                  The symmetric percentage error between forecasted and actual demand. For sparse Services days, it is useful as a diagnostic rather than the headline accuracy score.
+                  A bounded, symmetric percentage error metric (0–200%) that treats over-forecasts and under-forecasts equally. Unlike standard MAPE, sMAPE handles near-zero actual values gracefully—important for sparse Services booking days. Lower values indicate better accuracy; values below <strong>10%</strong> reflect highly accurate forecasts.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#06B6D4]">MAE (Mean Absolute Error) — in Pesos (₱)</strong>
+                <p className="mt-1">
+                  The average absolute difference between the forecasted and actual daily Services revenue in pesos. MAE is the most interpretable metric—it directly tells you the typical peso deviation per day. A low MAE confirms the model's predictions stay close to reality in real monetary terms.
                 </p>
               </div>
               <div>
                 <strong className="text-sm text-[#06B6D4]">Missing Days Filled</strong>
                 <p className="mt-1">
-                  The count of days with missing sales data (due to closures or system downtime) that the AI automatically calculated and filled using smart estimations to keep the forecasting model accurate and complete.
+                  The count of days with missing sales data (due to closures or system downtime) that the AI automatically imputed using smart estimations to keep the forecasting model accurate and complete.
                 </p>
               </div>
             </div>
