@@ -3748,7 +3748,7 @@ export class AnalyticsService {
       modelMetrics: mlResult?.modelMetrics || {},
       featureImportance: mlResult?.featureImportance || [],
       temperature: temp,
-      recommendedDiscount: 15,
+      recommendedItems: mlResult?.recommendedItems || [],
     };
   }
 
@@ -3767,33 +3767,79 @@ export class AnalyticsService {
       'gross_profit',
     ].join(',');
 
-    const { data: discountedRes } = await this.supabaseService.client
-      .from('fact_cross_channel_transactions')
-      .select(columns)
-      .gt('gross_sales', 0)
-      .or('discount_amount.gt.0,discount_depth.gt.0')
-      .order('transaction_timestamp', { ascending: false })
-      .limit(15000);
-
-    const { data: normalRes } = await this.supabaseService.client
-      .from('fact_cross_channel_transactions')
-      .select(columns)
-      .gt('gross_sales', 0)
-      .eq('discount_amount', 0)
-      .eq('discount_depth', 0)
-      .order('transaction_timestamp', { ascending: false })
-      .limit(15000);
-
     let data: any[] = [];
-    if (discountedRes && Array.isArray(discountedRes))
-      data = data.concat(discountedRes);
-    if (normalRes && Array.isArray(normalRes)) data = data.concat(normalRes);
+    
+    // Helper function to paginate queries
+    const fetchPaginated = async (queryBuilder: any, maxRows: number = 15000) => {
+      let results: any[] = [];
+      let start = 0;
+      let limit = 1000;
+      
+      while (results.length < maxRows) {
+        const { data: chunk, error } = await queryBuilder.range(start, start + limit - 1);
+        if (error || !chunk || chunk.length === 0) break;
+        results = results.concat(chunk);
+        if (chunk.length < limit) break;
+        start += limit;
+      }
+      return results;
+    };
+
+    const discountedRes = await fetchPaginated(
+      this.supabaseService.client
+        .from('fact_cross_channel_transactions')
+        .select(columns)
+        .gt('gross_sales', 0)
+        .or('discount_amount.gt.0,discount_depth.gt.0')
+        .order('transaction_timestamp', { ascending: true })
+    );
+
+    const normalRes = await fetchPaginated(
+      this.supabaseService.client
+        .from('fact_cross_channel_transactions')
+        .select(columns)
+        .gt('gross_sales', 0)
+        .eq('discount_amount', 0)
+        .eq('discount_depth', 0)
+        .order('transaction_timestamp', { ascending: true })
+    );
+
+    data = data.concat(discountedRes);
+    data = data.concat(normalRes);
+
+    if (data.length === 0) return [];
+    
+    // Fetch product names to map PRD_ back to human-readable names
+    const productIds = Array.from(new Set(data.map(r => r.product_id).filter(id => id)));
+    const { data: products } = await this.supabaseService.client
+      .from('product_dim')
+      .select('product_id, product_name, category')
+      .in('product_id', productIds);
+      
+    const productMap = new Map();
+    const cafeCategories = ['coffee', 'non-caffeine', 'pasta/snacks', 'pet bakery', 'rice meals'];
+    
+    if (products) {
+      products.forEach(p => {
+        productMap.set(p.product_id, {
+          name: p.product_name,
+          category: p.category ? p.category.toLowerCase() : '',
+        });
+      });
+    }
+
+    // Filter out retail/grooming items
+    data = data.filter((row: any) => {
+      const p = productMap.get(row.product_id);
+      if (!p) return false; // Ignore unknown or deleted products
+      return cafeCategories.includes(p.category);
+    });
 
     if (data.length === 0) return [];
 
     return data.map((row: any) => ({
       transactionTimestamp: row.transaction_timestamp,
-      itemKey: row.product_id || row.service_id || 'unknown',
+      itemKey: productMap.get(row.product_id)?.name || row.product_id || row.service_id || 'unknown',
       channelKey: row.channel_id || 'unknown',
       segmentKey: row.segment_id || 'unknown',
       quantitySold: Number(row.quantity_sold || 0),
@@ -3806,7 +3852,7 @@ export class AnalyticsService {
   }
 
   async activateHappyHour(
-    discountPercent: number,
+    items: Array<{ itemKey: string; discountPercent: number; probabilityScore?: number }>,
     targetDate: string,
     targetHour: number,
     probabilityScore: number,
@@ -3817,7 +3863,7 @@ export class AnalyticsService {
         target_date: new Date(
           `${targetDate}T${targetHour.toString().padStart(2, '0')}:00:00Z`,
         ).toISOString(),
-        owner_approved_discount_percent: discountPercent,
+        items_json: items,
         probability_score: probabilityScore,
         status: 'approved',
       })

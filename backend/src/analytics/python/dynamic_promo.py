@@ -334,8 +334,8 @@ def predict_promo_success(payload):
     temp = safe_float(payload.get("temp"), safe_float(medians.get("temp"), 28))
     traffic_drop = safe_float(payload.get("traffic_drop"), dynamic_traffic_drop)
     discount_depth = safe_float(payload.get("discount_depth"), 0.15)
-    baseline_units = safe_float(payload.get("baseline_units"), safe_float(medians.get("baseline_units"), 2))
-    baseline_margin_rate = safe_float(
+    baseline_units_global = safe_float(payload.get("baseline_units"), safe_float(medians.get("baseline_units"), 2))
+    baseline_margin_rate_global = safe_float(
         payload.get("baseline_margin_rate"),
         safe_float(medians.get("baseline_margin_rate"), 0.25),
     )
@@ -347,20 +347,98 @@ def predict_promo_success(payload):
             "temp": [temp],
             "traffic_drop": [traffic_drop],
             "discount_depth": [discount_depth],
-            "baseline_units": [baseline_units],
-            "baseline_margin_rate": [baseline_margin_rate],
+            "baseline_units": [baseline_units_global],
+            "baseline_margin_rate": [baseline_margin_rate_global],
         }
     )
 
-    prob = rf.predict_proba(X_new)[0][1]
+    global_prob = rf.predict_proba(X_new)[0][1]
     importances = dict(zip(FEATURE_COLUMNS, rf.feature_importances_))
 
+    # --- NEW ITEM-LEVEL LOGIC (Phase 1) ---
+    recommended_items = []
+    if history_rows:
+        df = pd.DataFrame(history_rows)
+        # Parse timestamp safely
+        df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="ISO8601", errors="coerce")
+        if df["timestamp"].isna().all():
+            df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="mixed", errors="coerce")
+        
+        df["hour"] = df["timestamp"].dt.hour
+        df["item_key"] = series_or_default(df, "itemKey", "unknown").fillna("unknown").astype(str)
+        df["quantity"] = pd.to_numeric(series_or_default(df, "quantitySold", 0), errors="coerce").fillna(0)
+        df["net_sales"] = pd.to_numeric(series_or_default(df, "netSales", 0), errors="coerce").fillna(0)
+        df["gross_profit"] = pd.to_numeric(series_or_default(df, "grossProfit", 0), errors="coerce").fillna(0)
+        df["margin_rate"] = np.where(df["net_sales"] > 0, df["gross_profit"] / df["net_sales"], 0)
+
+        # Filter to the dynamic_hour using pandas
+        df_hour = df[df["hour"] == int(hour)]
+        
+        if not df_hour.empty:
+            # Group by itemKey leveraging pandas vectorized grouping
+            item_hour_stats = df_hour.groupby("item_key").agg(
+                total_quantity=("quantity", "sum"),
+                baseline_units=("quantity", "mean"),
+                baseline_margin_rate=("margin_rate", "mean")
+            ).reset_index()
+
+            # Using pandas quantile to find anomaly/underperforming items without custom math formulas
+            if len(item_hour_stats) >= 4:
+                threshold = item_hour_stats["total_quantity"].quantile(0.25)
+                candidates_df = item_hour_stats[item_hour_stats["total_quantity"] <= threshold]
+            else:
+                candidates_df = item_hour_stats
+
+            # Exclude unknown items
+            if not candidates_df.empty:
+                candidates_df = candidates_df[candidates_df["item_key"] != "unknown"].copy()
+            
+            if not candidates_df.empty:
+                # Assign dynamic discounts purely based on margin bracket
+                def calc_discount(margin):
+                    if margin > 0.4: return 0.20
+                    elif margin < 0.2: return 0.10
+                    return 0.15
+                
+                candidates_df["rec_discount"] = candidates_df["baseline_margin_rate"].apply(calc_discount)
+                
+                # Create a feature matrix for the candidates
+                X_candidates = pd.DataFrame({
+                    "hour": [hour] * len(candidates_df),
+                    "is_weekend": [is_weekend] * len(candidates_df),
+                    "temp": [temp] * len(candidates_df),
+                    "traffic_drop": [traffic_drop] * len(candidates_df),
+                    "discount_depth": candidates_df["rec_discount"].values,
+                    "baseline_units": candidates_df["baseline_units"].fillna(baseline_units_global).values,
+                    "baseline_margin_rate": candidates_df["baseline_margin_rate"].fillna(baseline_margin_rate_global).values
+                })
+                
+                # Vectorized prediction using scikit-learn
+                probs = rf.predict_proba(X_candidates)[:, 1]
+                candidates_df["probabilityScore"] = probs
+                
+                # Filter to good recommendations (> 0% probability), sort and take top 5
+                good_cands = candidates_df[candidates_df["probabilityScore"] >= 0.0].sort_values(by="probabilityScore", ascending=False).head(5)
+                
+                for _, row in good_cands.iterrows():
+                    recommended_items.append({
+                        "itemKey": str(row["item_key"]),
+                        "recommendedDiscount": float(row["rec_discount"] * 100),
+                        "probabilityScore": float(row["probabilityScore"]),
+                        "historicalDrop": float(traffic_drop)
+                    })
+
+    if recommended_items:
+        # Override global probability with the max of the recommendations for backward compatibility
+        global_prob = recommended_items[0]["probabilityScore"]
+
     return {
-        "probabilityScore": float(prob),
+        "probabilityScore": float(global_prob),
         "featureImportance": {key: float(value) for key, value in importances.items()},
         "modelMetrics": metrics,
         "targetHour": int(hour),
         "predictedTrafficDrop": float(traffic_drop),
+        "recommendedItems": recommended_items
     }
 
 
