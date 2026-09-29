@@ -173,6 +173,27 @@ export function Retail() {
   }, []);
 
   useEffect(() => {
+    const handleScrollToTarget = () => {
+      const hash = typeof window !== "undefined" ? window.location.hash : "";
+      const sectionQuery = router.query.section;
+      if (hash === "#retail-revenue-by-channel" || sectionQuery === "retail-revenue-by-channel") {
+        setTimeout(() => {
+          const el = document.getElementById("retail-revenue-by-channel");
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+            el.classList.add("ring-4", "ring-[#D42A7D]/40", "transition-all", "duration-500");
+            setTimeout(() => {
+              el.classList.remove("ring-4", "ring-[#D42A7D]/40");
+            }, 3000);
+          }
+        }, 300);
+      }
+    };
+
+    handleScrollToTarget();
+  }, [router.asPath, router.query]);
+
+  useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
     if (customRange) {
       setChannelRangeMode("custom");
@@ -833,7 +854,7 @@ export function Retail() {
       </div>
 
       {/* RETAIL REVENUE BY CHANNEL */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+      <div id="retail-revenue-by-channel" className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 scroll-mt-24">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           <div>
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">

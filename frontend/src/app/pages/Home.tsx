@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun } from "lucide-react";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun, Layers, Receipt } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -72,19 +72,40 @@ interface HomeSuggestion {
   detailedExplanation: string;
 }
 
+export interface RetailPlatformBreakdown {
+  channel: string;
+  label: string;
+  shortLabel: string;
+  revenue: number;
+  orders: number;
+  percent: number;
+  color: string;
+}
+
 interface HomeOverview {
   anchorDate: string | null;
   kpis: {
     totalRevenue: number;
     totalOrders: number;
     retailRevenue: number;
+    avgOrderValue?: number;
+    aovChangePercent?: number;
     revenueChangePercent: number;
     ordersChangePercent: number;
     busiestSector: string;
     pendingSuggestions: number;
   };
+  retailBreakdown?: RetailPlatformBreakdown[];
   insight: string;
-  omnichannelSeries: Array<{ hour: string; cafe: number; services: number; retail: number }>;
+  omnichannelSeries: Array<{
+    hour: string;
+    cafe: number;
+    services: number;
+    retail: number;
+    retail_pos?: number;
+    retail_shopee?: number;
+    retail_tiktok?: number;
+  }>;
   sectorSummary: Array<{ sector: string; revenue: number; orders: number }>;
   channelSummary: Array<{ channel: string; revenue: number; count: number }>;
   channelBalance: Array<{ category: string; channel: string; physical: number; online: number; count: number }>;
@@ -113,7 +134,11 @@ export function Home() {
   const router = useRouter();
   const [timeRange, setTimeRange] = useState("today");
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+  const [realtimeRefresh, setRealtimeRefresh] = useState(0);
   const [expandedSuggestions, setExpandedSuggestions] = useState<number[]>([]);
+  const [approvedSuggestions, setApprovedSuggestions] = useState<number[]>([]);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<number[]>([]);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
   const [homeOverview, setHomeOverview] = useState<HomeOverview | null>(null);
   const [homeLoading, setHomeLoading] = useState(false);
   const [homeError, setHomeError] = useState<string | null>(null);
@@ -134,14 +159,37 @@ export function Home() {
     };
   }, []);
 
+  // Auto-recalibrate when new data arrives (CSV upload processed, warehouse ETL complete)
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
+      const eventType = customEvent.detail?.type;
+      if (
+        !eventType ||
+        eventType === "upload_processed" ||
+        eventType === "etl_completed" ||
+        eventType === "forecast_ready"
+      ) {
+        setRealtimeRefresh((prev) => prev + 1);
+      }
+    };
+
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => {
+      window.removeEventListener("woof:realtime", handleRealtime);
+    };
+  }, []);
+
   // Map globalDateRange changes to local timeRange state
   useEffect(() => {
     if (globalDateRange === "today" || globalDateRange === "yesterday") {
       setTimeRange("today");
     } else if (globalDateRange === "last-7-days") {
       setTimeRange("week");
-    } else if (globalDateRange === "last-30-days" || globalDateRange === "last-90-days" || globalDateRange === "last-12-months") {
+    } else if (globalDateRange === "last-30-days") {
       setTimeRange("month");
+    } else if (globalDateRange === "last-12-months" || globalDateRange === "last-90-days") {
+      setTimeRange("custom");
     } else if (globalDateRange === "custom") {
       setTimeRange("custom");
     }
@@ -149,6 +197,14 @@ export function Home() {
 
   const handleLocalTimeRangeChange = (localVal: string) => {
     setTimeRange(localVal);
+    let targetRange = "last-7-days";
+    if (localVal === "today") targetRange = "today";
+    else if (localVal === "week") targetRange = "last-7-days";
+    else if (localVal === "month") targetRange = "last-30-days";
+    else if (localVal === "custom") targetRange = "custom";
+    setGlobalDateRange(targetRange);
+    localStorage.setItem("globalDateRange", targetRange);
+    window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: targetRange }));
   };
 
   const toggleSuggestionExplanation = (id: number) => {
@@ -177,7 +233,7 @@ export function Home() {
     return () => {
       active = false;
     };
-  }, [globalDateRange]);
+  }, [globalDateRange, realtimeRefresh]);
 
   useEffect(() => {
     let active = true;
@@ -201,30 +257,41 @@ export function Home() {
     return `${number >= 0 ? "+" : ""}${number.toFixed(1)}%`;
   };
 
+  const suggestions = useMemo(() => homeOverview?.suggestions || [], [homeOverview?.suggestions]);
+
+  // Dynamically linked to "WOOF Autonomous Suggestions — Pending Review"
+  const pendingSuggestionsCount = useMemo(() => {
+    if (!suggestions || suggestions.length === 0) return 0;
+    return suggestions.filter(
+      (s) => !approvedSuggestions.includes(s.id) && !dismissedSuggestions.includes(s.id),
+    ).length;
+  }, [suggestions, approvedSuggestions, dismissedSuggestions]);
+
   const scaledKPIs = useMemo(() => {
     const kpis = homeOverview?.kpis;
     const totalRevenue = toNumber(kpis?.totalRevenue);
-    const retailRevenue =
-      kpis?.retailRevenue ??
-      homeOverview?.sectorSummary.find((item) => item.sector === "Retail")?.revenue ??
-      0;
-    const safeRetailRevenue = toNumber(retailRevenue);
+    const totalOrders = toNumber(kpis?.totalOrders);
+    const aovValue = toNumber(kpis?.avgOrderValue || (totalOrders > 0 ? totalRevenue / totalOrders : 0));
     const revChange = toNumber(kpis?.revenueChangePercent);
     const ordChange = toNumber(kpis?.ordersChangePercent);
+    const aovChange = toNumber(kpis?.aovChangePercent ?? (
+      ordChange !== -100 ? (((1 + revChange / 100) / (1 + ordChange / 100)) - 1) * 100 : 0
+    ));
+
     return {
       revenue: formatCurrency(totalRevenue),
-      orders: toNumber(kpis?.totalOrders).toLocaleString(),
-      retail: formatCurrency(safeRetailRevenue),
-      retailPercent:
-        totalRevenue > 0 ? `${((safeRetailRevenue / totalRevenue) * 100).toFixed(1)}% of revenue` : "0.0% of revenue",
+      orders: totalOrders.toLocaleString(),
+      aov: formatCurrency(aovValue),
+      aovPercent: `${formatPercent(aovChange)} vs previous period`,
+      aovColorClass: aovChange >= 0 ? "text-green-600" : "text-rose-600",
       revenuePercent: `${formatPercent(revChange)} vs previous period`,
       ordersPercent: `${formatPercent(ordChange)} vs previous period`,
       revenueColorClass: revChange >= 0 ? "text-green-600" : "text-rose-600",
       ordersColorClass: ordChange >= 0 ? "text-green-600" : "text-rose-600",
       busiestSector: kpis?.busiestSector || "None",
-      pending: kpis?.pendingSuggestions || 0,
+      pending: pendingSuggestionsCount,
     };
-  }, [homeOverview]);
+  }, [homeOverview, pendingSuggestionsCount]);
 
   const dynamicOmnichannelData = homeOverview?.omnichannelSeries || [];
   const separatedEquilibriumData = useMemo(() => {
@@ -306,20 +373,42 @@ export function Home() {
     [homeOverview?.anchorDate],
   );
   const displayHeatmapDays = clientHeatmapDays;
-  const suggestions = homeOverview?.suggestions || [];
   const carouselSuggestions = useMemo(
     () => (suggestions.length > 2 ? [...suggestions, ...suggestions] : suggestions),
     [suggestions],
   );
   const shouldAnimateSuggestions = suggestions.length > 2;
-  const heroDate = homeOverview?.anchorDate
-    ? new Date(homeOverview.anchorDate).toLocaleDateString("en-PH", {
+  const [currentDateFormatted, setCurrentDateFormatted] = useState<string>(() => {
+    return new Date().toLocaleDateString("en-PH", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  });
+
+  const [greeting, setGreeting] = useState<string>(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  });
+
+  useEffect(() => {
+    const now = new Date();
+    setCurrentDateFormatted(
+      now.toLocaleDateString("en-PH", {
         weekday: "long",
         year: "numeric",
         month: "long",
         day: "numeric",
       })
-    : "Waiting for uploaded transactions";
+    );
+    const hour = now.getHours();
+    if (hour < 12) setGreeting("Good morning");
+    else if (hour < 18) setGreeting("Good afternoon");
+    else setGreeting("Good evening");
+  }, []);
   const weatherIcon =
     currentWeather && toNumber(currentWeather.rainfallMm) > 0.5
       ? CloudRain
@@ -336,11 +425,13 @@ export function Home() {
   const legendData = useMemo(() => {
     const sectorTotal = (sector: string) =>
       toNumber(homeOverview?.sectorSummary.find((item) => item.sector === sector)?.revenue);
+    const sectorOrders = (sector: string) =>
+      homeOverview?.sectorSummary.find((item) => item.sector === sector)?.orders ?? 0;
     const total = sectorTotal("Cafe") + sectorTotal("Services") + sectorTotal("Retail");
     return [
-      { key: "cafe", label: "Cafe", color: "#F53799", value: sectorTotal("Cafe") },
-      { key: "services", label: "Services", color: "#0EA5E9", value: sectorTotal("Services") },
-      { key: "retail", label: "Retail", color: "#F59E0B", value: sectorTotal("Retail") },
+      { key: "cafe", label: "Cafe", color: "#F53799", value: sectorTotal("Cafe"), orders: sectorOrders("Cafe") },
+      { key: "services", label: "Services", color: "#0EA5E9", value: sectorTotal("Services"), orders: sectorOrders("Services") },
+      { key: "retail", label: "Retail", color: "#F59E0B", value: sectorTotal("Retail"), orders: sectorOrders("Retail") },
     ].map((item) => ({
       ...item,
       total: formatCurrency(item.value),
@@ -353,10 +444,337 @@ export function Home() {
     cafe: true,
     services: true,
     retail: true,
+    retail_pos: true,
+    retail_tiktok: true,
+    retail_shopee: true,
   });
-  const [approvedSuggestions, setApprovedSuggestions] = useState<number[]>([]);
-  const [dismissedSuggestions, setDismissedSuggestions] = useState<number[]>([]);
-  const suggestionsRef = useRef<HTMLDivElement>(null);
+  const [retailSplitMode, setRetailSplitMode] = useState(false);
+  const [isRetailPlatformsOpen, setIsRetailPlatformsOpen] = useState(false);
+  const retailDropdownRef = useRef<HTMLDivElement>(null);
+
+  const distinguishedPlatformCards = useMemo(() => {
+    const sectorItem = (sec: string) =>
+      homeOverview?.sectorSummary.find((item) => item.sector === sec);
+    const cafeRev = toNumber(sectorItem("Cafe")?.revenue);
+    const cafeOrders = sectorItem("Cafe")?.orders ?? 0;
+
+    const servicesRev = toNumber(sectorItem("Services")?.revenue);
+    const servicesOrders = sectorItem("Services")?.orders ?? 0;
+
+    const retailRev = toNumber(sectorItem("Retail")?.revenue);
+    const totalOmnichannel = cafeRev + servicesRev + retailRev;
+
+    const defaultRetailBreakdown = [
+      {
+        channel: "pos",
+        label: "In-Store POS",
+        shortLabel: "POS",
+        revenue: 0,
+        orders: 0,
+        percent: 0,
+        color: "#D42A7D",
+      },
+      {
+        channel: "tiktok",
+        label: "TikTok Shop",
+        shortLabel: "TikTok",
+        revenue: 0,
+        orders: 0,
+        percent: 0,
+        color: "#8B5CF6",
+      },
+      {
+        channel: "shopee",
+        label: "Shopee",
+        shortLabel: "Shopee",
+        revenue: 0,
+        orders: 0,
+        percent: 0,
+        color: "#F97316",
+      },
+    ];
+
+    const actualRetailBreakdown =
+      homeOverview?.retailBreakdown && homeOverview.retailBreakdown.length > 0
+        ? homeOverview.retailBreakdown
+        : defaultRetailBreakdown;
+
+    const retailCards = actualRetailBreakdown.map((item) => {
+      const channelKey =
+        item.channel === "pos"
+          ? ("retail_pos" as const)
+          : item.channel === "tiktok"
+          ? ("retail_tiktok" as const)
+          : ("retail_shopee" as const);
+
+      const omniShare =
+        totalOmnichannel > 0
+          ? `${((toNumber(item.revenue) / totalOmnichannel) * 100).toFixed(1)}%`
+          : "0.0%";
+
+      const sublabel =
+        item.channel === "pos"
+          ? "Storefront Counter"
+          : item.channel === "tiktok"
+          ? "Social Commerce"
+          : "Marketplace Mall";
+
+      const bgTint =
+        item.channel === "pos"
+          ? "#FFF2FA"
+          : item.channel === "tiktok"
+          ? "#FAF5FF"
+          : "#FFF7ED";
+
+      const borderTint =
+        item.channel === "pos"
+          ? "#FFD9EC"
+          : item.channel === "tiktok"
+          ? "#E9D5FF"
+          : "#FED7AA";
+
+      return {
+        key: channelKey,
+        sector: "Retail",
+        channel: item.channel,
+        label: item.label,
+        sublabel,
+        badge: "Retail Channel",
+        color: item.color || (item.channel === "pos" ? "#D42A7D" : item.channel === "tiktok" ? "#8B5CF6" : "#F97316"),
+        bgTint,
+        borderTint,
+        revenue: item.revenue,
+        total: formatCurrency(item.revenue),
+        orders: item.orders,
+        retailPercent: `${toNumber(item.percent).toFixed(1)}% of Retail`,
+        omniPercent: `${omniShare} total`,
+        route: "/retail",
+      };
+    });
+
+    const cafeOmniShare =
+      totalOmnichannel > 0
+        ? `${((cafeRev / totalOmnichannel) * 100).toFixed(1)}%`
+        : "0.0%";
+
+    const servicesOmniShare =
+      totalOmnichannel > 0
+        ? `${((servicesRev / totalOmnichannel) * 100).toFixed(1)}%`
+        : "0.0%";
+
+    return [
+      {
+        key: "cafe" as const,
+        sector: "Cafe",
+        channel: "pos",
+        label: "Cafe",
+        sublabel: "Dining & Drinks",
+        badge: "Physical POS",
+        color: "#F53799",
+        bgTint: "#FFF2FA",
+        borderTint: "#FFD9EC",
+        revenue: cafeRev,
+        total: formatCurrency(cafeRev),
+        orders: cafeOrders,
+        retailPercent: null,
+        omniPercent: `${cafeOmniShare} total`,
+        route: "/cafe",
+      },
+      {
+        key: "services" as const,
+        sector: "Services",
+        channel: "pos",
+        label: "Services",
+        sublabel: "Grooming & Care",
+        badge: "In-Store & Appt",
+        color: "#0EA5E9",
+        bgTint: "#F0F9FF",
+        borderTint: "#BAE6FD",
+        revenue: servicesRev,
+        total: formatCurrency(servicesRev),
+        orders: servicesOrders,
+        retailPercent: null,
+        omniPercent: `${servicesOmniShare} total`,
+        route: "/services",
+      },
+      ...retailCards,
+    ];
+  }, [homeOverview]);
+
+  const handleSetRetailSplitMode = (mode: boolean) => {
+    setRetailSplitMode(mode);
+    if (mode) {
+      setVisibleSeries((prev) => ({
+        ...prev,
+        retail_pos: true,
+        retail_tiktok: true,
+        retail_shopee: true,
+      }));
+    } else {
+      setVisibleSeries((prev) => ({
+        ...prev,
+        retail: true,
+      }));
+    }
+  };
+
+  const setAllSeries = (enabled: boolean) => {
+    setVisibleSeries({
+      cafe: enabled,
+      services: enabled,
+      retail: enabled,
+      retail_pos: enabled,
+      retail_tiktok: enabled,
+      retail_shopee: enabled,
+    });
+  };
+
+  const isolateRetailChannelsOnly = () => {
+    setVisibleSeries({
+      cafe: false,
+      services: false,
+      retail: true,
+      retail_pos: true,
+      retail_tiktok: true,
+      retail_shopee: true,
+    });
+  };
+
+  const isolatePhysicalOnly = () => {
+    setVisibleSeries({
+      cafe: true,
+      services: true,
+      retail: false,
+      retail_pos: true,
+      retail_tiktok: false,
+      retail_shopee: false,
+    });
+  };
+
+  const isolateMarketplacesOnly = () => {
+    setVisibleSeries({
+      cafe: false,
+      services: false,
+      retail: false,
+      retail_pos: false,
+      retail_tiktok: true,
+      retail_shopee: true,
+    });
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        retailDropdownRef.current &&
+        !retailDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsRetailPlatformsOpen(false);
+      }
+    };
+
+    if (isRetailPlatformsOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isRetailPlatformsOpen]);
+
+  const CustomOmnichannelTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    const data = payload[0]?.payload;
+    if (!data) return null;
+
+    const cafe = toNumber(data.cafe);
+    const services = toNumber(data.services);
+    const retail = toNumber(data.retail);
+    const retailPos = toNumber(data.retail_pos);
+    const retailShopee = toNumber(data.retail_shopee);
+    const retailTiktok = toNumber(data.retail_tiktok);
+
+    // Only sum what's actually visible in the chart right now
+    const visibleTotal = retailSplitMode
+      ? (visibleSeries.cafe ? cafe : 0)
+        + (visibleSeries.services ? services : 0)
+        + (visibleSeries.retail_pos ? retailPos : 0)
+        + (visibleSeries.retail_tiktok ? retailTiktok : 0)
+        + (visibleSeries.retail_shopee ? retailShopee : 0)
+      : (visibleSeries.cafe ? cafe : 0)
+        + (visibleSeries.services ? services : 0)
+        + (visibleSeries.retail ? retail : 0);
+
+    return (
+      <div className="bg-white/95 backdrop-blur-md border border-[#FFD9EC] rounded-xl p-3 shadow-xl text-xs space-y-2 min-w-[200px]">
+        <div className="font-bold text-[#223047] border-b border-[#FFD9EC] pb-1 flex items-center justify-between">
+          <span>{label}</span>
+          <span className="text-[10px] text-[#223047]/60 font-normal">{retailSplitMode ? "Split View" : "Sectors"}</span>
+        </div>
+        <div className="space-y-1.5">
+          {visibleSeries.cafe && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[#F53799] font-medium">
+                <span className="w-2 h-2 rounded-full bg-[#F53799]" />
+                Cafe:
+              </span>
+              <span className="font-bold text-[#223047]">{formatCurrency(cafe)}</span>
+            </div>
+          )}
+          {visibleSeries.services && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[#0EA5E9] font-medium">
+                <span className="w-2 h-2 rounded-full bg-[#0EA5E9]" />
+                Services:
+              </span>
+              <span className="font-bold text-[#223047]">{formatCurrency(services)}</span>
+            </div>
+          )}
+          {!retailSplitMode && visibleSeries.retail && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[#F59E0B] font-semibold">
+                <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
+                Retail:
+              </span>
+              <span className="font-bold text-[#223047]">{formatCurrency(retail)}</span>
+            </div>
+          )}
+          {retailSplitMode && visibleSeries.retail_pos && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-[#D42A7D] font-medium">
+                <span className="w-2 h-2 rounded-full bg-[#D42A7D]" />
+                In-Store POS:
+              </span>
+              <span className="font-bold text-[#223047]">{formatCurrency(retailPos)}</span>
+            </div>
+          )}
+          {retailSplitMode && visibleSeries.retail_tiktok && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-[#8B5CF6] font-medium">
+                <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
+                TikTok Shop:
+              </span>
+              <span className="font-bold text-[#223047]">{formatCurrency(retailTiktok)}</span>
+            </div>
+          )}
+          {retailSplitMode && visibleSeries.retail_shopee && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1 text-[#F97316] font-medium">
+                <span className="w-2 h-2 rounded-full bg-[#F97316]" />
+                Shopee:
+              </span>
+              <span className="font-bold text-[#223047]">{formatCurrency(retailShopee)}</span>
+            </div>
+          )}
+        </div>
+        {visibleTotal > 0 && (
+          <div className="border-t border-[#FFD9EC] pt-1 flex justify-between font-bold text-[#223047]">
+            <span>Visible Total:</span>
+            <span className="text-[#F53799]">{formatCurrency(visibleTotal)}</span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const [errorModal, setErrorModal] = useState<{ isOpen: boolean; type: ErrorType | null }>({
     isOpen: false,
     type: null,
@@ -367,7 +785,13 @@ export function Home() {
   });
 
   const scrollToSuggestions = () => {
-    suggestionsRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (suggestionsRef.current) {
+      suggestionsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      suggestionsRef.current.classList.add("ring-4", "ring-[#06B6D4]/40", "transition-all", "duration-500");
+      setTimeout(() => {
+        suggestionsRef.current?.classList.remove("ring-4", "ring-[#06B6D4]/40");
+      }, 2500);
+    }
   };
 
   const openChatbot = () => {
@@ -476,13 +900,13 @@ export function Home() {
           <div className="space-y-4 md:space-y-6">
             <div>
               <div className="text-sm md:text-base text-white/80 mb-1 md:mb-2">
-                Good morning, Happy Tails
+                {greeting}, Happy Tails
               </div>
               <h1 className="text-2xl md:text-3xl lg:text-[40px] font-extrabold text-white leading-tight mb-2 md:mb-3">
                 Today's Revenue Intelligence
               </h1>
               <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs md:text-sm text-white/70">
-                <span>{heroDate}</span>
+                <span>{currentDateFormatted}</span>
                 <span className="hidden sm:inline">•</span>
                 <span className="hidden sm:inline">Lucena City, Philippines</span>
                 <Badge variant="outline" className="gap-1.5 border-white/30 text-white">
@@ -590,44 +1014,55 @@ export function Home() {
             </div>
           </div>
 
-          {/* Retail Revenue */}
+          {/* Average Order Value (AOV) */}
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3"
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
-              <PawPrint className="w-4 h-4 md:w-5 md:h-5 text-white" />
+              <Receipt className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
-                  Retail
-                  <InfoTooltip label="Revenue from pet shop, product, and retail transactions." />
+                  Avg Order Value (AOV)
+                  <InfoTooltip label="Average spend per transaction across Cafe, Services, and Retail. Directly measures customer basket size and multi-line cross-selling." />
                 </span>
               </div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.retail}</div>
-              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs mt-1 hidden md:inline-flex">
-                {scaledKPIs.retailPercent}
-              </Badge>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.aov}</div>
+              <div className={`text-xs ${scaledKPIs.aovColorClass} font-medium hidden md:block`}>
+                {scaledKPIs.aovPercent}
+              </div>
             </div>
           </div>
 
           {/* WOOF Suggestions */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
-            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
+          <div 
+            onClick={scrollToSuggestions}
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#06B6D4]/50 transition-all group"
+            title="Click to view WOOF Autonomous Suggestions"
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#0891B2] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
               <Zap className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
                 <span>WOOF Suggestions</span>
-                <InfoTooltip label="AI-assisted recommendations generated from sales, demand, and pattern analysis. These still need owner review." />
+                <InfoTooltip label="AI-assisted recommendations generated from sales, demand, and pattern analysis. Dynamically linked to WOOF Autonomous Suggestions — Pending Review." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.pending}</div>
               <Button
-                onClick={scrollToSuggestions}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  scrollToSuggestions();
+                }}
                 size="sm"
-                className="bg-[#F53799] hover:bg-[#D42A7D] text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex"
+                className={`text-white h-6 md:h-7 text-xs mt-1 px-2 md:px-3 hidden md:inline-flex transition-colors ${
+                  scaledKPIs.pending === 0
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-[#F53799] hover:bg-[#D42A7D]"
+                }`}
               >
-                Review
+                {scaledKPIs.pending === 0 ? "All Reviewed" : "Review"}
               </Button>
             </div>
           </div>
@@ -646,126 +1081,379 @@ export function Home() {
             </h2>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {["Today", "Week", "Month", "Custom"].map((range) => (
-              <Button
-                key={range}
-                size="sm"
-                variant={timeRange === range.toLowerCase() ? "default" : "outline"}
-                onClick={() => handleLocalTimeRangeChange(range.toLowerCase())}
-                className={
-                  timeRange === range.toLowerCase()
-                    ? "bg-[#F53799] hover:bg-[#D42A7D]"
-                    : "border-[#FFD9EC] hover:bg-[#FFF2FA]"
-                }
+          <div className="flex flex-wrap items-center gap-2">
+            {/* View Mode Toggle: Sectors vs Split Retail Platforms */}
+            <div className="flex items-center gap-1 bg-[#FFF2FA] border border-[#FFD9EC] p-0.5 rounded-lg text-xs">
+              <button
+                type="button"
+                onClick={() => handleSetRetailSplitMode(false)}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                  !retailSplitMode
+                    ? "bg-white text-[#223047] shadow-xs"
+                    : "text-[#223047] opacity-70 hover:opacity-100"
+                }`}
               >
-                {range}
-              </Button>
-            ))}
+                Sectors View
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetRetailSplitMode(true)}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                  retailSplitMode
+                    ? "bg-white text-[#223047] shadow-xs"
+                    : "text-[#223047] opacity-70 hover:opacity-100"
+                }`}
+              >
+                Distinguish Retail Platforms
+              </button>
+            </div>
+
+            {/* Time range buttons */}
+            <div className="flex flex-wrap gap-1.5">
+              {["Today", "Week", "Month", "Custom"].map((range) => (
+                <Button
+                  key={range}
+                  size="sm"
+                  variant={timeRange === range.toLowerCase() ? "default" : "outline"}
+                  onClick={() => handleLocalTimeRangeChange(range.toLowerCase())}
+                  className={
+                    timeRange === range.toLowerCase()
+                      ? "bg-[#F53799] hover:bg-[#D42A7D]"
+                      : "border-[#FFD9EC] hover:bg-[#FFF2FA]"
+                  }
+                >
+                  {range}
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
 
-        <ResponsiveContainer width="100%" height={300} className="md:!h-[400px]">
-          <AreaChart data={dynamicOmnichannelData}>
-            <defs>
-              <linearGradient key="cafeLuxe-gradient" id="cafeLuxe" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#F53799" stopOpacity={0.35} />
-                <stop offset="100%" stopColor="#F53799" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient key="servicesGrad-gradient" id="servicesGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0EA5E9" stopOpacity={0.35} />
-                <stop offset="100%" stopColor="#0EA5E9" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient key="retailGrad-gradient" id="retailGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.35} />
-                <stop offset="100%" stopColor="#F59E0B" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-            <XAxis dataKey="hour" stroke="#223047" style={{ fontSize: "12px" }} />
-            <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "white",
-                border: "1px solid #FFD9EC",
-                borderRadius: "12px",
-                padding: "12px",
-              }}
-            />
-            {visibleSeries.cafe && (
-              <Area
-                key="cafe-area"
-                type="monotone"
-                dataKey="cafe"
-                stroke="#F53799"
-                strokeWidth={2.5}
-                fill="url(#cafeLuxe)"
-                animationDuration={800}
-              />
-            )}
-            {visibleSeries.services && (
-              <Area
-                key="services-area"
-                type="monotone"
-                dataKey="services"
-                stroke="#0EA5E9"
-                strokeWidth={2.5}
-                fill="url(#servicesGrad)"
-                animationDuration={800}
-              />
-            )}
-            {visibleSeries.retail && (
-              <Area
-                key="retail-area"
-                type="monotone"
-                dataKey="retail"
-                stroke="#F59E0B"
-                strokeWidth={2.5}
-                fill="url(#retailGrad)"
-                animationDuration={800}
-              />
-            )}
-          </AreaChart>
-        </ResponsiveContainer>
-
-        {/* Legend Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-4 pt-4 border-t border-[#FFD9EC]">
-          {legendData.map((sector) => (
-            <div
-              key={sector.key}
-              className={`flex items-center justify-between gap-2 md:gap-3 p-2 md:p-3 rounded-lg border border-transparent transition-all ${
-                visibleSeries[sector.key as keyof typeof visibleSeries]
-                  ? "bg-[#FFF2FA] border-[#FFD9EC]"
-                  : "opacity-40 hover:opacity-60"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
-                className="flex items-center gap-2 md:gap-3 flex-1 text-left min-w-0"
-              >
-                <div
-                  className="w-3 h-3 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: sector.color }}
+        <div className="w-full h-[280px] md:h-[320px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={dynamicOmnichannelData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient key="cafeLuxe-gradient" id="cafeLuxe" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#F53799" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#F53799" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient key="servicesGrad-gradient" id="servicesGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#0EA5E9" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#0EA5E9" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient key="retailGrad-gradient" id="retailGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#F59E0B" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient key="posGrad-gradient" id="posGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#D42A7D" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#D42A7D" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient key="tiktokGrad-gradient" id="tiktokGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#8B5CF6" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient key="shopeeGrad-gradient" id="shopeeGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#F97316" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#F97316" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
+              <XAxis dataKey="hour" stroke="#223047" style={{ fontSize: "12px" }} />
+              <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
+              <Tooltip content={<CustomOmnichannelTooltip />} />
+              {visibleSeries.cafe && (
+                <Area
+                  key="cafe-area"
+                  type="monotone"
+                  dataKey="cafe"
+                  name="Cafe"
+                  stroke="#F53799"
+                  strokeWidth={2.5}
+                  fill="url(#cafeLuxe)"
+                  animationDuration={800}
                 />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-[#223047] opacity-60">{sector.label}</div>
-                  <div className="text-sm font-bold text-[#223047]">{sector.total}</div>
-                  <div className="text-xs text-[#223047] opacity-50">{sector.percent}</div>
-                </div>
-              </button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => router.push(sector.key === "cafe" ? "/cafe" : sector.key === "services" ? "/services" : "/retail")}
-                className="text-[11px] font-semibold text-[#F53799] hover:bg-white/80 h-7 px-2"
-                title={`Deep dive into ${sector.label}`}
-              >
-                Deep Dive <ArrowRight className="w-3 h-3 ml-1" />
-              </Button>
-            </div>
-          ))}
+              )}
+              {visibleSeries.services && (
+                <Area
+                  key="services-area"
+                  type="monotone"
+                  dataKey="services"
+                  name="Services"
+                  stroke="#0EA5E9"
+                  strokeWidth={2.5}
+                  fill="url(#servicesGrad)"
+                  animationDuration={800}
+                />
+              )}
+              {!retailSplitMode && visibleSeries.retail && (
+                <Area
+                  key="retail-area"
+                  type="monotone"
+                  dataKey="retail"
+                  name="Retail"
+                  stroke="#F59E0B"
+                  strokeWidth={2.5}
+                  fill="url(#retailGrad)"
+                  animationDuration={800}
+                />
+              )}
+              {retailSplitMode && (
+                <>
+                  {visibleSeries.retail_pos && (
+                    <Area
+                      key="retail-pos-area"
+                      type="monotone"
+                      dataKey="retail_pos"
+                      name="In-Store POS (Retail)"
+                      stroke="#D42A7D"
+                      strokeWidth={2.2}
+                      fill="url(#posGrad)"
+                      animationDuration={800}
+                    />
+                  )}
+                  {visibleSeries.retail_tiktok && (
+                    <Area
+                      key="retail-tiktok-area"
+                      type="monotone"
+                      dataKey="retail_tiktok"
+                      name="TikTok Shop (Retail)"
+                      stroke="#8B5CF6"
+                      strokeWidth={2.2}
+                      fill="url(#tiktokGrad)"
+                      animationDuration={800}
+                    />
+                  )}
+                  {visibleSeries.retail_shopee && (
+                    <Area
+                      key="retail-shopee-area"
+                      type="monotone"
+                      dataKey="retail_shopee"
+                      name="Shopee (Retail)"
+                      stroke="#F97316"
+                      strokeWidth={2.2}
+                      fill="url(#shopeeGrad)"
+                      animationDuration={800}
+                    />
+                  )}
+                </>
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
         </div>
+
+        {/* Legend Row / Detailed Platform Cards */}
+        {!retailSplitMode ? (
+          /* Macro 3-Sector View */
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-stretch gap-2 md:gap-4 !mt-3 md:!mt-4 pt-3 border-t border-[#FFD9EC]">
+            {legendData.map((sector) => {
+              const isRetail = sector.key === "retail";
+              const isVisible = visibleSeries[sector.key as keyof typeof visibleSeries];
+              return (
+                <div
+                  key={sector.key}
+                  className={`relative flex items-center justify-between gap-2 md:gap-3 p-2.5 md:p-3 rounded-xl border transition-all ${
+                    isVisible
+                      ? "bg-[#FFF2FA] border-[#FFD9EC]"
+                      : "opacity-40 hover:opacity-60 border-transparent"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
+                    <div
+                      onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
+                      className="w-3 h-3 rounded-full flex-shrink-0 cursor-pointer hover:scale-110 transition-transform"
+                      style={{ backgroundColor: sector.color }}
+                      title={`Toggle ${sector.label} line in chart`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div
+                        onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
+                        className="cursor-pointer"
+                        title={`Toggle ${sector.label} line in chart`}
+                      >
+                        <div className="text-xs text-[#223047] opacity-60 font-medium">{sector.label}</div>
+                        <div className="text-sm md:text-base font-bold text-[#223047]">{sector.total}</div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span
+                          onClick={() => toggleSeries(sector.key as keyof typeof visibleSeries)}
+                          className="text-xs text-[#223047] opacity-50 cursor-pointer"
+                        >
+                          {sector.percent}
+                        </span>
+                        {sector.orders > 0 && (
+                          <>
+                            <span className="text-[10px] text-[#223047]/30">•</span>
+                            <span className="text-[11px] text-[#223047]/60 font-medium">
+                              {sector.orders.toLocaleString()} orders
+                            </span>
+                          </>
+                        )}
+                        {isRetail && homeOverview?.retailBreakdown && homeOverview.retailBreakdown.length > 0 && (
+                          <>
+                            <span className="text-[10px] text-[#223047]/30">•</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsRetailPlatformsOpen((prev) => !prev);
+                              }}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border shadow-2xs transition-all cursor-pointer ${
+                                isRetailPlatformsOpen
+                                  ? "bg-[#F53799] text-white border-[#F53799]"
+                                  : "bg-white text-[#F53799] hover:bg-[#FFF2FA] border-[#FFD9EC]"
+                              }`}
+                            >
+                              <span>Platform Origin</span>
+                              <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isRetailPlatformsOpen ? "rotate-180" : ""}`} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => router.push(sector.key === "cafe" ? "/cafe" : sector.key === "services" ? "/services" : "/retail")}
+                    className="text-[11px] font-semibold text-[#F53799] hover:bg-white/80 h-7 px-2 shrink-0 self-center"
+                  >
+                    Deep Dive <ArrowRight className="w-3 h-3 ml-1" />
+                  </Button>
+
+                  {/* Retail Platform Origin Dropdown */}
+                  {isRetail && isRetailPlatformsOpen && homeOverview?.retailBreakdown && homeOverview.retailBreakdown.length > 0 && (
+                    <div
+                      ref={retailDropdownRef}
+                      className="absolute top-[calc(100%+6px)] right-0 z-40 w-72 bg-white/95 backdrop-blur-md border border-[#FFD9EC] rounded-xl p-3 shadow-xl space-y-2 animate-in fade-in-50 duration-200"
+                    >
+                      <div className="flex items-center justify-between pb-1.5 border-b border-[#FFD9EC]/60">
+                        <span className="flex items-center gap-1.5 text-xs font-bold text-[#223047]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B]" />
+                          Retail Platform Origin
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setIsRetailPlatformsOpen(false); }}
+                          className="text-[11px] text-[#F53799] hover:underline font-semibold cursor-pointer"
+                        >
+                          hide
+                        </button>
+                      </div>
+                      <div className="space-y-1.5 pt-0.5">
+                        {homeOverview.retailBreakdown.map((item) => (
+                          <div key={item.channel} className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                              <span className="truncate text-[#223047] font-medium text-[11px]">{item.label}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="font-semibold text-[#223047] text-[11px]">{formatCurrency(item.revenue)}</span>
+                              <span className="px-1.5 py-0.5 rounded font-bold text-[10px]" style={{ backgroundColor: `${item.color}15`, color: item.color }}>
+                                {item.percent}%
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* Detailed All-Platforms View */
+          <div className="space-y-3 !mt-3 md:!mt-4 pt-3 border-t border-[#FFD9EC]">
+            {/* Preset Filters Ribbon */}
+            <div className="flex flex-wrap items-center gap-2 justify-between">
+              <div className="flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-[#D42A7D]" />
+                <span className="text-xs font-semibold text-[#223047]">5 Platform Streams</span>
+                <span className="text-[10px] text-[#223047]/50 hidden md:inline">• Click card to toggle chart line</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-[#223047]/50 uppercase font-semibold">Presets:</span>
+                <button type="button" onClick={() => setAllSeries(true)} className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#FFF2FA] hover:bg-white text-[#223047] border border-[#FFD9EC] transition-all cursor-pointer">All</button>
+                <button type="button" onClick={isolateRetailChannelsOnly} className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#FAF5FF] hover:bg-white text-[#8B5CF6] border border-[#E9D5FF] transition-all cursor-pointer">Retail</button>
+                <button type="button" onClick={isolatePhysicalOnly} className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#FFF2FA] hover:bg-white text-[#D42A7D] border border-[#FFD9EC] transition-all cursor-pointer">Physical</button>
+                <button type="button" onClick={isolateMarketplacesOnly} className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#FFF7ED] hover:bg-white text-[#F97316] border border-[#FED7AA] transition-all cursor-pointer">Digital</button>
+              </div>
+            </div>
+
+            {/* 5 Platform Cards — vertical layout */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 md:gap-3">
+              {distinguishedPlatformCards.map((platform) => {
+                const isVisible = visibleSeries[platform.key];
+                return (
+                  <div
+                    key={platform.key}
+                    onClick={() => toggleSeries(platform.key)}
+                    className={`relative flex flex-col p-3 rounded-xl border transition-all duration-200 cursor-pointer select-none ${
+                      isVisible
+                        ? "hover:shadow-sm hover:brightness-[0.98]"
+                        : "opacity-40 hover:opacity-70 border-dashed border-slate-200"
+                    }`}
+                    style={{
+                      backgroundColor: isVisible ? platform.bgTint : "#f8f9fa",
+                      borderColor: isVisible ? platform.borderTint : undefined,
+                    }}
+                    title={`Click to ${isVisible ? "hide" : "show"} ${platform.label} in chart`}
+                  >
+                    {/* Top: dot + label */}
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: platform.color }}
+                      />
+                      <span className="text-[11px] font-semibold text-[#223047]/70 leading-tight">{platform.label}</span>
+                    </div>
+
+                    {/* Revenue */}
+                    <div className="text-sm font-extrabold text-[#223047] leading-tight mb-1">
+                      {platform.total}
+                    </div>
+
+                    {/* Percentage */}
+                    <div className="mb-1">
+                      {platform.retailPercent ? (
+                        <div>
+                          <span className="text-[11px] font-bold" style={{ color: platform.color }}>
+                            {platform.retailPercent}
+                          </span>
+                          <div className="text-[10px] text-[#223047]/40">({platform.omniPercent})</div>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-[#223047]/50">{platform.omniPercent}</span>
+                      )}
+                    </div>
+
+                    {/* Orders */}
+                    {platform.orders > 0 && (
+                      <div className="text-[10px] text-[#223047]/50 font-medium mb-2">
+                        {platform.orders.toLocaleString()} orders
+                      </div>
+                    )}
+
+                    {/* Deep Dive */}
+                    <div className="mt-auto pt-2 border-t border-black/5">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); router.push(platform.route); }}
+                        className="inline-flex items-center gap-1 text-[10px] font-bold hover:underline transition-all"
+                        style={{ color: platform.color }}
+                      >
+                        Deep Dive <ArrowRight className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* SECTION 3 — VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
@@ -790,13 +1478,21 @@ export function Home() {
 
       {/* SECTION 5 — CHANNEL EQUILIBRIUM */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7 mb-4 md:mb-6">
-        <div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               Offline vs. Online Channel Balance
             </h2>
-            <InfoTooltip label="Total recorded revenue across POS, TikTok Shop, Shopee, and PetHub channels." />
+            <InfoTooltip label="Fair comparison pulled from Supabase using TikTok Shop's exact start and end date window to match across POS and Shopee (same year, same period). Click any bar or channel badge to view detailed breakdown in Retail." />
           </div>
+          <button
+            type="button"
+            onClick={() => router.push('/retail#retail-revenue-by-channel')}
+            className="inline-flex items-center gap-1.5 text-xs md:text-sm font-semibold text-[#D42A7D] hover:text-[#B01E64] transition-all group cursor-pointer self-start sm:self-auto px-3 py-1.5 rounded-xl hover:bg-[#FFF2FA] border border-transparent hover:border-[#FFD9EC]"
+          >
+            <span>View Retail Revenue by Channel</span>
+            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+          </button>
         </div>
 
         {separatedEquilibriumData.length === 0 && (
@@ -804,47 +1500,65 @@ export function Home() {
             Upload POS, Shopee, TikTok, or PetHub transactions to compare channel revenue.
           </div>
         )}
-        <ResponsiveContainer width="100%" height={Math.max(180, separatedEquilibriumData.length * 55)} className="md:!h-[240px]">
-          <BarChart
-            data={separatedEquilibriumData}
-            layout="vertical"
-            margin={{ top: 8, right: 40, bottom: 8, left: 32 }}
-            barSize={26}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
-            <XAxis
-              type="number"
-              stroke="#223047"
-              style={{ fontSize: "12px" }}
-              tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
-            />
-            <YAxis
-              type="category"
-              dataKey="category"
-              stroke="#223047"
-              width={160}
-              style={{ fontSize: "12px", fontWeight: 600 }}
-            />
-            <Tooltip
-              formatter={(value: any, _name: string, item: any) => {
-                const label = item?.payload?.category || "Revenue";
-                return [formatCurrency(Number(value) || 0), label];
-              }}
-              contentStyle={{
-                backgroundColor: "white",
-                border: "1px solid #FFD9EC",
-                borderRadius: "12px",
-              }}
-            />
-            <Bar dataKey="revenue" radius={[0, 6, 6, 0]} animationDuration={800}>
-              {separatedEquilibriumData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.fill} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        <div 
+          className="w-full cursor-pointer group" 
+          style={{ height: Math.max(140, separatedEquilibriumData.length * 44 + 32) }}
+          title="Click to view Retail Revenue by Channel"
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={separatedEquilibriumData}
+              layout="vertical"
+              margin={{ top: 6, right: 32, bottom: 0, left: 24 }}
+              barSize={24}
+              onClick={() => router.push('/retail#retail-revenue-by-channel')}
+              className="cursor-pointer"
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
+              <XAxis
+                type="number"
+                stroke="#223047"
+                style={{ fontSize: "12px" }}
+                tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
+              />
+              <YAxis
+                type="category"
+                dataKey="category"
+                stroke="#223047"
+                width={160}
+                style={{ fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+              />
+              <Tooltip
+                formatter={(value: any, _name: string, item: any) => {
+                  const label = item?.payload?.category || "Revenue";
+                  return [formatCurrency(Number(value) || 0), label];
+                }}
+                contentStyle={{
+                  backgroundColor: "white",
+                  border: "1px solid #FFD9EC",
+                  borderRadius: "12px",
+                }}
+              />
+              <Bar 
+                dataKey="revenue" 
+                radius={[0, 6, 6, 0]} 
+                animationDuration={800}
+                className="cursor-pointer hover:opacity-85 transition-opacity"
+                onClick={() => router.push('/retail#retail-revenue-by-channel')}
+              >
+                {separatedEquilibriumData.map((entry, index) => (
+                  <Cell 
+                    key={`cell-${index}`} 
+                    fill={entry.fill} 
+                    className="cursor-pointer hover:opacity-80 transition-opacity"
+                  />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
 
-        <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 pt-3 border-t border-[#FFD9EC]/50">
+        <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6 !mt-3 md:!mt-4 pt-3 border-t border-[#FFD9EC]/50">
           {separatedEquilibriumData.map((item) => (
             <div key={item.category} className="flex items-center gap-2 text-xs md:text-sm text-[#223047]">
               <span
@@ -934,13 +1648,16 @@ export function Home() {
         </div>
 
         {/* WOOF Autonomous Suggestions */}
-        <div ref={suggestionsRef} className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-          <div>
+        <div ref={suggestionsRef} className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 scroll-mt-24 transition-all">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div className="flex items-center gap-2">
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                 WOOF Autonomous Suggestions — Pending Review
               </h2>
-              <InfoTooltip label="AI-generated promotion recommendations based on real-time pattern analysis." />
+              <Badge className={`${scaledKPIs.pending === 0 ? "bg-emerald-500" : "bg-[#06B6D4]"} text-white text-xs`}>
+                {scaledKPIs.pending} Pending
+              </Badge>
+              <InfoTooltip label="AI-generated promotion recommendations based on real-time pattern analysis. Dynamically updates the WOOF Suggestions KPI card." />
             </div>
           </div>
 

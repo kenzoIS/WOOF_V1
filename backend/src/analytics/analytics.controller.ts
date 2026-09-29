@@ -206,9 +206,13 @@ export class AnalyticsController {
   }
 
   @Get('forecast-by-channel/retail')
-  async getRetailForecastByChannel() {
-    return this.cached(this.key('forecast-by-channel-retail'), () =>
-      this.analyticsService.getRetailForecastByChannel(),
+  async getRetailForecastByChannel(
+    @Query('forceRefresh') forceRefresh?: string,
+  ) {
+    return this.cached(
+      this.key('forecast-by-channel-retail'),
+      () => this.analyticsService.getRetailForecastByChannel(),
+      { forceRefresh },
     );
   }
 
