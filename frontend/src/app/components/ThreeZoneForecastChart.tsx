@@ -556,9 +556,6 @@ export function ThreeZoneForecastChart({
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#FFD9EC]/60">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-[#223047]">{sector} Multi-Zone Evaluation</span>
-            <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-semibold">
-              {modelName}
-            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 text-xs">

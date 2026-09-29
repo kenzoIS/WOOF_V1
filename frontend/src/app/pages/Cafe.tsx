@@ -315,6 +315,9 @@ export function Cafe() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [showAcademicView, setShowAcademicView] = useState(false);
   const [chartGranularity, setChartGranularity] = useState<TimeGrain>("monthly");
+  const [showPerformanceDetails, setShowPerformanceDetails] = useState(false);
+  const [showAnalysisDetails, setShowAnalysisDetails] = useState(false);
+  const [showSimulatorDetails, setShowSimulatorDetails] = useState(false);
   useEffect(() => {
     setChartGranularity(getSettingsPreferences().dashboard.defaultChartView);
     return onSettingsPreferencesChanged((preferences) => {
@@ -1551,217 +1554,279 @@ export function Cafe() {
 
             {/* Model Info, Recommendation, and Exogenous Info */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
-              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3">
-                <div className="flex items-center justify-between">
+              {/* CARD 1: Active Model Performance */}
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all">
+                <div
+                  onClick={() => setShowPerformanceDetails((prev) => !prev)}
+                  className="flex items-center justify-between cursor-pointer select-none"
+                >
                   <div>
                     <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
                     <span className="text-[11px] text-[#F53799] font-semibold capitalize">
                       {chartGranularity} Horizon Evaluation
                     </span>
                   </div>
-                  <button
-                    onClick={() => setShowInfoModal(true)}
-                    className="woof-info-tooltip inline-flex h-6 w-6 items-center justify-center rounded-full border transition-colors"
-                    title="Explain metrics"
-                  >
-                    <Info className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-3 md:gap-4">
-                  <div>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
-                    <div className="text-xl md:text-2xl font-bold text-[#F53799]">
-                      {dynamicPerformanceMetrics.mase}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
-                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
-                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.smape}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
-                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowInfoModal(true);
+                      }}
+                      className="text-[11px] font-semibold px-2 py-0.5 rounded border border-[#FFD9EC] bg-white text-[#F53799] hover:bg-[#FFF2FA] transition-colors"
+                    >
+                      Info
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
+                    >
+                      {showPerformanceDetails ? "Hide" : "Show"}
+                    </button>
                   </div>
                 </div>
-                {forecastRun?.modelMetadata && (
-                  <div className="mt-2 border-t border-[#FFD9EC] pt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-[#223047]">
-                    <div>
-                      <div className="font-semibold opacity-50 uppercase">Forecast Mode</div>
-                      <div className="font-semibold opacity-80">{formatForecastMode(forecastRun.modelMetadata.forecastMode)}</div>
-                    </div>
-                    <div>
-                      <div className="font-semibold opacity-50 uppercase">Observed Demand Days</div>
-                      <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.observedDemandDays ?? "-")}</div>
-                    </div>
-                    <div>
-                      <div className="font-semibold opacity-50 uppercase">Training Calendar</div>
-                      <div className="font-semibold opacity-80">
-                        {formatMetadataCalendar(forecastRun.modelMetadata, "trainStartDate", "trainEndDate")}
+
+                {showPerformanceDetails && (
+                  <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200">
+                    <div className="grid grid-cols-2 gap-3 md:gap-4">
+                      <div>
+                        <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
+                        <div className="text-xl md:text-2xl font-bold text-[#F53799]">
+                          {dynamicPerformanceMetrics.mase}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#223047] opacity-60 mb-1">Accuracy</div>
+                        <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
+                        <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.smape}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
+                        <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
                       </div>
                     </div>
-                    <div>
-                      <div className="font-semibold opacity-50 uppercase">Test Calendar</div>
-                      <div className="font-semibold opacity-80">
-                        {formatMetadataCalendar(forecastRun.modelMetadata, "testStartDate", "testEndDate")}
+                    {forecastRun?.modelMetadata && (
+                      <div className="mt-2 border-t border-[#FFD9EC] pt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-[#223047]">
+                        <div>
+                          <div className="font-semibold opacity-50 uppercase">Forecast Mode</div>
+                          <div className="font-semibold opacity-80">{formatForecastMode(forecastRun.modelMetadata.forecastMode)}</div>
+                        </div>
+                        <div>
+                          <div className="font-semibold opacity-50 uppercase">Observed Demand Days</div>
+                          <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.observedDemandDays ?? "-")}</div>
+                        </div>
+                        <div>
+                          <div className="font-semibold opacity-50 uppercase">Training Calendar</div>
+                          <div className="font-semibold opacity-80">
+                            {formatMetadataCalendar(forecastRun.modelMetadata, "trainStartDate", "trainEndDate")}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="font-semibold opacity-50 uppercase">Test Calendar</div>
+                          <div className="font-semibold opacity-80">
+                            {formatMetadataCalendar(forecastRun.modelMetadata, "testStartDate", "testEndDate")}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="font-semibold opacity-50 uppercase">Closed Days Excluded</div>
+                          <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.closedDaysExcluded ?? "-")}</div>
+                        </div>
+                        <div>
+                          <div className="font-semibold opacity-50 uppercase">Status / Fallback Reason</div>
+                          <div className="font-semibold opacity-80">
+                            {forecastRun.isFallback
+                              ? String(forecastRun.rejectionReason || forecastRun.modelMetadata.fallbackReason || "Selected model could not run")
+                              : "Model fit successfully"}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="font-semibold opacity-50 uppercase">Closed Days Excluded</div>
-                      <div className="font-semibold opacity-80">{String(forecastRun.modelMetadata.closedDaysExcluded ?? "-")}</div>
-                    </div>
-                    <div>
-                      <div className="font-semibold opacity-50 uppercase">Status / Fallback Reason</div>
-                      <div className="font-semibold opacity-80">
-                        {forecastRun.isFallback
-                          ? String(forecastRun.rejectionReason || forecastRun.modelMetadata.fallbackReason || "Selected model could not run")
-                          : "Model fit successfully"}
-                      </div>
-                    </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 flex flex-col justify-between">
-                <div className="space-y-3">
-                  <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
-                  
+              {/* CARD 2: WOOF Analysis */}
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all flex flex-col justify-between">
+                <div
+                  onClick={() => setShowAnalysisDetails((prev) => !prev)}
+                  className="flex items-center justify-between cursor-pointer select-none"
+                >
                   <div>
-                    <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Forecast Mode</label>
-                    <select
-                      value={forecastMode}
-                      onChange={(e) => setForecastMode(e.target.value)}
-                      className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
-                    >
-                      <option value="production">Production forecast</option>
-                      <option value="latest-holdout">Latest holdout backtest</option>
-                      <option value="fixed-window">Thesis fixed-window backtest</option>
-                    </select>
+                    <h3 className="text-sm md:text-base font-bold text-[#223047]">WOOF Analysis</h3>
+                    <span className="text-[11px] text-[#223047]/60 font-semibold capitalize">
+                      Mode: {forecastMode.replace("-", " ")}
+                    </span>
                   </div>
-
-                  <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-                    {forecastMode === "fixed-window"
-                      ? "Thesis backtest mode uses the April-May 2026 overlap for reproducible defense metrics."
-                      : forecastMode === "latest-holdout"
-                        ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
-                      : (forecastRun
-                          ? `${forecastRun.modelName} was evaluated on held-out uploaded Cafe history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
-                          : "Upload Cafe history from POS or PetHub to generate a validated forecast.")}
-                  </p>
+                  <button
+                    type="button"
+                    className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
+                  >
+                    {showAnalysisDetails ? "Hide" : "Show"}
+                  </button>
                 </div>
-                
-                <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm mt-2" size="sm">
-                  Retrain Model
-                </Button>
-              </div>
 
-              {/* EXOGENOUS FACTORS OVERRIDE & SIMULATOR */}
-              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 flex flex-col justify-between">
-                <div>
-                  <h3 className="text-sm md:text-base font-bold text-[#223047]">Sales Simulator (What-If?)</h3>
-                  <p className="text-xs text-[#223047] opacity-60 mb-2">
-                    Simulate weather conditions and calendar holidays to forecast Cafe sales.
-                  </p>
+                {showAnalysisDetails && (
+                  <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200 flex-1 flex flex-col justify-between">
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Forecast Mode</label>
+                        <select
+                          value={forecastMode}
+                          onChange={(e) => setForecastMode(e.target.value)}
+                          className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                        >
+                          <option value="production">Production forecast</option>
+                          <option value="latest-holdout">Latest holdout backtest</option>
+                          <option value="fixed-window">Thesis fixed-window backtest</option>
+                        </select>
+                      </div>
 
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Weather Conditions</label>
-                      <select
-                        value={weatherScenario}
-                        onChange={(e) => setWeatherScenario(e.target.value)}
-                        className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
-                      >
-                        <option value="default">Current Live Weather</option>
-                        <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
-                        <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
-                        <option value="custom">Custom Climate (Sliders)...</option>
-                      </select>
+                      <p className="text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+                        {forecastMode === "fixed-window"
+                          ? "Thesis backtest mode uses the April-May 2026 overlap for reproducible defense metrics."
+                          : forecastMode === "latest-holdout"
+                            ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
+                          : (forecastRun
+                              ? `${forecastRun.modelName} was evaluated on held-out uploaded Cafe history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
+                              : "Upload Cafe history from POS or PetHub to generate a validated forecast.")}
+                      </p>
                     </div>
 
-                    {weatherScenario === "custom" && (
-                      <div className="space-y-2 border border-[#FFD9EC] bg-[#FFF2FA]/50 p-2.5 rounded-lg mt-2">
+                    <Button onClick={handleRetrainModel} className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm mt-3" size="sm">
+                      Retrain Model
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* CARD 3: Sales Simulator (What-If?) */}
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all flex flex-col justify-between">
+                <div
+                  onClick={() => setShowSimulatorDetails((prev) => !prev)}
+                  className="flex items-center justify-between cursor-pointer select-none"
+                >
+                  <div>
+                    <h3 className="text-sm md:text-base font-bold text-[#223047]">Sales Simulator (What-If?)</h3>
+                    <span className="text-[11px] text-[#223047]/60 font-semibold">
+                      Scenario Testing
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
+                  >
+                    {showSimulatorDetails ? "Hide" : "Show"}
+                  </button>
+                </div>
+
+                {showSimulatorDetails && (
+                  <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200 flex-1 flex flex-col justify-between">
+                    <div>
+                      <p className="text-xs text-[#223047] opacity-60 mb-2">
+                        Simulate weather conditions and calendar holidays to forecast Cafe sales.
+                      </p>
+
+                      <div className="space-y-3">
                         <div>
-                          <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
-                            <span>Temperature</span>
-                            <span>{tempOverride}°C</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="15"
-                            max="40"
-                            value={tempOverride}
-                            onChange={(e) => setTempOverride(Number(e.target.value))}
-                            className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
-                          />
-                        </div>
-                        <div>
-                          <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
-                            <span>Relative Humidity</span>
-                            <span>{humidityOverride}%</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="20"
-                            max="100"
-                            value={humidityOverride}
-                            onChange={(e) => setHumidityOverride(Number(e.target.value))}
-                            className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
-                          />
-                        </div>
-                        <div>
-                          <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
-                            <span>Rain Chance / Intensity</span>
-                            <span>{rainChanceOverride === 1 ? "Rainy" : "No Rain"}</span>
-                          </div>
+                          <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Weather Conditions</label>
                           <select
-                            value={rainChanceOverride}
-                            onChange={(e) => setRainChanceOverride(Number(e.target.value))}
-                            className="w-full px-2 py-1 bg-white border border-[#FFD9EC] rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                            value={weatherScenario}
+                            onChange={(e) => setWeatherScenario(e.target.value)}
+                            className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
                           >
-                            <option value="0">No Rain</option>
-                            <option value="1">Rainy</option>
+                            <option value="default">Current Live Weather</option>
+                            <option value="sunny">Hot & Sunny Day (32°C, No Rain)</option>
+                            <option value="rainy">Cool & Rainy Day (24°C, Rainy)</option>
+                            <option value="custom">Custom Climate (Sliders)...</option>
+                          </select>
+                        </div>
+
+                        {weatherScenario === "custom" && (
+                          <div className="space-y-2 border border-[#FFD9EC] bg-[#FFF2FA]/50 p-2.5 rounded-lg mt-2">
+                            <div>
+                              <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                                <span>Temperature</span>
+                                <span>{tempOverride}°C</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="15"
+                                max="40"
+                                value={tempOverride}
+                                onChange={(e) => setTempOverride(Number(e.target.value))}
+                                className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                                <span>Relative Humidity</span>
+                                <span>{humidityOverride}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="20"
+                                max="100"
+                                value={humidityOverride}
+                                onChange={(e) => setHumidityOverride(Number(e.target.value))}
+                                className="w-full h-1 bg-[#FFD9EC] rounded-lg appearance-none cursor-pointer accent-[#F53799]"
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-[10px] text-[#223047] mb-1 font-semibold">
+                                <span>Rain Chance / Intensity</span>
+                                <span>{rainChanceOverride === 1 ? "Rainy" : "No Rain"}</span>
+                              </div>
+                              <select
+                                value={rainChanceOverride}
+                                onChange={(e) => setRainChanceOverride(Number(e.target.value))}
+                                className="w-full px-2 py-1 bg-white border border-[#FFD9EC] rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                              >
+                                <option value="0">No Rain</option>
+                                <option value="1">Rainy</option>
+                              </select>
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Holiday Schedule</label>
+                          <select
+                            value={holidayScenario}
+                            onChange={(e) => setHolidayScenario(e.target.value)}
+                            className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                          >
+                            <option value="default">Live Calendar Holidays</option>
+                            <option value="force">Treat Everyday as a Holiday</option>
+                            <option value="ignore">Treat Everyday as a Workday</option>
                           </select>
                         </div>
                       </div>
-                    )}
+                    </div>
 
-                    <div>
-                      <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">Holiday Schedule</label>
-                      <select
-                        value={holidayScenario}
-                        onChange={(e) => setHolidayScenario(e.target.value)}
-                        className="w-full px-2 py-1.5 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+                    <div className="flex gap-2 mt-4 pt-2 border-t border-[#FFD9EC]">
+                      <Button
+                        disabled={isSimulating}
+                        onClick={handleApplySimulation}
+                        className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs py-1"
+                        size="sm"
                       >
-                        <option value="default">Live Calendar Holidays</option>
-                        <option value="force">Treat Everyday as a Holiday</option>
-                        <option value="ignore">Treat Everyday as a Workday</option>
-                      </select>
+                        {isSimulating ? "Simulating..." : "Run Simulator"}
+                      </Button>
+                      <Button
+                        disabled={isSimulating}
+                        onClick={handleResetSimulation}
+                        variant="outline"
+                        className="border-[#FFD9EC] text-xs py-1 px-2"
+                        size="sm"
+                      >
+                        Reset to Live
+                      </Button>
                     </div>
                   </div>
-                </div>
-
-                <div className="flex gap-2 mt-4 pt-2 border-t border-[#FFD9EC]">
-                  <Button
-                    disabled={isSimulating}
-                    onClick={handleApplySimulation}
-                    className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs py-1"
-                    size="sm"
-                  >
-                    {isSimulating ? "Simulating..." : "Run Simulator"}
-                  </Button>
-                  <Button
-                    disabled={isSimulating}
-                    onClick={handleResetSimulation}
-                    variant="outline"
-                    className="border-[#FFD9EC] text-xs py-1 px-2"
-                    size="sm"
-                  >
-                    Reset to Live
-                  </Button>
-                </div>
+                )}
               </div>
             </div>
         </>
