@@ -28,6 +28,15 @@ import {
 
 // --- Types ---
 
+export interface BacktestMetrics {
+  mae: number;
+  rmse: number;
+  mape: number;
+  mase: number;
+  wape: number;
+  mpe: number;
+}
+
 export interface ThreeZonePoint {
   date: string; // YYYY-MM-DD
   actual: number | null;
@@ -54,6 +63,7 @@ export interface ThreeZoneForecastChartProps {
   rawData: ThreeZonePoint[];
   initialSplitDate?: string;
   initialForecastHorizon?: string;
+  metrics?: BacktestMetrics | null;
   modelName?: string;
   sector?: "Cafe" | "Services" | string;
   currencyPrefix?: string;
@@ -303,7 +313,6 @@ export function ThreeZoneForecastChart({
   rawData,
   initialSplitDate = "2025-11-15",
   initialForecastHorizon = "2026-02-20",
-  metrics,
   modelName = "Prophet",
   sector = "Cafe",
   currencyPrefix = "₱",

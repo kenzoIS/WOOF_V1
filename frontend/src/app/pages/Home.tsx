@@ -17,7 +17,7 @@ const fallbackHeatmapDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].ma
   dayLabel: day,
   label: day,
 }));
-const heatmapHours = ["8AM", "10AM", "12PM", "2PM", "4PM", "6PM", "8PM"];
+const heatmapHours = Array.from({ length: 12 }, (_, index) => index + 7);
 
 const formatDateKeyInTimeZone = (date: Date, timeZone: string) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -33,8 +33,7 @@ const formatDateKeyInTimeZone = (date: Date, timeZone: string) => {
 };
 
 const buildHeatmapDaysFromAnchor = (anchorDate?: string | null) => {
-  if (!anchorDate) return fallbackHeatmapDays;
-  const anchor = new Date(anchorDate);
+  const anchor = anchorDate ? new Date(`${anchorDate.slice(0, 10)}T12:00:00.000Z`) : new Date();
   if (Number.isNaN(anchor.getTime())) return fallbackHeatmapDays;
 
   const anchorKey = formatDateKeyInTimeZone(anchor, "Asia/Manila");
@@ -42,7 +41,7 @@ const buildHeatmapDaysFromAnchor = (anchorDate?: string | null) => {
 
   return Array.from({ length: 7 }, (_, index) => {
     const value = new Date(anchorNoon);
-    value.setUTCDate(anchorNoon.getUTCDate() - 6 + index);
+    value.setUTCDate(anchorNoon.getUTCDate() + index);
     const date = value.toISOString().slice(0, 10);
     const weekday = new Intl.DateTimeFormat("en-PH", {
       weekday: "short",
@@ -66,7 +65,7 @@ interface HomeSuggestion {
   title: string;
   trigger: string;
   discount: string;
-  expectedLift: string;
+  historicalEvidence: string;
   confidence: string;
   reason: string;
   detailedExplanation: string;
@@ -84,6 +83,7 @@ export interface RetailPlatformBreakdown {
 
 interface HomeOverview {
   anchorDate: string | null;
+  heatmapAnchorDate: string | null;
   kpis: {
     totalRevenue: number;
     totalOrders: number;
@@ -110,7 +110,7 @@ interface HomeOverview {
   channelSummary: Array<{ channel: string; revenue: number; count: number }>;
   channelBalance: Array<{ category: string; channel: string; physical: number; online: number; count: number }>;
   heatmapDays: Array<{ date: string; dayLabel: string; label: string }>;
-  heatmap: Array<{ date?: string; dayOfWeek: number; dayLabel?: string; hourBucket: number; sector: string; revenue: number; intensity: number }>;
+  heatmap: Array<{ date?: string; dayOfWeek: number; dayLabel?: string; hourBucket: number; sector: string; revenue: number; intensity: number; sampleDays?: number }>;
   suggestions: HomeSuggestion[];
   nextAction: HomeSuggestion | null;
 }
@@ -130,6 +130,14 @@ const toNumber = (value: unknown, fallback = 0) => {
   return Number.isFinite(number) ? number : fallback;
 };
 
+const getManilaDateKey = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
 export function Home() {
   const router = useRouter();
   const [timeRange, setTimeRange] = useState("today");
@@ -143,6 +151,15 @@ export function Home() {
   const [homeLoading, setHomeLoading] = useState(false);
   const [homeError, setHomeError] = useState<string | null>(null);
   const [currentWeather, setCurrentWeather] = useState<CurrentWeather | null>(null);
+  const [manilaDateKey, setManilaDateKey] = useState(getManilaDateKey);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const nextDateKey = getManilaDateKey();
+      setManilaDateKey((current) => current === nextDateKey ? current : nextDateKey);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -233,7 +250,7 @@ export function Home() {
     return () => {
       active = false;
     };
-  }, [globalDateRange, realtimeRefresh]);
+  }, [globalDateRange, realtimeRefresh, manilaDateKey]);
 
   useEffect(() => {
     let active = true;
@@ -369,8 +386,8 @@ export function Home() {
   }, [homeOverview?.channelBalance]);
   const equilibriumData = separatedEquilibriumData;
   const clientHeatmapDays = useMemo(
-    () => buildHeatmapDaysFromAnchor(homeOverview?.anchorDate),
-    [homeOverview?.anchorDate],
+    () => buildHeatmapDaysFromAnchor(homeOverview?.heatmapAnchorDate),
+    [homeOverview?.heatmapAnchorDate],
   );
   const displayHeatmapDays = clientHeatmapDays;
   const carouselSuggestions = useMemo(
@@ -440,6 +457,13 @@ export function Home() {
   }, [homeOverview]);
 
   const [heatmapFilter, setHeatmapFilter] = useState("allsectors");
+  const [hoveredHeatmapCell, setHoveredHeatmapCell] = useState<{
+    label: string;
+    revenue: number;
+    intensity: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const [visibleSeries, setVisibleSeries] = useState({
     cafe: true,
     services: true,
@@ -858,25 +882,45 @@ export function Home() {
     return "#F53799";
   };
 
-  const getHeatmapValue = (day: { date: string; dayLabel: string }, hourLabel: string) => {
-    const dayIndex = fallbackHeatmapDays.findIndex((item) => item.dayLabel === day.dayLabel);
-    const mongoDay = dayIndex === 6 ? 1 : dayIndex + 2;
-    const hour = Number(hourLabel.replace(/\D/g, ""));
-    const hourBucket = hourLabel.includes("PM") && hour !== 12 ? hour + 12 : hour;
-    const rows = (homeOverview?.heatmap || []).filter((row) => {
-      const sectorMatches =
-        heatmapFilter === "allsectors" ||
-        row.sector.toLowerCase() === heatmapFilter;
-      const dayMatches = day.date
-        ? row.date
-          ? row.date === day.date
-          : row.dayLabel === day.dayLabel || row.dayOfWeek === mongoDay
-        : row.dayLabel === day.dayLabel || row.dayOfWeek === mongoDay;
-      return dayMatches && row.hourBucket === hourBucket && sectorMatches;
+  const getHeatmapRevenue = (date: string, hour: number) =>
+    (homeOverview?.heatmap || [])
+      .filter((row) => {
+        const sector = row.sector.toLowerCase();
+        return (
+          row.date === date &&
+          row.hourBucket === hour &&
+          ["cafe", "services"].includes(sector) &&
+          (heatmapFilter === "allsectors" || sector === heatmapFilter)
+        );
+      })
+      .reduce((total, row) => total + toNumber(row.revenue), 0);
+  const maxHeatmapRevenue = Math.max(
+    0,
+    ...displayHeatmapDays.flatMap((day) =>
+      heatmapHours.map((hour) => getHeatmapRevenue(day.date, hour)),
+    ),
+  );
+  const getHeatmapIntensity = (date: string, hour: number) =>
+    maxHeatmapRevenue > 0
+      ? (getHeatmapRevenue(date, hour) / maxHeatmapRevenue) * 100
+      : 0;
+  const updateHeatmapTooltip = (
+    event: React.MouseEvent<HTMLDivElement> | React.FocusEvent<HTMLDivElement>,
+    label: string,
+    revenue: number,
+    intensity: number,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const isMouseEvent = "clientX" in event && event.clientX > 0;
+    setHoveredHeatmapCell({
+      label,
+      revenue,
+      intensity,
+      x: isMouseEvent ? event.clientX : rect.left + rect.width / 2,
+      y: isMouseEvent ? event.clientY : rect.top,
     });
-    if (!rows.length) return 0;
-    return rows.reduce((max, row) => Math.max(max, toNumber(row.intensity)), 0);
   };
+  const heatmapDateLabel = `${displayHeatmapDays[0]?.label || "Today"} – ${displayHeatmapDays[displayHeatmapDays.length - 1]?.label || ""}`;
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
@@ -1583,19 +1627,22 @@ export function Home() {
                 <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                   Sales Intensity Map
                 </h2>
-                <InfoTooltip label="Past 7 uploaded-data dates." />
+                <InfoTooltip label="Estimated hourly revenue for the next 7 days, based on the same weekday and hour over the previous two years. Recent history receives more weight." />
+              </div>
+              <div className="mt-1 text-sm text-[#06B6D4] font-medium">
+                7-day forecast · {heatmapDateLabel}
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2 md:justify-end">
-              {["All Sectors", "Cafe", "Services", "Retail"].map((filter) => (
+              {["Cafe + Services", "Cafe", "Services"].map((filter) => (
                 <Button
                   key={filter}
                   size="sm"
-                  variant={heatmapFilter === filter.toLowerCase().replace(" ", "") ? "default" : "outline"}
-                  onClick={() => setHeatmapFilter(filter.toLowerCase().replace(" ", ""))}
+                  variant={heatmapFilter === (filter === "Cafe + Services" ? "allsectors" : filter.toLowerCase()) ? "default" : "outline"}
+                  onClick={() => setHeatmapFilter(filter === "Cafe + Services" ? "allsectors" : filter.toLowerCase())}
                   className={
-                    heatmapFilter === filter.toLowerCase().replace(" ", "")
+                    heatmapFilter === (filter === "Cafe + Services" ? "allsectors" : filter.toLowerCase())
                       ? "bg-[#F53799] hover:bg-[#D42A7D] text-xs"
                       : "border-[#FFD9EC] hover:bg-[#FFF2FA] text-xs"
                   }
@@ -1606,35 +1653,58 @@ export function Home() {
             </div>
           </div>
 
-          <div className="space-y-3">
-            {heatmapHours.map((hour) => (
-              <div key={hour} className="grid grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 md:gap-4">
-                <div className="text-xs text-[#223047] opacity-60">{hour}</div>
-                <div className="grid grid-cols-7 gap-1.5 md:gap-2 lg:gap-3">
-                  {displayHeatmapDays.map((day) => {
-                    const value = getHeatmapValue(day, hour);
+          <div className="overflow-x-auto pb-1">
+            <div className="min-w-[760px] space-y-2">
+              <div className="grid grid-cols-[5rem_repeat(12,minmax(0,1fr))] gap-1.5 md:gap-2">
+                <div className="text-xs text-[#223047] opacity-60">Day</div>
+                {heatmapHours.map((hour) => (
+                  <div key={hour} className="text-center text-[10px] md:text-xs text-[#223047] opacity-60">
+                    {hour === 12 ? "12 PM" : hour < 12 ? `${hour} AM` : `${hour - 12} PM`}
+                  </div>
+                ))}
+              </div>
+              {displayHeatmapDays.map((day) => (
+                <div key={day.date} className="grid grid-cols-[5rem_repeat(12,minmax(0,1fr))] items-center gap-1.5 md:gap-2">
+                  <div className="text-xs font-medium text-[#223047]">{day.label}</div>
+                  {heatmapHours.map((hour) => {
+                    const revenue = getHeatmapRevenue(day.date, hour);
+                    const intensity = getHeatmapIntensity(day.date, hour);
+                    const hourLabel = hour === 12 ? "12 PM" : hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
+                    const periodEnd = hour + 1;
+                    const intervalLabel = `${hourLabel}–${periodEnd === 12 ? "12 PM" : periodEnd < 12 ? `${periodEnd} AM` : `${periodEnd - 12} PM`}`;
                     return (
                       <div
-                        key={`${hour}-${day.date || day.dayLabel}`}
-                        className="h-8 md:h-11 lg:h-14 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] transition-all"
-                        style={{ backgroundColor: getHeatmapColor(value) }}
-                        title={`${day.label} ${hour}: ${value.toFixed(0)}% sales intensity`}
+                        key={`${day.date}-${hour}`}
+                        tabIndex={0}
+                        role="img"
+                        aria-label={`${day.label}, ${intervalLabel} forecast ${formatCurrency(revenue)}, ${intensity.toFixed(0)}% intensity`}
+                        onMouseEnter={(event) => updateHeatmapTooltip(event, `${day.label} · ${intervalLabel}`, revenue, intensity)}
+                        onMouseMove={(event) => updateHeatmapTooltip(event, `${day.label} · ${intervalLabel}`, revenue, intensity)}
+                        onMouseLeave={() => setHoveredHeatmapCell(null)}
+                        onFocus={(event) => updateHeatmapTooltip(event, `${day.label} · ${intervalLabel}`, revenue, intensity)}
+                        onBlur={() => setHoveredHeatmapCell(null)}
+                        className="h-8 md:h-11 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] focus:ring-2 focus:ring-[#F53799] transition-all"
+                        style={{ backgroundColor: getHeatmapColor(intensity) }}
                       />
                     );
                   })}
                 </div>
-              </div>
-            ))}
-            <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] md:grid-cols-[5.5rem_minmax(0,1fr)] gap-3 md:gap-4 pt-1">
-              <div aria-hidden="true" />
-              <div className="grid grid-cols-7 gap-1.5 md:gap-2 lg:gap-3">
-                {displayHeatmapDays.map((day) => (
-                  <div key={day.date || day.dayLabel} className="text-center text-[10px] md:text-xs text-[#223047] opacity-60">
-                    {day.label}
-                  </div>
-                ))}
-              </div>
+              ))}
             </div>
+          </div>
+          {hoveredHeatmapCell && (
+            <div
+              role="status"
+              className="fixed z-[100] pointer-events-none -translate-x-1/2 -translate-y-full rounded-lg border border-[#FFD9EC] bg-white px-3 py-2 shadow-lg text-xs text-[#223047]"
+              style={{ left: hoveredHeatmapCell.x, top: hoveredHeatmapCell.y - 10 }}
+            >
+              <div className="font-semibold">{hoveredHeatmapCell.label}</div>
+              <div className="font-bold text-[#06B6D4]">{hoveredHeatmapCell.intensity.toFixed(0)}% intensity</div>
+              <div>Forecast revenue: {formatCurrency(hoveredHeatmapCell.revenue)}</div>
+            </div>
+          )}
+          <div className="text-[10px] text-center text-[#223047] opacity-50">
+            Hour blocks run from 7 AM through 7 PM; the final block is 6–7 PM.
           </div>
           
           {/* Legend */}
@@ -1717,8 +1787,13 @@ export function Home() {
                   </div>
                 </div>
 
-                <div className="text-3xl font-extrabold text-[#F53799]">
-                  {suggestion.expectedLift}
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-[#223047] opacity-50 mb-1">
+                    Historical evidence
+                  </div>
+                  <div className="text-xl md:text-2xl font-extrabold text-[#F53799]">
+                    {suggestion.historicalEvidence}
+                  </div>
                 </div>
 
                 <p className="text-xs text-[#223047] opacity-50" style={{ lineHeight: "1.6" }}>

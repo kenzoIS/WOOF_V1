@@ -111,10 +111,12 @@ export function ModelDetailsModal({ isOpen, onClose, forecastRun }: ModelDetails
               </div>
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-center">
                 <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block mb-1">
-                  {isServices ? "MAE (₱/demand day)" : "MAE"}
+                  {isServices ? "MAE (₱/demand day)" : "Accuracy"}
                 </span>
                 <span className="text-lg font-extrabold text-emerald-600">
-                  {forecastRun.mae != null ? `${isServices ? "₱" : ""}${forecastRun.mae.toFixed(2)}` : "N/A"}
+                  {isServices
+                    ? forecastRun.mae != null ? `₱${forecastRun.mae.toFixed(2)}` : "N/A"
+                    : forecastRun.accuracy != null ? `${forecastRun.accuracy.toFixed(1)}%` : "N/A"}
                 </span>
               </div>
             </div>

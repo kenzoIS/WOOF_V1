@@ -219,6 +219,25 @@ export class AnalyticsService {
       return this.emptyHomeOverview(normalizedRange);
     }
 
+    const heatmapAnchorDate = this.formatDateInTimeZone(
+      new Date(),
+      'Asia/Manila',
+    );
+    const heatmapTodayStart = new Date(
+      `${heatmapAnchorDate}T00:00:00.000+08:00`,
+    );
+    const heatmapHistoryStart = new Date(heatmapTodayStart);
+    heatmapHistoryStart.setUTCFullYear(
+      heatmapHistoryStart.getUTCFullYear() - 2,
+    );
+    // Use nearby calendar dates from prior years so recommendations follow
+    // historical demand around today's season, instead of today's live totals.
+    const historicalSuggestionDates = Array.from({ length: 15 }, (_, index) => {
+      const date = new Date(`${heatmapAnchorDate}T12:00:00.000Z`);
+      date.setUTCDate(date.getUTCDate() + index - 7);
+      return date.toISOString().slice(5, 10);
+    });
+
     const { start, end, previousStart, previousEnd } = this.getHomeDateWindow(
       range,
       latestDate,
@@ -282,6 +301,8 @@ export class AnalyticsService {
       channelBalance,
       heatmap,
       topItems,
+      historicalSuggestionItems,
+      historicalSuggestionSectors,
     ] = await Promise.all([
       this.aggregateHomeTotals(dateFilter),
       this.aggregateHomeTotals(previousDateFilter),
@@ -310,7 +331,10 @@ export class AnalyticsService {
       this.getChannelBalanceFromSupabase(matchedChannelDateFilter),
       this.aggregateWithDiskUse([
         {
-          $match: { date: { $gte: this.getHeatmapStartDate(end), $lte: end } },
+          $match: {
+            sector: { $in: ['Cafe', 'Services'] },
+            date: { $gte: heatmapHistoryStart, $lt: heatmapTodayStart },
+          },
         },
         {
           $project: {
@@ -337,14 +361,13 @@ export class AnalyticsService {
             },
           },
         },
+        { $match: { hour: { $gte: 7, $lte: 18 } } },
         {
           $group: {
             _id: {
               date: '$dateKey',
               dayOfWeek: '$dayOfWeek',
-              hourBucket: {
-                $subtract: ['$hour', { $mod: ['$hour', 2] }],
-              },
+              hourBucket: '$hour',
               sector: '$sector',
             },
             revenue: { $sum: '$netSales' },
@@ -369,8 +392,109 @@ export class AnalyticsService {
         { $sort: { revenue: -1 } },
         { $limit: 6 },
       ]),
+      this.aggregateWithDiskUse([
+        {
+          $match: {
+            date: { $gte: heatmapHistoryStart, $lt: heatmapTodayStart },
+          },
+        },
+        {
+          $project: {
+            productName: 1,
+            sector: 1,
+            category: 1,
+            netSales: 1,
+            quantity: 1,
+            transactionId: 1,
+            calendarDay: {
+              $dateToString: {
+                format: '%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+            dateKey: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+          },
+        },
+        { $match: { calendarDay: { $in: historicalSuggestionDates } } },
+        {
+          $group: {
+            _id: {
+              productName: '$productName',
+              sector: '$sector',
+              category: '$category',
+            },
+            revenue: { $sum: '$netSales' },
+            quantity: { $sum: '$quantity' },
+            orders: { $addToSet: '$transactionId' },
+            dates: { $addToSet: '$dateKey' },
+          },
+        },
+        {
+          $addFields: {
+            orderCount: { $size: '$orders' },
+            sampleDays: { $size: '$dates' },
+          },
+        },
+        { $sort: { revenue: -1 } },
+        { $limit: 12 },
+      ]),
+      this.aggregateWithDiskUse([
+        {
+          $match: {
+            date: { $gte: heatmapHistoryStart, $lt: heatmapTodayStart },
+          },
+        },
+        {
+          $project: {
+            sector: 1,
+            netSales: 1,
+            calendarDay: {
+              $dateToString: {
+                format: '%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+            dateKey: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
+            transactionId: 1,
+          },
+        },
+        { $match: { calendarDay: { $in: historicalSuggestionDates } } },
+        {
+          $group: {
+            _id: '$sector',
+            revenue: { $sum: '$netSales' },
+            orders: { $addToSet: '$transactionId' },
+            dates: { $addToSet: '$dateKey' },
+          },
+        },
+        {
+          $addFields: {
+            orderCount: { $size: '$orders' },
+            sampleDays: { $size: '$dates' },
+          },
+        },
+        { $sort: { revenue: -1 } },
+      ]),
     ]);
 
+    const heatmapForecast = this.buildHomeHeatmapForecast(
+      heatmap,
+      heatmapAnchorDate,
+    );
     const sectorSummary = this.formatHomeSectorSummary(sectorTotals);
     const channelSummary = this.formatHomeChannelSummary(channelTotals);
     const totalRevenue = currentTotals.totalRevenue;
@@ -384,6 +508,9 @@ export class AnalyticsService {
       sectorSummary,
       channelSummary,
       topItems,
+      historicalSuggestionItems,
+      historicalSuggestionSectors,
+      suggestionDate: heatmapAnchorDate,
       totalRevenue,
     });
 
@@ -506,8 +633,9 @@ export class AnalyticsService {
       channelSummary,
       retailBreakdown,
       channelBalance,
-      heatmapDays: this.buildHomeHeatmapDays(end),
-      heatmap: this.formatHomeHeatmap(heatmap),
+      heatmapAnchorDate,
+      heatmapDays: this.buildHomeHeatmapDays(new Date(`${heatmapAnchorDate}T12:00:00.000Z`)),
+      heatmap: this.formatHomeHeatmap(heatmapForecast),
       suggestions,
       nextAction: suggestions[0] || null,
     };
@@ -1090,6 +1218,7 @@ export class AnalyticsService {
         Number(metadata.forecastRevenuePayloadVersion) || 0;
       const hasRevenuePayload =
         payloadVersion >= FORECAST_REVENUE_PAYLOAD_VERSION &&
+        (module !== 'Services' || metadata.revenueEvaluation == null) &&
         Array.isArray(cachedForecast.historical) &&
         cachedForecast.historical.some(
           (point: any) => Number(point?.revenue) > 0,
@@ -1257,41 +1386,6 @@ export class AnalyticsService {
         evaluationPlan,
       );
     }
-    const serviceRevenueEvaluation = module === 'Services'
-      ? this.evaluateServicesRevenueMetrics(
-          finalModel,
-          completeHistorical,
-          trainHistorical,
-          evaluationPlan,
-        )
-      : null;
-    if (serviceRevenueEvaluation) {
-      finalModel = {
-        ...finalModel,
-        ...serviceRevenueEvaluation.daily,
-        accuracy: null,
-        wape: undefined,
-        biasPercent: undefined,
-        weeklyMetrics: serviceRevenueEvaluation.weekly,
-        monthlyMetrics: serviceRevenueEvaluation.monthly,
-        modelMetadata: {
-          ...(finalModel.modelMetadata || {}),
-          backtestMetricImplementation:
-            'Revenue-scale evaluation from chronological holdout predictions; MASE uses only pre-test revenue and a seven-observation seasonal-naive baseline.',
-          revenueEvaluation: {
-            target: 'daily_services_revenue_php',
-            source: serviceRevenueEvaluation.source,
-            evaluatedDays: serviceRevenueEvaluation.daily.observations,
-            closedDaysExcluded: true,
-            priceConversion:
-              'Training-window weighted revenue per observed booking; no holdout revenue used for conversion.',
-            daily: serviceRevenueEvaluation.daily,
-            weekly: serviceRevenueEvaluation.weekly,
-            monthly: serviceRevenueEvaluation.monthly,
-          },
-        },
-      };
-    }
     const priceCostMatrix = await this.getActivePriceCostMatrix(module);
     const itemHistory = await this.getItemHistory(module);
     const calibratedForecast = this.applyPriceCalibration(
@@ -1312,41 +1406,17 @@ export class AnalyticsService {
     const payload = {
       module,
       model_name: finalModel.modelName,
-      mase:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.daily.mase ?? null
-          : finalModel.mase,
-      smape:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.daily.smape ?? null
-          : finalModel.smape,
-      accuracy: module === 'Services' ? null : finalModel.accuracy,
-      mae:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.daily.mae ?? null
-          : finalModel.mae,
-      rmse:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.daily.rmse ?? null
-          : finalModel.rmse,
-      mape: module === 'Services' ? null : finalModel.mape,
-      r2: module === 'Services' ? null : finalModel.r2,
-      weeklyMetrics:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.weekly ?? null
-          : finalModel.weeklyMetrics ?? null,
-      monthlyMetrics:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.monthly ?? null
-          : finalModel.monthlyMetrics ?? null,
-      weekly_metrics:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.weekly ?? null
-          : finalModel.weeklyMetrics ?? null,
-      monthly_metrics:
-        module === 'Services'
-          ? serviceRevenueEvaluation?.monthly ?? null
-          : finalModel.monthlyMetrics ?? null,
+      mase: finalModel.mase,
+      smape: finalModel.smape,
+      accuracy: finalModel.accuracy,
+      mae: finalModel.mae,
+      rmse: finalModel.rmse,
+      mape: finalModel.mape,
+      r2: finalModel.r2,
+      weeklyMetrics: finalModel.weeklyMetrics ?? null,
+      monthlyMetrics: finalModel.monthlyMetrics ?? null,
+      weekly_metrics: finalModel.weeklyMetrics ?? null,
+      monthly_metrics: finalModel.monthlyMetrics ?? null,
       is_fallback: useFallback,
       rejection_reason: useFallback ? rejectionReason : null,
       historical: this.buildAnchoredHistoricalPayload(
@@ -1363,32 +1433,18 @@ export class AnalyticsService {
       item_history: itemHistory,
       model_metadata: {
         ...finalModel.modelMetadata,
-        additionalRegressionMetrics:
-          module === 'Services'
-            ? {
-                mae: finalModel.mae,
-                rmse: finalModel.rmse,
-                biasMeanError: finalModel.biasMeanError,
-                forecastSkillPercent: finalModel.forecastSkillPercent,
-              }
-            : {
-                mae: finalModel.mae,
-                rmse: finalModel.rmse,
-                mape: finalModel.mape,
-                r2: finalModel.r2,
-                wape: finalModel.wape,
-                biasPercent: finalModel.biasPercent,
-              },
-        ...(module !== 'Services'
-          ? {
-              accuracyLabel:
-                'Accuracy = max(0, 100 - WAPE). sMAPE remains available as a sparse-demand diagnostic.',
-            }
-          : {}),
+        additionalRegressionMetrics: {
+          mae: finalModel.mae,
+          rmse: finalModel.rmse,
+          mape: finalModel.mape,
+          r2: finalModel.r2,
+          wape: finalModel.wape,
+          biasPercent: finalModel.biasPercent,
+        },
+        accuracyLabel:
+          'Accuracy = max(0, 100 - WAPE). sMAPE remains available as a sparse-demand diagnostic.',
         targetEvaluationPolicy:
-          module === 'Services'
-            ? 'Displayed errors compare actual PHP revenue with bookings forecast converted using training-window weighted revenue per booking. MASE uses a 7-observation seasonal-naive revenue baseline; closed and incomplete days are excluded.'
-            : 'Primary Python models train and evaluate on outlier-capped demand using log1p/expm1 target transformation; raw actuals remain visible in history.',
+          'Primary Python models train and evaluate on outlier-capped demand using log1p/expm1 target transformation; raw actuals remain visible in history.',
         splitRatio,
         emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
         forecastMode: evaluationPlan.mode,
@@ -3975,8 +4031,9 @@ export class AnalyticsService {
   }
 
   async getNextQuietPeriod(): Promise<any> {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const todayManila = this.formatDateInTimeZone(new Date(), 'Asia/Manila');
+    const tomorrow = new Date(`${todayManila}T12:00:00.000Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
     const { lat, lng } = this.exogenousDataService.getDefaultCoordinates();
 
@@ -3993,8 +4050,8 @@ export class AnalyticsService {
       }
     } catch (e) {}
 
-    const isWeekend =
-      tomorrow.getDay() === 0 || tomorrow.getDay() === 6 ? 1 : 0;
+    const targetWeekday = new Date(`${tomorrowStr}T12:00:00.000Z`).getUTCDay();
+    const isWeekend = targetWeekday === 0 || targetWeekday === 6 ? 1 : 0;
     const proposedDiscountDepth = 0.15;
     const promoTrainingRows = await this.getPromoModelTrainingRows();
     const discountedRows = promoTrainingRows.filter(
@@ -4016,6 +4073,7 @@ export class AnalyticsService {
         is_weekend: isWeekend,
         temp,
         discount_depth: proposedDiscountDepth,
+        target_date: tomorrowStr,
         trainingSignature: promoTrainingSignature,
         trainingRows: promoTrainingRows,
       });
@@ -4163,7 +4221,7 @@ export class AnalyticsService {
       .from('dynamic_promos')
       .insert({
         target_date: new Date(
-          `${targetDate}T${targetHour.toString().padStart(2, '0')}:00:00Z`,
+          `${targetDate}T${targetHour.toString().padStart(2, '0')}:00:00+08:00`,
         ).toISOString(),
         items_json: items,
         probability_score: probabilityScore,
@@ -4438,7 +4496,6 @@ export class AnalyticsService {
       data: historical,
       forecastDays,
       splitRatio: splitRatio || '90-5-5',
-      ...(module === 'Services' ? { includeBacktest: true } : {}),
       ...extraPayload,
     });
   }
@@ -6609,170 +6666,6 @@ export class AnalyticsService {
     };
   }
 
-  private evaluateServicesRevenueMetrics(
-    result: ModelResult,
-    historical: NormalizedDailyValue[],
-    training: NormalizedDailyValue[],
-    plan: ForecastEvaluationPlan,
-  ): {
-    daily: ForecastErrorMetrics;
-    weekly: ForecastErrorMetrics | null;
-    monthly: ForecastErrorMetrics | null;
-    source: string;
-  } | null {
-    const historyByDate = new Map(historical.map((point) => [point.date, point]));
-    let examples: Array<{ date: string; actual: number; predicted: number }> = [];
-    let metricTraining = training.filter((point) => point.isObservedDemand);
-    let source = '';
-
-    if (plan.isBacktest && plan.evaluationHistorical.length > 0) {
-      const forecastByDate = new Map(
-        result.forecast.map((point) => [
-          point.date,
-          Number(point.forecastQuantity ?? point.forecast),
-        ]),
-      );
-      examples = plan.evaluationHistorical.flatMap((point) => {
-        const predicted = forecastByDate.get(point.date);
-        return predicted !== undefined && Number.isFinite(predicted)
-          ? [{ date: point.date, actual: Number(point.revenue ?? point.actual ?? 0), predicted }]
-          : [];
-      });
-      source = plan.backtestMetricSource;
-    } else if (result.backtest?.dates?.length) {
-      examples = result.backtest.dates.flatMap((date, index) => {
-        const point = historyByDate.get(date);
-        const predicted = Number(result.backtest?.predicted[index]);
-        return point && Number.isFinite(predicted)
-          ? [{ date, actual: Number(point.revenue ?? point.actual ?? 0), predicted }]
-          : [];
-      });
-      const firstTestDate = result.backtest.dates[0];
-      metricTraining = historical.filter(
-        (point) => point.date < firstTestDate && point.isObservedDemand,
-      );
-      source = 'services_sarimax_internal_test_holdout';
-    } else {
-      // The SMA emergency model has no exported holdout predictions. Score its
-      // actual fixed 7-observation forecast on a final chronological slice.
-      const observed = historical.filter((point) => point.isObservedDemand);
-      const testCount = Math.max(2, Math.ceil(observed.length * 0.05));
-      const splitIndex = Math.max(7, observed.length - testCount);
-      metricTraining = observed.slice(0, splitIndex);
-      const testRows = observed.slice(splitIndex);
-      const lastSevenOrders = metricTraining.slice(-7).map((point) => point.actual);
-      const predictedOrders = this.average(lastSevenOrders);
-      examples = testRows.map((point) => ({
-        date: point.date,
-        actual: Number(point.revenue ?? point.actual ?? 0),
-        predicted: predictedOrders,
-      }));
-      source = 'services_sma_chronological_holdout';
-    }
-
-    examples = examples.filter(
-      (point) =>
-        Number.isFinite(point.actual) &&
-        Number.isFinite(point.predicted) &&
-        point.actual >= 0 &&
-        point.predicted >= 0,
-    );
-    if (examples.length === 0 || metricTraining.length < 2) return null;
-
-    const trainingRevenue = metricTraining.map((point) =>
-      Math.max(0, Number(point.revenue) || 0),
-    );
-    const trainingOrders = metricTraining.reduce(
-      (sum, point) => sum + Math.max(0, Number(point.actual) || 0),
-      0,
-    );
-    const observedTrainingRevenue = metricTraining.reduce(
-      (sum, point) => sum + Math.max(0, Number(point.revenue) || 0),
-      0,
-    );
-    const unitPrice = trainingOrders > 0
-      ? observedTrainingRevenue / trainingOrders
-      : 0;
-    if (!(unitPrice > 0)) return null;
-
-    const calculate = (
-      actual: number[],
-      predicted: number[],
-      train: number[],
-      seasonalPeriod: number,
-    ): ForecastErrorMetrics => {
-      const length = Math.min(actual.length, predicted.length);
-      const errors = Array.from({ length }, (_, index) => predicted[index] - actual[index]);
-      const absoluteErrors = errors.map((error) => Math.abs(error));
-      const squaredErrors = errors.map((error) => error ** 2);
-      const smapeValues = Array.from({ length }, (_, index) => {
-        const denominator = (Math.abs(actual[index]) + Math.abs(predicted[index])) / 2;
-        return denominator === 0 ? 0 : Math.abs(errors[index]) / denominator * 100;
-      });
-      let lag = train.length > seasonalPeriod ? seasonalPeriod : 1;
-      let naiveErrors = train.slice(lag).map((value, index) => Math.abs(value - train[index]));
-      if (naiveErrors.length === 0 && train.length > 1) {
-        lag = 1;
-        naiveErrors = train.slice(1).map((value, index) => Math.abs(value - train[index]));
-      }
-      const mae = this.average(absoluteErrors);
-      const naiveMae = this.average(naiveErrors);
-      const mase = naiveMae > 0 ? mae / naiveMae : mae === 0 ? 0 : 999;
-      return {
-        mase: this.round(mase),
-        smape: this.round(this.average(smapeValues)),
-        mae: this.round(mae),
-        rmse: this.round(Math.sqrt(this.average(squaredErrors))),
-        biasMeanError: this.round(this.average(errors)),
-        forecastSkillPercent: this.round((1 - mase) * 100),
-        observations: length,
-      };
-    };
-
-    const daily = calculate(
-      examples.map((point) => point.actual),
-      examples.map((point) => point.predicted * unitPrice),
-      trainingRevenue,
-      7,
-    );
-
-    const resample = (grain: 'weekly' | 'monthly') => {
-      const bucketFor = (dateKey: string) => {
-        if (grain === 'monthly') return dateKey.slice(0, 7);
-        const date = new Date(`${dateKey}T00:00:00.000Z`);
-        const daysUntilSunday = (7 - date.getUTCDay()) % 7;
-        date.setUTCDate(date.getUTCDate() + daysUntilSunday);
-        return date.toISOString().slice(0, 10);
-      };
-      const sumByBucket = (rows: Array<{ date: string; value: number }>) => {
-        const sums = new Map<string, number>();
-        rows.forEach(({ date, value }) => {
-          const key = bucketFor(date);
-          sums.set(key, (sums.get(key) || 0) + value);
-        });
-        return sums;
-      };
-      const trainBuckets = sumByBucket(metricTraining.map((point) => ({
-        date: point.date,
-        value: Math.max(0, Number(point.revenue) || 0),
-      })));
-      const actualBuckets = sumByBucket(examples.map((point) => ({ date: point.date, value: point.actual })));
-      const predictedBuckets = sumByBucket(examples.map((point) => ({ date: point.date, value: point.predicted * unitPrice })));
-      const dates = [...actualBuckets.keys()].filter((date) => predictedBuckets.has(date)).sort();
-      const trainingDates = [...trainBuckets.keys()].sort();
-      if (dates.length === 0 || trainingDates.length < 2) return null;
-      const period = grain === 'monthly' && trainingDates.length >= 24 ? 12 : 1;
-      return calculate(
-        dates.map((date) => actualBuckets.get(date) || 0),
-        dates.map((date) => predictedBuckets.get(date) || 0),
-        trainingDates.map((date) => trainBuckets.get(date) || 0),
-        period,
-      );
-    };
-
-    return { daily, weekly: resample('weekly'), monthly: resample('monthly'), source };
-  }
-
   private buildVolumeForecast(
     forecast: ModelResult['forecast'],
   ): ModelResult['forecast'] {
@@ -7737,6 +7630,9 @@ export class AnalyticsService {
         sectorSummary,
         channelSummary,
         topItems,
+        historicalSuggestionItems: [],
+        historicalSuggestionSectors: [],
+        suggestionDate: this.formatDateInTimeZone(end, 'Asia/Manila'),
         totalRevenue,
       });
 
@@ -8291,7 +8187,7 @@ export class AnalyticsService {
 
     return Array.from({ length: 7 }, (_, index) => {
       const value = new Date(anchor);
-      value.setUTCDate(anchor.getUTCDate() - 6 + index);
+      value.setUTCDate(anchor.getUTCDate() + index);
       const date = value.toISOString().slice(0, 10);
       return {
         date,
@@ -8299,6 +8195,80 @@ export class AnalyticsService {
         label: this.formatHeatmapDisplayLabel(date),
       };
     });
+  }
+
+  private buildHomeHeatmapForecast(rows: any[], targetDate: string): any[] {
+    const forecastDates = this.buildHomeHeatmapDays(
+      new Date(`${targetDate}T12:00:00.000Z`),
+    ).map((day) => day.date);
+    const daysBySector = new Map<
+      string,
+      Map<string, { dayOfWeek: number; date: string }>
+    >();
+    const revenueBySectorDateHour = new Map<string, number>();
+
+    rows.forEach((row) => {
+      const date = String(row._id?.date || '');
+      const sector = String(row._id?.sector || '');
+      const dayOfWeek = Number(row._id?.dayOfWeek);
+      const hour = Number(row._id?.hourBucket);
+      if (!date || !['Cafe', 'Services'].includes(sector)) return;
+
+      const sectorDays = daysBySector.get(sector) || new Map();
+      sectorDays.set(date, { date, dayOfWeek });
+      daysBySector.set(sector, sectorDays);
+      revenueBySectorDateHour.set(
+        `${sector}|${date}|${hour}`,
+        Number(row.revenue) || 0,
+      );
+    });
+
+    const forecast: any[] = [];
+    for (const sector of ['Cafe', 'Services']) {
+      const sectorDays = [...(daysBySector.get(sector)?.values() || [])];
+      for (const forecastDate of forecastDates) {
+        const targetDayOfWeek =
+          new Date(`${forecastDate}T12:00:00.000Z`).getUTCDay() + 1;
+        const targetTimestamp = new Date(
+          `${forecastDate}T12:00:00.000Z`,
+        ).getTime();
+        const matchingDays = sectorDays.filter(
+          (day) => day.dayOfWeek === targetDayOfWeek,
+        );
+
+        for (let hour = 7; hour <= 18; hour += 1) {
+          let weightedRevenue = 0;
+          let totalWeight = 0;
+          for (const day of matchingDays) {
+            const dayTimestamp = new Date(
+              `${day.date}T12:00:00.000Z`,
+            ).getTime();
+            const ageDays = Math.max(
+              0,
+              (targetTimestamp - dayTimestamp) / (24 * 60 * 60 * 1000),
+            );
+            const weight = Math.exp((-Math.LN2 * ageDays) / 180);
+            weightedRevenue +=
+              (revenueBySectorDateHour.get(
+                `${sector}|${day.date}|${hour}`,
+              ) || 0) * weight;
+            totalWeight += weight;
+          }
+
+          forecast.push({
+            _id: {
+              date: forecastDate,
+              dayOfWeek: targetDayOfWeek,
+              hourBucket: hour,
+              sector,
+            },
+            revenue: totalWeight > 0 ? weightedRevenue / totalWeight : 0,
+            sampleDays: matchingDays.length,
+          });
+        }
+      }
+    }
+    return forecast;
   }
 
   private formatHomeHeatmap(rows: any[]): any[] {
@@ -8316,6 +8286,7 @@ export class AnalyticsService {
       sector: row._id?.sector || 'Unknown',
       revenue: this.round(Number(row.revenue) || 0),
       intensity: this.round(((Number(row.revenue) || 0) / maxRevenue) * 100),
+      sampleDays: Number(row.sampleDays) || 0,
     }));
   }
 
@@ -8354,12 +8325,23 @@ export class AnalyticsService {
     sectorSummary: any[];
     channelSummary: any[];
     topItems: any[];
+    historicalSuggestionItems: any[];
+    historicalSuggestionSectors: any[];
+    suggestionDate: string;
     totalRevenue: number;
   }): any[] {
     const topSector = [...input.sectorSummary].sort(
       (a, b) => b.revenue - a.revenue,
     )[0];
-    const topItem = input.topItems[0];
+    const dateSpecificItems = input.historicalSuggestionItems.length
+      ? input.historicalSuggestionItems
+      : input.topItems;
+    const dateSpecificSectors = input.historicalSuggestionSectors.length
+      ? input.historicalSuggestionSectors
+      : input.sectorSummary;
+    const topItem = dateSpecificItems[0];
+    const historicalTopSector = dateSpecificSectors[0];
+    const suggestionDay = this.formatHeatmapDisplayLabel(input.suggestionDate);
     const onlineRevenue = input.channelSummary
       .filter((row) => row.channel !== 'POS')
       .reduce((sum, row) => sum + row.revenue, 0);
@@ -8380,26 +8362,28 @@ export class AnalyticsService {
       );
       suggestions.push({
         id: 1,
-        title: `Promote ${topItem._id.productName}`,
-        trigger: 'Next high-traffic sales window',
+        title: `Promote ${topItem._id.productName} for ${suggestionDay}`,
+        trigger: `Historical demand around ${suggestionDay}`,
         discount: 'Targeted bundle or featured placement',
-        expectedLift: `+${this.formatPeso(topItem.revenue * 0.08)}`,
+        historicalEvidence: topItem.sampleDays
+          ? `${topItem.orderCount} orders • ${topItem.sampleDays} historical days`
+          : `${topItem.orderCount} orders • selected period`,
         confidence: `${confidence}%`,
-        reason: `${topItem._id.productName} is currently the top revenue driver in ${topItem._id.sector}.`,
-        detailedExplanation: `This recommendation is based on uploaded transaction data. ${topItem._id.productName} generated ${this.formatPeso(topItem.revenue)} across ${topItem.orderCount} orders in the selected period, making it the strongest candidate for promotion or bundling.`,
+        reason: `${topItem._id.productName} led historical sales in ${topItem._id.sector} around this time of year${topItem.sampleDays ? ` across ${topItem.sampleDays} recorded days` : ''}.`,
+        detailedExplanation: `This recommendation uses transactions from the two years before ${input.suggestionDate}, within seven calendar days of ${suggestionDay}. ${topItem._id.productName} recorded ${topItem.orderCount} orders${topItem.sampleDays ? ` across ${topItem.sampleDays} historical dates` : ' in the selected period'}, making it a candidate to feature or bundle. This is a historical pattern, not a guaranteed sales outcome.`,
       });
     }
 
-    if (topSector?.revenue > 0) {
+    if (historicalTopSector?.revenue > 0) {
       suggestions.push({
         id: 2,
-        title: `Prioritize ${topSector.sector} inventory and staffing`,
-        trigger: 'Current selected period',
+        title: `Plan ${historicalTopSector._id || historicalTopSector.sector} coverage for ${suggestionDay}`,
+        trigger: `Seasonal pattern around ${suggestionDay}`,
         discount: 'Operational action',
-        expectedLift: `+${this.formatPeso(topSector.revenue * 0.05)}`,
+        historicalEvidence: `${historicalTopSector.orderCount ?? historicalTopSector.orders ?? 0} orders • ${historicalTopSector.sampleDays ? `${historicalTopSector.sampleDays} historical days` : 'selected period'}`,
         confidence: '82%',
-        reason: `${topSector.sector} is the busiest sector by revenue.`,
-        detailedExplanation: `${topSector.sector} produced ${this.formatPeso(topSector.revenue)} from ${topSector.orders} orders. Keep high-demand items visible and staff this area first during peak periods.`,
+        reason: `${historicalTopSector._id || historicalTopSector.sector} had the strongest historical revenue around this calendar date${historicalTopSector.sampleDays ? ` across ${historicalTopSector.sampleDays} recorded days` : ''}.`,
+        detailedExplanation: `Historical transactions around ${suggestionDay} show ${historicalTopSector._id || historicalTopSector.sector} had the most recorded orders${historicalTopSector.sampleDays ? ` across ${historicalTopSector.sampleDays} days` : ' in the selected period'}. Use this pattern to review stock and staffing; actual demand can differ from prior years.`,
       });
     }
 
@@ -8410,10 +8394,10 @@ export class AnalyticsService {
         title: `Rebalance ${weaker} channel performance`,
         trigger: 'Channel balance monitor',
         discount: 'Channel-specific offer',
-        expectedLift: `+${this.formatPeso(Math.abs(posRevenue - onlineRevenue) * 0.04)}`,
+        historicalEvidence: `${posRevenue ? input.channelSummary.find((row) => row.channel === 'POS')?.count ?? 0 : 0} POS transactions • ${input.channelSummary.filter((row) => row.channel !== 'POS').reduce((sum, row) => sum + row.count, 0)} online transactions`,
         confidence: '76%',
         reason: `Uploaded sales show a visible gap between physical and online channels.`,
-        detailedExplanation: `Physical POS revenue is ${this.formatPeso(posRevenue)} while online revenue is ${this.formatPeso(onlineRevenue)}. Use this gap to decide whether to push marketplace promos or in-store conversion tactics.`,
+        detailedExplanation: `The selected period has ${input.channelSummary.find((row) => row.channel === 'POS')?.count ?? 0} POS transactions and ${input.channelSummary.filter((row) => row.channel !== 'POS').reduce((sum, row) => sum + row.count, 0)} online transactions. Use the transaction mix to decide whether to test marketplace promotions or in-store conversion tactics.`,
       });
     }
 
@@ -8438,9 +8422,14 @@ export class AnalyticsService {
   }
 
   private emptyHomeOverview(range: HomeRange): any {
+    const heatmapAnchorDate = this.formatDateInTimeZone(
+      new Date(),
+      'Asia/Manila',
+    );
     return {
       range,
       anchorDate: null,
+      heatmapAnchorDate,
       window: null,
       kpis: {
         totalRevenue: 0,
@@ -8463,7 +8452,9 @@ export class AnalyticsService {
       ],
       channelSummary: [],
       channelBalance: [],
-      heatmapDays: [],
+      heatmapDays: this.buildHomeHeatmapDays(
+        new Date(`${heatmapAnchorDate}T12:00:00.000Z`),
+      ),
       heatmap: [],
       suggestions: [],
       nextAction: null,

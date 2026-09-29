@@ -23,6 +23,14 @@ FEATURE_COLUMNS = [
 MODEL_PATH = os.path.join(tempfile.gettempdir(), "woof_rf_promo_model.joblib")
 
 
+def parse_manila_timestamps(values):
+    """Parse source timestamps as instants and extract business dates in Manila."""
+    parsed = pd.to_datetime(values, format="ISO8601", errors="coerce", utc=True)
+    if parsed.isna().all():
+        parsed = pd.to_datetime(values, format="mixed", errors="coerce", utc=True)
+    return parsed.dt.tz_convert("Asia/Manila")
+
+
 def series_or_default(df, column, default):
     if column in df:
         return df[column]
@@ -49,9 +57,7 @@ def build_training_examples(history_rows):
     if df.empty:
         return pd.DataFrame()
 
-    df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="ISO8601", errors="coerce")
-    if df["timestamp"].isna().all():
-        df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="mixed", errors="coerce")
+    df["timestamp"] = parse_manila_timestamps(df.get("transactionTimestamp"))
     df = df.dropna(subset=["timestamp"])
     if df.empty:
         return pd.DataFrame()
@@ -269,9 +275,7 @@ def detect_quiet_period(history_rows, target_dayofweek=None):
         return 15, 45.0
 
     # Parse hour and sum quantity
-    df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"], format="ISO8601", errors="coerce")
-    if df["transactionTimestamp"].isna().all():
-        df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"], format="mixed", errors="coerce")
+    df["transactionTimestamp"] = parse_manila_timestamps(df["transactionTimestamp"])
     df = df.dropna(subset=["transactionTimestamp"])
     if df.empty:
         return 15, 45.0
@@ -283,7 +287,8 @@ def detect_quiet_period(history_rows, target_dayofweek=None):
     # Determine the target day-of-week (default: tomorrow)
     if target_dayofweek is None:
         from datetime import datetime, timedelta
-        target_dayofweek = (datetime.now() + timedelta(days=1)).weekday()
+        from zoneinfo import ZoneInfo
+        target_dayofweek = (datetime.now(ZoneInfo("Asia/Manila")) + timedelta(days=1)).weekday()
 
     # Filter to matching day-of-week only
     df_dow = df[df["dayofweek"] == target_dayofweek]
@@ -359,7 +364,14 @@ def predict_promo_success(payload):
 
     # Determine tomorrow's day-of-week for weekday-aware recommendations
     from datetime import datetime, timedelta
-    target_date = datetime.now() + timedelta(days=1)
+    from zoneinfo import ZoneInfo
+    target_date = payload.get("target_date")
+    if target_date:
+        target_date = datetime.strptime(str(target_date), "%Y-%m-%d")
+    else:
+        target_date = datetime.now(ZoneInfo("Asia/Manila")) + timedelta(days=1)
+    if not isinstance(target_date, datetime):
+        target_date = datetime.now(ZoneInfo("Asia/Manila")) + timedelta(days=1)
     target_dayofweek = target_date.weekday()  # 0=Mon … 6=Sun
     target_is_weekend = 1 if target_dayofweek in (5, 6) else 0
 
@@ -396,9 +408,7 @@ def predict_promo_success(payload):
     if history_rows:
         df = pd.DataFrame(history_rows)
         # Parse timestamp safely
-        df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="ISO8601", errors="coerce")
-        if df["timestamp"].isna().all():
-            df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="mixed", errors="coerce")
+        df["timestamp"] = parse_manila_timestamps(df.get("transactionTimestamp"))
         df = df.dropna(subset=["timestamp"])
 
         df["hour"] = df["timestamp"].dt.hour
@@ -421,6 +431,13 @@ def predict_promo_success(payload):
             df_dow = df
 
         df_hour = df_dow[df_dow["hour"] == int(hour)]
+        if df_hour.empty:
+            # Keep suggestions available when this weekday has no transactions
+            # at the quiet hour; first broaden to any weekday at that hour.
+            df_hour = df[df["hour"] == int(hour)]
+        if df_hour.empty:
+            # Last resort: recommend from the target weekday/weekend rows.
+            df_hour = df_dow
         
         if not df_hour.empty:
             # Group by itemKey leveraging pandas vectorized grouping

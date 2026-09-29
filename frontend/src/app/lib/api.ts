@@ -96,6 +96,7 @@ export interface ForecastRun {
   modelName: string;
   mase: number | null;
   smape: number | null;
+  accuracy?: number | null;
   mae?: number | null;
   rmse?: number | null;
   mape?: number | null;
