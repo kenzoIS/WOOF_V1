@@ -77,6 +77,7 @@ describe('AuthService', () => {
     );
 
     expect(result.email).toBe('woofdash@gmail.com');
+    // @ts-ignore
     expect(result.accessToken).toBe('supabase-token');
     expect(createUser).toHaveBeenCalledWith(
       expect.objectContaining({

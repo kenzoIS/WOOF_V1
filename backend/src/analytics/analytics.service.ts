@@ -4050,6 +4050,8 @@ export class AnalyticsService {
       modelMetrics: mlResult?.modelMetrics || {},
       featureImportance: mlResult?.featureImportance || [],
       temperature: temp,
+      targetDayName: mlResult?.targetDayName || '',
+      targetDayOfWeek: mlResult?.targetDayOfWeek ?? -1,
       recommendedItems: mlResult?.recommendedItems || [],
     };
   }
@@ -4112,22 +4114,26 @@ export class AnalyticsService {
     if (data.length === 0) return [];
     
     // Fetch product names to map PRD_ back to human-readable names
+    // Must paginate because Supabase .in() returns max 1000 rows
     const productIds = Array.from(new Set(data.map(r => r.product_id).filter(id => id)));
-    const { data: products } = await this.supabaseService.client
-      .from('product_dim')
-      .select('product_id, product_name, category')
-      .in('product_id', productIds);
-      
     const productMap = new Map();
     const cafeCategories = ['coffee', 'non-caffeine', 'pasta/snacks', 'pet bakery', 'rice meals'];
-    
-    if (products) {
-      products.forEach(p => {
-        productMap.set(p.product_id, {
-          name: p.product_name,
-          category: p.category ? p.category.toLowerCase() : '',
+
+    for (let i = 0; i < productIds.length; i += 500) {
+      const batch = productIds.slice(i, i + 500);
+      const { data: products } = await this.supabaseService.client
+        .from('product_dim')
+        .select('product_id, product_name, category')
+        .in('product_id', batch);
+      
+      if (products) {
+        products.forEach(p => {
+          productMap.set(p.product_id, {
+            name: p.product_name,
+            category: p.category ? p.category.toLowerCase() : '',
+          });
         });
-      });
+      }
     }
 
     // Filter out retail/grooming items
