@@ -40,6 +40,26 @@ export default function App({ Component, pageProps }: AppProps) {
     if (auth && router.pathname === "/login") {
       router.replace("/");
     }
+
+    // Pre-compile all sector routes in the background once authenticated
+    if (auth && router.pathname !== "/login") {
+      const routesToPrefetch = [
+        "/",
+        "/cafe",
+        "/services",
+        "/retail",
+        "/ai-simulation",
+        "/smart-reports",
+        "/feedback",
+        "/settings",
+      ];
+      routesToPrefetch.forEach((route, i) => {
+        setTimeout(() => {
+          router.prefetch(route);
+          fetch(route, { priority: "low" as RequestPriority }).catch(() => {});
+        }, i * 300);
+      });
+    }
   }, [router.pathname]);
 
   if (!checkedAuth) {

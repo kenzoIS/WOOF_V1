@@ -3,6 +3,15 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  experimental: {
+    optimizePackageImports: [
+      'lucide-react',
+      'recharts',
+      '@mui/material',
+      '@mui/icons-material',
+      '@radix-ui/react-icons'
+    ],
+  },
   async rewrites() {
     return [
       {

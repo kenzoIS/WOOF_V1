@@ -398,6 +398,27 @@ export function Login() {
       toast.success("Welcome back!", {
         description: "Signed in to WOOF.",
       });
+
+      // Silently prefetch all sector routes in the background so they are
+      // pre-compiled by the time the user clicks a tab (eliminates 5-7s delay).
+      const routesToPrefetch = [
+        "/",
+        "/cafe",
+        "/services",
+        "/retail",
+        "/ai-simulation",
+        "/smart-reports",
+        "/feedback",
+        "/settings",
+      ];
+      routesToPrefetch.forEach((route, i) => {
+        setTimeout(() => {
+          router.prefetch(route);
+          // Also do a real fetch to force server-side compilation in dev mode
+          fetch(route, { priority: "low" as RequestPriority }).catch(() => {});
+        }, i * 200);
+      });
+
       router.push(getSettingsPreferences().dashboard.defaultLandingPage);
     } catch (error) {
       toast.error("Unable to sign in", {

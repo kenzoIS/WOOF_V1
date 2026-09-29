@@ -251,7 +251,15 @@ def load_cached_model(signature):
     return None
 
 
-def detect_quiet_period(history_rows):
+def detect_quiet_period(history_rows, target_dayofweek=None):
+    """Find the quietest business hour using only historical data from the same
+    day-of-week as the target date. This ensures Monday recommendations differ
+    from Saturday recommendations, etc.
+
+    Args:
+        history_rows: list of transaction dicts
+        target_dayofweek: int 0=Monday … 6=Sunday.  If None, uses tomorrow.
+    """
     if not history_rows:
         return 15, 45.0  # Default fallback if no data
 
@@ -264,10 +272,32 @@ def detect_quiet_period(history_rows):
     df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"], format="ISO8601", errors="coerce")
     if df["transactionTimestamp"].isna().all():
         df["transactionTimestamp"] = pd.to_datetime(df["transactionTimestamp"], format="mixed", errors="coerce")
+    df = df.dropna(subset=["transactionTimestamp"])
+    if df.empty:
+        return 15, 45.0
+
     df["hour"] = df["transactionTimestamp"].dt.hour
+    df["dayofweek"] = df["transactionTimestamp"].dt.dayofweek  # 0=Mon … 6=Sun
     df["quantitySold"] = pd.to_numeric(df["quantitySold"], errors="coerce").fillna(0)
 
-    hourly_sales = df.groupby("hour")["quantitySold"].sum()
+    # Determine the target day-of-week (default: tomorrow)
+    if target_dayofweek is None:
+        from datetime import datetime, timedelta
+        target_dayofweek = (datetime.now() + timedelta(days=1)).weekday()
+
+    # Filter to matching day-of-week only
+    df_dow = df[df["dayofweek"] == target_dayofweek]
+    if df_dow.empty:
+        # Fallback: use weekend vs weekday grouping if no exact match
+        target_is_weekend = target_dayofweek in (5, 6)
+        if target_is_weekend:
+            df_dow = df[df["dayofweek"].isin([5, 6])]
+        else:
+            df_dow = df[~df["dayofweek"].isin([5, 6])]
+    if df_dow.empty:
+        df_dow = df  # Last resort: use all data
+
+    hourly_sales = df_dow.groupby("hour")["quantitySold"].sum()
 
     if hourly_sales.empty:
         return 15, 45.0
@@ -326,11 +356,17 @@ def predict_promo_success(payload):
         )
 
     medians = examples[FEATURE_COLUMNS].median(numeric_only=True)
-    
-    dynamic_hour, dynamic_traffic_drop = detect_quiet_period(history_rows)
+
+    # Determine tomorrow's day-of-week for weekday-aware recommendations
+    from datetime import datetime, timedelta
+    target_date = datetime.now() + timedelta(days=1)
+    target_dayofweek = target_date.weekday()  # 0=Mon … 6=Sun
+    target_is_weekend = 1 if target_dayofweek in (5, 6) else 0
+
+    dynamic_hour, dynamic_traffic_drop = detect_quiet_period(history_rows, target_dayofweek)
     
     hour = safe_float(payload.get("hour"), dynamic_hour)
-    is_weekend = safe_float(payload.get("is_weekend"), safe_float(medians.get("is_weekend"), 0))
+    is_weekend = safe_float(payload.get("is_weekend"), target_is_weekend)
     temp = safe_float(payload.get("temp"), safe_float(medians.get("temp"), 28))
     traffic_drop = safe_float(payload.get("traffic_drop"), dynamic_traffic_drop)
     discount_depth = safe_float(payload.get("discount_depth"), 0.15)
@@ -355,7 +391,7 @@ def predict_promo_success(payload):
     global_prob = rf.predict_proba(X_new)[0][1]
     importances = dict(zip(FEATURE_COLUMNS, rf.feature_importances_))
 
-    # --- NEW ITEM-LEVEL LOGIC (Phase 1) ---
+    # --- ITEM-LEVEL LOGIC (weekday-aware) ---
     recommended_items = []
     if history_rows:
         df = pd.DataFrame(history_rows)
@@ -363,16 +399,28 @@ def predict_promo_success(payload):
         df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="ISO8601", errors="coerce")
         if df["timestamp"].isna().all():
             df["timestamp"] = pd.to_datetime(df.get("transactionTimestamp"), format="mixed", errors="coerce")
-        
+        df = df.dropna(subset=["timestamp"])
+
         df["hour"] = df["timestamp"].dt.hour
+        df["dayofweek"] = df["timestamp"].dt.dayofweek
         df["item_key"] = series_or_default(df, "itemKey", "unknown").fillna("unknown").astype(str)
         df["quantity"] = pd.to_numeric(series_or_default(df, "quantitySold", 0), errors="coerce").fillna(0)
         df["net_sales"] = pd.to_numeric(series_or_default(df, "netSales", 0), errors="coerce").fillna(0)
         df["gross_profit"] = pd.to_numeric(series_or_default(df, "grossProfit", 0), errors="coerce").fillna(0)
         df["margin_rate"] = np.where(df["net_sales"] > 0, df["gross_profit"] / df["net_sales"], 0)
 
-        # Filter to the dynamic_hour using pandas
-        df_hour = df[df["hour"] == int(hour)]
+        # Filter to same day-of-week AND target hour
+        df_dow = df[df["dayofweek"] == target_dayofweek]
+        if df_dow.empty:
+            # Fallback: weekend vs weekday grouping
+            if target_is_weekend:
+                df_dow = df[df["dayofweek"].isin([5, 6])]
+            else:
+                df_dow = df[~df["dayofweek"].isin([5, 6])]
+        if df_dow.empty:
+            df_dow = df
+
+        df_hour = df_dow[df_dow["hour"] == int(hour)]
         
         if not df_hour.empty:
             # Group by itemKey leveraging pandas vectorized grouping
@@ -432,12 +480,16 @@ def predict_promo_success(payload):
         # Override global probability with the max of the recommendations for backward compatibility
         global_prob = recommended_items[0]["probabilityScore"]
 
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
     return {
         "probabilityScore": float(global_prob),
         "featureImportance": {key: float(value) for key, value in importances.items()},
         "modelMetrics": metrics,
         "targetHour": int(hour),
         "predictedTrafficDrop": float(traffic_drop),
+        "targetDayName": day_names[target_dayofweek],
+        "targetDayOfWeek": int(target_dayofweek),
         "recommendedItems": recommended_items
     }
 
