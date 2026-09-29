@@ -32,9 +32,11 @@ interface ModelResult {
   modelName: string;
   mase: number;
   smape: number;
-  accuracy: number;
+  accuracy?: number | null;
   wape?: number;
   biasPercent?: number;
+  biasMeanError?: number;
+  forecastSkillPercent?: number;
   mae?: number;
   rmse?: number;
   mape?: number;
@@ -42,9 +44,11 @@ interface ModelResult {
   weeklyMetrics?: {
     mase: number;
     smape: number;
-    accuracy: number;
+    accuracy?: number | null;
     wape?: number;
     biasPercent?: number;
+    biasMeanError?: number;
+    forecastSkillPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;
@@ -53,9 +57,11 @@ interface ModelResult {
   monthlyMetrics?: {
     mase: number;
     smape: number;
-    accuracy: number;
+    accuracy?: number | null;
     wape?: number;
     biasPercent?: number;
+    biasMeanError?: number;
+    forecastSkillPercent?: number;
     mae?: number;
     rmse?: number;
     mape?: number;
@@ -82,6 +88,16 @@ interface ModelResult {
     trainActual: number[];
   };
   modelMetadata?: Record<string, unknown>;
+}
+
+interface ForecastErrorMetrics {
+  mase: number;
+  smape: number;
+  mae: number;
+  rmse: number;
+  biasMeanError: number;
+  forecastSkillPercent: number;
+  observations: number;
 }
 
 interface CafeForecastSelection {
@@ -142,7 +158,7 @@ interface TrafficColumn {
   weekday: number;
   date?: string;
 }
-const FORECAST_REVENUE_PAYLOAD_VERSION = 8;
+const FORECAST_REVENUE_PAYLOAD_VERSION = 9;
 const DEFAULT_FORECAST_DAYS = 30;
 const MAX_FORECAST_DAYS = 90;
 const PYTHON_TIMEOUT_MS = 120_000;
@@ -1088,6 +1104,41 @@ export class AnalyticsService {
         evaluationPlan,
       );
     }
+    const serviceRevenueEvaluation = module === 'Services'
+      ? this.evaluateServicesRevenueMetrics(
+          finalModel,
+          completeHistorical,
+          trainHistorical,
+          evaluationPlan,
+        )
+      : null;
+    if (serviceRevenueEvaluation) {
+      finalModel = {
+        ...finalModel,
+        ...serviceRevenueEvaluation.daily,
+        accuracy: null,
+        wape: undefined,
+        biasPercent: undefined,
+        weeklyMetrics: serviceRevenueEvaluation.weekly,
+        monthlyMetrics: serviceRevenueEvaluation.monthly,
+        modelMetadata: {
+          ...(finalModel.modelMetadata || {}),
+          backtestMetricImplementation:
+            'Revenue-scale evaluation from chronological holdout predictions; MASE uses only pre-test revenue and a seven-observation seasonal-naive baseline.',
+          revenueEvaluation: {
+            target: 'daily_services_revenue_php',
+            source: serviceRevenueEvaluation.source,
+            evaluatedDays: serviceRevenueEvaluation.daily.observations,
+            closedDaysExcluded: true,
+            priceConversion:
+              'Training-window weighted revenue per observed booking; no holdout revenue used for conversion.',
+            daily: serviceRevenueEvaluation.daily,
+            weekly: serviceRevenueEvaluation.weekly,
+            monthly: serviceRevenueEvaluation.monthly,
+          },
+        },
+      };
+    }
     const priceCostMatrix = await this.getActivePriceCostMatrix(module);
     const itemHistory = await this.getItemHistory(module);
     const calibratedForecast = this.applyPriceCalibration(
@@ -1108,17 +1159,41 @@ export class AnalyticsService {
     const payload = {
       module,
       model_name: finalModel.modelName,
-      mase: finalModel.mase,
-      smape: finalModel.smape,
-      accuracy: finalModel.accuracy,
-      mae: finalModel.mae,
-      rmse: finalModel.rmse,
-      mape: finalModel.mape,
-      r2: finalModel.r2,
-      weeklyMetrics: finalModel.weeklyMetrics ?? null,
-      monthlyMetrics: finalModel.monthlyMetrics ?? null,
-      weekly_metrics: finalModel.weeklyMetrics ?? null,
-      monthly_metrics: finalModel.monthlyMetrics ?? null,
+      mase:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.daily.mase ?? null
+          : finalModel.mase,
+      smape:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.daily.smape ?? null
+          : finalModel.smape,
+      accuracy: module === 'Services' ? null : finalModel.accuracy,
+      mae:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.daily.mae ?? null
+          : finalModel.mae,
+      rmse:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.daily.rmse ?? null
+          : finalModel.rmse,
+      mape: module === 'Services' ? null : finalModel.mape,
+      r2: module === 'Services' ? null : finalModel.r2,
+      weeklyMetrics:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.weekly ?? null
+          : finalModel.weeklyMetrics ?? null,
+      monthlyMetrics:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.monthly ?? null
+          : finalModel.monthlyMetrics ?? null,
+      weekly_metrics:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.weekly ?? null
+          : finalModel.weeklyMetrics ?? null,
+      monthly_metrics:
+        module === 'Services'
+          ? serviceRevenueEvaluation?.monthly ?? null
+          : finalModel.monthlyMetrics ?? null,
       is_fallback: useFallback,
       rejection_reason: useFallback ? rejectionReason : null,
       historical: this.buildAnchoredHistoricalPayload(
@@ -1135,18 +1210,32 @@ export class AnalyticsService {
       item_history: itemHistory,
       model_metadata: {
         ...finalModel.modelMetadata,
-        additionalRegressionMetrics: {
-          mae: finalModel.mae,
-          rmse: finalModel.rmse,
-          mape: finalModel.mape,
-          r2: finalModel.r2,
-          wape: finalModel.wape,
-          biasPercent: finalModel.biasPercent,
-        },
-        accuracyLabel:
-          'Accuracy = max(0, 100 - WAPE). sMAPE remains available as a sparse-demand diagnostic.',
+        additionalRegressionMetrics:
+          module === 'Services'
+            ? {
+                mae: finalModel.mae,
+                rmse: finalModel.rmse,
+                biasMeanError: finalModel.biasMeanError,
+                forecastSkillPercent: finalModel.forecastSkillPercent,
+              }
+            : {
+                mae: finalModel.mae,
+                rmse: finalModel.rmse,
+                mape: finalModel.mape,
+                r2: finalModel.r2,
+                wape: finalModel.wape,
+                biasPercent: finalModel.biasPercent,
+              },
+        ...(module !== 'Services'
+          ? {
+              accuracyLabel:
+                'Accuracy = max(0, 100 - WAPE). sMAPE remains available as a sparse-demand diagnostic.',
+            }
+          : {}),
         targetEvaluationPolicy:
-          'Primary Python models train and evaluate on outlier-capped demand using log1p/expm1 target transformation; raw actuals remain visible in history.',
+          module === 'Services'
+            ? 'Displayed errors compare actual PHP revenue with bookings forecast converted using training-window weighted revenue per booking. MASE uses a 7-observation seasonal-naive revenue baseline; closed and incomplete days are excluded.'
+            : 'Primary Python models train and evaluate on outlier-capped demand using log1p/expm1 target transformation; raw actuals remain visible in history.',
         splitRatio,
         emaAlpha: module === 'Cafe' ? 0.3 : 0.4,
         forecastMode: evaluationPlan.mode,
@@ -1262,12 +1351,19 @@ export class AnalyticsService {
 
     // Map snake_case back to camelCase for the frontend (withForecastStartAnchor uses camelCase)
     const runSource = savedRun || payload;
+    const serviceRevenueDailyMetrics =
+      runSource.model_metadata?.revenueEvaluation?.daily;
     const normalizedRun = {
       ...runSource,
       modelName: runSource.model_name || 'Prophet',
       wape:
-        runSource.wape ??
-        runSource.model_metadata?.additionalRegressionMetrics?.wape,
+        module === 'Services'
+          ? undefined
+          : runSource.wape ??
+            runSource.model_metadata?.additionalRegressionMetrics?.wape,
+      biasMeanError: serviceRevenueDailyMetrics?.biasMeanError ?? null,
+      forecastSkillPercent:
+        serviceRevenueDailyMetrics?.forecastSkillPercent ?? null,
       biasPercent:
         runSource.bias_percent ??
         runSource.model_metadata?.additionalRegressionMetrics?.biasPercent,
@@ -4136,6 +4232,7 @@ export class AnalyticsService {
       data: historical,
       forecastDays,
       splitRatio: splitRatio || '90-5-5',
+      ...(module === 'Services' ? { includeBacktest: true } : {}),
       ...extraPayload,
     });
   }
@@ -6304,6 +6401,170 @@ export class AnalyticsService {
           'TypeScript seasonal MASE/sMAPE recalculation over holdout dates; Python model training metrics use sktime/sklearn when installed.',
       },
     };
+  }
+
+  private evaluateServicesRevenueMetrics(
+    result: ModelResult,
+    historical: NormalizedDailyValue[],
+    training: NormalizedDailyValue[],
+    plan: ForecastEvaluationPlan,
+  ): {
+    daily: ForecastErrorMetrics;
+    weekly: ForecastErrorMetrics | null;
+    monthly: ForecastErrorMetrics | null;
+    source: string;
+  } | null {
+    const historyByDate = new Map(historical.map((point) => [point.date, point]));
+    let examples: Array<{ date: string; actual: number; predicted: number }> = [];
+    let metricTraining = training.filter((point) => point.isObservedDemand);
+    let source = '';
+
+    if (plan.isBacktest && plan.evaluationHistorical.length > 0) {
+      const forecastByDate = new Map(
+        result.forecast.map((point) => [
+          point.date,
+          Number(point.forecastQuantity ?? point.forecast),
+        ]),
+      );
+      examples = plan.evaluationHistorical.flatMap((point) => {
+        const predicted = forecastByDate.get(point.date);
+        return predicted !== undefined && Number.isFinite(predicted)
+          ? [{ date: point.date, actual: point.revenue, predicted }]
+          : [];
+      });
+      source = plan.backtestMetricSource;
+    } else if (result.backtest?.dates?.length) {
+      examples = result.backtest.dates.flatMap((date, index) => {
+        const point = historyByDate.get(date);
+        const predicted = Number(result.backtest?.predicted[index]);
+        return point && Number.isFinite(predicted)
+          ? [{ date, actual: point.revenue, predicted }]
+          : [];
+      });
+      const firstTestDate = result.backtest.dates[0];
+      metricTraining = historical.filter(
+        (point) => point.date < firstTestDate && point.isObservedDemand,
+      );
+      source = 'services_sarimax_internal_test_holdout';
+    } else {
+      // The SMA emergency model has no exported holdout predictions. Score its
+      // actual fixed 7-observation forecast on a final chronological slice.
+      const observed = historical.filter((point) => point.isObservedDemand);
+      const testCount = Math.max(2, Math.ceil(observed.length * 0.05));
+      const splitIndex = Math.max(7, observed.length - testCount);
+      metricTraining = observed.slice(0, splitIndex);
+      const testRows = observed.slice(splitIndex);
+      const lastSevenOrders = metricTraining.slice(-7).map((point) => point.actual);
+      const predictedOrders = this.average(lastSevenOrders);
+      examples = testRows.map((point) => ({
+        date: point.date,
+        actual: point.revenue,
+        predicted: predictedOrders,
+      }));
+      source = 'services_sma_chronological_holdout';
+    }
+
+    examples = examples.filter(
+      (point) =>
+        Number.isFinite(point.actual) &&
+        Number.isFinite(point.predicted) &&
+        point.actual >= 0 &&
+        point.predicted >= 0,
+    );
+    if (examples.length === 0 || metricTraining.length < 2) return null;
+
+    const trainingRevenue = metricTraining.map((point) =>
+      Math.max(0, Number(point.revenue) || 0),
+    );
+    const trainingOrders = metricTraining.reduce(
+      (sum, point) => sum + Math.max(0, Number(point.actual) || 0),
+      0,
+    );
+    const observedTrainingRevenue = metricTraining.reduce(
+      (sum, point) => sum + Math.max(0, Number(point.revenue) || 0),
+      0,
+    );
+    const unitPrice = trainingOrders > 0
+      ? observedTrainingRevenue / trainingOrders
+      : 0;
+    if (!(unitPrice > 0)) return null;
+
+    const calculate = (
+      actual: number[],
+      predicted: number[],
+      train: number[],
+      seasonalPeriod: number,
+    ): ForecastErrorMetrics => {
+      const length = Math.min(actual.length, predicted.length);
+      const errors = Array.from({ length }, (_, index) => predicted[index] - actual[index]);
+      const absoluteErrors = errors.map((error) => Math.abs(error));
+      const squaredErrors = errors.map((error) => error ** 2);
+      const smapeValues = Array.from({ length }, (_, index) => {
+        const denominator = (Math.abs(actual[index]) + Math.abs(predicted[index])) / 2;
+        return denominator === 0 ? 0 : Math.abs(errors[index]) / denominator * 100;
+      });
+      let lag = train.length > seasonalPeriod ? seasonalPeriod : 1;
+      let naiveErrors = train.slice(lag).map((value, index) => Math.abs(value - train[index]));
+      if (naiveErrors.length === 0 && train.length > 1) {
+        lag = 1;
+        naiveErrors = train.slice(1).map((value, index) => Math.abs(value - train[index]));
+      }
+      const mae = this.average(absoluteErrors);
+      const naiveMae = this.average(naiveErrors);
+      const mase = naiveMae > 0 ? mae / naiveMae : mae === 0 ? 0 : 999;
+      return {
+        mase: this.round(mase),
+        smape: this.round(this.average(smapeValues)),
+        mae: this.round(mae),
+        rmse: this.round(Math.sqrt(this.average(squaredErrors))),
+        biasMeanError: this.round(this.average(errors)),
+        forecastSkillPercent: this.round((1 - mase) * 100),
+        observations: length,
+      };
+    };
+
+    const daily = calculate(
+      examples.map((point) => point.actual),
+      examples.map((point) => point.predicted * unitPrice),
+      trainingRevenue,
+      7,
+    );
+
+    const resample = (grain: 'weekly' | 'monthly') => {
+      const bucketFor = (dateKey: string) => {
+        if (grain === 'monthly') return dateKey.slice(0, 7);
+        const date = new Date(`${dateKey}T00:00:00.000Z`);
+        const daysUntilSunday = (7 - date.getUTCDay()) % 7;
+        date.setUTCDate(date.getUTCDate() + daysUntilSunday);
+        return date.toISOString().slice(0, 10);
+      };
+      const sumByBucket = (rows: Array<{ date: string; value: number }>) => {
+        const sums = new Map<string, number>();
+        rows.forEach(({ date, value }) => {
+          const key = bucketFor(date);
+          sums.set(key, (sums.get(key) || 0) + value);
+        });
+        return sums;
+      };
+      const trainBuckets = sumByBucket(metricTraining.map((point) => ({
+        date: point.date,
+        value: Math.max(0, Number(point.revenue) || 0),
+      })));
+      const actualBuckets = sumByBucket(examples.map((point) => ({ date: point.date, value: point.actual })));
+      const predictedBuckets = sumByBucket(examples.map((point) => ({ date: point.date, value: point.predicted * unitPrice })));
+      const dates = [...actualBuckets.keys()].filter((date) => predictedBuckets.has(date)).sort();
+      const trainingDates = [...trainBuckets.keys()].sort();
+      if (dates.length === 0 || trainingDates.length < 2) return null;
+      const period = grain === 'monthly' && trainingDates.length >= 24 ? 12 : 1;
+      return calculate(
+        dates.map((date) => actualBuckets.get(date) || 0),
+        dates.map((date) => predictedBuckets.get(date) || 0),
+        trainingDates.map((date) => trainBuckets.get(date) || 0),
+        period,
+      );
+    };
+
+    return { daily, weekly: resample('weekly'), monthly: resample('monthly'), source };
   }
 
   private buildVolumeForecast(

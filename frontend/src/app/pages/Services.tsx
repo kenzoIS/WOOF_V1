@@ -3,7 +3,7 @@ import * as React from "react";
 import { useRouter } from "next/router";
 import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight, ChevronRight } from "lucide-react";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
-import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
+import { ThreeZoneForecastChart, ThreeZonePoint, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
@@ -568,68 +568,44 @@ export function Services() {
     return forecastRun.historical[holdEnd - 1]?.date ?? "2026-02-01";
   }, [forecastRun]);
 
-  const academicMetrics = useMemo<BacktestMetrics | null>(() => {
-    if (!forecastRun) return null;
-    return {
-      mae: forecastRun.mae ?? 0,
-      rmse: forecastRun.rmse ?? 0,
-      mape: forecastRun.mape ?? 0,
-      mase: forecastRun.mase ?? 0,
-      wape: (forecastRun as any).wape ?? 0,
-      mpe: (forecastRun as any).mpe ?? 0,
-    };
-  }, [forecastRun]);
-
   const dynamicPerformanceMetrics = useMemo(() => {
-    if (!forecastRun) {
-      return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
-    }
-    const baseMetrics = () => {
-      if (typeof forecastRun.mase === "number") {
-        return {
-          mase: Number(forecastRun.mase).toFixed(2),
-          accuracy: `${Number(forecastRun.accuracy).toFixed(1)}%`,
-          smape: `${Number(forecastRun.smape).toFixed(2)}%`,
-          mae: Number(forecastRun.mae ?? 0).toFixed(2),
-        };
-      }
-      return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
+    const fallback = {
+      mase: "—",
+      skill: "—",
+      smape: "—",
+      mae: "—",
+      rmse: "—",
+      bias: "—",
     };
-    if (chartGranularity === "monthly") {
-      const m = forecastRun.monthlyMetrics ?? (forecastRun as any).monthly_metrics;
-      if (m && typeof m.mase === "number") {
-        return {
-          mase: Number(m.mase).toFixed(2),
-          accuracy: `${Number(m.accuracy).toFixed(1)}%`,
-          smape: `${Number(m.smape).toFixed(2)}%`,
-          mae: Number(m.mae ?? 0).toFixed(2),
-        };
-      }
-      return baseMetrics();
-    }
-    if (chartGranularity === "weekly") {
-      const w = forecastRun.weeklyMetrics ?? (forecastRun as any).weekly_metrics;
-      if (w && typeof w.mase === "number") {
-        return {
-          mase: Number(w.mase).toFixed(2),
-          accuracy: `${Number(w.accuracy).toFixed(1)}%`,
-          smape: `${Number(w.smape).toFixed(2)}%`,
-          mae: Number(w.mae ?? 0).toFixed(2),
-        };
-      }
-      return baseMetrics();
-    }
-    // Daily horizon
-    if (typeof forecastRun.mase === "number") {
-      return {
-        mase: Number(forecastRun.mase).toFixed(2),
-        accuracy: `${Number(forecastRun.accuracy).toFixed(1)}%`,
-        smape: `${Number(forecastRun.smape).toFixed(2)}%`,
-        mae: Number(forecastRun.mae ?? 0).toFixed(2),
-      };
-    }
-    return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
+    if (!forecastRun) return fallback;
+    const selected = chartGranularity === "monthly"
+      ? forecastRun.monthlyMetrics
+      : chartGranularity === "weekly"
+        ? forecastRun.weeklyMetrics
+        : null;
+    const metric = selected || forecastRun;
+    const mase = typeof metric.mase === "number" ? metric.mase : null;
+    const bias = "biasMeanError" in metric ? metric.biasMeanError : forecastRun.biasMeanError;
+    const skill = "forecastSkillPercent" in metric
+      ? metric.forecastSkillPercent
+      : (typeof mase === "number" ? (1 - mase) * 100 : forecastRun.forecastSkillPercent);
+    const format = (value: unknown, digits = 2) =>
+      typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
+    return {
+      mase: format(mase),
+      skill: skill == null ? "—" : `${format(skill, 1)}%`,
+      smape: metric.smape == null ? "—" : `${format(metric.smape)}%`,
+      mae: format(metric.mae),
+      rmse: format(metric.rmse),
+      bias: format(bias),
+    };
   }, [chartGranularity, forecastRun]);
+
+  const metricPeriodLabel = chartGranularity === "daily"
+    ? "demand day"
+    : chartGranularity === "weekly"
+      ? "week"
+      : "month";
 
   // Aggregated KPI values dynamically calculated from API history based on globalDateRange
   const aggregatedKpis = useMemo(() => {
@@ -1088,7 +1064,7 @@ export function Services() {
                 label={
                   <>
                     Active model: <span className="font-semibold">{forecastRun?.modelName || "Waiting for uploaded Services history"}</span>
-                    {forecastRun && ` (MASE: ${forecastRun.mase.toFixed(2)}, sMAPE: ${forecastRun.smape.toFixed(2)}%, MAE: ₱${Number(forecastRun.mae ?? 0).toFixed(2)}).`}
+                    {forecastRun && ` (Revenue MASE: ${dynamicPerformanceMetrics.mase}, sMAPE: ${dynamicPerformanceMetrics.smape}, MAE: ₱${dynamicPerformanceMetrics.mae}).`}
                   </>
                 }
               />
@@ -1140,7 +1116,6 @@ export function Services() {
             rawData={rawThreeZoneData}
             initialSplitDate={academicSplitDate}
             initialForecastHorizon={academicForecastHorizon}
-            metrics={academicMetrics}
             modelName={forecastRun?.modelName ?? "SARIMAX"}
             sector="Services"
             currencyPrefix="₱"
@@ -1174,24 +1149,32 @@ export function Services() {
                 <Info className="w-4 h-4" />
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3 md:gap-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">MASE</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Revenue MASE</div>
                 <div className="text-xl md:text-2xl font-bold text-[#06B6D4]">
                   {dynamicPerformanceMetrics.mase}
                 </div>
+              </div>
+              <div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Skill vs Baseline</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.skill}</div>
               </div>
               <div>
                 <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.smape}</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">MAE (₱)</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">MAE (₱/{metricPeriodLabel})</div>
                 <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.mae !== "—" ? `₱${dynamicPerformanceMetrics.mae}` : "—"}</div>
               </div>
               <div>
-                <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">RMSE (₱/{metricPeriodLabel})</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.rmse !== "—" ? `₱${dynamicPerformanceMetrics.rmse}` : "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#223047] opacity-60 mb-1">Bias (₱/{metricPeriodLabel})</div>
+                <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.bias !== "—" ? `₱${dynamicPerformanceMetrics.bias}` : "—"}</div>
               </div>
             </div>
             {forecastRun?.modelMetadata && (
@@ -1640,21 +1623,33 @@ export function Services() {
             </div>
             <div className="space-y-4 text-xs md:text-sm text-[#223047] opacity-80 animate-in fade-in zoom-in-95 duration-150" style={{ lineHeight: "1.6" }}>
               <div>
-                <strong className="text-sm text-[#06B6D4]">MASE (Mean Absolute Scaled Error) — Target Threshold ≤ 0.20</strong>
+                <strong className="text-sm text-[#06B6D4]">Revenue MASE</strong>
                 <p className="mt-1">
-                  Measures the forecasting error scaled against a naïve seasonal persistence benchmark. A MASE below 1.0 means the model outperforms a simple repeat-last-season baseline; our research target of <strong>MASE ≤ 0.20</strong> indicates the model's error is only 20% of the naïve baseline, demonstrating exceptional predictive precision for Services demand.
+                  Compares peso forecast error with a 7-observation seasonal-naive revenue baseline using training data only. Below 1 means the model beat that baseline; 1 matches it; above 1 means it did worse. MASE is a relative error score, not an accuracy percentage.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#06B6D4]">Forecast Skill vs Baseline</strong>
+                <p className="mt-1">
+                  Calculated as 100 × (1 − Revenue MASE). Positive values mean lower error than the seasonal-naive baseline; negative values mean higher error. It is not capped, so a model can score below 0% when it performs worse than the baseline.
                 </p>
               </div>
               <div>
                 <strong className="text-sm text-[#06B6D4]">sMAPE (Symmetric Mean Absolute Percentage Error)</strong>
                 <p className="mt-1">
-                  A bounded, symmetric percentage error metric (0–200%) that treats over-forecasts and under-forecasts equally. Unlike standard MAPE, sMAPE handles near-zero actual values gracefully—important for sparse Services booking days. Lower values indicate better accuracy; values below <strong>10%</strong> reflect highly accurate forecasts.
+                  A symmetric percentage error from 0% to 200%. Lower is better, but it can be sensitive on low-revenue days. It is calculated on the same observed-demand holdout dates as the peso metrics.
                 </p>
               </div>
               <div>
-                <strong className="text-sm text-[#06B6D4]">MAE (Mean Absolute Error) — in Pesos (₱)</strong>
+                <strong className="text-sm text-[#06B6D4]">MAE and RMSE — Pesos per evaluated period</strong>
                 <p className="mt-1">
-                  The average absolute difference between the forecasted and actual daily Services revenue in pesos. MAE is the most interpretable metric—it directly tells you the typical peso deviation per day. A low MAE confirms the model's predictions stay close to reality in real monetary terms.
+                  Both compare actual Services revenue with forecast revenue for the selected daily, weekly, or monthly horizon. MAE is the average absolute peso error; RMSE penalizes large misses more heavily. Forecast bookings are converted using the training-window weighted revenue per booking, without using holdout prices.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#06B6D4]">Bias — Pesos per evaluated period</strong>
+                <p className="mt-1">
+                  Mean forecast minus actual revenue. Positive bias means the model tends to overforecast; negative bias means it tends to underforecast. Values near zero indicate little overall directional bias, though daily misses may still be large.
                 </p>
               </div>
               <div>

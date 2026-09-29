@@ -20,6 +20,8 @@ export function ModelDetailsModal({ isOpen, onClose, forecastRun }: ModelDetails
   // If forecastRun has actual metadata, we show the premium diagnostics layout
   const m = forecastRun?.modelMetadata as any;
   const isFallback = forecastRun?.isFallback ?? false;
+  const isServices = forecastRun?.module === "Services";
+  const serviceRevenueMetrics = m?.revenueEvaluation?.daily;
 
   const mockErrorLogs = [
     {
@@ -90,13 +92,13 @@ export function ModelDetailsModal({ isOpen, onClose, forecastRun }: ModelDetails
             )}
 
             {/* Performance KPI Cards */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className={`grid ${isServices ? "grid-cols-2 md:grid-cols-3" : "grid-cols-3"} gap-3`}>
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-center">
                 <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block mb-1">
                   sMAPE Score
                 </span>
                 <span className="text-lg font-extrabold text-[#F53799]">
-                  {forecastRun.smape !== undefined ? `${forecastRun.smape.toFixed(2)}%` : "N/A"}
+                  {forecastRun.smape != null ? `${forecastRun.smape.toFixed(2)}%` : "N/A"}
                 </span>
               </div>
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-center">
@@ -104,18 +106,40 @@ export function ModelDetailsModal({ isOpen, onClose, forecastRun }: ModelDetails
                   MASE Score
                 </span>
                 <span className="text-lg font-extrabold text-[#223047]">
-                  {forecastRun.mase !== undefined ? forecastRun.mase.toFixed(2) : "N/A"}
+                  {forecastRun.mase != null ? forecastRun.mase.toFixed(2) : "N/A"}
                 </span>
               </div>
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-center">
                 <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block mb-1">
-                  WAPE Accuracy
+                  {isServices ? "MAE (₱/demand day)" : "MAE"}
                 </span>
                 <span className="text-lg font-extrabold text-emerald-600">
-                  {forecastRun.accuracy !== undefined ? `${forecastRun.accuracy.toFixed(1)}%` : "N/A"}
+                  {forecastRun.mae != null ? `${isServices ? "₱" : ""}${forecastRun.mae.toFixed(2)}` : "N/A"}
                 </span>
               </div>
             </div>
+            {isServices && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+                <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-center">
+                  <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block mb-1">Skill vs Baseline</span>
+                  <span className="text-lg font-extrabold text-[#223047]">
+                    {serviceRevenueMetrics?.forecastSkillPercent != null ? `${Number(serviceRevenueMetrics.forecastSkillPercent).toFixed(1)}%` : "N/A"}
+                  </span>
+                </div>
+                <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-center">
+                  <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block mb-1">RMSE (₱/demand day)</span>
+                  <span className="text-lg font-extrabold text-[#223047]">
+                    {forecastRun.rmse != null ? `₱${forecastRun.rmse.toFixed(2)}` : "N/A"}
+                  </span>
+                </div>
+                <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-center">
+                  <span className="text-[10px] uppercase font-bold text-[#223047] opacity-50 block mb-1">Bias (₱/demand day)</span>
+                  <span className="text-lg font-extrabold text-[#223047]">
+                    {serviceRevenueMetrics?.biasMeanError != null ? `₱${Number(serviceRevenueMetrics.biasMeanError).toFixed(2)}` : "N/A"}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Calendar & Parameters Grid */}
             <div className="bg-[#FFF2FA]/30 border border-[#FFD9EC] rounded-xl p-4 space-y-3">

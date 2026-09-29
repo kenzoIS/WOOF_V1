@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import * as React from "react";
 import { useRouter } from "next/router";
 import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, ChevronRight, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart, ThumbsUp, ThumbsDown, Sparkles, RefreshCw, CheckCircle2, Clock, X, ExternalLink, Tag, ShoppingCart, TrendingDown } from "lucide-react";
-import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
+import { ThreeZoneForecastChart, ThreeZonePoint, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
@@ -975,56 +975,47 @@ export function Cafe() {
     return forecastRun.historical[holdEnd - 1]?.date ?? "2026-02-01";
   }, [forecastRun]);
 
-  const academicMetrics = useMemo<BacktestMetrics | null>(() => {
-    if (!forecastRun) return null;
-    return {
-      mae: forecastRun.mae ?? 0,
-      rmse: forecastRun.rmse ?? 0,
-      mape: forecastRun.mape ?? 0,
-      mase: forecastRun.mase ?? 0,
-      wape: (forecastRun as any).wape ?? 0,
-      mpe: (forecastRun as any).mpe ?? 0,
-    };
-  }, [forecastRun]);
-
   const dynamicPerformanceMetrics = useMemo(() => {
     if (!forecastRun) {
-      return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
+      return { mase: "—", skill: "—", smape: "—", mae: "—", rmse: "—" };
     }
     if (chartGranularity === "monthly") {
       const m = forecastRun.monthlyMetrics ?? (forecastRun as any).monthly_metrics;
       if (m && typeof m.mase === "number") {
         return {
           mase: Number(m.mase).toFixed(2),
-          accuracy: `${Number(m.accuracy).toFixed(1)}%`,
+          skill: `${((1 - Number(m.mase)) * 100).toFixed(1)}%`,
           smape: `${Number(m.smape).toFixed(2)}%`,
           mae: Number(m.mae ?? 0).toFixed(2),
+          rmse: Number(m.rmse ?? 0).toFixed(2),
         };
       }
-      return { mase: "N/A", accuracy: "N/A", smape: "N/A", mae: "N/A" };
+      return { mase: "N/A", skill: "N/A", smape: "N/A", mae: "N/A", rmse: "N/A" };
     }
     if (chartGranularity === "weekly") {
       const w = forecastRun.weeklyMetrics ?? (forecastRun as any).weekly_metrics;
       if (w && typeof w.mase === "number") {
         return {
           mase: Number(w.mase).toFixed(2),
-          accuracy: `${Number(w.accuracy).toFixed(1)}%`,
+          skill: `${((1 - Number(w.mase)) * 100).toFixed(1)}%`,
           smape: `${Number(w.smape).toFixed(2)}%`,
           mae: Number(w.mae ?? 0).toFixed(2),
+          rmse: Number(w.rmse ?? 0).toFixed(2),
         };
       }
-      return { mase: "N/A", accuracy: "N/A", smape: "N/A", mae: "N/A" };
+      return { mase: "N/A", skill: "N/A", smape: "N/A", mae: "N/A", rmse: "N/A" };
     }
     // Daily horizon
     if (typeof forecastRun.mase === "number") {
       return {
         mase: Number(forecastRun.mase).toFixed(2),
-        accuracy: `${Number(forecastRun.accuracy).toFixed(1)}%`,
+        skill: `${((1 - Number(forecastRun.mase)) * 100).toFixed(1)}%`,
         smape: `${Number(forecastRun.smape).toFixed(2)}%`,
         mae: Number(forecastRun.mae ?? 0).toFixed(2),
+        rmse: Number(forecastRun.rmse ?? 0).toFixed(2),
       };
     }
-    return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
+    return { mase: "—", skill: "—", smape: "—", mae: "—", rmse: "—" };
   }, [chartGranularity, forecastRun]);
 
   // Filtered menu items based on filter
@@ -1492,9 +1483,9 @@ export function Cafe() {
                         </span>
                       </div>
                       <div className="bg-[#FFF7FB] p-2 rounded-xl border border-[#FFD9EC]/50 text-center">
-                        <span className="text-[10px] text-[#223047]/60 block font-medium">WAPE Accuracy</span>
+                        <span className="text-[10px] text-[#223047]/60 block font-medium">Skill vs Baseline</span>
                         <span className="text-sm font-extrabold text-emerald-600">
-                          {formatFixed(forecastRun.accuracy, 1)}%
+                          {forecastRun.mase != null ? `${formatFixed((1 - forecastRun.mase) * 100, 1)}%` : "—"}
                         </span>
                       </div>
                     </div>
@@ -1546,7 +1537,6 @@ export function Cafe() {
                 rawData={rawThreeZoneData}
                 initialSplitDate={academicSplitDate}
                 initialForecastHorizon={academicForecastHorizon}
-                metrics={academicMetrics}
                 modelName={forecastRun?.modelName ?? "Prophet"}
                 sector="Cafe"
                 currencyPrefix="₱"
@@ -1588,16 +1578,20 @@ export function Cafe() {
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1">WAPE Accuracy</div>
-                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.accuracy}</div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">Skill vs Baseline</div>
+                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.skill}</div>
                   </div>
                   <div>
                     <div className="text-xs text-[#223047] opacity-60 mb-1">sMAPE</div>
                     <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.smape}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1">Missing Days Filled</div>
-                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{String(forecastRun?.modelMetadata?.missingDaysFilled ?? "—")}</div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">MAE</div>
+                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.mae}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[#223047] opacity-60 mb-1">RMSE</div>
+                    <div className="text-xl md:text-2xl font-bold text-[#223047]">{dynamicPerformanceMetrics.rmse}</div>
                   </div>
                 </div>
                 {forecastRun?.modelMetadata && (
@@ -2364,21 +2358,27 @@ export function Cafe() {
             </div>
             <div className="space-y-4 text-xs md:text-sm text-[#223047] opacity-80 animate-in fade-in zoom-in-95 duration-150" style={{ lineHeight: "1.6" }}>
               <div>
-                <strong className="text-sm text-[#F53799]">MASE (Mean Absolute Scaled Error) — Target Threshold ≤ 0.20</strong>
+                <strong className="text-sm text-[#F53799]">MASE (Mean Absolute Scaled Error)</strong>
                 <p className="mt-1">
-                  Measures the forecasting error scaled against a naive seasonal persistence benchmark. In our research methodology, a strict threshold of **MASE ≤ 0.20** indicates exceptional model precision, proving that AI error is tightly bounded within 20% of baseline seasonal variation.
+                  Measures forecast error against a seasonal-naive baseline. Below 1 means the model beat that baseline; 1 matches it; above 1 means it did worse. MASE is a relative error score, not an accuracy percentage.
                 </p>
               </div>
               <div>
-                <strong className="text-sm text-[#F53799]">WAPE Accuracy</strong>
+                <strong className="text-sm text-[#F53799]">Forecast Skill vs Baseline</strong>
                 <p className="mt-1">
-                  Measures total absolute forecast error against total actual demand. For example, **90% WAPE Accuracy** means total forecast error is about 10% of actual demand volume.
+                  Calculated as 100 × (1 − MASE). Positive values mean lower error than the seasonal-naive baseline; negative values mean higher error. It is not capped at 0% or 100%.
                 </p>
               </div>
               <div>
                 <strong className="text-sm text-[#F53799]">sMAPE (Symmetric Mean Absolute Percentage Error)</strong>
                 <p className="mt-1">
                   The symmetric percentage error between forecasted and actual demand. It is more stable for low-volume Cafe days.
+                </p>
+              </div>
+              <div>
+                <strong className="text-sm text-[#F53799]">MAE and RMSE</strong>
+                <p className="mt-1">
+                  Both report error in the forecast target's unit. MAE is the average absolute error; RMSE gives larger misses more weight. Compare them only on the same holdout window.
                 </p>
               </div>
               <div>

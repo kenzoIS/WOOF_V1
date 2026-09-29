@@ -28,15 +28,6 @@ import {
 
 // --- Types ---
 
-export interface BacktestMetrics {
-  mae: number;
-  rmse: number;
-  mape: number;
-  mase: number;
-  wape: number;
-  mpe: number;
-}
-
 export interface ThreeZonePoint {
   date: string; // YYYY-MM-DD
   actual: number | null;
@@ -63,7 +54,6 @@ export interface ThreeZoneForecastChartProps {
   rawData: ThreeZonePoint[];
   initialSplitDate?: string;
   initialForecastHorizon?: string;
-  metrics?: BacktestMetrics | null;
   modelName?: string;
   sector?: "Cafe" | "Services" | string;
   currencyPrefix?: string;
@@ -497,34 +487,6 @@ export function ThreeZoneForecastChart({
       stepSize,
     };
   }, [chartData]);
-
-  // Summary KPIs
-  const summaryKpis = useMemo(() => {
-    let holdoutActual = 0;
-    let holdoutPred = 0;
-    let futureTotal = 0;
-
-    for (const pt of partitionedData) {
-      if (pt.date > splitDate && pt.date <= forecastHorizon) {
-        if (pt.actual != null) holdoutActual += pt.actual;
-        if (pt.predicted != null) holdoutPred += pt.predicted;
-      } else if (pt.date > forecastHorizon) {
-        if (pt.forecast != null) futureTotal += pt.forecast;
-        else if (pt.actual != null) futureTotal += pt.actual;
-      }
-    }
-
-    const variancePct = holdoutActual > 0 ? ((holdoutPred - holdoutActual) / holdoutActual) * 100 : 0;
-    const accuracy = metrics?.mape != null ? Math.max(0, 100 - metrics.mape) : 88.6;
-
-    return {
-      holdoutActual,
-      holdoutPred,
-      variancePct,
-      accuracy,
-      futureTotal,
-    };
-  }, [partitionedData, splitDate, forecastHorizon, metrics]);
 
   return (
     <div className="space-y-4">
