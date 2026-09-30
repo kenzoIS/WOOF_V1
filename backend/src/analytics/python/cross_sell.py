@@ -1190,28 +1190,14 @@ def run_cross_sell(baskets, config=None):
 
         unique_products = sorted({item for basket in dataset for item in basket})
         matrix_cells = len(dataset) * len(unique_products)
-        if (
-            len(dataset) > MAX_BASKETS_WITHOUT_GUARD
-            and matrix_cells > MAX_DENSE_MATRIX_CELLS
-        ):
-            return base_result(
-                [],
-                bundle_candidates,
-                item_metrics,
-                started_basket_count,
-                len(dataset),
-                cleaned_items,
-                thresholds,
-                baskets,
-                "Dataset too large for dense FP-Growth; raise support, filter by sector/hour, or use top-N product filtering.",
-                {
-                    "uniqueItemCount": int(len(unique_products)),
-                    "matrixCells": int(matrix_cells),
-                },
-            )
+        
+        # When dataset is very large, sample most recent 5,000 multi-item baskets to ensure rapid FP-Growth without timeout
+        dense_train = train_dataset
+        if len(dense_train) > 5000:
+            dense_train = dense_train[-5000:]
              
         te = TransactionEncoder()
-        te_ary = te.fit(train_dataset).transform(train_dataset)
+        te_ary = te.fit(dense_train).transform(dense_train)
         df = pd.DataFrame(te_ary, columns=te.columns_)
         
         # FP-Growth (Restricted to bundles of 2 to 3 items maximum)
