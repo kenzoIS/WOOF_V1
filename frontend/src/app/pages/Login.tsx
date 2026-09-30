@@ -10,7 +10,6 @@ import {
   resetDashboardPassword,
   verifyResetOtp,
 } from "../lib/api";
-import { getSettingsPreferences } from "../lib/preferences";
 import logoImg from "../../imports/happytailslogo-removebg-preview.png";
 
 type ForgotPasswordStep = "email" | "otp" | "newPassword";
@@ -419,7 +418,7 @@ export function Login() {
         }, i * 200);
       });
 
-      router.push(getSettingsPreferences().dashboard.defaultLandingPage);
+      router.push("/");
     } catch (error) {
       toast.error("Unable to sign in", {
         description:
@@ -428,6 +427,7 @@ export function Login() {
             : "Please check your dashboard credentials and try again.",
       });
       setTwoFactorCode("");
+      setRequiresTwoFactor(false);
       setIsLoggingIn(false);
     }
   };

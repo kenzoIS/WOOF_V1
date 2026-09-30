@@ -22,8 +22,8 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import {
-  getSettingsPreferences,
-  onSettingsPreferencesChanged,
+  getDashboardChartView,
+  saveDashboardChartView,
 } from "../lib/preferences";
 
 // --- Types ---
@@ -324,15 +324,13 @@ export function ThreeZoneForecastChart({
 }: ThreeZoneForecastChartProps) {
   const [internalTimeGrain, setInternalTimeGrain] = useState<TimeGrain>("monthly");
   useEffect(() => {
-    setInternalTimeGrain(getSettingsPreferences().dashboard.defaultChartView);
-    return onSettingsPreferencesChanged((preferences) => {
-      setInternalTimeGrain(preferences.dashboard.defaultChartView);
-    });
+    setInternalTimeGrain(getDashboardChartView());
   }, []);
   const timeGrain = controlledTimeGrain ?? internalTimeGrain;
   const setTimeGrain = (g: TimeGrain) => {
-    setInternalTimeGrain(g);
-    onTimeGrainChange?.(g);
+    const saved = saveDashboardChartView(g);
+    setInternalTimeGrain(saved);
+    onTimeGrainChange?.(saved);
   };
   const [yearPreset, setYearPreset] = useState<YearPreset>("all");
   const [splitDate, setSplitDate] = useState<string>(initialSplitDate);

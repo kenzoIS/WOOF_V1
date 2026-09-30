@@ -1,16 +1,20 @@
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Database, Download, CheckCircle2, ShieldAlert, Moon, Sun, MapPin, Clock, CircleDollarSign, Archive, FileText, BellRing, MessageSquare, HardDrive, LayoutDashboard, PanelLeftClose, Eye, EyeOff, BarChart3, KeyRound, Smartphone, History, TimerReset } from "lucide-react";
+import { Settings as SettingsIcon, Download, ChevronDown, CheckCircle2, ShieldAlert, Moon, Sun, MapPin, Clock, CircleDollarSign, LayoutDashboard, PanelLeftClose, Eye, EyeOff, KeyRound, Smartphone, History, TimerReset } from "lucide-react";
 import {
+  applyDataRetention,
   changeDashboardPassword,
   disableTwoFactor,
+  downloadSettingsDataExport,
   enableTwoFactor,
   getAlertThresholds,
+  getDataRetentionSettings,
   getExogenousStatus,
-  getForecast,
   getLoginActivity,
   getTwoFactorStatus,
+  saveDataRetentionSettings,
   saveAlertThresholds,
   setupTwoFactor,
+  type ExogenousStatus,
   type LoginActivityEntry,
 } from "../lib/api";
 import {
@@ -29,12 +33,124 @@ import {
 } from "../lib/preferences";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { Checkbox } from "../components/ui/checkbox";
 import { Switch } from "../components/ui/switch";
 import { Slider } from "../components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
 import { toast } from "sonner";
 import { InfoTooltip } from "../components/InfoTooltip";
 
 const DASHBOARD_SECURITY_EMAIL = "woofdash@gmail.com";
+
+type ExportDatasetKey =
+  | "auditLogs"
+  | "smartReports"
+  | "recommendationFeedback"
+  | "forecastRuns"
+  | "crossSellCaches"
+  | "bundleArchives"
+  | "csvUploads";
+
+type ExportFormat = "json" | "csv";
+
+const exportDatasetOptions: Array<{
+  key: ExportDatasetKey;
+  label: string;
+  description: string;
+  csvEligible: boolean;
+}> = [
+  {
+    key: "auditLogs",
+    label: "System logs",
+    description: "Audit and system action history.",
+    csvEligible: false,
+  },
+  {
+    key: "smartReports",
+    label: "Generated reports",
+    description: "Smart report outputs and report feedback.",
+    csvEligible: false,
+  },
+  {
+    key: "recommendationFeedback",
+    label: "Recommendation feedback",
+    description: "Promotion, recommendation, and user feedback rows.",
+    csvEligible: true,
+  },
+  {
+    key: "forecastRuns",
+    label: "Model artifacts",
+    description: "Forecast runs, model metadata, and diagnostics.",
+    csvEligible: false,
+  },
+  {
+    key: "crossSellCaches",
+    label: "Temporary caches",
+    description: "Cross-sell and recommendation cache payloads.",
+    csvEligible: false,
+  },
+  {
+    key: "bundleArchives",
+    label: "Bundle archives",
+    description: "Saved bundle definitions and nested item metadata.",
+    csvEligible: false,
+  },
+  {
+    key: "csvUploads",
+    label: "Upload metadata",
+    description: "Upload records, counts, and ETL summaries.",
+    csvEligible: true,
+  },
+];
+
+function formatProviderSource(source?: string | null) {
+  if (!source || source === "unknown") return "Unknown";
+  return source
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatApiKeyStatus(status?: string, requiresApiKey?: boolean) {
+  if (status === "not_required" || requiresApiKey === false) return "Not required";
+  if (status === "configured") return "Configured";
+  if (status === "missing") return "Missing";
+  return "Unknown";
+}
+
+function formatDiagnosticsDate(value?: string | null) {
+  if (!value) return "No cached records yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unavailable";
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatCoordinates(coordinates?: { lat: number; lng: number }) {
+  if (!coordinates) return "Unavailable";
+  return `${coordinates.lat.toFixed(4)}, ${coordinates.lng.toFixed(4)}`;
+}
 
 export function Settings() {
   const [businessProfile, setBusinessProfile] = useState(DEFAULT_SETTINGS_PREFERENCES.businessProfile);
@@ -57,8 +173,19 @@ export function Settings() {
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [isUpdatingTwoFactor, setIsUpdatingTwoFactor] = useState(false);
   const [loginActivity, setLoginActivity] = useState<LoginActivityEntry[]>([]);
+  const [isExportingData, setIsExportingData] = useState(false);
+  const [isExportPanelOpen, setIsExportPanelOpen] = useState(false);
+  const [exportAllData, setExportAllData] = useState(true);
+  const [selectedExportDatasets, setSelectedExportDatasets] = useState<ExportDatasetKey[]>(
+    exportDatasetOptions.map((option) => option.key),
+  );
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("json");
+  const [isApplyingRetention, setIsApplyingRetention] = useState(false);
+  const [confirmedRetentionDays, setConfirmedRetentionDays] = useState(DEFAULT_SETTINGS_PREFERENCES.dataRetention);
+  const [pendingRetentionDays, setPendingRetentionDays] = useState<number | null>(null);
+  const [isConfirmingRetention, setIsConfirmingRetention] = useState(false);
 
-  const [exogenousStatus, setExogenousStatus] = useState<any>(null);
+  const [exogenousStatus, setExogenousStatus] = useState<ExogenousStatus | null>(null);
 
   useEffect(() => {
     getExogenousStatus()
@@ -66,8 +193,6 @@ export function Settings() {
       .catch((err) => console.error("Failed to load exogenous status:", err));
   }, []);
 
-  const [autoRetrain, setAutoRetrain] = useState(DEFAULT_SETTINGS_PREFERENCES.autoRetrain);
-  const [confidenceThreshold, setConfidenceThreshold] = useState([DEFAULT_SETTINGS_PREFERENCES.confidenceThreshold]);
   const [dataRetention, setDataRetention] = useState([DEFAULT_SETTINGS_PREFERENCES.dataRetention]);
   const [darkMode, setDarkMode] = useState(false);
   const [colorTheme, setColorTheme] = useState<ColorThemeKey>(DEFAULT_SETTINGS_PREFERENCES.colorTheme);
@@ -80,9 +205,8 @@ export function Settings() {
     setAlertThresholds(preferences.alertThresholds);
     setDashboardPreferences(preferences.dashboard);
     setSecurityPreferences(preferences.security);
-    setAutoRetrain(preferences.autoRetrain);
-    setConfidenceThreshold([preferences.confidenceThreshold]);
     setDataRetention([preferences.dataRetention]);
+    setConfirmedRetentionDays(preferences.dataRetention);
     setColorTheme(preferences.colorTheme);
     setCustomTheme(preferences.customTheme);
     setDarkMode(applyStoredTheme() === "dark");
@@ -107,6 +231,17 @@ export function Settings() {
         }));
       })
       .catch((err) => console.warn("Using local alert thresholds:", err));
+
+    getDataRetentionSettings()
+      .then((settings) => {
+        setDataRetention([settings.retentionDays]);
+        setConfirmedRetentionDays(settings.retentionDays);
+        saveSettingsPreferences((current) => ({
+          ...current,
+          dataRetention: settings.retentionDays,
+        }));
+      })
+      .catch((err) => console.warn("Using local data retention setting:", err));
   }, []);
 
   const handleThemeChange = (checked: boolean) => {
@@ -119,8 +254,6 @@ export function Settings() {
       dashboard: dashboardPreferences,
       security: securityPreferences,
       businessProfile,
-      autoRetrain,
-      confidenceThreshold: confidenceThreshold[0],
       dataRetention: dataRetention[0],
       theme: checked ? "dark" : "light",
       colorTheme,
@@ -242,31 +375,69 @@ export function Settings() {
     }));
   };
 
-  const handleAutoRetrainChange = (checked: boolean) => {
-    setAutoRetrain(checked);
-    saveSettingsPreferences((current) => ({
-      ...current,
-      autoRetrain: checked,
-    }));
-  };
-
-  const handleConfidenceThresholdChange = (value: number[]) => {
-    setConfidenceThreshold(value);
-    saveSettingsPreferences((current) => ({
-      ...current,
-      confidenceThreshold: value[0] ?? DEFAULT_SETTINGS_PREFERENCES.confidenceThreshold,
-    }));
+  const syncDataRetention = (retentionDays: number) => {
+    saveDataRetentionSettings(retentionDays).catch((err) => {
+      console.warn("Data retention backend sync failed:", err);
+    });
   };
 
   const handleDataRetentionChange = (value: number[]) => {
+    const retentionDays = value[0] ?? DEFAULT_SETTINGS_PREFERENCES.dataRetention;
     setDataRetention(value);
     saveSettingsPreferences((current) => ({
       ...current,
-      dataRetention: value[0] ?? DEFAULT_SETTINGS_PREFERENCES.dataRetention,
+      dataRetention: retentionDays,
     }));
   };
 
-  const handleSaveSettings = () => {
+  const handleDataRetentionCommit = (value: number[]) => {
+    const retentionDays = value[0] ?? DEFAULT_SETTINGS_PREFERENCES.dataRetention;
+    if (retentionDays === confirmedRetentionDays) {
+      return;
+    }
+    setPendingRetentionDays(retentionDays);
+  };
+
+  const handleCancelRetentionChange = () => {
+    setDataRetention([confirmedRetentionDays]);
+    saveSettingsPreferences((current) => ({
+      ...current,
+      dataRetention: confirmedRetentionDays,
+    }));
+    setPendingRetentionDays(null);
+  };
+
+  const handleConfirmRetentionChange = async () => {
+    const retentionDays = pendingRetentionDays ?? dataRetention[0];
+    setIsConfirmingRetention(true);
+    try {
+      const updated = await saveDataRetentionSettings(retentionDays);
+      setDataRetention([updated.retentionDays]);
+      setConfirmedRetentionDays(updated.retentionDays);
+      saveSettingsPreferences((current) => ({
+        ...current,
+        dataRetention: updated.retentionDays,
+      }));
+      toast.success("Retention duration updated", {
+        description: `Operational retention will now use ${updated.retentionDays} days. Historical sales data remains protected.`,
+      });
+    } catch (error) {
+      setDataRetention([confirmedRetentionDays]);
+      saveSettingsPreferences((current) => ({
+        ...current,
+        dataRetention: confirmedRetentionDays,
+      }));
+      toast.error("Retention duration was not updated", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setPendingRetentionDays(null);
+      setIsConfirmingRetention(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
     saveSettingsPreferences((current) => ({
       ...current,
       businessProfile,
@@ -274,16 +445,34 @@ export function Settings() {
       alertThresholds,
       dashboard: dashboardPreferences,
       security: securityPreferences,
-      autoRetrain,
-      confidenceThreshold: confidenceThreshold[0],
       dataRetention: dataRetention[0],
       theme: darkMode ? "dark" : "light",
       colorTheme,
       customTheme,
     }));
-    toast.success("Settings saved!", {
-      description: "Your preferences have been updated.",
-    });
+
+    setIsApplyingRetention(true);
+    try {
+      const result = await applyDataRetention(dataRetention[0]);
+      const deletedCount = Object.values(result?.deleted || {}).reduce(
+        (sum: number, value: unknown) =>
+          sum + (typeof value === "number" ? value : 0),
+        0,
+      );
+      toast.success("Settings saved!", {
+        description: `Retention policy applied. ${deletedCount} operational record${deletedCount === 1 ? "" : "s"} cleaned; historical sales stayed protected.`,
+      });
+    } catch (error) {
+      syncDataRetention(dataRetention[0]);
+      toast.warning("Settings saved locally", {
+        description:
+          error instanceof Error
+            ? `Retention cleanup could not run: ${error.message}`
+            : "Retention cleanup could not run right now.",
+      });
+    } finally {
+      setIsApplyingRetention(false);
+    }
   };
 
   const handleChangePassword = async () => {
@@ -396,42 +585,75 @@ export function Settings() {
     }
   };
 
-  const handleExportData = () => {
-    toast.info("Exporting data...");
-    setTimeout(() => {
-      toast.success("Data exported!", {
-        description: "WOOF_Data_Export_2026-04-15.zip",
-      });
-    }, 1500);
+  const handleExportAllChange = (checked: boolean) => {
+    setExportAllData(checked);
+    if (checked) {
+      setSelectedExportDatasets(exportDatasetOptions.map((option) => option.key));
+      setExportFormat("json");
+    }
   };
 
-  const handleRetrainModels = () => {
-    const toastId = toast.loading("Retraining all models with the latest data... This may take up to a minute.");
-    Promise.all([
-      getForecast("cafe", { forceRefresh: "true" }),
-      getForecast("services", { forceRefresh: "true" })
-    ])
-      .then(() => {
-        toast.dismiss(toastId);
-        toast.success("Models retrained successfully!", {
-          description: "All prediction models updated with latest data.",
-        });
-      })
-      .catch((err) => {
-        toast.dismiss(toastId);
-        toast.error("Model retraining failed: " + (err instanceof Error ? err.message : String(err)));
+  const handleExportDatasetChange = (key: ExportDatasetKey, checked: boolean) => {
+    setExportAllData(false);
+    setSelectedExportDatasets((current) => {
+      const next = checked
+        ? Array.from(new Set([...current, key]))
+        : current.filter((item) => item !== key);
+      const normalized = next.length ? next : [key];
+      const csvCompatible =
+        normalized.length === 1 &&
+        exportDatasetOptions.find((option) => option.key === normalized[0])?.csvEligible;
+      if (!csvCompatible) {
+        setExportFormat("json");
+      }
+      return normalized;
+    });
+  };
+
+  const selectedExportOptions = exportDatasetOptions.filter((option) =>
+    selectedExportDatasets.includes(option.key),
+  );
+  const canExportCsv =
+    !exportAllData &&
+    selectedExportOptions.length === 1 &&
+    Boolean(selectedExportOptions[0]?.csvEligible);
+  const resolvedExportFormat: ExportFormat =
+    exportAllData || !canExportCsv ? "json" : exportFormat;
+
+  const handleExportData = async () => {
+    setIsExportingData(true);
+    const toastId = toast.loading("Preparing data export...");
+    try {
+      const { blob, filename } = await downloadSettingsDataExport({
+        format: resolvedExportFormat,
+        exportAll: exportAllData,
+        datasets: exportAllData ? undefined : selectedExportDatasets,
       });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.dismiss(toastId);
+      toast.success("Data export ready", {
+        description: filename,
+      });
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error("Data export failed", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setIsExportingData(false);
+    }
   };
 
   const profileInputClass = "w-full px-3 py-2 bg-white/70 border border-[#FFD9EC] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F53799]/30 text-[#223047]";
   const profileLabelClass = "text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold uppercase tracking-wide";
-  const retentionScopeItems = [
-    { label: "System logs", icon: FileText },
-    { label: "Generated reports", icon: Archive },
-    { label: "Notifications", icon: BellRing },
-    { label: "Feedback events", icon: MessageSquare },
-    { label: "Temporary caches", icon: HardDrive },
-  ];
   const alertThresholdItems: Array<{
     key: keyof AlertThresholdPreferences;
     label: string;
@@ -536,22 +758,16 @@ export function Settings() {
   const activePaletteName = colorTheme === "custom"
     ? "Custom Manual Theme"
     : colorThemes.find((theme) => theme.key === colorTheme)?.name;
-  const landingPageOptions: Array<{ value: DashboardPreferences["defaultLandingPage"]; label: string }> = [
-    { value: "/", label: "Home" },
-    { value: "/cafe", label: "Cafe" },
-    { value: "/services", label: "Services" },
-    { value: "/retail", label: "Retail" },
-    { value: "/ai-simulation", label: "AI Simulation" },
-    { value: "/smart-reports", label: "Smart Reports" },
-    { value: "/root-cause-explorer", label: "Root Cause Explorer" },
-    { value: "/feedback", label: "Feedback" },
-    { value: "/audit", label: "Audit" },
-  ];
-  const chartViewOptions: Array<{ value: DashboardPreferences["defaultChartView"]; label: string }> = [
-    { value: "monthly", label: "Monthly" },
-    { value: "weekly", label: "Weekly" },
-    { value: "daily", label: "Daily" },
-  ];
+  const weatherProvider = exogenousStatus?.providers?.weather;
+  const holidayProvider = exogenousStatus?.providers?.holidays;
+  const weatherSource = exogenousStatus?.weatherCache?.lastSource;
+  const holidaySource = exogenousStatus?.holidayCache?.lastSource;
+  const weatherIsFallback = weatherSource === "synthetic";
+  const holidayIsFallback = holidaySource === "hardcoded";
+  const weatherIsConnected = weatherSource === "api" || weatherSource === "cache";
+  const holidayIsConnected = holidaySource === "api" || holidaySource === "cache";
+  const apiStatusDisplayClass =
+    "rounded-lg border border-[#FFD9EC] bg-white/70 px-3 py-2 text-xs font-semibold text-[#223047]";
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
@@ -565,8 +781,12 @@ export function Settings() {
             <InfoTooltip label="Configure WOOF system preferences and data management." />
           </div>
         </div>
-        <Button onClick={handleSaveSettings} className="bg-[#F53799] hover:bg-[#D42A7D] w-full md:w-auto">
-          Save All Settings
+        <Button
+          onClick={handleSaveSettings}
+          disabled={isApplyingRetention}
+          className="bg-[#F53799] hover:bg-[#D42A7D] w-full md:w-auto"
+        >
+          {isApplyingRetention ? "Applying Retention..." : "Save All Settings"}
         </Button>
       </div>
 
@@ -676,6 +896,344 @@ export function Settings() {
         </div>
       </div>
 
+      {/* EXTERNAL API CONNECTIONS & DIAGNOSTICS */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              External API Connections & Diagnostics
+            </h2>
+            <InfoTooltip label="Configure forecasting data providers and check API cache health." />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-2 md:pt-4">
+          {/* Weather Provider Diagnostics */}
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm md:text-base text-[#223047]">
+                    {weatherProvider?.providerName || "Weather Provider"} Integration
+                  </h3>
+                  <InfoTooltip label="Weather context used by forecasting models. Provider names, key status, coordinates, cache count, timestamps, and fallback source are reported by the backend diagnostics endpoint." />
+                </div>
+              </div>
+              {weatherIsConnected ? (
+                <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
+                  <CheckCircle2 className="w-3 h-3" /> {weatherSource === "cache" ? "Using Cache" : "Connected"}
+                </Badge>
+              ) : weatherIsFallback ? (
+                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1 bg-amber-50">
+                  <ShieldAlert className="w-3 h-3" /> Synthetic Fallback
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-[#FFD9EC] text-[#223047] gap-1 bg-white/70">
+                  <ShieldAlert className="w-3 h-3" /> Pending
+                </Badge>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div>
+                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">API Key Status</label>
+                <div className={apiStatusDisplayClass}>
+                  {formatApiKeyStatus(weatherProvider?.apiKeyStatus, weatherProvider?.requiresApiKey)}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-[#223047]">
+                <div>
+                  <span className="opacity-60 block">Target Location</span>
+                  <span className="font-semibold">{weatherProvider?.targetLocation || "Unavailable"}</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Coordinates</span>
+                  <span className="font-semibold">{formatCoordinates(weatherProvider?.coordinates)}</span>
+                </div>
+                <div>
+                  <span className="opacity-60 flex items-center gap-1">
+                    Cached Records
+                    <InfoTooltip label="Saved weather rows reused by WOOF so forecasts do not need to call the weather provider every time." />
+                  </span>
+                  <span className="font-semibold">{exogenousStatus?.weatherCache?.count ?? "—"} daily rows</span>
+                </div>
+                <div>
+                  <span className="opacity-60 flex items-center gap-1">
+                    Last Active Source
+                    <InfoTooltip label="Shows whether the latest weather data came from the live API, cache, or a fallback source." />
+                  </span>
+                  <span className="font-semibold text-xs">{formatProviderSource(weatherSource)}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="opacity-60 block">Latest Cache Update</span>
+                  <span className="font-semibold">{formatDiagnosticsDate(exogenousStatus?.weatherCache?.latestFetchedAt)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Holiday Provider Diagnostics */}
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm md:text-base text-[#223047]">
+                    {holidayProvider?.providerName || "Holiday Provider"} Calendar
+                  </h3>
+                  <InfoTooltip label="Holiday context used by forecasting models. The backend reports whether the external provider is configured and whether the latest calendar data came from the API, cache, or protected local fallback." />
+                </div>
+              </div>
+              {holidayIsConnected ? (
+                <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
+                  <CheckCircle2 className="w-3 h-3" /> {holidaySource === "cache" ? "Using Cache" : "Connected"}
+                </Badge>
+              ) : holidayIsFallback ? (
+                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1 bg-amber-50">
+                  <ShieldAlert className="w-3 h-3" /> Hardcoded Fallback
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-[#FFD9EC] text-[#223047] gap-1 bg-white/70">
+                  <ShieldAlert className="w-3 h-3" /> Pending
+                </Badge>
+              )}
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <div>
+                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">API Key Status</label>
+                <div className={apiStatusDisplayClass}>
+                  {formatApiKeyStatus(holidayProvider?.apiKeyStatus, holidayProvider?.requiresApiKey)}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-[#223047]">
+                <div>
+                  <span className="opacity-60 block">Target Country</span>
+                  <span className="font-semibold">
+                    {holidayProvider?.targetCountry
+                      ? `${holidayProvider.targetCountry.name} (${holidayProvider.targetCountry.code})`
+                      : "Unavailable"}
+                  </span>
+                </div>
+                <div>
+                  <span className="opacity-60 flex items-center gap-1">
+                    Cached Years
+                    <InfoTooltip label="Saved holiday calendars available to the forecasting engine." />
+                  </span>
+                  <span className="font-semibold">{exogenousStatus?.holidayCache?.count ?? "—"} years</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Last Active Source</span>
+                  <span className="font-semibold text-xs">{formatProviderSource(holidaySource)}</span>
+                </div>
+                <div>
+                  <span className="opacity-60 block">Cache Status</span>
+                  <span className={exogenousStatus?.holidayCache?.count ? "font-semibold text-green-600" : "font-semibold text-amber-600"}>
+                    {exogenousStatus?.holidayCache?.count ? "Available" : "No cached records"}
+                  </span>
+                </div>
+                <div className="col-span-2">
+                  <span className="opacity-60 block">Latest Cache Update</span>
+                  <span className="font-semibold">{formatDiagnosticsDate(exogenousStatus?.holidayCache?.latestFetchedAt)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DATA MANAGEMENT */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+              Data Management
+            </h2>
+            <InfoTooltip label="Control operational retention rules and export options. Retention applies only to operational records such as logs, reports, feedback, failed imports, and temporary caches; historical transaction and sales data stays protected because forecasting depends on it." />
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:gap-6 pt-2 md:pt-4">
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-5 border border-[#FFD9EC]/50">
+            <div>
+              <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                <span>Operational Retention Window</span>
+                <InfoTooltip label="How long WOOF keeps short-lived operational records before cleanup. Historical transaction and sales history is excluded from this cleanup and stays available for model training." />
+              </div>
+              <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-3 md:mb-4">
+                Keep logs, generated reports, notifications, feedback events, failed imports, and temporary caches for {dataRetention[0]} days.
+              </div>
+              <div className="flex items-center gap-3 md:gap-4">
+                <Slider
+                  value={dataRetention}
+                  onValueChange={handleDataRetentionChange}
+                  onValueCommit={handleDataRetentionCommit}
+                  max={365}
+                  min={30}
+                  step={30}
+                  className="flex-1"
+                />
+                <span className="text-base md:text-lg font-bold text-[#D42A7D] w-12 md:w-16">
+                  {dataRetention[0]}d
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4">
+            <Button
+              type="button"
+              onClick={() => setIsExportPanelOpen((open) => !open)}
+              className="w-full bg-[#D42A7D] hover:bg-[#F53799] gap-2 text-sm md:text-base"
+            >
+              <Download className="w-4 h-4" />
+              Export Data
+              <ChevronDown
+                className={`w-4 h-4 transition-transform ${isExportPanelOpen ? "rotate-180" : ""}`}
+              />
+            </Button>
+
+            {isExportPanelOpen && (
+              <div className="rounded-xl border border-[#FFD9EC]/70 bg-white/80 p-4 space-y-4">
+                <label className="flex items-start gap-3 rounded-lg border border-[#FFD9EC]/70 bg-[#FFF7FB] p-3">
+                  <Checkbox
+                    checked={exportAllData}
+                    onCheckedChange={(checked) => handleExportAllChange(checked === true)}
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-bold text-[#223047]">Export all data</span>
+                    <span className="block text-xs text-[#223047] opacity-65">
+                      Full exports include nested settings, diagnostics, reports, model artifacts, and caches, so they are available in JSON only.
+                    </span>
+                  </span>
+                </label>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-bold uppercase tracking-wide text-[#223047] opacity-60">
+                    Data to export
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {exportDatasetOptions.map((option) => {
+                      const checked = exportAllData || selectedExportDatasets.includes(option.key);
+                      return (
+                        <label
+                          key={option.key}
+                          className={`flex items-start gap-3 rounded-lg border p-3 ${
+                            exportAllData
+                              ? "border-[#FFD9EC]/50 bg-white/50 opacity-70"
+                              : "border-[#FFD9EC]/70 bg-white"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            disabled={exportAllData}
+                            onCheckedChange={(value) =>
+                              handleExportDatasetChange(option.key, value === true)
+                            }
+                            className="mt-0.5"
+                          />
+                          <span className="min-w-0">
+                            <span className="flex flex-wrap items-center gap-2 text-sm font-bold text-[#223047]">
+                              {option.label}
+                              {option.csvEligible && (
+                                <Badge variant="outline" className="border-[#06B6D4]/40 text-[#067C91] bg-[#06B6D4]/10">
+                                  CSV OK
+                                </Badge>
+                              )}
+                            </span>
+                            <span className="block text-xs text-[#223047] opacity-65">
+                              {option.description}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 md:items-end">
+                  <div className="space-y-2">
+                    <div className="text-xs font-bold uppercase tracking-wide text-[#223047] opacity-60">
+                      File format
+                    </div>
+                    <Select
+                      value={resolvedExportFormat}
+                      onValueChange={(value) => setExportFormat(value as ExportFormat)}
+                      disabled={exportAllData}
+                    >
+                      <SelectTrigger className="bg-white border-[#FFD9EC] text-[#223047]">
+                        <SelectValue placeholder="Choose format" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="json">JSON</SelectItem>
+                        <SelectItem value="csv" disabled={!canExportCsv}>
+                          CSV
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-[#223047] opacity-65">
+                      {exportAllData
+                        ? "Export All is locked to JSON."
+                        : canExportCsv
+                          ? "CSV is available because one flat dataset is selected."
+                          : "CSV is disabled for multi-dataset, nested, or sensitive exports."}
+                    </p>
+                  </div>
+
+                  <Button
+                    onClick={handleExportData}
+                    disabled={isExportingData || isApplyingRetention || selectedExportDatasets.length === 0}
+                    className="bg-[#06B6D4] hover:bg-[#0891B2] gap-2 text-sm md:text-base"
+                  >
+                    <Download className="w-4 h-4" />
+                    {isExportingData ? "Preparing..." : `Download ${resolvedExportFormat.toUpperCase()}`}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <AlertDialog
+        open={pendingRetentionDays !== null}
+        onOpenChange={(open) => {
+          if (!open && !isConfirmingRetention) {
+            handleCancelRetentionChange();
+          }
+        }}
+      >
+        <AlertDialogContent className="woof-retention-dialog max-w-md rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="woof-retention-dialog-title">
+              Apply retention duration?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="woof-retention-dialog-description">
+              WOOF will use {pendingRetentionDays ?? dataRetention[0]} days as the operational retention window for logs, generated reports, notifications, feedback events, failed imports, and temporary caches. Historical transaction and sales data will remain protected for forecasting.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={handleCancelRetentionChange}
+              disabled={isConfirmingRetention}
+              className="woof-retention-dialog-cancel"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void handleConfirmRetentionChange();
+              }}
+              disabled={isConfirmingRetention}
+              className="woof-retention-dialog-action"
+            >
+              {isConfirmingRetention ? "Applying..." : "Apply Duration"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* NOTIFICATION PREFERENCES */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div>
@@ -752,257 +1310,69 @@ export function Settings() {
         </div>
       </div>
 
-      {/* AI & MODEL SETTINGS */}
+      {/* DASHBOARD PREFERENCES */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              AI & Model Configuration
+              Dashboard Preferences
             </h2>
-            <InfoTooltip label="Control model behavior and prediction thresholds." />
+            <InfoTooltip label="Set the default workspace behavior for daily monitoring." />
           </div>
         </div>
 
-        <div className="grid gap-4 md:gap-6 pt-2 md:pt-4">
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
-                  <span>Automatic Model Retraining</span>
-                  <InfoTooltip label="When enabled, WOOF can refresh forecasting models after new upload or webhook data is processed." />
-                </div>
-              </div>
-              <Switch checked={autoRetrain} onCheckedChange={handleAutoRetrainChange} />
-            </div>
-          </div>
-
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4">
-            <div>
-              <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
-                <span>Confidence Threshold</span>
-                <InfoTooltip label={`Minimum confidence level for AI suggestions: ${confidenceThreshold[0]}%.`} />
-              </div>
-              <div className="mb-3 md:mb-4" />
-              <div className="flex items-center gap-3 md:gap-4">
-                <Slider
-                  value={confidenceThreshold}
-                  onValueChange={handleConfidenceThresholdChange}
-                  max={95}
-                  min={60}
-                  step={5}
-                  className="flex-1"
-                />
-                <span className="text-base md:text-lg font-bold text-[#F53799] w-10 md:w-12">
-                  {confidenceThreshold[0]}%
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl">
-            <Button onClick={handleRetrainModels} className="w-full bg-[#06B6D4] hover:bg-[#06B6D4] text-sm md:text-base">
-              Retrain All Models Now
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* EXTERNAL API CONNECTIONS & DIAGNOSTICS */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              External API Connections & Diagnostics
-            </h2>
-            <InfoTooltip label="Configure forecasting data providers and check API cache health." />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-2 md:pt-4">
-          {/* OpenWeather Config */}
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-sm md:text-base text-[#223047]">OpenWeatherMap Integration</h3>
-                  <InfoTooltip label="Exogenous weather feed for Cafe & Services. Weather data is used as outside context for demand forecasting, especially Cafe and Services demand." />
-                </div>
-              </div>
-              {exogenousStatus?.weatherCache?.lastSource && exogenousStatus.weatherCache.lastSource !== "synthetic" ? (
-                <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
-                  <CheckCircle2 className="w-3 h-3" /> Connected
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1 bg-amber-50">
-                  <ShieldAlert className="w-3 h-3" /> Synthetic Fallback
-                </Badge>
-              )}
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <div>
-                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">API Key Status</label>
-                <input
-                  type="text"
-                  readOnly
-                  value="••••••••••••••••••••••••••••••••"
-                  className="w-full px-3 py-2 bg-white/70 border border-[#FFD9EC] rounded-lg text-xs focus:outline-none text-[#223047] opacity-70"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs text-[#223047]">
-                <div>
-                  <span className="opacity-60 block">Target Location</span>
-                  <span className="font-semibold">Lucena City, PH</span>
-                </div>
-                <div>
-                  <span className="opacity-60 block">Coordinates</span>
-                  <span className="font-semibold">13.9397, 121.6145</span>
-                </div>
-                <div>
-                  <span className="opacity-60 flex items-center gap-1">
-                    Cached Records
-                    <InfoTooltip label="Saved weather rows reused by WOOF so forecasts do not need to call the weather provider every time." />
-                  </span>
-                  <span className="font-semibold">{exogenousStatus?.weatherCache?.count ?? "—"} daily rows</span>
-                </div>
-                <div>
-                  <span className="opacity-60 flex items-center gap-1">
-                    Last Active Source
-                    <InfoTooltip label="Shows whether the latest weather data came from the live API or a fallback source." />
-                  </span>
-                  <span className="font-semibold uppercase text-xs">{exogenousStatus?.weatherCache?.lastSource ?? "—"}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Abstract Holidays Config */}
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-4 border border-[#FFD9EC]/50">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-sm md:text-base text-[#223047]">Abstract Holidays Calendar</h3>
-                  <InfoTooltip label="Philippine national holiday catalog provider. Holiday context helps WOOF adjust demand expectations for dates that may affect customer behavior." />
-                </div>
-              </div>
-              {exogenousStatus?.holidayCache?.lastSource && exogenousStatus.holidayCache.lastSource !== "hardcoded" ? (
-                <Badge className="bg-green-500 text-white gap-1 hover:bg-green-500">
-                  <CheckCircle2 className="w-3 h-3" /> Connected
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1 bg-amber-50">
-                  <ShieldAlert className="w-3 h-3" /> Hardcoded Fallback
-                </Badge>
-              )}
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <div>
-                <label className="text-[11px] text-[#223047] opacity-70 block mb-1 font-semibold">API Key Status</label>
-                <input
-                  type="text"
-                  readOnly
-                  value="••••••••••••••••••••••••••••••••"
-                  className="w-full px-3 py-2 bg-white/70 border border-[#FFD9EC] rounded-lg text-xs focus:outline-none text-[#223047] opacity-70"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs text-[#223047]">
-                <div>
-                  <span className="opacity-60 block">Target Country</span>
-                  <span className="font-semibold">Philippines (PH)</span>
-                </div>
-                <div>
-                  <span className="opacity-60 flex items-center gap-1">
-                    Cached Years
-                    <InfoTooltip label="Saved holiday calendars available to the forecasting engine." />
-                  </span>
-                  <span className="font-semibold">{exogenousStatus?.holidayCache?.count ?? "—"} years</span>
-                </div>
-                <div>
-                  <span className="opacity-60 block">Last Active Source</span>
-                  <span className="font-semibold uppercase text-xs">{exogenousStatus?.holidayCache?.lastSource ?? "—"}</span>
-                </div>
-                <div>
-                  <span className="opacity-60 block">Cache Status</span>
-                  <span className="font-semibold text-green-600">Active</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* DATA MANAGEMENT */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Data Management
-            </h2>
-            <InfoTooltip label="Control operational retention rules, protected forecasting history, and export options." />
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:gap-6 pt-2 md:pt-4">
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl space-y-5 border border-[#FFD9EC]/50">
-            <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5">
-              <div>
-                <div className="mb-1 flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
-                  <span>Operational Retention Window</span>
-                  <InfoTooltip label="How long WOOF keeps short-lived operational records before they become eligible for cleanup or archive review." />
-                </div>
-                <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-3 md:mb-4">
-                  Keep logs, generated reports, notifications, feedback events, and temporary caches for {dataRetention[0]} days.
-                </div>
-                <div className="flex items-center gap-3 md:gap-4">
-                  <Slider
-                    value={dataRetention}
-                    onValueChange={handleDataRetentionChange}
-                    max={365}
-                    min={30}
-                    step={30}
-                    className="flex-1"
-                  />
-                  <span className="text-base md:text-lg font-bold text-[#D42A7D] w-12 md:w-16">
-                    {dataRetention[0]}d
-                  </span>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-[#06B6D4]/30 bg-white/80 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#06B6D4]/10">
-                    <Database className="h-4 w-4 text-[#06B6D4]" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 pt-2 md:pt-4">
+          {[
+            {
+              key: "compactKpiCards",
+              label: "Compact KPI Cards",
+              description: "Reduce KPI card padding and label spacing across summary rows.",
+              icon: LayoutDashboard,
+            },
+            {
+              key: "showDemoControls",
+              label: "Show Demo Controls",
+              description: "Reveal test-only controls such as connection simulation buttons.",
+              icon: Eye,
+            },
+            {
+              key: "showTooltips",
+              label: "Show Explanations",
+              description: "Display inline info icons beside metrics and technical labels.",
+              icon: Eye,
+            },
+            {
+              key: "sidebarCollapsedByDefault",
+              label: "Sidebar Collapsed by Default",
+              description: "Start the dashboard with the compact navigation rail.",
+              icon: PanelLeftClose,
+            },
+          ].map((item) => {
+            const Icon = item.icon;
+            const key = item.key as keyof Pick<
+              DashboardPreferences,
+              "compactKpiCards" | "showDemoControls" | "showTooltips" | "sidebarCollapsedByDefault"
+            >;
+            return (
+              <div key={item.key} className="flex items-center justify-between gap-3 p-4 md:p-5 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 min-h-[92px]">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
+                    <Icon className="h-4 w-4 text-[#F53799]" />
                   </div>
-                  <div>
-                    <div className="font-bold text-sm text-[#223047]">Historical Sales Protected</div>
-                    <p className="mt-1 text-xs text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-                      Transaction history is preserved for forecasting accuracy unless it is manually archived by an owner.
-                    </p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
+                      <span>{item.label}</span>
+                      <InfoTooltip label={item.description} />
+                    </div>
                   </div>
                 </div>
+                <Switch
+                  checked={Boolean(dashboardPreferences[key])}
+                  onCheckedChange={(checked) => handleDashboardPreferenceChange(key, checked)}
+                />
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-              {retentionScopeItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <div key={item.label} className="flex items-center gap-2 rounded-xl border border-[#FFD9EC]/70 bg-white/70 px-3 py-3 text-xs font-semibold text-[#223047]">
-                    <Icon className="h-4 w-4 shrink-0 text-[#F53799]" />
-                    <span>{item.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl">
-            <Button onClick={handleExportData} className="w-full bg-[#D42A7D] hover:bg-[#F53799] gap-2 text-sm md:text-base">
-              <Download className="w-4 h-4" />
-              Export All Data
-            </Button>
-          </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1127,122 +1497,6 @@ export function Settings() {
               )}
             </button>
           ))}
-        </div>
-      </div>
-
-      {/* DASHBOARD PREFERENCES */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Dashboard Preferences
-            </h2>
-            <InfoTooltip label="Set the default workspace behavior for daily monitoring." />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 pt-2 md:pt-4">
-          <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
-                <LayoutDashboard className="h-5 w-5 text-[#F53799]" />
-              </div>
-              <div className="flex-1">
-                <label className={profileLabelClass}>Default Landing Page</label>
-                <select
-                  value={dashboardPreferences.defaultLandingPage}
-                  onChange={(event) => handleDashboardPreferenceChange(
-                    "defaultLandingPage",
-                    event.target.value as DashboardPreferences["defaultLandingPage"],
-                  )}
-                  className={profileInputClass}
-                >
-                  {landingPageOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
-                <BarChart3 className="h-5 w-5 text-[#06B6D4]" />
-              </div>
-              <div className="flex-1">
-                <label className={profileLabelClass}>Default Chart View</label>
-                <select
-                  value={dashboardPreferences.defaultChartView}
-                  onChange={(event) => handleDashboardPreferenceChange(
-                    "defaultChartView",
-                    event.target.value as DashboardPreferences["defaultChartView"],
-                  )}
-                  className={profileInputClass}
-                >
-                  {chartViewOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:gap-4">
-            {[
-              {
-                key: "compactKpiCards",
-                label: "Compact KPI Cards",
-                description: "Reduce KPI card padding and label spacing across summary rows.",
-                icon: LayoutDashboard,
-              },
-              {
-                key: "showDemoControls",
-                label: "Show Demo Controls",
-                description: "Reveal test-only controls such as connection simulation buttons.",
-                icon: Eye,
-              },
-              {
-                key: "showTooltips",
-                label: "Show Explanations",
-                description: "Display inline info icons beside metrics and technical labels.",
-                icon: Eye,
-              },
-              {
-                key: "sidebarCollapsedByDefault",
-                label: "Sidebar Collapsed by Default",
-                description: "Start the dashboard with the compact navigation rail.",
-                icon: PanelLeftClose,
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-              const key = item.key as keyof Pick<
-                DashboardPreferences,
-                "compactKpiCards" | "showDemoControls" | "showTooltips" | "sidebarCollapsedByDefault"
-              >;
-              return (
-                <div key={item.key} className="flex items-center justify-between gap-3 p-4 md:p-5 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white border border-[#FFD9EC]">
-                      <Icon className="h-4 w-4 text-[#F53799]" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 font-semibold text-sm md:text-base text-[#223047]">
-                        <span>{item.label}</span>
-                        <InfoTooltip label={item.description} />
-                      </div>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={Boolean(dashboardPreferences[key])}
-                    onCheckedChange={(checked) => handleDashboardPreferenceChange(key, checked)}
-                  />
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 

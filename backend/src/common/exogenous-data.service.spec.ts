@@ -122,6 +122,46 @@ describe('ExogenousDataService', () => {
     );
   });
 
+  it('reports provider diagnostics without exposing secrets', () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'LUCENA_LAT') return '14.1234';
+      if (key === 'LUCENA_LNG') return '121.9876';
+      if (key === 'EXOGENOUS_LOCATION_LABEL') return 'Lucena Test Site, PH';
+      return undefined;
+    });
+
+    const diagnostics = service.getProviderDiagnostics();
+
+    expect(diagnostics.weather).toEqual(
+      expect.objectContaining({
+        providerName: 'Open-Meteo',
+        requiresApiKey: false,
+        apiKeyStatus: 'not_required',
+        targetLocation: 'Lucena Test Site, PH',
+        coordinates: { lat: 14.1234, lng: 121.9876 },
+      }),
+    );
+    expect(diagnostics.holidays).toEqual(
+      expect.objectContaining({
+        providerName: 'Abstract Holidays API',
+        requiresApiKey: true,
+        apiKeyStatus: 'missing',
+        fallbackSource: 'hardcoded',
+      }),
+    );
+  });
+
+  it('reports configured holiday provider without returning the API key', () => {
+    configService.get.mockImplementation((key: string) =>
+      key === 'ABSTRACT_HOLIDAYS_KEY' ? 'secret-value' : undefined,
+    );
+
+    const diagnostics = service.getProviderDiagnostics();
+
+    expect(diagnostics.holidays.apiKeyStatus).toBe('configured');
+    expect(JSON.stringify(diagnostics)).not.toContain('secret-value');
+  });
+
   it('falls back to hardcoded Philippine holidays when no API key is configured', async () => {
     const holidays = await service.fetchHolidayHistory(2026);
 

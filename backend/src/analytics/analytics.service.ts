@@ -3570,6 +3570,7 @@ export class AnalyticsService {
 
   async getExogenousStatus(): Promise<any> {
     const cacheStatus = await this.exogenousDataService.getCacheStatus();
+    const providers = this.exogenousDataService.getProviderDiagnostics();
     const { data: lastServicesForecast } = await this.supabaseService.client
       .from('forecast_runs')
       .select('*')
@@ -3581,6 +3582,7 @@ export class AnalyticsService {
 
     return {
       ...cacheStatus,
+      providers,
       lastServicesForecast: lastServicesForecast
         ? {
             modelName,

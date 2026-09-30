@@ -21,7 +21,7 @@ import {
   parseGlobalRange,
   countDays,
 } from "../lib/dateRanges";
-import { getSettingsPreferences, onSettingsPreferencesChanged } from "../lib/preferences";
+import { getDashboardChartView, saveDashboardChartView } from "../lib/preferences";
 import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 import {
   LineChart,
@@ -221,10 +221,7 @@ export function Services() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [chartGranularity, setChartGranularity] = useState<TimeGrain>("monthly");
   useEffect(() => {
-    setChartGranularity(getSettingsPreferences().dashboard.defaultChartView);
-    return onSettingsPreferencesChanged((preferences) => {
-      setChartGranularity(preferences.dashboard.defaultChartView);
-    });
+    setChartGranularity(getDashboardChartView());
   }, []);
   const [showPerformanceDetails, setShowPerformanceDetails] = useState(false);
   const [showAnalysisDetails, setShowAnalysisDetails] = useState(false);
@@ -1149,7 +1146,7 @@ export function Services() {
             currencyPrefix="₱"
             themeColor="#06B6D4"
             timeGrain={chartGranularity}
-            onTimeGrainChange={(g) => setChartGranularity(g)}
+            onTimeGrainChange={(g) => setChartGranularity(saveDashboardChartView(g))}
             weatherOverlayEnabled={weatherOverlayEnabled}
             weatherOverlayData={weatherOverlayData}
           />

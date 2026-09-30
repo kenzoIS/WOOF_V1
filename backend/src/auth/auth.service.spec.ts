@@ -108,6 +108,71 @@ describe('AuthService', () => {
     });
   });
 
+  it('rejects a wrong password before requesting a two-factor code', async () => {
+    listUsers.mockResolvedValue({
+      data: {
+        users: [
+          {
+            id: 'user-1',
+            email: 'woofdash@gmail.com',
+            user_metadata: {
+              twoFactor: {
+                enabled: true,
+                secret: 'JBSWY3DPEHPK3PXP',
+              },
+            },
+          },
+        ],
+      },
+      error: null,
+    });
+    signInWithPassword.mockResolvedValueOnce({
+      data: { session: null },
+      error: { message: 'Invalid credentials' },
+    });
+
+    await expect(
+      service().login('woofdash@gmail.com', 'wrong-password'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: 'woofdash@gmail.com',
+      password: 'wrong-password',
+    });
+  });
+
+  it('requests two-factor only after the password is valid', async () => {
+    listUsers.mockResolvedValue({
+      data: {
+        users: [
+          {
+            id: 'user-1',
+            email: 'woofdash@gmail.com',
+            user_metadata: {
+              twoFactor: {
+                enabled: true,
+                secret: 'JBSWY3DPEHPK3PXP',
+              },
+            },
+          },
+        ],
+      },
+      error: null,
+    });
+
+    await expect(
+      service().login('woofdash@gmail.com', 'valid-password'),
+    ).resolves.toEqual({
+      requiresTwoFactor: true,
+      email: 'woofdash@gmail.com',
+    });
+
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: 'woofdash@gmail.com',
+      password: 'valid-password',
+    });
+  });
+
   it('sends an OTP and resets the Supabase dashboard password', async () => {
     listUsers.mockResolvedValue({
       data: { users: [{ id: 'user-1', email: 'woofdash@gmail.com' }] },

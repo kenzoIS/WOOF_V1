@@ -137,6 +137,62 @@
   color: #ffffff;
 }
 
+.woof-retention-dialog {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--woof-theme-primary, var(--primary)) 18%, rgba(15, 23, 42, 0.22));
+}
+
+.woof-retention-dialog-title {
+  color: var(--foreground);
+  font-weight: 800;
+}
+
+.woof-retention-dialog-description {
+  color: color-mix(in srgb, var(--foreground) 72%, transparent);
+  line-height: 1.6;
+}
+
+.woof-retention-dialog-cancel {
+  background: color-mix(in srgb, var(--card) 84%, var(--foreground) 4%);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--foreground) 12%);
+  color: var(--foreground);
+  box-shadow: none;
+}
+
+.woof-retention-dialog-cancel:hover,
+.woof-retention-dialog-cancel:focus-visible {
+  background: color-mix(in srgb, var(--woof-theme-primary, var(--primary)) 12%, var(--card));
+  border-color: color-mix(in srgb, var(--woof-theme-primary, var(--primary)) 42%, var(--border));
+  color: var(--foreground);
+}
+
+.woof-retention-dialog-action {
+  background: var(--woof-theme-primary, var(--primary));
+  color: var(--primary-foreground);
+  border: 1px solid color-mix(in srgb, var(--woof-theme-primary, var(--primary)) 78%, #ffffff 10%);
+}
+
+.woof-retention-dialog-action:hover,
+.woof-retention-dialog-action:focus-visible {
+  background: var(--woof-theme-primary-strong, var(--primary));
+  color: var(--primary-foreground);
+}
+
+.woof-dark .woof-retention-dialog-cancel {
+  background: rgba(248, 251, 255, 0.08);
+  border-color: rgba(255, 217, 236, 0.32);
+  color: var(--foreground);
+}
+
+.woof-dark .woof-retention-dialog-cancel:hover,
+.woof-dark .woof-retention-dialog-cancel:focus-visible {
+  background: color-mix(in srgb, var(--woof-theme-primary, var(--primary)) 22%, rgba(248, 251, 255, 0.08));
+  border-color: color-mix(in srgb, var(--woof-theme-primary, var(--primary)) 56%, rgba(255, 217, 236, 0.32));
+  color: var(--foreground);
+}
+
 .woof-info-tooltip {
   border-color: rgba(107, 114, 128, 0.22);
   background: rgba(255, 255, 255, 0.62);

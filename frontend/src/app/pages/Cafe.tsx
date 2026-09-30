@@ -21,7 +21,7 @@ import {
   parseGlobalRange,
   countDays,
 } from "../lib/dateRanges";
-import { getSettingsPreferences, onSettingsPreferencesChanged } from "../lib/preferences";
+import { getDashboardChartView, saveDashboardChartView } from "../lib/preferences";
 import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
 import cafeMascot from "../../imports/no_bg_Cafe-2.png";
 import {
@@ -319,10 +319,7 @@ export function Cafe() {
   const [showAnalysisDetails, setShowAnalysisDetails] = useState(false);
   const [showSimulatorDetails, setShowSimulatorDetails] = useState(false);
   useEffect(() => {
-    setChartGranularity(getSettingsPreferences().dashboard.defaultChartView);
-    return onSettingsPreferencesChanged((preferences) => {
-      setChartGranularity(preferences.dashboard.defaultChartView);
-    });
+    setChartGranularity(getDashboardChartView());
   }, []);
   
   const [quietPeriod, setQuietPeriod] = useState<any>(null);
@@ -1542,7 +1539,7 @@ export function Cafe() {
                 currencyPrefix="₱"
                 themeColor="#F53799"
                 timeGrain={chartGranularity}
-                onTimeGrainChange={(g) => setChartGranularity(g)}
+                onTimeGrainChange={(g) => setChartGranularity(saveDashboardChartView(g))}
                 weatherOverlayEnabled={weatherOverlayEnabled}
                 weatherOverlayData={weatherOverlayData}
               />

@@ -294,6 +294,53 @@ export interface AlertThresholds {
   dataStalenessDays: number;
 }
 
+export interface DataRetentionSettings {
+  retentionDays: number;
+  protectedHistoricalSales: true;
+  scope: string[];
+}
+
+export interface ExogenousStatus {
+  weatherCache: {
+    count: number;
+    latestFetchedAt: string | null;
+    lastSource: 'api' | 'cache' | 'synthetic' | 'unknown';
+  };
+  holidayCache: {
+    count: number;
+    latestFetchedAt: string | null;
+    lastSource: 'api' | 'cache' | 'hardcoded' | 'unknown';
+  };
+  providers?: {
+    weather?: {
+      providerName: string;
+      providerKind: 'weather';
+      requiresApiKey: boolean;
+      apiKeyStatus: 'not_required';
+      targetLocation: string;
+      countryCode: string;
+      coordinates: { lat: number; lng: number };
+      fallbackSource: 'synthetic';
+    };
+    holidays?: {
+      providerName: string;
+      providerKind: 'holiday_calendar';
+      requiresApiKey: boolean;
+      apiKeyStatus: 'configured' | 'missing';
+      targetCountry: { name: string; code: string };
+      fallbackSource: 'hardcoded';
+    };
+  };
+  lastServicesForecast: {
+    modelName: string | null;
+    modelType: string;
+    exogenousVariables: string[];
+    weatherDataSource: string;
+    holidayDataSource: string;
+    generatedAt: string;
+  } | null;
+}
+
 async function fetchApi(path: string, options?: RequestInit) {
   const canUseCache = shouldCacheRequest(path, options);
   const cacheKey = `${API_BASE}${path}`;
@@ -587,6 +634,61 @@ export async function evaluateAlertThresholds(metrics: Partial<{
   });
 }
 
+export async function getDataRetentionSettings(): Promise<DataRetentionSettings> {
+  return fetchApi('/settings/data-retention');
+}
+
+export async function saveDataRetentionSettings(
+  retentionDays: number,
+): Promise<DataRetentionSettings> {
+  return fetchApi('/settings/data-retention', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ retentionDays }),
+  });
+}
+
+export async function applyDataRetention(retentionDays: number) {
+  return fetchApi('/settings/data-retention/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ retentionDays }),
+  });
+}
+
+export async function downloadSettingsDataExport(options?: {
+  format?: 'json' | 'csv';
+  exportAll?: boolean;
+  datasets?: string[];
+}): Promise<{
+  blob: Blob;
+  filename: string;
+}> {
+  const query = new URLSearchParams();
+  if (options?.format) query.set('format', options.format);
+  if (options?.exportAll === false) query.set('all', 'false');
+  if (options?.datasets?.length) query.set('datasets', options.datasets.join(','));
+
+  const res = await request(`/settings/export${query.toString() ? `?${query.toString()}` : ''}`);
+  if (!res.ok) {
+    throw await apiError(res, res.statusText || 'Data export failed');
+  }
+
+  const disposition = res.headers.get('content-disposition') || '';
+  const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+  const fallbackExtension = options?.format === 'csv' ? 'csv' : 'json';
+  const fallbackScope =
+    options?.format === 'csv' && options.datasets?.length === 1
+      ? options.datasets[0]
+      : 'Data_Export';
+  return {
+    blob: await res.blob(),
+    filename:
+      filenameMatch?.[1] ||
+      `WOOF_${fallbackScope}_${new Date().toISOString().slice(0, 10)}.${fallbackExtension}`,
+  };
+}
+
 // Analytics APIs
 export async function getDashboard(sector: string) {
   return fetchApi(`/analytics/dashboard/${sector}`);
@@ -809,7 +911,7 @@ export async function getBundlePlanningContext(startDate: string, endDate?: stri
   return fetchApi(`/analytics/bundle-planning-context?${params.toString()}`);
 }
 
-export async function getExogenousStatus() {
+export async function getExogenousStatus(): Promise<ExogenousStatus> {
   return fetchApi('/analytics/exogenous/status');
 }
 

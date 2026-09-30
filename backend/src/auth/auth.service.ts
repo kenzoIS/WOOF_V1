@@ -67,16 +67,6 @@ export class AuthService {
     const user = await this.findSupabaseUserByEmail(adminEmail);
     const twoFactor = this.getUserTwoFactor(user);
 
-    if (twoFactor.enabled) {
-      if (!twoFactorCode?.trim()) {
-        return { requiresTwoFactor: true, email: adminEmail };
-      }
-
-      if (!this.verifyTotp(twoFactor.secret, twoFactorCode)) {
-        throw new UnauthorizedException('Invalid authenticator code');
-      }
-    }
-
     const { data, error } =
       await this.supabaseService.client.auth.signInWithPassword({
         email: adminEmail,
@@ -85,6 +75,16 @@ export class AuthService {
 
     if (error || !data.session) {
       throw new UnauthorizedException('Invalid dashboard credentials');
+    }
+
+    if (twoFactor.enabled) {
+      if (!twoFactorCode?.trim()) {
+        return { requiresTwoFactor: true, email: adminEmail };
+      }
+
+      if (!this.verifyTotp(twoFactor.secret, twoFactorCode)) {
+        throw new UnauthorizedException('Invalid authenticator code');
+      }
     }
 
     this.recordLoginActivity('login', adminEmail);

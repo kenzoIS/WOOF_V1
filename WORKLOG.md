@@ -2,6 +2,268 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-09-30 - Settings Data Management Reorder
+
+### Requested
+- Move the Data Management section above the Notification Preferences section.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Reordered the Settings page so Data Management appears immediately before Notification Preferences.
+- Preserved both sections' existing controls, state handling, backend wiring, and styling.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-30 - Login Password and OTP Flow Fix
+
+### Requested
+- Prevent the OTP section from appearing when the first login attempt uses an incorrect password.
+- Show the lower-right error toast immediately for incorrect passwords.
+- Preserve the logical login flow so OTP is requested only after password validation succeeds.
+
+### Backend Changes
+- Updated `backend/src/auth/auth.service.ts`.
+- Moved Supabase password verification before the two-factor-required response.
+- Kept two-factor code validation before issuing the final dashboard session.
+- Updated `backend/src/auth/auth.service.spec.ts`.
+- Added regression coverage proving wrong passwords reject before the OTP step and valid passwords can then request OTP.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Login.tsx`.
+- Cleared and hid the OTP section when login fails so stale two-factor UI cannot remain visible after a credential error.
+
+### Verification
+- Passed: `npm.cmd test -- auth.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-30 - Settings Section Reorder
+
+### Requested
+- Move External API Connections & Diagnostics below Business Profile.
+- Move Dashboard Preferences above Appearance.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Reordered the Settings page sections so External API Connections & Diagnostics appears immediately after Business Profile.
+- Reordered Dashboard Preferences so it appears immediately before Appearance.
+- Preserved each section's existing controls, state handling, backend wiring, and styling.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-30 - External API Diagnostics Backend Accuracy
+
+### Requested
+- Make External API Connections & Diagnostics accurate and backed by real backend state instead of frontend-only or hardcoded display values.
+- Align the section with industry-standard practices.
+
+### Backend Changes
+- Updated `backend/src/common/exogenous-data.service.ts`.
+- Added provider diagnostics for forecasting exogenous data sources, including provider name, provider type, API key requirement/status, configured target location/country, coordinates, and fallback source.
+- Kept API key handling secret-safe by returning only status values such as `not_required`, `configured`, or `missing`; no key values are exposed.
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Included provider diagnostics in the existing exogenous status endpoint alongside cache counts, latest cache timestamps, and last active sources.
+- Updated `backend/src/common/exogenous-data.service.spec.ts`.
+- Added regression tests for provider diagnostics and secret redaction.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts`.
+- Added a typed `ExogenousStatus` response contract for the backend diagnostics endpoint.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Replaced the inaccurate OpenWeatherMap label with the backend-reported Open-Meteo provider.
+- Removed fake masked API key inputs and replaced them with backend-reported key status.
+- Replaced hardcoded location, coordinates, country, source, and cache status labels with backend diagnostics and cache data.
+- Added latest cache update timestamps and clearer API/cache/fallback badges.
+
+### Verification
+- Passed: `npm.cmd test -- exogenous-data.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-30 - Dashboard Preferences Simplification
+
+### Requested
+- Remove Default Landing Page because the dashboard should always default to Home.
+- Remove Default Chart View because charts should use the last chart view selected from the chart/header controls.
+- Reflow Compact KPI Cards, Show Demo Controls, Show Explanations, and Sidebar Collapsed by Default to avoid unused white space.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Removed the Default Landing Page and Default Chart View dropdown controls from Dashboard Preferences.
+- Reflowed the four remaining Dashboard Preferences toggles into a balanced responsive grid.
+- Updated `frontend/src/app/pages/Login.tsx`.
+- Login now always routes to the Home page after successful sign-in.
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Removed `defaultLandingPage` and `defaultChartView` from dashboard preferences.
+- Added `getDashboardChartView` and `saveDashboardChartView` helpers backed by local storage.
+- Updated `frontend/src/app/pages/Cafe.tsx`, `frontend/src/app/pages/Services.tsx`, and `frontend/src/app/components/ThreeZoneForecastChart.tsx`.
+- Cafe/Services forecast charts now initialize from the last selected chart granularity and save changes as the new default for future chart views.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+- Passed: `npm.cmd test -- settings.service.spec.ts --runInBand` in `backend`.
+
+## 2026-09-30 - Data Management Backend Retention and Export
+
+### Requested
+- Make Data Management retention apply to operational records such as logs, generated reports, notifications, feedback events, temporary caches, and failed imports.
+- Keep historical transaction and sales data protected because forecasting depends on it.
+- Make Export All Data generate a real backend export instead of a simulated toast.
+- Remove the visible Historical Sales Protected card and fold that protection note into the information icon.
+
+### Backend Changes
+- Updated `backend/src/settings/settings.service.ts`.
+- Added backend data-retention settings with a normalized 30-365 day retention window.
+- Added retention cleanup that targets operational records only: audit logs, smart reports, recommendation feedback, forecast/model artifacts, cross-sell caches, failed import metadata, and weather/holiday operational caches.
+- Added explicit protected historical sales guardrails in retention and export metadata.
+- Added a real JSON export bundle containing settings, audit logs, generated reports, recommendation feedback, forecast/model artifacts, cross-sell caches, bundle archives, upload metadata, and exogenous cache diagnostics.
+- Updated `backend/src/settings/settings.controller.ts`.
+- Added `GET/PATCH /api/settings/data-retention`, `POST /api/settings/data-retention/apply`, and `GET /api/settings/export`.
+- Updated `backend/src/common/exogenous-data.service.ts`.
+- Added operational weather/holiday cache pruning by retention cutoff.
+- Updated `backend/src/settings/settings.module.ts` to import the shared common cache service.
+- Updated `backend/src/settings/settings.service.spec.ts` with Data Management retention/export guardrail tests.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts`.
+- Added data-retention API helpers and backend export download support.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Synced the Data Management retention slider to the backend.
+- Applied retention cleanup through Save All Settings while keeping historical sales data protected.
+- Replaced the simulated Export All Data toast with a real backend JSON download.
+- Removed the visible Historical Sales Protected card and moved that note into the Data Management and Operational Retention information icons.
+- Added failed imports to the retention scope display.
+
+### Verification
+- Passed: `npm.cmd test -- settings.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-30 - Data Retention Confirmation Dialog
+
+### Requested
+- Remove the visible retention scope icons below the Data Management duration slider.
+- Add a confirmation popup when the selected retention duration will be reflected by the system.
+- Clarify whether JSON or CSV is the better export format.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Removed the retention scope chip/icon row below the Operational Retention Window slider.
+- Added a confirmation dialog after changing the retention slider value.
+- Confirmation saves the selected retention duration to the backend and explains that historical transaction and sales data remains protected.
+- Canceling the dialog restores the last confirmed retention duration.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+- Passed: `npm.cmd test -- settings.service.spec.ts --runInBand` in `backend`.
+
+## 2026-09-30 - Manual Data Export Selection and CSV Support
+
+### Requested
+- Replace the single Export All Data button with an Export Data control that lets users choose all or selected datasets.
+- Let users choose JSON or CSV where CSV is appropriate.
+- Keep Export All locked to JSON and notify users that full exports can only be JSON.
+- Keep nested, sensitive, and system-oriented data JSON-only.
+
+### Backend Changes
+- Updated `backend/src/settings/settings.service.ts`.
+- Added export dataset metadata and CSV eligibility rules.
+- Added selective export support for JSON exports.
+- Added CSV export support only for one flat dataset at a time.
+- CSV is allowed for recommendation feedback and upload metadata.
+- JSON remains required for full exports, system logs, generated reports, forecast/model artifacts, cross-sell caches, and bundle archives.
+- Updated `backend/src/settings/settings.controller.ts`.
+- `GET /api/settings/export` now accepts `format`, `datasets`, and `all` query parameters.
+- Updated `backend/src/settings/settings.service.spec.ts` to verify CSV eligibility behavior.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts`.
+- Added export query parameter support for selected datasets and format.
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Replaced the direct Export All Data button with an Export Data dropdown panel.
+- Added an Export all data checkbox that selects every dataset and forces JSON.
+- Added dataset checkboxes with CSV eligibility badges.
+- Added a format selector that enables CSV only when exactly one CSV-compatible dataset is selected.
+- Added helper copy explaining why Export All and nested/sensitive exports are JSON-only.
+
+### Verification
+- Passed: `npm.cmd test -- settings.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-30 - CSV Export Filename Fix
+
+### Requested
+- Double-check why selecting one flat dataset and CSV format still downloaded as JSON.
+
+### Findings
+- The backend generated CSV exports with `.csv` filenames, but the frontend could not reliably read the cross-origin `Content-Disposition` response header.
+- When that header was hidden by CORS, the frontend fell back to the generic `WOOF_Data_Export.json` filename even for CSV responses.
+
+### Backend Changes
+- Updated `backend/src/main.ts`.
+- Exposed the `Content-Disposition` header through CORS so the frontend can read backend export filenames.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts`.
+- Added a format-aware fallback filename so CSV exports still download with a `.csv` extension if the browser cannot read `Content-Disposition`.
+
+### Verification
+- Passed: `npm.cmd test -- settings.service.spec.ts --runInBand` in `backend`.
+- Passed: `npm.cmd run build` in `backend`.
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+
+## 2026-09-30 - Retention Dialog Theme-Safe Buttons
+
+### Requested
+- Fix the Apply Retention Duration confirmation dialog Cancel button so it remains visible in dark mode, selected themes, and manual themes.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Added scoped dialog classes for the retention confirmation modal, title, description, cancel button, and action button.
+- Updated `frontend/src/styles/theme.css`.
+- Added theme-variable driven styles for the retention dialog buttons so Cancel and Apply retain contrast across light mode, dark mode, built-in palettes, and manual custom themes.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+- Passed: `npm.cmd test -- settings.service.spec.ts --runInBand` in `backend`.
+
+## 2026-09-30 - Settings AI Model Configuration Removal
+
+### Requested
+- Confirm whether automatic model retraining and confidence-based AI suggestion ordering/filtering already exist elsewhere in the system.
+- Remove the Settings page AI & Model Configuration section if those behaviors are already covered.
+
+### Findings
+- Confirmed CSV ingestion already triggers automatic forecast cache warmups/retraining for Cafe and Services with `forceRefresh: 'true'` after new upload data is processed.
+- Confirmed PetHub webhook ingestion also triggers automatic forecast warmups with `forceRefresh: 'true'` after incoming transaction data is processed.
+- Confirmed AI suggestion displays already use confidence, support, lift, score, and top-N ranking/filtering in modules such as AI Simulation and Behavioral Bridges.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Settings.tsx`.
+- Removed the AI & Model Configuration section from Settings.
+- Removed the local-only automatic retraining toggle, confidence threshold slider, manual Settings retrain button, and their unused state/handlers/import.
+- Updated `frontend/src/app/lib/preferences.ts`.
+- Removed obsolete `autoRetrain` and `confidenceThreshold` fields from the shared Settings preferences model and defaults.
+- Kept the actual automatic backend retraining paths and ranked AI suggestion behavior unchanged.
+
+### Verification
+- Passed: `npx.cmd tsc --noEmit --pretty false` in `frontend`.
+- Passed: `npm.cmd run build` in `frontend`.
+- Passed: `npm.cmd test -- settings.service.spec.ts --runInBand` in `backend`.
+
 ## 2026-09-28 - Credential Exposure Hardening
 
 ### Requested

@@ -51,6 +51,27 @@ export interface ExogenousCacheStatus {
   };
 }
 
+export interface ExogenousProviderDiagnostics {
+  weather: {
+    providerName: string;
+    providerKind: 'weather';
+    requiresApiKey: boolean;
+    apiKeyStatus: 'not_required';
+    targetLocation: string;
+    countryCode: string;
+    coordinates: { lat: number; lng: number };
+    fallbackSource: 'synthetic';
+  };
+  holidays: {
+    providerName: string;
+    providerKind: 'holiday_calendar';
+    requiresApiKey: boolean;
+    apiKeyStatus: 'configured' | 'missing';
+    targetCountry: { name: string; code: string };
+    fallbackSource: 'hardcoded';
+  };
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_TEMP_CELSIUS = 28;
 const DEFAULT_LUCENA_LAT = 13.9397;
@@ -91,6 +112,36 @@ export class ExogenousDataService {
 
   getLastHolidaySource(): 'api' | 'cache' | 'hardcoded' | 'unknown' {
     return this.lastHolidaySource;
+  }
+
+  getProviderDiagnostics(): ExogenousProviderDiagnostics {
+    const coordinates = this.getDefaultCoordinates();
+    const holidayApiKey = this.configService
+      .get<string>('ABSTRACT_HOLIDAYS_KEY')
+      ?.trim();
+
+    return {
+      weather: {
+        providerName: 'Open-Meteo',
+        providerKind: 'weather',
+        requiresApiKey: false,
+        apiKeyStatus: 'not_required',
+        targetLocation:
+          this.configService.get<string>('EXOGENOUS_LOCATION_LABEL') ||
+          'Lucena City, PH',
+        countryCode: 'PH',
+        coordinates,
+        fallbackSource: 'synthetic',
+      },
+      holidays: {
+        providerName: 'Abstract Holidays API',
+        providerKind: 'holiday_calendar',
+        requiresApiKey: true,
+        apiKeyStatus: holidayApiKey ? 'configured' : 'missing',
+        targetCountry: { name: 'Philippines', code: 'PH' },
+        fallbackSource: 'hardcoded',
+      },
+    };
   }
 
   async fetchWeatherHistory(
@@ -284,6 +335,21 @@ export class ExogenousDataService {
         latestFetchedAt: (latestHoliday as any)?.fetchedAt || null,
         lastSource: this.lastHolidaySource,
       },
+    };
+  }
+
+  async pruneOperationalCaches(cutoff: Date): Promise<{
+    weatherCache: number;
+    holidayCache: number;
+  }> {
+    const [weatherResult, holidayResult] = await Promise.all([
+      this.weatherCacheModel.deleteMany({ fetchedAt: { $lt: cutoff } }),
+      this.holidayCacheModel.deleteMany({ fetchedAt: { $lt: cutoff } }),
+    ]);
+
+    return {
+      weatherCache: weatherResult.deletedCount || 0,
+      holidayCache: holidayResult.deletedCount || 0,
     };
   }
 

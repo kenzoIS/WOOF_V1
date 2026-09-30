@@ -19,25 +19,12 @@ export type CustomThemePreferences = {
   surface: string;
 };
 
-export type DashboardLandingPage =
-  | "/"
-  | "/cafe"
-  | "/services"
-  | "/retail"
-  | "/ai-simulation"
-  | "/smart-reports"
-  | "/root-cause-explorer"
-  | "/feedback"
-  | "/audit";
-
 export type DashboardChartView = "monthly" | "weekly" | "daily";
 
 export type DashboardPreferences = {
-  defaultLandingPage: DashboardLandingPage;
   compactKpiCards: boolean;
   showDemoControls: boolean;
   showTooltips: boolean;
-  defaultChartView: DashboardChartView;
   sidebarCollapsedByDefault: boolean;
 };
 
@@ -58,8 +45,6 @@ export type SettingsPreferences = {
   alertThresholds: AlertThresholdPreferences;
   dashboard: DashboardPreferences;
   security: SecurityPreferences;
-  autoRetrain: boolean;
-  confidenceThreshold: number;
   dataRetention: number;
   theme: "light" | "dark";
   colorTheme: ColorThemeKey;
@@ -89,18 +74,14 @@ export const DEFAULT_SETTINGS_PREFERENCES: SettingsPreferences = {
     dataStalenessDays: 7,
   },
   dashboard: {
-    defaultLandingPage: "/",
     compactKpiCards: false,
     showDemoControls: false,
     showTooltips: true,
-    defaultChartView: "monthly",
     sidebarCollapsedByDefault: false,
   },
   security: {
     sessionTimeoutMinutes: 10,
   },
-  autoRetrain: true,
-  confidenceThreshold: 80,
   dataRetention: 90,
   theme: "light",
   colorTheme: "pink",
@@ -114,6 +95,7 @@ export const DEFAULT_SETTINGS_PREFERENCES: SettingsPreferences = {
 const SETTINGS_KEY = "woofSettingsPreferences";
 const LEGACY_THEME_KEY = "woofTheme";
 const LEGACY_SIDEBAR_KEY = "woofSidebarCollapsed";
+const CHART_VIEW_KEY = "woofDashboardChartView";
 const PREFERENCES_EVENT = "woof:settings-preferences-changed";
 const THEME_CLASSES = ["woof-theme-pink", "woof-theme-ocean", "woof-theme-mint", "woof-theme-slate", "woof-theme-custom"];
 const DASHBOARD_CLASSES = ["woof-compact-kpis", "woof-show-demo-controls", "woof-hide-tooltips", "woof-sidebar-default-collapsed"];
@@ -130,27 +112,10 @@ function normalizeNumber(value: unknown, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, Math.round(numericValue)));
 }
 
-function normalizeLandingPage(value: unknown): DashboardLandingPage {
-  const allowed: DashboardLandingPage[] = [
-    "/",
-    "/cafe",
-    "/services",
-    "/retail",
-    "/ai-simulation",
-    "/smart-reports",
-    "/root-cause-explorer",
-    "/feedback",
-    "/audit",
-  ];
-  return allowed.includes(value as DashboardLandingPage)
-    ? value as DashboardLandingPage
-    : DEFAULT_SETTINGS_PREFERENCES.dashboard.defaultLandingPage;
-}
-
 function normalizeChartView(value: unknown): DashboardChartView {
   return value === "weekly" || value === "daily"
     ? value
-    : DEFAULT_SETTINGS_PREFERENCES.dashboard.defaultChartView;
+    : "monthly";
 }
 
 function normalizePreferences(value: Partial<SettingsPreferences> | null): SettingsPreferences {
@@ -168,11 +133,9 @@ function normalizePreferences(value: Partial<SettingsPreferences> | null): Setti
       dataStalenessDays: normalizeNumber(value?.alertThresholds?.dataStalenessDays, DEFAULT_SETTINGS_PREFERENCES.alertThresholds.dataStalenessDays, 1, 60),
     },
     dashboard: {
-      defaultLandingPage: normalizeLandingPage(value?.dashboard?.defaultLandingPage),
       compactKpiCards: Boolean(value?.dashboard?.compactKpiCards ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.compactKpiCards),
       showDemoControls: Boolean(value?.dashboard?.showDemoControls ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.showDemoControls),
       showTooltips: Boolean(value?.dashboard?.showTooltips ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.showTooltips),
-      defaultChartView: normalizeChartView(value?.dashboard?.defaultChartView),
       sidebarCollapsedByDefault: Boolean(value?.dashboard?.sidebarCollapsedByDefault ?? DEFAULT_SETTINGS_PREFERENCES.dashboard.sidebarCollapsedByDefault),
     },
     security: {
@@ -187,10 +150,6 @@ function normalizePreferences(value: Partial<SettingsPreferences> | null): Setti
       ...DEFAULT_SETTINGS_PREFERENCES.businessProfile,
       ...(value?.businessProfile ?? {}),
     },
-    confidenceThreshold:
-      typeof value?.confidenceThreshold === "number"
-        ? value.confidenceThreshold
-        : DEFAULT_SETTINGS_PREFERENCES.confidenceThreshold,
     dataRetention:
       typeof value?.dataRetention === "number"
         ? value.dataRetention
@@ -288,6 +247,21 @@ export function applyDocumentColorTheme(
       ].forEach((name) => document.documentElement.style.removeProperty(name));
     }
   }
+}
+
+export function getDashboardChartView(): DashboardChartView {
+  if (typeof window === "undefined") {
+    return "monthly";
+  }
+  return normalizeChartView(localStorage.getItem(CHART_VIEW_KEY));
+}
+
+export function saveDashboardChartView(value: DashboardChartView) {
+  const normalized = normalizeChartView(value);
+  if (typeof window !== "undefined") {
+    localStorage.setItem(CHART_VIEW_KEY, normalized);
+  }
+  return normalized;
 }
 
 export function applyDocumentDashboardPreferences(
