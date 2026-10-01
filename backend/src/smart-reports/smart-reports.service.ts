@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -230,6 +231,19 @@ export class SmartReportsService {
     endDateStr: string,
     sectors: ('Cafe' | 'Retail' | 'Services')[],
   ): Promise<any> {
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new BadRequestException('Invalid date format provided');
+    }
+    if (start > end) {
+      throw new BadRequestException('Start date cannot be later than end date');
+    }
+    const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays > 31) {
+      throw new BadRequestException('Date range cannot exceed 31 days. Trend forecast model is calibrated for 30-31 day windows.');
+    }
+
     // 1. Map Sectors to PostgreSQL naming standard (Services -> Service)
     const pgSectors = sectors.map((s) => (s === 'Services' ? 'Service' : s));
 
@@ -589,7 +603,7 @@ export class SmartReportsService {
     // Section 2: Trend Analysis & Forecasts
     sections.push({
       title: 'Trend Analysis & Forecasts',
-      content: `A context-aware multivariate linear trend analysis fitted over the historical window indicates a ${trend.toLowerCase()} trajectory for the upcoming 30 days. Daily revenue is projected to move with a calculated period growth rate of ${growthRate}%. The overall estimated sales outlook for the next 30 days totals ${formattedProjected}.`,
+      content: `A context-aware multivariate linear trend analysis fitted over the historical window indicates a ${trend.toLowerCase()} trajectory for the upcoming 30–31 day forecast horizon. Daily revenue is projected to move with a calculated period growth rate of ${growthRate}%. The overall estimated sales outlook for this forecast period totals ${formattedProjected}.`,
     });
 
     // Section 3: Customer Sentiment Analysis — only if real feedback exists

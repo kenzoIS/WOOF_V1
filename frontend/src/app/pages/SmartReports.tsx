@@ -21,7 +21,6 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ReferenceLine,
 } from "recharts";
 
 export function SmartReports() {
@@ -51,7 +50,52 @@ export function SmartReports() {
   const [showPartialDataModal, setShowPartialDataModal] = useState(false);
   const [showNoDataModal, setShowNoDataModal] = useState(false);
   const [showInvalidDateModal, setShowInvalidDateModal] = useState(false);
+  const [showDateRangeModal, setShowDateRangeModal] = useState(false);
+  const [reportToDelete, setReportToDelete] = useState<SmartReport | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [pendingReportToShow, setPendingReportToShow] = useState<SmartReport | null>(null);
+
+  const calculateDayDiff = (startStr: string, endStr: string): number => {
+    if (!startStr || !endStr) return 0;
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
+    const utcStart = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+    const utcEnd = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+    return Math.round((utcEnd - utcStart) / (1000 * 60 * 60 * 24));
+  };
+
+  const checkDateRange = (start: string, end: string) => {
+    if (start && end && start.length === 10 && end.length === 10) {
+      if (start <= end) {
+        const diff = calculateDayDiff(start, end);
+        if (diff > 31) {
+          setShowDateRangeModal(true);
+        }
+      }
+    }
+  };
+
+  const formatRangeLabel = (startStr?: string, endStr?: string) => {
+    if (!startStr || !endStr) return "Revenue Trend";
+    try {
+      const s = new Date(startStr);
+      const e = new Date(endStr);
+      if (isNaN(s.getTime()) || isNaN(e.getTime())) {
+        return `${startStr} to ${endStr} Revenue Trend`;
+      }
+      if (s.getFullYear() === e.getFullYear()) {
+        const sFmt = s.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        const eFmt = e.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        return `${sFmt} – ${eFmt} Revenue Trend`;
+      }
+      const sFmt = s.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const eFmt = e.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      return `${sFmt} – ${eFmt} Revenue Trend`;
+    } catch {
+      return `${startStr} to ${endStr} Revenue Trend`;
+    }
+  };
 
   const fetchReports = async (selectLatest = false) => {
     try {
@@ -100,6 +144,12 @@ export function SmartReports() {
       return;
     }
 
+    // Modal 4: Date range exceeds 30-31 days
+    if (calculateDayDiff(startDate, endDate) > 31) {
+      setShowDateRangeModal(true);
+      return;
+    }
+
     setIsGenerating(true);
     try {
       const newReport = await generateSmartReport({
@@ -136,23 +186,28 @@ export function SmartReports() {
     }
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteClick = (rep: SmartReport, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (typeof window !== "undefined" && !window.confirm("Are you sure you want to delete this report?")) {
-      return;
-    }
+    setReportToDelete(rep);
+  };
 
+  const handleConfirmDelete = async () => {
+    if (!reportToDelete) return;
+    setIsDeleting(true);
     try {
-      await deleteSmartReport(id);
-      toast.success("Report deleted");
+      await deleteSmartReport(reportToDelete._id);
+      toast.success("Report deleted successfully");
       // Optimistically remove from local list
-      setReports((prev) => prev.filter((rep) => rep._id !== id));
-      if (selectedReport?._id === id) {
+      setReports((prev) => prev.filter((rep) => rep._id !== reportToDelete._id));
+      if (selectedReport?._id === reportToDelete._id) {
         setSelectedReport(null);
       }
+      setReportToDelete(null);
     } catch (err: any) {
       toast.error("Delete failed", { description: err.message });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -204,11 +259,17 @@ export function SmartReports() {
     });
     csvContent += `\n`;
     
-    csvContent += `DAILY TREND PROJECTIONS (30 Days)\n`;
-    csvContent += `Date,Projected Revenue (PHP)\n`;
-    selectedReport.extrapolatedTrends.dates.forEach((date, idx) => {
-      csvContent += `${date},${Math.round(selectedReport.extrapolatedTrends.projectedRevenue[idx])}\n`;
-    });
+    csvContent += `DAILY REVENUE TREND\n`;
+    csvContent += `Date,Actual Revenue (PHP)\n`;
+    if (selectedReport.aggregatedData.dailyHistory && selectedReport.aggregatedData.dailyHistory.length > 0) {
+      selectedReport.aggregatedData.dailyHistory.forEach((h) => {
+        csvContent += `${h.date},${Math.round(h.value)}\n`;
+      });
+    } else {
+      selectedReport.extrapolatedTrends.dates.forEach((date, idx) => {
+        csvContent += `${date},${Math.round(selectedReport.extrapolatedTrends.projectedRevenue[idx])}\n`;
+      });
+    }
     
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -225,10 +286,9 @@ export function SmartReports() {
     window.print();
   };
 
-  // Build chart dataset: historical actuals + 30-day projection on one continuous timeline
+  // Build chart dataset: historical actuals only
   const getChartData = () => {
-    if (!selectedReport) return { data: [], forecastStartDate: null, hasHistory: false };
-    const trends = selectedReport.extrapolatedTrends;
+    if (!selectedReport) return { data: [], hasHistory: false };
     const history = (selectedReport.aggregatedData.dailyHistory ?? []).filter(
       (h) => h.value > 0  // skip zero-value days
     );
@@ -237,44 +297,28 @@ export function SmartReports() {
     const fmt = (d: string) =>
       new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-    if (!hasHistory) {
-      // No history — just show the clean projection
+    if (hasHistory) {
       return {
-        data: trends.dates.map((date, idx) => ({
-          date: fmt(date),
-          projected: Math.round(trends.projectedRevenue[idx]),
+        data: history.map((h) => ({
+          date: fmt(h.date),
+          revenue: Math.round(h.value),
         })),
-        forecastStartDate: null,
-        hasHistory: false,
+        hasHistory: true,
       };
     }
 
-    // Historical actuals
-    const historicalPoints = history.map((h) => ({
-      date: fmt(h.date),
-      actual: h.value,
-      projected: undefined as number | undefined,
-    }));
-
-    // Bridge: last actual value carried into first projected point so lines connect
-    const lastActualVal = history[history.length - 1].value;
-    const forecastStartDate = trends.dates[0] ?? null;
-
-    // Projected points
-    const projectedPoints = trends.dates.map((date, idx) => ({
-      date: fmt(date),
-      actual: idx === 0 ? lastActualVal : undefined,
-      projected: Math.round(trends.projectedRevenue[idx]),
-    }));
-
+    // Graceful fallback for older reports
+    const trends = selectedReport.extrapolatedTrends;
     return {
-      data: [...historicalPoints, ...projectedPoints],
-      forecastStartDate: forecastStartDate ? fmt(forecastStartDate) : null,
-      hasHistory: true,
+      data: (trends?.dates ?? []).map((date, idx) => ({
+        date: fmt(date),
+        revenue: Math.round(trends.projectedRevenue[idx] ?? 0),
+      })),
+      hasHistory: false,
     };
   };
 
-  const { data: chartData, forecastStartDate, hasHistory } = getChartData();
+  const { data: chartData } = getChartData();
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#FFFBFD] p-6 overflow-y-auto space-y-6">
@@ -336,7 +380,11 @@ export function SmartReports() {
                   <input
                     type="date"
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setStartDate(val);
+                      checkDateRange(val, endDate);
+                    }}
                     className="w-full text-xs rounded-xl border border-[#FFD9EC] p-2.5 transition-colors focus:border-[#F53799] focus:outline-none"
                     required
                   />
@@ -346,11 +394,33 @@ export function SmartReports() {
                   <input
                     type="date"
                     value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEndDate(val);
+                      checkDateRange(startDate, val);
+                    }}
                     className="w-full text-xs rounded-xl border border-[#FFD9EC] p-2.5 transition-colors focus:border-[#F53799] focus:outline-none"
                     required
                   />
                 </div>
+              </div>
+
+              {/* Date Horizon Indicator */}
+              <div className="flex items-center justify-between text-[11px] px-0.5 pt-0.5">
+                <span className="text-[#223047] opacity-60">
+                  Forecast Window: <strong className="font-semibold text-[#223047]">30–31 days max</strong>
+                </span>
+                {startDate && endDate && startDate <= endDate && (
+                  <span
+                    className={`font-bold ${
+                      calculateDayDiff(startDate, endDate) > 31
+                        ? "text-red-500 font-extrabold"
+                        : "text-emerald-600"
+                    }`}
+                  >
+                    {calculateDayDiff(startDate, endDate)} days selected
+                  </span>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -433,7 +503,7 @@ export function SmartReports() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={(e) => handleDelete(rep._id, e)}
+                          onClick={(e) => handleDeleteClick(rep, e)}
                           className="px-2 py-1 text-[11px] font-bold rounded-lg hover:bg-red-50 text-red-500 hover:text-red-700 transition-colors"
                         >
                           Delete
@@ -572,76 +642,51 @@ export function SmartReports() {
                   </div>
                 </div>
 
-                {/* Trend chart */}
+                {/* Date Trend Chart (Historical Actuals Only) */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-black uppercase text-[#223047] opacity-50 tracking-wider">
-                      {hasHistory ? "Historical Actuals + 30-Day Forecast" : "30-Day Extrapolated Trend Forecast"}
-                    </h3>
-                    {hasHistory && forecastStartDate && (
-                      <span className="text-[10px] bg-cyan-50 border border-cyan-200 text-cyan-700 px-2 py-0.5 rounded-full font-bold">
-                        Forecast starts {forecastStartDate}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-black uppercase text-[#223047] opacity-60 tracking-wider">
+                        {formatRangeLabel(selectedReport.dateRange?.start, selectedReport.dateRange?.end)}
+                      </h3>
+                      <InfoTooltip label="Daily recorded net revenue transactions across the selected reporting date range." />
+                    </div>
+                    <span className="text-[10px] bg-pink-50 border border-pink-200 text-[#F53799] px-2.5 py-0.5 rounded-full font-bold">
+                      {selectedReport.dateRange?.start} to {selectedReport.dateRange?.end}
+                    </span>
                   </div>
                   <div className="h-[240px] w-full bg-slate-50 border border-slate-100 rounded-xl p-2">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                      <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                         <defs>
-                          <linearGradient id="colorActual" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#F53799" stopOpacity={0.18}/>
-                            <stop offset="95%" stopColor="#F53799" stopOpacity={0}/>
-                          </linearGradient>
-                          <linearGradient id="colorProjected" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.18}/>
-                            <stop offset="95%" stopColor="#06B6D4" stopOpacity={0}/>
+                          <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#F53799" stopOpacity={0.25}/>
+                            <stop offset="95%" stopColor="#F53799" stopOpacity={0.02}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                         <XAxis dataKey="date" fontSize={9} tickLine={false} interval="preserveStartEnd" />
                         <YAxis fontSize={9} tickLine={false} width={52} />
                         <Tooltip
-                          formatter={(value: any, name: string) => [
+                          formatter={(value: any) => [
                             `₱${Number(value).toLocaleString()}`,
-                            name === "actual" ? "Actual Revenue" : "Projected Revenue"
+                            "Actual Revenue"
                           ]}
                         />
                         <Legend
                           wrapperStyle={{ fontSize: 10 }}
-                          formatter={(value) => value === "actual" ? "Actual Revenue (PHP)" : "Projected Revenue (PHP)"}
+                          formatter={() => "Daily Actual Revenue (PHP)"}
                         />
-                        {hasHistory && forecastStartDate && (
-                          <ReferenceLine
-                            x={forecastStartDate}
-                            stroke="#94a3b8"
-                            strokeDasharray="4 3"
-                            label={{ value: "Forecast →", position: "insideTopRight", fontSize: 9, fill: "#64748b" }}
-                          />
-                        )}
-                        {hasHistory && (
-                          <Area
-                            type="monotone"
-                            dataKey="actual"
-                            stroke="#F53799"
-                            strokeWidth={2}
-                            fillOpacity={1}
-                            fill="url(#colorActual)"
-                            connectNulls
-                            dot={false}
-                            name="actual"
-                          />
-                        )}
                         <Area
                           type="monotone"
-                          dataKey="projected"
-                          stroke="#06B6D4"
-                          strokeWidth={hasHistory ? 2 : 2}
-                          strokeDasharray={hasHistory ? "5 3" : undefined}
+                          dataKey="revenue"
+                          stroke="#F53799"
+                          strokeWidth={2.5}
                           fillOpacity={1}
-                          fill="url(#colorProjected)"
-                          connectNulls
-                          dot={false}
-                          name="projected"
+                          fill="url(#colorRevenue)"
+                          dot={{ r: 2.5, fill: "#F53799" }}
+                          activeDot={{ r: 5 }}
+                          name="Daily Actual Revenue"
                         />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -862,6 +907,122 @@ export function SmartReports() {
                 className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-white font-bold py-2 rounded-xl text-xs"
               >
                 Fix Dates
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 4: Date Range Exceeds 30-31 Days */}
+      {showDateRangeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white border-2 border-[#FFD9EC] rounded-3xl p-6 shadow-2xl max-w-md w-full mx-4 space-y-4">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider bg-pink-100 text-[#F53799] px-2.5 py-1 rounded-full">
+                Reporting Horizon Limit
+              </span>
+              <h3 className="text-base font-black text-[#223047] mt-2">
+                Date Range Exceeds 30–31 Days
+              </h3>
+            </div>
+            <p className="text-xs text-[#223047] opacity-80 leading-relaxed">
+              The extrapolated trend forecast model is calibrated specifically for a 30–31 day window. Because calendar months vary (30 or 31 days), reports must be generated within this horizon to ensure statistical accuracy in trend regression.
+            </p>
+            <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-xs space-y-1.5">
+              <div className="flex justify-between text-[#223047]">
+                <span className="opacity-70">Current Selected Range:</span>
+                <span className="font-bold text-[#F53799]">
+                  {calculateDayDiff(startDate, endDate)} days ({startDate} to {endDate})
+                </span>
+              </div>
+              <div className="flex justify-between text-[#223047]">
+                <span className="opacity-70">Allowed Maximum:</span>
+                <span className="font-bold text-emerald-600">30–31 days</span>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  const d = new Date(endDate);
+                  d.setDate(d.getDate() - 30);
+                  const adjustedStart = d.toISOString().slice(0, 10);
+                  setStartDate(adjustedStart);
+                  setShowDateRangeModal(false);
+                  toast.success(`Date range adjusted to 30 days (${adjustedStart} to ${endDate})`);
+                }}
+                className="flex-1 bg-[#F53799] hover:bg-[#D42A7D] text-white font-bold py-2 rounded-xl text-xs"
+              >
+                Auto-Adjust to 30 Days
+              </Button>
+              <Button
+                onClick={() => setShowDateRangeModal(false)}
+                className="flex-1 bg-white border border-[#FFD9EC] hover:bg-slate-50 text-[#223047] font-bold py-2 rounded-xl text-xs"
+              >
+                Adjust Manually
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 5: Delete Confirmation Modal */}
+      {reportToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white border-2 border-red-100 rounded-3xl p-6 shadow-2xl max-w-md w-full mx-4 space-y-4">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider bg-red-100 text-red-600 px-2.5 py-1 rounded-full">
+                Delete Confirmation
+              </span>
+              <h3 className="text-base font-black text-[#223047] mt-2">
+                Delete Smart Report?
+              </h3>
+            </div>
+            <p className="text-xs text-[#223047] opacity-80 leading-relaxed">
+              Are you sure you want to delete <strong className="text-[#223047]">"{reportToDelete.title}"</strong>? This will permanently remove this generated report from your history log.
+            </p>
+            <div className="bg-red-50/50 border border-red-100 rounded-xl p-3 text-xs space-y-1.5">
+              <div className="flex justify-between text-[#223047]">
+                <span className="opacity-70">Date Range:</span>
+                <span className="font-bold text-[#223047]">
+                  {reportToDelete.dateRange.start} to {reportToDelete.dateRange.end}
+                </span>
+              </div>
+              <div className="flex justify-between text-[#223047]">
+                <span className="opacity-70">Generated:</span>
+                <span className="font-semibold text-[#223047]">
+                  {new Date(reportToDelete.generatedAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Yes, Delete Report"
+                )}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setReportToDelete(null)}
+                disabled={isDeleting}
+                className="flex-1 bg-white border border-[#FFD9EC] hover:bg-slate-50 text-[#223047] font-bold py-2 rounded-xl text-xs"
+              >
+                Cancel
               </Button>
             </div>
           </div>
