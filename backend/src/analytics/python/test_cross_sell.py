@@ -184,6 +184,24 @@ class CrossSellTests(unittest.TestCase):
         self.assertTrue(res_type_e["isValid"])
         self.assertEqual(res_type_e["bundleArchetype"], "Pet Meal + Specialty Treat")
 
+        # 11. Logical Guardrails: Human Food cannot bundle with Pet Dental Chews / Knot Bones / Packaged Pet Food
+        res_human_food_dental = evaluate_bundle_guardrails("Pork Tonkatsu", "Dental Chews Chicken Flavor", ["cafe"], ["retail"])
+        self.assertFalse(res_human_food_dental["isValid"])
+        self.assertEqual(res_human_food_dental["bundleArchetype"], "Excluded / Main Meal + Pet Item")
+
+        res_human_drink_knot_bone = evaluate_bundle_guardrails("Iced Caramel Macchiato", "1kg Knot Bone Pet Dental Treats (matcha/milk/bbq)", ["cafe"], ["retail"])
+        self.assertFalse(res_human_drink_knot_bone["isValid"])
+        self.assertEqual(res_human_drink_knot_bone["bundleArchetype"], "Excluded / Beverage + Utility")
+
+        res_rice_meal_wet_food = evaluate_bundle_guardrails("Chicken Cordon Bleu Rice Meal", "Buy 1 Get 1 Goodest Wet Food For Dogs (beef & Liver)", ["cafe"], ["retail"])
+        self.assertFalse(res_rice_meal_wet_food["isValid"])
+        self.assertEqual(res_rice_meal_wet_food["bundleArchetype"], "Excluded / Main Meal + Pet Item")
+
+        # 12. Type F: Retail + Retail items can bundle
+        res_retail_pair = evaluate_bundle_guardrails("Dental Chews Chicken Flavor", "Pedigree Adult Beef Loaf Wet Food", ["retail"], ["retail"])
+        self.assertTrue(res_retail_pair["isValid"])
+        self.assertEqual(res_retail_pair["bundleArchetype"], "Pet Care Essentials")
+
 
 if __name__ == "__main__":
     unittest.main()

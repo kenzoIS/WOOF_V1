@@ -283,6 +283,20 @@ export class AnalyticsController {
     );
   }
 
+  @Get('cross-sell/strategic-proximity')
+  async getStrategicProximity(
+    @Query('forceRefresh') forceRefresh?: string,
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
+  ) {
+    const params = { forceRefresh, dateStart, dateEnd };
+    return this.cached(
+      this.key('cross-sell-strategic-proximity', params),
+      () => this.analyticsService.getStrategicProximity(params),
+      { forceRefresh },
+    );
+  }
+
   @Get('cross-sell/seasonal-bundles')
   async getSeasonalCrossSellBundles(
     @Query('minSupport') minSupport?: string,

@@ -720,6 +720,11 @@ export async function getCrossSell(params?: CrossSellQuery) {
   return fetchApi(`/analytics/cross-sell${query}`);
 }
 
+export async function getStrategicProximity(params?: { forceRefresh?: string; dateStart?: string; dateEnd?: string }) {
+  const query = toQueryString(params);
+  return fetchApi(`/analytics/cross-sell/strategic-proximity${query}`);
+}
+
 export async function getSeasonalCrossSellBundles(params?: CrossSellQuery) {
   const query = toQueryString(params);
   return fetchApi(`/analytics/cross-sell/seasonal-bundles${query}`);

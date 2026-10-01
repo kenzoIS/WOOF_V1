@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from mlxtend.frequent_patterns import fpgrowth, association_rules
 from mlxtend.preprocessing import TransactionEncoder
-from backtest import compute_attach_rate_metrics
+from backtest import compute_attach_rate_metrics, build_basket_index
 
 warnings.filterwarnings('ignore')
 
@@ -441,7 +441,7 @@ KEYWORD_AFFINITIES = [
         "Human food bundles are realistic when items fit the same meal or snack occasion.",
     ),
     (
-        ("groom", "bath", "spa", "trim", "wash", "shampoo"),
+        ("groom", "bath", "spa", "trim", "wash"),
         ("coffee", "latte", "cappuccino", "americano", "tea", "drink", "juice", "smoothie"),
         1.0,
         "Grooming + drink is realistic because the owner can purchase a beverage while waiting for the pet service.",
@@ -487,37 +487,59 @@ KEYWORD_AFFINITIES = [
 # ---------------------------------------------------------
 # Exact 9-Category & High-Level Type Taxonomy
 # ---------------------------------------------------------
-COFFEE_KEYWORDS = (
-    "coffee", "latte", "cappuccino", "americano", "espresso", "macchiato", "mocha", "brew"
-)
-NON_CAFFEINE_KEYWORDS = (
-    "non-caffeine", "tea", "matcha", "frappe", "juice", "smoothie", "beverage", "drink", "chocolate", "iced tea"
-)
-PASTA_SNACK_KEYWORDS = (
-    "pasta", "snack", "sandwich", "waffle", "fries", "burger", "spaghetti", "carbonara", "bread", "toast", "pancake", "muffin"
-)
-RICE_MEAL_KEYWORDS = (
-    "rice", "meal", "pork", "chicken", "beef", "rice bowl", "cordon bleu"
-)
-GROOMING_KEYWORDS = (
-    "groom", "bath", "spa", "trim", "wash", "cut", "styling", "nail", "paw"
-)
-PET_HOTEL_KEYWORDS = (
-    "hotel", "boarding", "daycare", "stay", "kennel"
-)
-EVENTS_KEYWORDS = (
-    "event", "party", "barkday", "booking"
-)
 PET_BAKERY_KEYWORDS = (
-    "pupcake", "puppuccino", "woofle", "cat bento", "bento cake", "pet cake",
-    "pet bakery", "dog cake", "cat cake", "pup cake", "puppaccino", "donut", "doggie pizza", "pizza"
-)
-PET_SUPPLIES_KEYWORDS = (
-    "shampoo", "conditioner", "soap", "diaper", "toy", "chew", "brush", "comb",
-    "pet food", "kibble", "cologne", "spray", "treat", "dental", "litter", "leash", "harness", "wet food", "dry food"
+    "pupcake", "pupcakes", "puppuccino", "puppaccino", "woofle", "woofles",
+    "cat bento", "bento cake", "pet cake", "dog cake", "cat cake", "pup cake",
+    "doggie pizza", "dog pizza", "pet pizza", "pet donut", "dog donut", "cat donut"
 )
 
-DOG_KEYWORDS = ("dog", "pup", "woof", "canine", "canines", "pupp")
+PET_RETAIL_INDICATORS = (
+    "dog", "cat", "puppy", "kitten", "pet", "pets", "canine", "feline",
+    "chew", "chews", "bone", "bones", "knot bone", "dental", "rawhide",
+    "kibble", "wet food", "dry food", "canned food", "pouch", "loaf",
+    "shampoo", "conditioner", "soap", "cologne", "spray", "tick", "flea", "mange",
+    "diaper", "diapers", "pad", "pads", "pee pad", "litter", "scoop",
+    "leash", "harness", "collar", "toy", "toys", "ball", "rope",
+    "brush", "comb", "nail clipper", "bowl", "feeder", "carrier", "cage",
+    "treat", "treats", "jerky", "stick", "sticks", "snack dog", "pet treat",
+    "goodest", "pedigree", "whiskas", "royal canin", "sheba", "aozi", "smartheart",
+    "st roche", "bearing", "inaba", "ciao", "churu", "catnip"
+)
+
+GROOMING_KEYWORDS = (
+    "groom", "grooming", "bath", "blowdry", "trim", "wash", "cut",
+    "styling", "nail", "paw", "ear clean", "dematting"
+)
+
+PET_HOTEL_KEYWORDS = (
+    "hotel", "boarding", "daycare", "day care", "stay", "kennel", "overnight"
+)
+
+EVENTS_KEYWORDS = (
+    "event", "barkday", "party", "booking", "celebration"
+)
+
+COFFEE_KEYWORDS = (
+    "coffee", "latte", "cappuccino", "americano", "espresso", "macchiato",
+    "mocha", "brew", "flat white", "cold brew", "long black", "ristretto"
+)
+
+NON_CAFFEINE_KEYWORDS = (
+    "non-caffeine", "tea", "matcha", "frappe", "juice", "smoothie", "beverage",
+    "drink", "chocolate", "iced tea", "lemonade", "shake", "cooler", "soda"
+)
+
+PASTA_SNACK_KEYWORDS = (
+    "pasta", "snack", "sandwich", "waffle", "fries", "burger", "spaghetti",
+    "carbonara", "bread", "toast", "pancake", "muffin", "nachos", "quesadilla", "clubhouse"
+)
+
+RICE_MEAL_KEYWORDS = (
+    "rice", "meal", "rice bowl", "cordon bleu", "tonkatsu", "silog", "tapsilog",
+    "tocilog", "pork", "beef", "chicken", "curry", "adobo", "sisig"
+)
+
+DOG_KEYWORDS = ("dog", "pup", "woof", "canine", "canines", "pupp", "puppy")
 CAT_KEYWORDS = ("cat", "kitten", "feline", "meow", "purr", "kitty")
 
 
@@ -539,45 +561,62 @@ def detect_species(item_name):
 
 def get_item_category(item_name, sectors=None):
     """
-    Classifies item into one of 9 exact categories:
-    1. Coffee
-    2. Non-Caffeine
-    3. Pasta/Snacks
-    4. Rice Meals
-    5. Grooming
-    6. Pet Hotel
-    7. Events
-    8. Pet Bakery
-    9. Pet Supplies
+    Classifies item into one of 9 exact categories with strict domain boundaries:
+    1. Coffee (Human Drink)
+    2. Non-Caffeine (Human Drink)
+    3. Pasta/Snacks (Human Food)
+    4. Rice Meals (Human Food)
+    5. Grooming (Pet Service)
+    6. Pet Hotel (Pet Service)
+    7. Events (Pet Service)
+    8. Pet Bakery (Pet Treat - Cafe dine-in safe)
+    9. Pet Supplies (Pet Retail - supplies, dental chews, knot bones, kibble, wet food)
     """
     name = str(item_name or "").lower()
+    primary_sector = normalize_sector((sectors or ["unknown"])[0]) if sectors else "unknown"
 
+    # 1. Fresh Pet Bakery (Dog/Cat cafe items)
     if any(k in name for k in PET_BAKERY_KEYWORDS):
         return "Pet Bakery"
-    if any(k in name for k in NON_CAFFEINE_KEYWORDS):
-        return "Non-Caffeine"
-    if any(k in name for k in COFFEE_KEYWORDS):
-        return "Coffee"
-    if any(k in name for k in RICE_MEAL_KEYWORDS):
-        return "Rice Meals"
-    if any(k in name for k in PASTA_SNACK_KEYWORDS):
-        return "Pasta/Snacks"
-    if any(k in name for k in GROOMING_KEYWORDS):
+
+    # 2. Services Sector or Keywords (Must take priority over retail keywords like "dog" in "dog grooming")
+    if primary_sector == "services":
+        if any(k in name for k in PET_HOTEL_KEYWORDS):
+            return "Pet Hotel"
+        if any(k in name for k in EVENTS_KEYWORDS):
+            return "Events"
+        return "Grooming"
+
+    if any(k in name for k in GROOMING_KEYWORDS) or "spa" in name.split():
         return "Grooming"
     if any(k in name for k in PET_HOTEL_KEYWORDS):
         return "Pet Hotel"
     if any(k in name for k in EVENTS_KEYWORDS):
         return "Events"
-    if any(k in name for k in PET_SUPPLIES_KEYWORDS):
+
+    # 3. Check Pet Retail Indicators or Retail Sector
+    # Items with pet indicators (bones, chews, pet food, wet food, kibble) cannot become Human Food/Drink
+    is_pet_item = (
+        primary_sector == "retail"
+        or any(k in name for k in PET_RETAIL_INDICATORS)
+    )
+
+    if is_pet_item:
         return "Pet Supplies"
 
-    primary_sector = normalize_sector((sectors or ["unknown"])[0]) if sectors else "unknown"
+    # 4. Human Cafe Food & Drink
+    if any(k in name for k in COFFEE_KEYWORDS):
+        return "Coffee"
+    if any(k in name for k in NON_CAFFEINE_KEYWORDS):
+        return "Non-Caffeine"
+    if any(k in name for k in RICE_MEAL_KEYWORDS):
+        return "Rice Meals"
+    if any(k in name for k in PASTA_SNACK_KEYWORDS):
+        return "Pasta/Snacks"
+
+    # 5. Sector-based fallbacks
     if primary_sector == "cafe":
         return "Coffee"
-    if primary_sector == "services":
-        return "Grooming"
-    if primary_sector == "retail":
-        return "Pet Supplies"
 
     return "Pet Supplies"
 
@@ -585,11 +624,11 @@ def get_item_category(item_name, sectors=None):
 def get_high_level_type(category):
     """
     Maps 9 categories into 5 High-Level Types:
-    - 'Human Drink'
-    - 'Human Food'
-    - 'Pet Service'
-    - 'Pet Treat'
-    - 'Pet Care / Utility'
+    - 'Human Drink': Coffee, Non-Caffeine
+    - 'Human Food': Pasta/Snacks, Rice Meals
+    - 'Pet Service': Grooming, Pet Hotel, Events
+    - 'Pet Bakery': Pet Bakery (Cafe dine-in treats)
+    - 'Pet Supplies': Pet Supplies (Retail supplies, chews, packaged foods, hygiene)
     """
     if category in ("Coffee", "Non-Caffeine"):
         return "Human Drink"
@@ -598,15 +637,20 @@ def get_high_level_type(category):
     if category in ("Grooming", "Pet Hotel", "Events"):
         return "Pet Service"
     if category == "Pet Bakery":
-        return "Pet Treat"
+        return "Pet Bakery"
     if category == "Pet Supplies":
-        return "Pet Care / Utility"
+        return "Pet Supplies"
     return "Unknown"
 
 
 def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, offer_sectors=None):
     """
     Evaluates WOOF business guardrails and maps pairs to practical bundle archetypes.
+    Ensures 100% logical and operational consistency:
+    - Human food and beverages can NEVER bundle with retail pet supplies, dental chews, knot bones, kibble, wet food, or hygiene chemicals.
+    - Dog and Cat items can NEVER be mixed (Species Mismatch).
+    - Human Drink can ONLY bundle with Pet Bakery as 'Pamper Both / Duo Experience' or with Pet Service as 'Cafe + Service Waiting Combo'.
+    - Human Food (meals/pasta) can only bundle with Human Drinks/Food or Pet Services.
     """
     anchor_cat = get_item_category(anchor_name, anchor_sectors)
     offer_cat = get_item_category(offer_name, offer_sectors)
@@ -617,61 +661,7 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
     anchor_sp = detect_species(anchor_name)
     offer_sp = detect_species(offer_name)
 
-    # ---------------------------------------------------------
-    # ❌ 1. Same-Category / Substitute Exclusion Rule
-    # Same-domain pairs are allowed when they map to a practical bundle archetype.
-    # ---------------------------------------------------------
-    # ---------------------------------------------------------
-    # ❌ 2. Human Beverage + Utility / Retail Restriction Rule
-    # Human Drink + Pet Supplies is BANNED.
-    # ---------------------------------------------------------
-    is_beverage_utility_pair = (
-        (anchor_type == "Human Drink" and offer_cat == "Pet Supplies")
-        or (offer_type == "Human Drink" and anchor_cat == "Pet Supplies")
-    )
-    if is_beverage_utility_pair:
-        return {
-            "isValid": False,
-            "exclusionReason": "Human Beverages cannot be bundled with Pet Supplies/Utilities.",
-            "categoryCompat": 0.0,
-            "speciesMatch": 1.0,
-            "bundleArchetype": "Excluded / Beverage + Utility",
-            "anchorCategory": anchor_cat,
-            "offerCategory": offer_cat,
-            "anchorType": anchor_type,
-            "offerType": offer_type,
-            "anchorSpecies": anchor_sp,
-            "offerSpecies": offer_sp,
-        }
-
-    # ---------------------------------------------------------
-    # ❌ 3. Human Main Meals (Rice Meals / Pasta) + Pet Items Exclusion Rule
-    # Human Main Dishes (Rice Meals / Pasta) cannot be bundled with Pet Supplies/Utilities or Pet Treats/Food.
-    # Prevents cross-contaminated pairings (e.g. Rice Meal + Dental Treats or Anti-Mange Shampoo).
-    # ---------------------------------------------------------
-    is_main_meal_pet_pair = (
-        (anchor_cat in ("Rice Meals", "Pasta/Snacks") and offer_type in ("Pet Care / Utility", "Pet Treat"))
-        or (offer_cat in ("Rice Meals", "Pasta/Snacks") and anchor_type in ("Pet Care / Utility", "Pet Treat"))
-    )
-    if is_main_meal_pet_pair:
-        return {
-            "isValid": False,
-            "exclusionReason": "Human Main Meals (Rice Meals/Pasta) cannot be bundled with Pet Supplies or Pet Treats.",
-            "categoryCompat": 0.0,
-            "speciesMatch": 1.0,
-            "bundleArchetype": "Excluded / Main Meal + Pet Item",
-            "anchorCategory": anchor_cat,
-            "offerCategory": offer_cat,
-            "anchorType": anchor_type,
-            "offerType": offer_type,
-            "anchorSpecies": anchor_sp,
-            "offerSpecies": offer_sp,
-        }
-
-    # ---------------------------------------------------------
-    # ❌ 4. Species Mismatch Guardrail Rule
-    # Dog item + Cat item is BANNED.
-    # ---------------------------------------------------------
+    # ❌ 1. Species Mismatch Guardrail Rule (Dog + Cat is BANNED)
     if anchor_sp != "neutral" and offer_sp != "neutral" and anchor_sp != offer_sp:
         return {
             "isValid": False,
@@ -687,15 +677,56 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
             "offerSpecies": offer_sp,
         }
 
+    # ❌ 2. Human Beverage + Pet Retail / Supplies / Chews Exclusion Rule
+    is_beverage_pet_supplies_pair = (
+        (anchor_type == "Human Drink" and offer_type == "Pet Supplies")
+        or (offer_type == "Human Drink" and anchor_type == "Pet Supplies")
+    )
+    if is_beverage_pet_supplies_pair:
+        return {
+            "isValid": False,
+            "exclusionReason": "Human Beverages cannot be bundled with Pet Supplies, Dental Chews, or Pet Food.",
+            "categoryCompat": 0.0,
+            "speciesMatch": 1.0,
+            "bundleArchetype": "Excluded / Beverage + Utility",
+            "anchorCategory": anchor_cat,
+            "offerCategory": offer_cat,
+            "anchorType": anchor_type,
+            "offerType": offer_type,
+            "anchorSpecies": anchor_sp,
+            "offerSpecies": offer_sp,
+        }
+
+    # ❌ 3. Human Food + Pet Items Exclusion Rule
+    # Human Food (Rice Meals / Pasta / Snacks) cannot be bundled with Pet Supplies, Dental Chews, or Pet Bakery treats.
+    is_human_food_pet_pair = (
+        (anchor_type == "Human Food" and offer_type in ("Pet Supplies", "Pet Bakery"))
+        or (offer_type == "Human Food" and anchor_type in ("Pet Supplies", "Pet Bakery"))
+    )
+    if is_human_food_pet_pair:
+        return {
+            "isValid": False,
+            "exclusionReason": "Human Food cannot be bundled with Pet Supplies, Dental Chews, or Pet Treats.",
+            "categoryCompat": 0.0,
+            "speciesMatch": 1.0,
+            "bundleArchetype": "Excluded / Main Meal + Pet Item",
+            "anchorCategory": anchor_cat,
+            "offerCategory": offer_cat,
+            "anchorType": anchor_type,
+            "offerType": offer_type,
+            "anchorSpecies": anchor_sp,
+            "offerSpecies": offer_sp,
+        }
+
     # ---------------------------------------------------------
-    # 5. Valid Bundle Archetypes (isValid = True)
+    # Valid Bundle Archetypes
     # ---------------------------------------------------------
     types = {anchor_type, offer_type}
     cats = {anchor_cat, offer_cat}
 
     archetype = None
 
-    # ☕ Type A: "Human Cafe Combo" (Human Drink + Human Food)
+    # ☕ Type A: Human Cafe Pairs
     if anchor_type == "Human Drink" and offer_type == "Human Drink":
         archetype = "Beverage Pair / Companion Drinks"
 
@@ -705,8 +736,8 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
     elif types == {"Human Drink", "Human Food"}:
         archetype = "Human Cafe Combo"
 
-    # 🐶 Type B: "Pamper Both / Duo Experience" (Human Drink + Pet Bakery)
-    elif "Pet Treat" in types and "Human Drink" in types:
+    # 🐶 Type B: "Pamper Both / Duo Experience" (Human Drink + Pet Bakery only)
+    elif types == {"Human Drink", "Pet Bakery"}:
         archetype = "Pamper Both / Duo Experience"
 
     # ⏳ Type C: "Cafe + Service Waiting Combo" (Human Drink/Food + Pet Service)
@@ -714,21 +745,35 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
         archetype = "Cafe + Service Waiting Combo"
 
     # ✂️ Type D: "Service + Aftercare / Reward" (Pet Service + Pet Supplies OR Pet Bakery)
-    elif "Pet Service" in types and ("Pet Care / Utility" in types or "Pet Treat" in types):
+    elif "Pet Service" in types and ("Pet Supplies" in types or "Pet Bakery" in types):
         archetype = "Service + Aftercare / Reward"
 
     elif anchor_type == "Pet Service" and offer_type == "Pet Service":
         archetype = "Pet Service Package"
 
     # 🍖 Type E: "Pet Meal + Specialty Treat" (Pet Supplies + Pet Bakery)
-    elif cats == {"Pet Supplies", "Pet Bakery"} or types == {"Pet Care / Utility", "Pet Treat"}:
+    elif types == {"Pet Supplies", "Pet Bakery"}:
         archetype = "Pet Meal + Specialty Treat"
 
-    elif anchor_type == "Pet Care / Utility" and offer_type == "Pet Care / Utility":
+    # 🛍️ Type F: "Pet Care Essentials" (Pure Retail + Retail)
+    elif anchor_type == "Pet Supplies" and offer_type == "Pet Supplies":
         archetype = "Pet Care Essentials"
 
     else:
-        archetype = "Cross-Category Experience"
+        # Reject any other cross-domain combinations that are not explicitly approved
+        return {
+            "isValid": False,
+            "exclusionReason": "Cross-domain pairing does not match any approved operational archetype.",
+            "categoryCompat": 0.0,
+            "speciesMatch": 1.0,
+            "bundleArchetype": "Excluded / Incompatible Categories",
+            "anchorCategory": anchor_cat,
+            "offerCategory": offer_cat,
+            "anchorType": anchor_type,
+            "offerType": offer_type,
+            "anchorSpecies": anchor_sp,
+            "offerSpecies": offer_sp,
+        }
 
     compat_by_archetype = {
         "Cafe + Service Waiting Combo": 1.0,
@@ -737,16 +782,15 @@ def evaluate_bundle_guardrails(anchor_name, offer_name, anchor_sectors=None, off
         "Human Cafe Combo": 0.92,
         "Pet Meal + Specialty Treat": 0.90,
         "Pet Service Package": 0.86,
-        "Pet Care Essentials": 0.82,
+        "Pet Care Essentials": 0.84,
         "Beverage Pair / Companion Drinks": 0.80,
         "Human Food Combo": 0.78,
-        "Cross-Category Experience": 0.62,
     }
 
     return {
         "isValid": True,
         "exclusionReason": None,
-        "categoryCompat": compat_by_archetype.get(archetype, 0.62),
+        "categoryCompat": compat_by_archetype.get(archetype, 0.75),
         "speciesMatch": 1.0,
         "bundleArchetype": archetype,
         "anchorCategory": anchor_cat,
@@ -996,6 +1040,8 @@ def build_low_association_bundles(
                 bundle_item,
                 confidence,
                 business_fit_score,
+                known_anchor_count=item_stats[anchor]["basketCount"],
+                known_both_count=cooccurrences,
             )
 
             margin_percent = pricing_fields.get("projectedMarginPercent")
@@ -1149,6 +1195,8 @@ def run_cross_sell(baskets, config=None):
             
         multi_item_baskets = [b for b in baskets if len(b['items']) > 1]
         multi_item_baskets.sort(key=lambda x: x.get("date") or "1970-01-01T00:00:00.000Z")
+        if len(multi_item_baskets) > 5000:
+            multi_item_baskets = multi_item_baskets[-5000:]
         
         split_idx = int(len(multi_item_baskets) * 0.8)
         train_baskets = multi_item_baskets[:split_idx]
@@ -1187,6 +1235,8 @@ def run_cross_sell(baskets, config=None):
             item_prices,
             item_economics,
         )
+
+        basket_index = build_basket_index(dataset)
 
         unique_products = sorted({item for basket in dataset for item in basket})
         matrix_cells = len(dataset) * len(unique_products)
@@ -1302,6 +1352,7 @@ def run_cross_sell(baskets, config=None):
                 item_b,
                 round(float(row['confidence']), 4),
                 biz_fit_score,
+                basket_index=basket_index,
             )
 
             margin_percent = pricing_fields.get("projectedMarginPercent")
@@ -1335,7 +1386,8 @@ def run_cross_sell(baskets, config=None):
                 and round(float(row['lift']), 2) >= 1.20
             )
 
-            bundle_basket_count = sum(1 for b in dataset if item_b in b) if dataset else 0
+            bundle_key = str(item_b).strip().lower()
+            bundle_basket_count = len(basket_index.get(bundle_key, set())) if basket_index and bundle_key in basket_index else (sum(1 for b in dataset if item_b in b) if dataset else 0)
             bundle_support = round(bundle_basket_count / len(dataset), 4) if dataset else round(float(row['support']), 4)
             kulc, ir = compute_null_invariant_metrics(anchor_support, bundle_support, pair_support)
 

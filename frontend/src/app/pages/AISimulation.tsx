@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { BundleArchive, BundlePlanningContext, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
+import { BundleArchive, BundlePlanningContext, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getStrategicProximity, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import { InfoTooltip } from "../components/InfoTooltip";
@@ -343,6 +343,9 @@ export function AISimulation() {
   const [onlySignificant, setOnlySignificant] = useState(false);
   const [bundlePage, setBundlePage] = useState(1);
   const [proximityPage, setProximityPage] = useState(1);
+  const [backendProximity, setBackendProximity] = useState<any[]>([]);
+  const [isProximityLoading, setIsProximityLoading] = useState(true);
+  const [proximityRefreshCounter, setProximityRefreshCounter] = useState(0);
   const [selectedCandidateForDrawer, setSelectedCandidateForDrawer] = useState<DrawerBundleCandidate | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
@@ -747,6 +750,61 @@ export function AISimulation() {
     selectedHeaderRange.end,
     selectedHeaderRange.start,
   ]);
+
+  // Load Strategic Proximity strictly from backend analytics engine
+  useEffect(() => {
+    let cancelled = false;
+    setIsProximityLoading(true);
+
+    getStrategicProximity({
+      forceRefresh: proximityRefreshCounter > 0 ? "true" : undefined,
+      dateStart: selectedHeaderRange.start,
+      dateEnd: selectedHeaderRange.end,
+    })
+      .then((res: any) => {
+        if (!cancelled && res?.recommendations) {
+          setBackendProximity(res.recommendations);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to fetch strategic proximity recommendations:", err);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsProximityLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    proximityRefreshCounter,
+    selectedHeaderRange.start,
+    selectedHeaderRange.end,
+  ]);
+
+  // Automatically recalibrate Strategic Proximity whenever new data is inserted (CSV upload, POS transactions, ETL)
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
+      const eventType = customEvent.detail?.type;
+      if (
+        !eventType ||
+        eventType === "upload_processed" ||
+        eventType === "etl_completed" ||
+        eventType === "transaction_ingested" ||
+        eventType === "forecast_ready"
+      ) {
+        setProximityRefreshCounter((prev) => prev + 1);
+      }
+    };
+
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => {
+      window.removeEventListener("woof:realtime", handleRealtime);
+    };
+  }, []);
 
   const seasonalBundleQuery = useMemo(() => ({
     minSupport: (debouncedSupportThreshold / 100).toFixed(2),
@@ -1423,245 +1481,22 @@ export function AISimulation() {
     }
   }, [bundleCategoryFilter, bundleCategoryOptions]);
 
-  const DEFAULT_PROXIMITY_RECOMMENDATIONS = useMemo(() => [
-    {
-      pairing: "Dog Shampoo + Dog Toothbrushes",
-      advice: "Position these items in the same aisle or on adjacent end-caps to maximize impulse purchases. Routine pet hygiene shoppers demonstrate strong co-attachment when items are in close physical proximity.",
-      score: 92,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & E-Commerce)",
-      rank: 1,
-    },
-    {
-      pairing: "Pet Treats + Chew Toys",
-      advice: "Display chew toys directly beside high-frequency pet treat canisters. Customers purchasing rewards for their pets demonstrate an 87% co-purchase affinity when items are merchandised together on snack racks.",
-      score: 87,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & TikTok Shop)",
-      rank: 2,
-    },
-    {
-      pairing: "Dog Collar + Leash",
-      advice: "Hang complementary leashes adjacent to matching collars at eye-level. Immediate proximity removes visual search friction and drives immediate complete-set upgrades.",
-      score: 94,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (Shopee Bestseller & POS)",
-      rank: 3,
-    },
-    {
-      pairing: "Food Bowls + Treat Containers",
-      advice: "Group durable feeding accessories together on central display tables. Complementary home essentials stimulate basket enlargement when merchandised in close proximity.",
-      score: 78,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & E-Commerce)",
-      rank: 4,
-    },
-    {
-      pairing: "Pet Grooming Wipes + Paw Balm",
-      advice: "Place wellness and quick-care wipes next to specialty paw balms. Co-locating maintenance hygiene goods yields a 3.4x sales lift over isolated shelf placement.",
-      score: 85,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (TikTok Shop Trending & POS)",
-      rank: 5,
-    },
-    {
-      pairing: "Dog Toys + Training Treats",
-      advice: "Position interactive training treats right beside puzzle and chew toys. Pet owners purchasing mental stimulation toys have high propensity to purchase reward treats.",
-      score: 89,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & Shopee)",
-      rank: 6,
-    },
-    {
-      pairing: "Cat Wet Food Pouches + Cat Creamy Treats",
-      advice: "Feature creamy squeeze treats on strip-hangers directly in front of premium wet food cans. High-frequency cat owners routinely add squeeze treats as basket-fillers.",
-      score: 91,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (Shopee Bestseller & POS)",
-      rank: 7,
-    },
-    {
-      pairing: "Anti-Tick & Flea Spray + Slicker Brush",
-      advice: "Position shedding slicker brushes alongside coat parasite defense sprays. Customers treating skin and coat issues actively look for physical detangling tools simultaneously.",
-      score: 88,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & E-Commerce)",
-      rank: 8,
-    },
-    {
-      pairing: "Cat Litter Sand + Litter Deodorizer Scoop",
-      advice: "Place ergonomic litter scoops and carbon deodorizing beads on the shelf tier immediately above heavy litter sacks for instant cross-grab convenience.",
-      score: 93,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & TikTok Shop)",
-      rank: 9,
-    },
-    {
-      pairing: "Knot Bone Chew + Dental Chews",
-      advice: "Merchandise rawhide-free knot bones and multi-flavor dental sticks together in the oral care section. Co-placement drives dual-purchase for aggressive chewers.",
-      score: 86,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & Shopee)",
-      rank: 10,
-    },
-    {
-      pairing: "Pet Stain Remover + Odor Eliminator Spray",
-      advice: "Position enzymatic urine stain removers beside ambient odor neutralizers on cleaning supply shelves. Home maintenance shoppers prefer grabbing a complete hygiene duo.",
-      score: 84,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (E-Commerce & POS)",
-      rank: 11,
-    },
-    {
-      pairing: "Stainless Steel Bowl + Silicone Spill Mat",
-      advice: "Stack non-slip silicone feeding mats directly under stainless steel bowls. Visualizing the complete feeding station encourages instant add-on purchases.",
-      score: 82,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (Shopee Bestseller & POS)",
-      rank: 12,
-    },
-    {
-      pairing: "Puppy Kibble + Goat Milk Replacer",
-      advice: "Merchandise weaning puppy milk powders directly above puppy dry kibble bags. New puppy owners have high anxiety around nutrition transitions and willingly bundle both.",
-      score: 90,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & TikTok Shop)",
-      rank: 13,
-    },
-    {
-      pairing: "Nail Clipper + Styptic Powder",
-      advice: "Clip styptic quick-stop powder bottles directly onto the nail clipper hanging peg. Safety reassurance prompts customers to purchase the powder as an essential safety companion.",
-      score: 87,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & E-Commerce)",
-      rank: 14,
-    },
-    {
-      pairing: "Catnip Mist Spray + Corrugated Scratching Board",
-      advice: "Place liquid catnip infusion sprays adjacent to cardboard scratchers. Displaying them together shows owners how to attract cats to the board, boosting joint conversion.",
-      score: 91,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (Shopee & TikTok Shop)",
-      rank: 15,
-    },
-    {
-      pairing: "Dog Harness + Vehicle Safety Seatbelt Tether",
-      advice: "Hang universal car seatbelt buckles directly beside adjustable walking harnesses. Outdoor lifestyle pet parents view travel safety tethering as an immediate logical add-on.",
-      score: 86,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (Shopee Bestseller & POS)",
-      rank: 16,
-    },
-    {
-      pairing: "Hairball Remedy Gel + Indoor Cat Grass Kit",
-      advice: "Group hairball lubrication paste with fresh cat grass planting kits on feline digestive health displays. Dual natural remedy appeal increases overall retail basket value.",
-      score: 83,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & E-Commerce)",
-      rank: 17,
-    },
-    {
-      pairing: "Ear Cleansing Wash + Cotton Tip Applicators",
-      advice: "Co-locate antimicrobial ear cleaning flush bottles with medical-grade bamboo cotton swabs. Providing the applicator next to the liquid solution eliminates purchase hesitation.",
-      score: 88,
-      color: "#F59E0B",
-      sectorPair: "Retail + Retail",
-      channelSource: "Omnichannel (POS & TikTok Shop)",
-      rank: 18,
-    },
-  ], []);
-
   const proximityRecommendations = useMemo(() => {
-    const activeSource = (crossSellDataAllDay?.bundleCandidates?.length ? crossSellDataAllDay : crossSellData);
-    const candidates = activeSource?.bundleCandidates || [];
-
-    const allDayBundles = candidates.map((candidate) => {
-      const pA = candidate.itemAPrice || 0;
-      const pB = candidate.itemBPrice || 0;
-      const sectors = [
-        firstSector(candidate.antecedentSectors),
-        firstSector(candidate.consequentSectors),
-      ];
-      return {
-        bundle: formatPair(candidate.anchorItem, candidate.bundleItem),
-        itemA: candidate.anchorItem,
-        itemB: candidate.bundleItem,
-        confidence: Math.round((candidate.confidence || 0) * 100),
-        lift: candidate.lift || 0,
-        score: (candidate as any).synergyScore !== undefined && (candidate as any).synergyScore !== null ? Math.round((candidate as any).synergyScore) : Math.round((candidate.opportunityScore || 0) * 100),
-        sectors,
-        sectorPair: "Retail + Retail",
-        regularPrice: candidate.regularPrice || (pA + pB),
-        bundlePrice: candidate.bundlePrice || (pA + pB) * 0.85,
-        savings: candidate.savings || ((pA + pB) * 0.15),
-        bundleArchetype: (candidate as any).bundleArchetype,
-        synergyScore: (candidate as any).synergyScore
-      };
-    });
-
-    // Strict Filter: BOTH items must be Retail only! (Retail + Retail on store shelves)
-    const retailShelfBundles = allDayBundles.filter((b) => {
-      const s0 = (b.sectors[0] || "").toLowerCase();
-      const s1 = (b.sectors[1] || "").toLowerCase();
-      return !isExcludedPair(b.itemA, b.itemB, b.bundleArchetype) && s0 === "retail" && s1 === "retail";
-    });
-
-    const liveRetailRecommendations = retailShelfBundles.map((bundle, index) => {
-      const confidenceStr = bundle.confidence ? `${bundle.confidence}%` : "High";
-      const liftStr = bundle.lift ? `${bundle.lift.toFixed(1)}x` : "significant";
-      const advice = `Place "${bundle.itemA}" and "${bundle.itemB}" on the same or adjacent retail shelves. Customers who purchase ${bundle.itemA} have a ${confidenceStr} probability of buying ${bundle.itemB}, representing a ${liftStr} lift over random chance. Physical shelf proximity captures active purchase intent and enlarges basket size.`;
-
-      const synergyVal = bundle.synergyScore !== undefined && bundle.synergyScore !== null
-        ? Math.round(bundle.synergyScore)
-        : (bundle.score || 85);
-
-      return {
-        pairing: bundle.bundle,
-        advice,
-        score: synergyVal,
-        color: "#F59E0B",
-        sectorPair: "Retail + Retail",
-        channelSource: "Live Store & E-Commerce Transactions",
-        rank: index + 1,
-        regularPrice: bundle.regularPrice,
-        bundlePrice: bundle.bundlePrice,
-        savings: bundle.savings,
-      };
-    });
-
-    // Merge live retail candidates with omnichannel catalog pairs (avoiding duplicate pairings)
-    const seenPairings = new Set<string>();
-    const combined: typeof DEFAULT_PROXIMITY_RECOMMENDATIONS = [];
-    for (const rec of [...liveRetailRecommendations, ...DEFAULT_PROXIMITY_RECOMMENDATIONS]) {
-      const key = rec.pairing.toLowerCase().trim();
-      if (!seenPairings.has(key)) {
-        seenPairings.add(key);
-        combined.push({
-          ...rec,
-          rank: combined.length + 1,
-        });
-      }
+    if (!Array.isArray(backendProximity) || backendProximity.length === 0) {
+      return [];
     }
-
-    return combined;
-  }, [crossSellDataAllDay, crossSellData, DEFAULT_PROXIMITY_RECOMMENDATIONS]);
+    return backendProximity.map((rec, index) => ({
+      pairing: rec.pairing || "",
+      itemA: rec.itemA || "",
+      itemB: rec.itemB || "",
+      advice: rec.advice || "",
+      score: rec.score || 85,
+      color: rec.color || "#F59E0B",
+      sectorPair: rec.sectorPair || "Retail + Retail",
+      channelSource: rec.channelSource || "Omnichannel (POS & E-Commerce)",
+      rank: rec.rank || (index + 1),
+    }));
+  }, [backendProximity]);
 
   const proximityItemsPerPage = 6;
   const totalProximityPages = Math.max(1, Math.ceil(proximityRecommendations.length / proximityItemsPerPage));
@@ -4363,37 +4198,46 @@ export function AISimulation() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
-              {proximityRecommendations.length === 0 && (
+              {isProximityLoading ? (
+                <div className="col-span-1 lg:col-span-2 flex flex-col items-center justify-center p-12 text-center bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl">
+                  <RefreshCw className="w-8 h-8 text-[#06B6D4] animate-spin mb-3" />
+                  <div className="text-sm font-bold text-[#223047]">Loading Strategic Proximity...</div>
+                  <p className="text-xs text-[#223047] opacity-70 max-w-md mt-1">
+                    Fetching AI-driven shelf merchandising intelligence from backend analytics engine...
+                  </p>
+                </div>
+              ) : proximityRecommendations.length === 0 ? (
                 <div className="lg:col-span-2 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 text-sm text-[#223047] opacity-70">
                   No proximity recommendations are available for the selected Header Filter range. The placement advice will appear once FP-Growth rules or bundle candidates are detected from the ingested baskets.
                 </div>
-              )}
-              {paginatedProximity.map((rec, idx) => (
-                <div
-                  key={idx}
-                  className="bg-gradient-to-br from-white to-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 hover:border-[#F53799] transition-all"
-                >
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="text-xs text-[#06B6D4] font-semibold tracking-wide">RETAIL SHELF PAIRING</span>
-                      {(rec as any).channelSource && (
-                        <Badge variant="outline" className="border-[#FFD9EC] text-[#F53799] bg-[#FFF2FA] text-[10px] px-2 py-0">
-                          {(rec as any).channelSource}
-                        </Badge>
-                      )}
+              ) : (
+                paginatedProximity.map((rec, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-gradient-to-br from-white to-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4 hover:border-[#F53799] transition-all"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="text-xs text-[#06B6D4] font-semibold tracking-wide">RETAIL SHELF PAIRING</span>
+                        {(rec as any).channelSource && (
+                          <Badge variant="outline" className="border-[#FFD9EC] text-[#F53799] bg-[#FFF2FA] text-[10px] px-2 py-0">
+                            {(rec as any).channelSource}
+                          </Badge>
+                        )}
+                      </div>
+                      <h3 className="text-base font-bold text-[#223047] mb-2">{rec.pairing}</h3>
+                      <div className="text-xs text-[#223047] opacity-60 mb-1.5 font-semibold">MERCHANDISING ADVICE</div>
+                      <p className="text-sm text-[#223047]" style={{ lineHeight: "1.6" }}>
+                        {rec.advice}
+                      </p>
                     </div>
-                    <h3 className="text-base font-bold text-[#223047] mb-2">{rec.pairing}</h3>
-                    <div className="text-xs text-[#223047] opacity-60 mb-1.5 font-semibold">MERCHANDISING ADVICE</div>
-                    <p className="text-sm text-[#223047]" style={{ lineHeight: "1.6" }}>
-                      {rec.advice}
-                    </p>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
             {/* Pagination Controls */}
-            {proximityRecommendations.length > proximityItemsPerPage && (
+            {!isProximityLoading && proximityRecommendations.length > proximityItemsPerPage && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
                 <span className="text-xs text-[#223047] opacity-60">
                   Showing {Math.min(proximityRecommendations.length, (proximityPage - 1) * proximityItemsPerPage + 1)}-
