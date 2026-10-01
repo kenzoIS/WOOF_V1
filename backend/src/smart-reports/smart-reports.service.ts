@@ -467,7 +467,6 @@ export class SmartReportsService {
         trendDirection: extrapolationResult.trendDirection,
       },
       data_completeness: dataCompleteness,
-      is_partial_data: isPartialData,
       uat_feedback: {
         accuracyRating: null,
         usefulnessRating: null,
@@ -476,7 +475,6 @@ export class SmartReportsService {
         reviewedAt: null,
       },
       nlg_summary: nlgSummary,
-      nlg_sections: deterministicSections,
     };
 
     const { data: newReport, error: saveErr } = await this.supabase
@@ -491,7 +489,12 @@ export class SmartReportsService {
       );
     }
 
-    return this.mapToCamelCase(newReport);
+    // Attach computed fields that are not persisted as DB columns
+    return {
+      ...this.mapToCamelCase(newReport),
+      isPartialData,
+      nlgSections: deterministicSections,
+    };
   }
 
   private mapToCamelCase(report: any): any {
@@ -502,10 +505,11 @@ export class SmartReportsService {
       aggregatedData: report.aggregated_data,
       extrapolatedTrends: report.extrapolated_trends,
       dataCompleteness: report.data_completeness,
-      isPartialData: report.is_partial_data ?? false,
+      // isPartialData and nlgSections are computed in-memory on generate; not stored in DB
+      isPartialData: false,
+      nlgSections: null,
       uatFeedback: report.uat_feedback,
       nlgSummary: report.nlg_summary,
-      nlgSections: report.nlg_sections ?? null,
       generatedAt: new Date(report.generated_at),
     };
   }
