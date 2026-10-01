@@ -1009,6 +1009,7 @@ export interface SmartReport {
     averageMargin: number;
     channelRevenue: Record<string, number>;
     categorySales: Record<string, number>;
+    dailyHistory?: { date: string; value: number }[];
   };
   extrapolatedTrends: {
     horizonDays: number;

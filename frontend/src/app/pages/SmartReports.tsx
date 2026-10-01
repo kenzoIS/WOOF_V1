@@ -20,7 +20,8 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend
+  Legend,
+  ReferenceLine,
 } from "recharts";
 
 export function SmartReports() {
@@ -224,17 +225,42 @@ export function SmartReports() {
     window.print();
   };
 
-  // Build chart dataset combining historical and projected trend data
+  // Build chart dataset: historical actuals + 30-day projection on one continuous timeline
   const getChartData = () => {
-    if (!selectedReport) return [];
+    if (!selectedReport) return { data: [], forecastStartDate: null };
     const trends = selectedReport.extrapolatedTrends;
-    return trends.dates.map((date, idx) => ({
-      date: new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    const history = selectedReport.aggregatedData.dailyHistory ?? [];
+
+    const fmt = (d: string) =>
+      new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+    // Historical actuals
+    const historicalPoints = history.map((h) => ({
+      date: fmt(h.date),
+      rawDate: h.date,
+      actual: h.value,
+      projected: undefined as number | undefined,
+    }));
+
+    // Last actual value — bridge point so lines connect at boundary
+    const lastActualVal = history.length > 0 ? history[history.length - 1].value : undefined;
+    const forecastStartDate = trends.dates[0] ?? null;
+
+    // Projected points
+    const projectedPoints = trends.dates.map((date, idx) => ({
+      date: fmt(date),
+      rawDate: date,
+      actual: idx === 0 ? lastActualVal : undefined,  // bridge first projected point
       projected: Math.round(trends.projectedRevenue[idx]),
     }));
+
+    return {
+      data: [...historicalPoints, ...projectedPoints],
+      forecastStartDate: forecastStartDate ? fmt(forecastStartDate) : null,
+    };
   };
 
-  const chartData = getChartData();
+  const { data: chartData, forecastStartDate } = getChartData();
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#FFFBFD] p-6 overflow-y-auto space-y-6">
@@ -534,31 +560,72 @@ export function SmartReports() {
 
                 {/* Extrapolation chart */}
                 <div className="space-y-3">
-                  <h3 className="text-xs font-black uppercase text-[#223047] opacity-50 tracking-wider">
-                    30-Day Extrapolated Trend Forecast
-                  </h3>
-                  <div className="h-[220px] w-full bg-slate-50 border border-slate-100 rounded-xl p-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-black uppercase text-[#223047] opacity-50 tracking-wider">
+                      Historical Actuals + 30-Day Forecast
+                    </h3>
+                    {forecastStartDate && (
+                      <span className="text-[10px] bg-cyan-50 border border-cyan-200 text-cyan-700 px-2 py-0.5 rounded-full font-bold">
+                        Forecast starts {forecastStartDate}
+                      </span>
+                    )}
+                  </div>
+                  <div className="h-[240px] w-full bg-slate-50 border border-slate-100 rounded-xl p-2">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartData}>
+                      <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                         <defs>
+                          <linearGradient id="colorActual" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#F53799" stopOpacity={0.18}/>
+                            <stop offset="95%" stopColor="#F53799" stopOpacity={0}/>
+                          </linearGradient>
                           <linearGradient id="colorProjected" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.2}/>
+                            <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.18}/>
                             <stop offset="95%" stopColor="#06B6D4" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                        <XAxis dataKey="date" fontSize={9} tickLine={false} />
-                        <YAxis fontSize={9} tickLine={false} />
-                        <Tooltip />
-                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                        <XAxis dataKey="date" fontSize={9} tickLine={false} interval="preserveStartEnd" />
+                        <YAxis fontSize={9} tickLine={false} width={52} />
+                        <Tooltip
+                          formatter={(value: any, name: string) => [
+                            `₱${Number(value).toLocaleString()}`,
+                            name === "actual" ? "Actual Revenue" : "Projected Revenue"
+                          ]}
+                        />
+                        <Legend
+                          wrapperStyle={{ fontSize: 10 }}
+                          formatter={(value) => value === "actual" ? "Actual Revenue (PHP)" : "Projected Revenue (PHP)"}
+                        />
+                        {forecastStartDate && (
+                          <ReferenceLine
+                            x={forecastStartDate}
+                            stroke="#94a3b8"
+                            strokeDasharray="4 3"
+                            label={{ value: "Forecast →", position: "insideTopRight", fontSize: 9, fill: "#64748b" }}
+                          />
+                        )}
+                        <Area
+                          type="monotone"
+                          dataKey="actual"
+                          stroke="#F53799"
+                          strokeWidth={2}
+                          fillOpacity={1}
+                          fill="url(#colorActual)"
+                          connectNulls
+                          dot={false}
+                          name="actual"
+                        />
                         <Area
                           type="monotone"
                           dataKey="projected"
                           stroke="#06B6D4"
                           strokeWidth={2}
+                          strokeDasharray="5 3"
                           fillOpacity={1}
                           fill="url(#colorProjected)"
-                          name="Extrapolated Revenue (PHP)"
+                          connectNulls
+                          dot={false}
+                          name="projected"
                         />
                       </AreaChart>
                     </ResponsiveContainer>

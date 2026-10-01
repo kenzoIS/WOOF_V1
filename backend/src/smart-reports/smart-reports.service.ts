@@ -448,6 +448,11 @@ export class SmartReportsService {
       activeChannels.length === 1 && activeChannels[0] === 'POS';
 
     // 9. Persist report to Supabase
+    const dailyHistorySummary = history.map((h) => ({
+      date: h.date,
+      value: Math.round(h.value),
+    }));
+
     const payload = {
       title,
       date_range: { start: startDateStr, end: endDateStr },
@@ -458,6 +463,7 @@ export class SmartReportsService {
         averageMargin,
         channelRevenue,
         categorySales,
+        dailyHistory: dailyHistorySummary,
       },
       extrapolated_trends: {
         horizonDays: 30,
