@@ -136,30 +136,29 @@ export class SmartReportsService {
     });
   }
 
-  private getMockTaglishReviewsForCategory(category: string): string[] {
-    const reviewsMap: Record<string, string[]> = {
-      Grooming: [
-        'Super ganda ng gupit sa aso ko, mabait din yung groomer.',
-        'Medyo matagal lang yung pila pero mahusay naman mag-groom.',
-        'Ang bango ng balahibo pagkatapos! Will recommend this cafe.',
-      ],
-      Coffee: [
-        'Masarap yung Caramel Macchiato, hindi masyadong matamis.',
-        'Mabagal yung service nila nung weekend, tagal lumabas ng iced coffee.',
-        'Sulit yung price at friendly ang staff.',
-      ],
-      'Rice meals': [
-        'Ang sarap ng baked mac at chicken! Sulit na sulit.',
-        'Medyo late dumating yung food order pero masarap naman.',
-        'Hindi masyadong masarap yung rice meal na nakuha ko ngayon.',
-      ],
-    };
-    return (
-      reviewsMap[category] || [
-        'Maganda naman ang service at friendly ang staff.',
-        'Medyo matagal pero okay naman.',
-      ]
-    );
+  private async getRealFeedbackNotes(
+    startDateStr: string,
+    endDateStr: string,
+  ): Promise<string[]> {
+    try {
+      const { data } = await this.supabase
+        .from('recommendation_feedback')
+        .select('feedback_notes, created_at')
+        .gte('created_at', startDateStr)
+        .lte('created_at', endDateStr + 'T23:59:59Z')
+        .not('feedback_notes', 'is', null)
+        .neq('feedback_notes', '')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      const notes = (data || [])
+        .map((row: any) => row.feedback_notes as string)
+        .filter(Boolean);
+
+      return notes;
+    } catch {
+      return [];
+    }
   }
 
   private analyzeTaglishSentiment(reviews: string[]): {
@@ -384,16 +383,22 @@ export class SmartReportsService {
       horizon: 30,
     });
 
-    // 7. Perform Taglish Customer Feedback sentiment audit
+    // 7. Perform real Customer Feedback sentiment audit from recommendation_feedback table
     const sortedCategories = Object.entries(categorySales).sort(
       (a, b) => b[1] - a[1],
     );
     const topCategory = sortedCategories[0]?.[0] || 'Uncategorized';
-    const mockReviews = this.getMockTaglishReviewsForCategory(topCategory);
-    const taglishSentiment = this.analyzeTaglishSentiment(mockReviews);
+    const realFeedbackNotes = await this.getRealFeedbackNotes(
+      startDateStr,
+      endDateStr,
+    );
+    const hasFeedback = realFeedbackNotes.length > 0;
+    const sentimentData = hasFeedback
+      ? this.analyzeTaglishSentiment(realFeedbackNotes)
+      : null;
 
-    // 8. Parameterized NLG (Natural Language Generation)
-    const deterministicSummary = this.generateNlgText(
+    // 8. Parameterized NLG (Natural Language Generation) — returns structured sections
+    const deterministicSections = this.generateNlgSections(
       title,
       startDateStr,
       endDateStr,
@@ -406,10 +411,13 @@ export class SmartReportsService {
       extrapolationResult.trendDirection,
       extrapolationResult.projectedGrowthRate,
       extrapolationResult.projectedRevenue,
-      taglishSentiment,
-      mockReviews,
+      sentimentData,
+      realFeedbackNotes,
       dataCompleteness,
     );
+    const deterministicSummary = deterministicSections
+      .map((s) => s.content)
+      .join('\n\n');
     const llmSummary = await this.llmService.generate({
       feature: 'report_summary',
       prompt:
@@ -432,6 +440,13 @@ export class SmartReportsService {
       ? llmSummary.text
       : deterministicSummary;
 
+    // Determine if data is partial (only POS channel active)
+    const activeChannels = Object.keys(channelRevenue).filter(
+      (c) => channelRevenue[c] > 0,
+    );
+    const isPartialData =
+      activeChannels.length === 1 && activeChannels[0] === 'POS';
+
     // 9. Persist report to Supabase
     const payload = {
       title,
@@ -452,6 +467,7 @@ export class SmartReportsService {
         trendDirection: extrapolationResult.trendDirection,
       },
       data_completeness: dataCompleteness,
+      is_partial_data: isPartialData,
       uat_feedback: {
         accuracyRating: null,
         usefulnessRating: null,
@@ -460,6 +476,7 @@ export class SmartReportsService {
         reviewedAt: null,
       },
       nlg_summary: nlgSummary,
+      nlg_sections: deterministicSections,
     };
 
     const { data: newReport, error: saveErr } = await this.supabase
@@ -480,18 +497,20 @@ export class SmartReportsService {
   private mapToCamelCase(report: any): any {
     return {
       ...report,
-      _id: report.id, // For frontend compatibility if it expects _id
+      _id: report.id,
       dateRange: report.date_range,
       aggregatedData: report.aggregated_data,
       extrapolatedTrends: report.extrapolated_trends,
       dataCompleteness: report.data_completeness,
+      isPartialData: report.is_partial_data ?? false,
       uatFeedback: report.uat_feedback,
       nlgSummary: report.nlg_summary,
+      nlgSections: report.nlg_sections ?? null,
       generatedAt: new Date(report.generated_at),
     };
   }
 
-  private generateNlgText(
+  private generateNlgSections(
     title: string,
     start: string,
     end: string,
@@ -504,10 +523,10 @@ export class SmartReportsService {
     trend: 'UPWARD' | 'DOWNWARD' | 'STABLE',
     growthRate: number,
     projections: number[],
-    sentiment: { score: number; label: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' },
-    mockReviews: string[],
+    sentiment: { score: number; label: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' } | null,
+    feedbackNotes: string[],
     dataCompleteness: number,
-  ): string {
+  ): { title: string; content: string }[] {
     const formattedRevenue = new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'PHP',
@@ -549,22 +568,44 @@ export class SmartReportsService {
 
     const sectorList = sectors.length > 0 ? sectors.join(', ') : 'all';
 
-    const p1 = `Executive Summary: For the period starting from ${start} to ${end}, sales across the ${sectorList} business segment(s) yielded a total net revenue of ${formattedRevenue} and a gross profit of ${formattedProfit}, maintaining a healthy average profit margin of ${margin}%. Growth was primarily anchored by the ${topCategory} category. Channel distribution shows that ${topChannel} was the top performing channel, contributing ${formattedTopChannelRevenue} representing approximately ${channelShare}% of total gross performance. This report is built with a Data Completeness rating of ${dataCompleteness}%.`;
+    const sections: { title: string; content: string }[] = [];
 
-    const p2 = `Predictive Insights & Trend Analysis: A context-aware linear trend analysis fitted over the historical window indicates a ${trend.toLowerCase()} trend for the upcoming 30 days. Daily revenue is projected to move with a calculated period growth rate of ${growthRate}%. The overall estimated sales outlook for the next 30 days totals ${formattedProjected}.`;
+    // Section 1: Executive Performance Summary
+    sections.push({
+      title: 'Executive Performance Summary',
+      content: `For the period starting from ${start} to ${end}, sales across the ${sectorList} business segment(s) yielded a total net revenue of ${formattedRevenue} and a gross profit of ${formattedProfit}, maintaining a healthy average profit margin of ${margin}%. Growth was primarily anchored by the ${topCategory} category. Channel distribution shows that ${topChannel} was the top performing channel, contributing ${formattedTopChannelRevenue} — approximately ${channelShare}% of total gross performance. This report carries a Data Completeness rating of ${dataCompleteness}%.`,
+    });
 
-    const p3 = `Customer Sentiment Analysis: Review processing of top product categories (using Taglish keyword indexing) indicated a predominantly ${sentiment.label.toLowerCase()} feedback signal (sentiment score: ${sentiment.score.toFixed(2)}). Typical client feedback includes statements such as: "${mockReviews[0]}"`;
+    // Section 2: Trend Analysis & Forecasts
+    sections.push({
+      title: 'Trend Analysis & Forecasts',
+      content: `A context-aware multivariate linear trend analysis fitted over the historical window indicates a ${trend.toLowerCase()} trajectory for the upcoming 30 days. Daily revenue is projected to move with a calculated period growth rate of ${growthRate}%. The overall estimated sales outlook for the next 30 days totals ${formattedProjected}.`,
+    });
 
-    let p4 = '';
-    if (trend === 'UPWARD') {
-      p4 = `Strategic Advisory: Given the upward trajectory in sales, we recommend scaling up inventory stocking levels for the high-performing ${topCategory} category to prevent potential supply gaps. Marketing should double-down on promoting top-performing offerings on the ${topChannel} channel to maximize current momentum and accelerate transaction size.`;
-    } else if (trend === 'DOWNWARD') {
-      p4 = `Strategic Advisory: In light of the downward trend in revenue, it is critical to conduct operational cost reviews, recalibrate discount structures on ${topCategory}, and deploy target marketing campaigns or loyalty points boosters on ${topChannel} to help stabilize margins and arrest the decline.`;
-    } else {
-      p4 = `Strategic Advisory: With transaction patterns demonstrating stable and flat demand, focus should shift toward average order value (AOV) optimization through cross-selling and product bundling. We advise setting up automated alerts for customer feedback loops to identify and solve micro-bottlenecks in service delivery.`;
+    // Section 3: Customer Sentiment Analysis — only if real feedback exists
+    if (sentiment && feedbackNotes.length > 0) {
+      const sampleQuote = feedbackNotes[0];
+      sections.push({
+        title: 'Customer Sentiment Analysis',
+        content: `Analysis of ${feedbackNotes.length} real customer feedback note(s) within the selected period indicates a predominantly ${sentiment.label.toLowerCase()} signal (sentiment score: ${sentiment.score.toFixed(2)}). A representative sample: "${sampleQuote}"`,
+      });
     }
 
-    return `${p1}\n\n${p2}\n\n${p3}\n\n${p4}`;
+    // Section 4: Strategic Advisory & Recommendations
+    let advisory = '';
+    if (trend === 'UPWARD') {
+      advisory = `Given the upward trajectory in sales, we recommend scaling up inventory stocking levels for the high-performing ${topCategory} category to prevent potential supply gaps. Marketing should double-down on promoting top-performing offerings on the ${topChannel} channel to maximize current momentum and accelerate transaction size.`;
+    } else if (trend === 'DOWNWARD') {
+      advisory = `In light of the downward trend in revenue, it is critical to conduct operational cost reviews, recalibrate discount structures on ${topCategory}, and deploy targeted marketing campaigns or loyalty points boosters on ${topChannel} to help stabilize margins and arrest the decline.`;
+    } else {
+      advisory = `With transaction patterns demonstrating stable and flat demand, focus should shift toward average order value (AOV) optimization through cross-selling and product bundling. We advise setting up automated alerts for customer feedback loops to identify and solve micro-bottlenecks in service delivery.`;
+    }
+    sections.push({
+      title: 'Strategic Advisory & Recommendations',
+      content: advisory,
+    });
+
+    return sections;
   }
 
   async getAllReports(): Promise<any[]> {

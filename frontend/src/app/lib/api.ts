@@ -1026,6 +1026,8 @@ export interface SmartReport {
     reviewedAt: string | null;
   };
   nlgSummary: string;
+  nlgSections?: { title: string; content: string }[] | null;
+  isPartialData?: boolean;
   generatedAt: string;
 }
 

@@ -28,8 +28,14 @@ export function SmartReports() {
   const [reports, setReports] = useState<SmartReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<SmartReport | null>(null);
   const [title, setTitle] = useState("Executive Business Performance Report");
-  const [startDate, setStartDate] = useState("2021-03-01"); 
-  const [endDate, setEndDate] = useState("2021-03-31");
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const thirtyDaysAgoStr = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  })();
+  const [startDate, setStartDate] = useState(thirtyDaysAgoStr);
+  const [endDate, setEndDate] = useState(todayStr);
   const [selectedSectors, setSelectedSectors] = useState<string[]>(["Cafe", "Retail", "Services"]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -102,12 +108,8 @@ export function SmartReports() {
         sectors: selectedSectors,
       });
 
-      // Modal 1 check: Only POS data (Shopee, TikTok, PetHub missing or zero)
-      const channelRevenues = newReport.aggregatedData.channelRevenue || {};
-      const channelNames = Object.keys(channelRevenues).filter(c => channelRevenues[c] > 0);
-      const isOnlyPos = channelNames.length === 1 && channelNames[0] === "POS";
-
-      if (isOnlyPos) {
+      // Use isPartialData flag from backend instead of guessing from channel names
+      if (newReport.isPartialData) {
         setPendingReportToShow(newReport);
         setShowPartialDataModal(true);
       } else {
@@ -569,26 +571,18 @@ export function SmartReports() {
                     AI Business Intelligence Narrative (NLG)
                   </h3>
                   <div className="bg-[#FFF2FA]/30 border-2 border-[#FFD9EC] rounded-2xl p-5 space-y-4 text-xs leading-relaxed text-[#223047]">
-                    {selectedReport.nlgSummary.split("\n\n").map((para, idx) => {
-                      let titleStr = "Executive Performance Summary";
-                      
-                      if (idx === 1) {
-                        titleStr = "Trend Analysis & Forecasts";
-                      } else if (idx === 2) {
-                        titleStr = "Customer Sentiment Analysis";
-                      } else if (idx === 3) {
-                        titleStr = "Strategic Advisory & Recommendations";
-                      }
-
-                      return (
-                        <div key={idx} className="space-y-1.5 p-3.5 bg-white border border-[#FFD9EC] rounded-xl shadow-sm">
-                          <h4 className="font-extrabold text-xs text-[#223047]">
-                            {titleStr}
-                          </h4>
-                          <p className="opacity-80">{para}</p>
-                        </div>
-                      );
-                    })}
+                    {/* Use structured nlgSections if available, otherwise fall back to splitting nlgSummary */}
+                    {(selectedReport.nlgSections ?? selectedReport.nlgSummary.split("\n\n").map((content, idx) => ({
+                      title: ["Executive Performance Summary", "Trend Analysis & Forecasts", "Strategic Advisory & Recommendations"][idx] ?? `Section ${idx + 1}`,
+                      content
+                    }))).map((section: { title: string; content: string }, idx: number) => (
+                      <div key={idx} className="space-y-1.5 p-3.5 bg-white border border-[#FFD9EC] rounded-xl shadow-sm">
+                        <h4 className="font-extrabold text-xs text-[#223047]">
+                          {section.title}
+                        </h4>
+                        <p className="opacity-80">{section.content}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -611,7 +605,7 @@ export function SmartReports() {
                         </div>
                         {selectedReport.uatFeedback.feedbackText && (
                           <p className="text-xs text-emerald-950 italic opacity-85 mt-1">
-                            "{selectedReport.uatFeedback.feedbackText}"
+                            &ldquo;{selectedReport.uatFeedback.feedbackText}&rdquo;
                           </p>
                         )}
                         <span className="text-[10px] text-emerald-600/70 block mt-1">
