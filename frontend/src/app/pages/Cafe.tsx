@@ -2364,6 +2364,58 @@ export function Cafe() {
         </div>
       </div>
 
+      {/* PAST HAPPY HOURS */}
+      {pastHappyHours.length > 0 && (
+        <div className="mt-8 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg md:text-xl font-extrabold text-[#223047]">Approved Happy Hours</h3>
+              <p className="text-xs md:text-sm text-[#223047]/65 mt-0.5">Historical log of activated promotions.</p>
+            </div>
+          </div>
+          <div className="bg-white border border-[#223047]/10 rounded-2xl md:rounded-3xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-[#223047]/[0.02] border-b border-[#223047]/10">
+                  <tr>
+                    <th className="px-6 py-4 font-bold text-[#223047] w-[20%]">Date Activated</th>
+                    <th className="px-6 py-4 font-bold text-[#223047] w-[25%]">Target Slot</th>
+                    <th className="px-6 py-4 font-bold text-[#223047] w-[45%]">Items</th>
+                    <th className="px-6 py-4 font-bold text-[#223047] text-right w-[10%]">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#223047]/5">
+                  {pastHappyHours.map((promo, idx) => (
+                    <tr key={promo.id || idx} className="hover:bg-[#223047]/[0.02] transition-colors">
+                      <td className="px-6 py-4 text-[#223047]/70">
+                        {new Date(promo.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4 font-semibold text-[#06B6D4]">
+                        {new Date(promo.target_date).toLocaleDateString()} @ {new Date(promo.target_date).getHours()}:00
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {promo.items_json?.map((item: any, i: number) => (
+                            <Badge key={i} variant="outline" className="border-[#223047]/15 bg-white text-xs font-normal">
+                              {item.itemKey} <span className="font-bold text-[#F53799] ml-1">-{item.discountPercent}%</span>
+                            </Badge>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/10 border-green-500/20">
+                          {promo.status}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Error Modal */}
       {errorModal.type && (
         <ErrorModal
