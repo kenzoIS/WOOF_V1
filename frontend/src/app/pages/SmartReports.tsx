@@ -227,40 +227,54 @@ export function SmartReports() {
 
   // Build chart dataset: historical actuals + 30-day projection on one continuous timeline
   const getChartData = () => {
-    if (!selectedReport) return { data: [], forecastStartDate: null };
+    if (!selectedReport) return { data: [], forecastStartDate: null, hasHistory: false };
     const trends = selectedReport.extrapolatedTrends;
-    const history = selectedReport.aggregatedData.dailyHistory ?? [];
+    const history = (selectedReport.aggregatedData.dailyHistory ?? []).filter(
+      (h) => h.value > 0  // skip zero-value days
+    );
+    const hasHistory = history.length > 0;
 
     const fmt = (d: string) =>
       new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+    if (!hasHistory) {
+      // No history — just show the clean projection
+      return {
+        data: trends.dates.map((date, idx) => ({
+          date: fmt(date),
+          projected: Math.round(trends.projectedRevenue[idx]),
+        })),
+        forecastStartDate: null,
+        hasHistory: false,
+      };
+    }
+
     // Historical actuals
     const historicalPoints = history.map((h) => ({
       date: fmt(h.date),
-      rawDate: h.date,
       actual: h.value,
       projected: undefined as number | undefined,
     }));
 
-    // Last actual value — bridge point so lines connect at boundary
-    const lastActualVal = history.length > 0 ? history[history.length - 1].value : undefined;
+    // Bridge: last actual value carried into first projected point so lines connect
+    const lastActualVal = history[history.length - 1].value;
     const forecastStartDate = trends.dates[0] ?? null;
 
     // Projected points
     const projectedPoints = trends.dates.map((date, idx) => ({
       date: fmt(date),
-      rawDate: date,
-      actual: idx === 0 ? lastActualVal : undefined,  // bridge first projected point
+      actual: idx === 0 ? lastActualVal : undefined,
       projected: Math.round(trends.projectedRevenue[idx]),
     }));
 
     return {
       data: [...historicalPoints, ...projectedPoints],
       forecastStartDate: forecastStartDate ? fmt(forecastStartDate) : null,
+      hasHistory: true,
     };
   };
 
-  const { data: chartData, forecastStartDate } = getChartData();
+  const { data: chartData, forecastStartDate, hasHistory } = getChartData();
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#FFFBFD] p-6 overflow-y-auto space-y-6">
@@ -558,13 +572,13 @@ export function SmartReports() {
                   </div>
                 </div>
 
-                {/* Extrapolation chart */}
+                {/* Trend chart */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-black uppercase text-[#223047] opacity-50 tracking-wider">
-                      Historical Actuals + 30-Day Forecast
+                      {hasHistory ? "Historical Actuals + 30-Day Forecast" : "30-Day Extrapolated Trend Forecast"}
                     </h3>
-                    {forecastStartDate && (
+                    {hasHistory && forecastStartDate && (
                       <span className="text-[10px] bg-cyan-50 border border-cyan-200 text-cyan-700 px-2 py-0.5 rounded-full font-bold">
                         Forecast starts {forecastStartDate}
                       </span>
@@ -596,7 +610,7 @@ export function SmartReports() {
                           wrapperStyle={{ fontSize: 10 }}
                           formatter={(value) => value === "actual" ? "Actual Revenue (PHP)" : "Projected Revenue (PHP)"}
                         />
-                        {forecastStartDate && (
+                        {hasHistory && forecastStartDate && (
                           <ReferenceLine
                             x={forecastStartDate}
                             stroke="#94a3b8"
@@ -604,23 +618,25 @@ export function SmartReports() {
                             label={{ value: "Forecast →", position: "insideTopRight", fontSize: 9, fill: "#64748b" }}
                           />
                         )}
-                        <Area
-                          type="monotone"
-                          dataKey="actual"
-                          stroke="#F53799"
-                          strokeWidth={2}
-                          fillOpacity={1}
-                          fill="url(#colorActual)"
-                          connectNulls
-                          dot={false}
-                          name="actual"
-                        />
+                        {hasHistory && (
+                          <Area
+                            type="monotone"
+                            dataKey="actual"
+                            stroke="#F53799"
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill="url(#colorActual)"
+                            connectNulls
+                            dot={false}
+                            name="actual"
+                          />
+                        )}
                         <Area
                           type="monotone"
                           dataKey="projected"
                           stroke="#06B6D4"
-                          strokeWidth={2}
-                          strokeDasharray="5 3"
+                          strokeWidth={hasHistory ? 2 : 2}
+                          strokeDasharray={hasHistory ? "5 3" : undefined}
                           fillOpacity={1}
                           fill="url(#colorProjected)"
                           connectNulls
