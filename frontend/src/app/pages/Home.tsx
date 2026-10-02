@@ -385,6 +385,34 @@ export function Home() {
     return flattened;
   }, [homeOverview?.channelBalance]);
   const equilibriumData = separatedEquilibriumData;
+  const channelBalanceAxis = useMemo(() => {
+    const maxVal = Math.max(0, ...separatedEquilibriumData.map((d) => d.revenue));
+    if (maxVal <= 0) {
+      return {
+        domain: [0, 500000] as [number, number],
+        ticks: [0, 100000, 200000, 300000, 400000, 500000],
+      };
+    }
+    // Clean, smaller step increments (replaces large 850k gaps with regular round milestones)
+    let step = 500000;
+    if (maxVal <= 100000) step = 20000;
+    else if (maxVal <= 300000) step = 50000;
+    else if (maxVal <= 700000) step = 100000;
+    else if (maxVal <= 1500000) step = 250000;
+    else if (maxVal <= 4000000) step = 500000;
+    else if (maxVal <= 8000000) step = 1000000;
+    else step = 2000000;
+
+    const upper = Math.ceil(maxVal / step) * step;
+    const ticks: number[] = [];
+    for (let v = 0; v <= upper; v += step) {
+      ticks.push(v);
+    }
+    return {
+      domain: [0, upper] as [number, number],
+      ticks,
+    };
+  }, [separatedEquilibriumData]);
   const clientHeatmapDays = useMemo(
     () => buildHeatmapDaysFromAnchor(homeOverview?.heatmapAnchorDate),
     [homeOverview?.heatmapAnchorDate],
@@ -1571,6 +1599,9 @@ export function Home() {
               <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" horizontal={false} />
               <XAxis
                 type="number"
+                domain={channelBalanceAxis.domain}
+                ticks={channelBalanceAxis.ticks}
+                interval={0}
                 stroke="#223047"
                 style={{ fontSize: "12px" }}
                 tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
