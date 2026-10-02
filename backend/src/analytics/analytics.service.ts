@@ -1,4 +1,4 @@
-﻿import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -18,8 +18,9 @@ import {
 } from '../common/time-series';
 import { ExogenousDataService } from '../common/exogenous-data.service';
 import { SupabaseService } from '../common/supabase/supabase.service';
-import { AwsService } from '../aws/aws.service';
 import { AuditService } from '../audit/audit.service';
+import { AwsService } from '../aws/aws.service';
+import type { ActivationService } from '../activation/activation.service';
 
 /**
  * Forecasting limitations for the current capstone implementation:
@@ -173,6 +174,8 @@ export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
   private readonly backgroundForecastRefreshes = new Set<string>();
   private cachedChannelBalance: { data: any[]; timestamp: number } | null = null;
+  private cachedQuietPeriod: any = null;
+  private cachedQuietPeriodDate: string = '';
 
   constructor(
     @Optional()
@@ -182,7 +185,10 @@ export class AnalyticsService {
     private readonly configService: ConfigService,
     private readonly exogenousDataService: ExogenousDataService,
     private readonly awsService: AwsService,
-    @Optional() private readonly auditService?: AuditService,
+    private readonly auditService: AuditService,
+    @Optional()
+    @Inject(forwardRef(() => require('../activation/activation.service').ActivationService))
+    private readonly activationService?: ActivationService,
   ) {}
 
   private aggregateWithDiskUse<T = any>(pipeline: any[]) {
@@ -1221,10 +1227,11 @@ export class AnalyticsService {
       const hasRevenuePayload =
         payloadVersion >= FORECAST_REVENUE_PAYLOAD_VERSION &&
         (module !== 'Services' || metadata.revenueEvaluation == null) &&
-        Array.isArray(cachedForecast.historical) &&
-        cachedForecast.historical.some(
-          (point: any) => Number(point?.revenue) > 0,
-        );
+        (!cachedForecast.historical ||
+          cachedForecast.historical.length === 0 ||
+          cachedForecast.historical.some(
+            (point: any) => Number(point?.revenue) > 0,
+          ));
 
       const isForceRefresh = overrides?.forceRefresh === 'true';
 
@@ -1243,7 +1250,6 @@ export class AnalyticsService {
           return anchoredPayload;
         }
 
-        this.refreshForecastInBackground(module, overrides);
         return {
           ...anchoredPayload,
           isStale: true,
@@ -1529,11 +1535,13 @@ export class AnalyticsService {
       .single();
 
     // Archive forecast to AWS S3 Data Lake (fire-and-forget)
-    this.awsService
-      .uploadAnalyticsArchive('forecast', module, payload)
-      .catch((err) => {
-        console.warn(`S3 forecast archive failed for ${module}: ${err}`);
-      });
+    if (completeHistorical && completeHistorical.length > 0) {
+      this.awsService
+        .uploadAnalyticsArchive('forecast', module, payload)
+        .catch((err) => {
+          console.warn(`S3 forecast archive failed for ${module}: ${err}`);
+        });
+    }
     if (
       module === 'Cafe' &&
       pendingCafeSegmentedCandidate &&
@@ -5320,8 +5328,14 @@ export class AnalyticsService {
     }
   }
 
-  async getNextQuietPeriod(): Promise<any> {
+  async getNextQuietPeriod(forceRefresh = false): Promise<any> {
     const todayManila = this.formatDateInTimeZone(new Date(), 'Asia/Manila');
+    
+    if (!forceRefresh && this.cachedQuietPeriodDate === todayManila && this.cachedQuietPeriod) {
+      this.logger.log('Returning cached Next Quiet Period recommendation.');
+      return this.cachedQuietPeriod;
+    }
+
     const tomorrow = new Date(`${todayManila}T12:00:00.000Z`);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
@@ -5389,7 +5403,7 @@ export class AnalyticsService {
       };
     }
 
-    return {
+    const finalResult = {
       status: 'success',
       targetDate: tomorrowStr,
       targetHour: Number(mlResult?.targetHour ?? 14),
@@ -5402,6 +5416,39 @@ export class AnalyticsService {
       targetDayOfWeek: mlResult?.targetDayOfWeek ?? -1,
       recommendedItems: mlResult?.recommendedItems || [],
     };
+    
+    this.cachedQuietPeriod = finalResult;
+    this.cachedQuietPeriodDate = todayManila;
+    
+    return finalResult;
+  }
+
+  @Cron('0 7 * * *', { timeZone: 'Asia/Manila' })
+  async precomputeHappyHourDaily() {
+    this.logger.log('[Cron] Precomputing daily Happy Hour recommendation at 7:00 AM...');
+    try {
+      const qp = await this.getNextQuietPeriod(true);
+      this.logger.log('[Cron] Successfully precomputed Happy Hour recommendation.');
+      
+      const itemNames = qp?.recommendedItems?.map((i: any) => i.itemKey).join(', ') || 'None';
+      
+      await this.auditService.record({
+        action: `Generated Happy Hour Recommendation (${itemNames})`,
+        module: 'happy_hour',
+        actor: 'System',
+        actorType: 'system',
+        target: qp?.targetDate ? `${new Date(qp.targetDate).toLocaleDateString()} @ ${qp.targetHour}:00` : 'Happy Hour',
+        status: 'success',
+        category: 'ai_system',
+        metadata: {
+          targetDate: qp?.targetDate,
+          targetHour: qp?.targetHour,
+          items: qp?.recommendedItems,
+        },
+      });
+    } catch (error) {
+      this.logger.error(`[Cron] Failed to precompute Happy Hour: ${error.message}`);
+    }
   }
 
   private async getPromoModelTrainingRows(): Promise<any[]> {
@@ -5421,23 +5468,29 @@ export class AnalyticsService {
 
     let data: any[] = [];
     
-    // Helper function to paginate queries
-    const fetchPaginated = async (queryBuilder: any, maxRows: number = 15000) => {
-      let results: any[] = [];
-      let start = 0;
-      let limit = 1000;
+    // Helper function to paginate queries concurrently
+    const fetchPaginated = async (queryBuilderFactory: () => any, maxRows: number = 15000) => {
+      const limit = 1000;
+      const chunksCount = Math.ceil(maxRows / limit);
+      const promises: Promise<any>[] = [];
       
-      while (results.length < maxRows) {
-        const { data: chunk, error } = await queryBuilder.range(start, start + limit - 1);
-        if (error || !chunk || chunk.length === 0) break;
+      for (let i = 0; i < chunksCount; i++) {
+        const start = i * limit;
+        promises.push(
+          Promise.resolve(queryBuilderFactory().range(start, start + limit - 1))
+        );
+      }
+      
+      const chunks = await Promise.all(promises);
+      let results: any[] = [];
+      for (const { data: chunk, error } of chunks) {
+        if (error || !chunk) continue;
         results = results.concat(chunk);
-        if (chunk.length < limit) break;
-        start += limit;
       }
       return results;
     };
 
-    const discountedRes = await fetchPaginated(
+    const discountedRes = await fetchPaginated(() =>
       this.supabaseService.client
         .from('fact_cross_channel_transactions')
         .select(columns)
@@ -5446,7 +5499,7 @@ export class AnalyticsService {
         .order('transaction_timestamp', { ascending: true })
     );
 
-    const normalRes = await fetchPaginated(
+    const normalRes = await fetchPaginated(() =>
       this.supabaseService.client
         .from('fact_cross_channel_transactions')
         .select(columns)
@@ -5461,21 +5514,27 @@ export class AnalyticsService {
 
     if (data.length === 0) return [];
     
-    // Fetch product names to map PRD_ back to human-readable names
-    // Must paginate because Supabase .in() returns max 1000 rows
     const productIds = Array.from(new Set(data.map(r => r.product_id).filter(id => id)));
     const productMap = new Map();
     const cafeCategories = ['coffee', 'non-caffeine', 'pasta/snacks', 'pet bakery', 'rice meals'];
+    const productPromises: Promise<any>[] = [];
 
     for (let i = 0; i < productIds.length; i += 500) {
       const batch = productIds.slice(i, i + 500);
-      const { data: products } = await this.supabaseService.client
-        .from('product_dim')
-        .select('product_id, product_name, category')
-        .in('product_id', batch);
-      
+      productPromises.push(
+        Promise.resolve(
+          this.supabaseService.client
+            .from('product_dim')
+            .select('product_id, product_name, category')
+            .in('product_id', batch)
+        )
+      );
+    }
+    
+    const productResults = await Promise.all(productPromises);
+    for (const { data: products } of productResults) {
       if (products) {
-        products.forEach(p => {
+        (products as any[]).forEach(p => {
           productMap.set(p.product_id, {
             name: p.product_name,
             category: p.category ? p.category.toLowerCase() : '',
@@ -5519,7 +5578,7 @@ export class AnalyticsService {
         target_date: new Date(
           `${targetDate}T${targetHour.toString().padStart(2, '0')}:00:00+08:00`,
         ).toISOString(),
-        items_json: items,
+        metrics: { items },
         probability_score: probabilityScore,
         status: 'approved',
       })
@@ -5536,7 +5595,69 @@ export class AnalyticsService {
       }
       throw new Error(`Failed to activate Happy Hour: ${error.message}`);
     }
+
+    await this.auditService.record({
+      action: `Approved Happy Hour Promotion (${items.map(i => i.itemKey).join(', ')})`,
+      module: 'happy_hour',
+      actor: 'Owner',
+      actorType: 'user',
+      target: `${new Date(data.target_date).toLocaleDateString()} @ ${new Date(data.target_date).getHours()}:00`,
+      status: 'success',
+      stateBefore: 'draft',
+      stateAfter: 'approved',
+      category: 'workflow',
+      metadata: {
+        items,
+        probabilityScore,
+      },
+    });
+
+    // --- Auto-generate a Campaign Draft in the Activation Layer ---
+    this.generateHappyHourCampaignDraft(items, targetDate, targetHour, probabilityScore)
+      .catch(err => this.logger.error(`[HappyHour→Campaign] Failed to generate campaign draft: ${err.message}`));
+
     return data;
+  }
+
+  private async generateHappyHourCampaignDraft(
+    items: Array<{ itemKey: string; discountPercent: number }>,
+    targetDate: string,
+    targetHour: number,
+    probabilityScore: number,
+  ) {
+    if (!this.activationService) {
+      this.logger.warn('[HappyHour→Campaign] ActivationService not available; skipping campaign draft.');
+      return;
+    }
+
+    const itemNames = items.map(i => i.itemKey);
+    const maxDiscount = Math.max(...items.map(i => i.discountPercent));
+    const discountSummary = items.length === 1
+      ? `${items[0].discountPercent}% off ${items[0].itemKey}`
+      : `Up to ${maxDiscount}% off select cafe items`;
+
+    const recommendation = {
+      id: `HH-${targetDate}-${String(targetHour).padStart(2, '0')}00`,
+      source: 'happy_hour',
+      title: `Cafe Happy Hour — ${targetDate} @ ${targetHour}:00`,
+      featuredItems: itemNames,
+      promoMechanic: discountSummary,
+      targetSegment: 'Cafe Customers & PetHub App Users',
+      expectedLift: '15-25% traffic recovery during off-peak',
+      confidence: `${Math.round(probabilityScore * 100)}%`,
+      reason: 'Predicted traffic drop detected. Off-peak quiet period identified by the Happy Hour engine.',
+      analyticsContext: {
+        targetDate,
+        targetHour,
+        probabilityScore,
+        items,
+        source: 'happy_hour_engine',
+      },
+    };
+
+    this.logger.log(`[HappyHour→Campaign] Generating campaign draft for: ${itemNames.join(', ')}`);
+    const result = await this.activationService.generateCampaign(recommendation as any);
+    this.logger.log(`[HappyHour→Campaign] Campaign draft created: ${result?.campaign?.campaignId}`);
   }
 
   async getPastHappyHours(): Promise<any> {
@@ -10468,11 +10589,11 @@ export class AnalyticsService {
     const promotions = await this.getFeedbackPromotions();
     const completed = promotions.filter((p) => p.status === 'completed');
     const active = promotions.filter((p) => p.status === 'active');
-    const helpful = completed.filter((p) => p.feedback === 'helpful').length;
-    const notHelpful = completed.filter(
+    const helpful = promotions.filter((p) => p.feedback === 'helpful').length;
+    const notHelpful = promotions.filter(
       (p) => p.feedback === 'not-helpful',
     ).length;
-    const pending = completed.filter((p) => p.feedback === null).length;
+    const pending = promotions.filter((p) => p.feedback === null).length;
 
     const accuracies = completed
       .map((p) => {

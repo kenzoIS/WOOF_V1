@@ -144,10 +144,74 @@ export function Feedback() {
 
   const completedPromotions = promotions.filter((p) => p.status === "completed");
   const activePromotions = promotions.filter((p) => p.status === "active");
-  const helpfulCount = summary?.helpfulCount ?? completedPromotions.filter((p) => p.feedback === "helpful").length;
-  const notHelpfulCount = summary?.notHelpfulCount ?? completedPromotions.filter((p) => p.feedback === "not-helpful").length;
-  const pendingFeedback = summary?.pendingCount ?? completedPromotions.filter((p) => p.feedback === null).length;
+  const helpfulCount = summary?.helpfulCount ?? promotions.filter((p) => p.feedback === "helpful").length;
+  const notHelpfulCount = summary?.notHelpfulCount ?? promotions.filter((p) => p.feedback === "not-helpful").length;
+  const pendingFeedback = summary?.pendingCount ?? promotions.filter((p) => p.feedback === null).length;
   const avgAccuracy = summary?.avgAccuracy ?? 89.2;
+  const renderFeedbackControls = (promo: FeedbackPromotion) => (
+    <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
+      {promo.feedback === null ? (
+        <div className="space-y-2 md:space-y-3">
+          <p className="text-xs md:text-sm font-semibold text-[#223047]">
+            Was this recommendation helpful?
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
+            <Button
+              onClick={() => handleFeedback(promo.id, true)}
+              disabled={submittingId === promo.id}
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white gap-2 text-xs md:text-sm"
+            >
+              <ThumbsUp className="w-3 h-3 md:w-4 md:h-4" />
+              <span className="hidden sm:inline">Yes, Helpful</span>
+              <span className="sm:hidden">Helpful</span>
+            </Button>
+            <Button
+              onClick={() => handleFeedback(promo.id, false)}
+              disabled={submittingId === promo.id}
+              variant="outline"
+              className="flex-1 border-[#FFD9EC] hover:bg-[#FFF2FA] gap-2 text-xs md:text-sm"
+            >
+              <ThumbsDown className="w-3 h-3 md:w-4 md:h-4" />
+              <span className="hidden sm:inline">No, Not Helpful</span>
+              <span className="sm:hidden">Not Helpful</span>
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className={`p-3 md:p-4 rounded-lg md:rounded-xl ${
+          promo.feedback === "helpful" ? "bg-green-100/90" : "bg-orange-100/90"
+        }`}>
+          <div className="flex items-center gap-2 md:gap-3">
+            {promo.feedback === "helpful" ? (
+              <>
+                <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-green-600 flex-shrink-0" />
+                <div>
+                  <p className="text-xs md:text-sm font-semibold text-green-800">
+                    Feedback Recorded: Helpful (Saved to Supabase & AWS S3)
+                  </p>
+                  <p className="text-xs text-green-700 hidden md:block">
+                    WOOF is learning from this successful pattern.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <ThumbsDown className="w-4 h-4 md:w-5 md:h-5 text-orange-600 flex-shrink-0" />
+                <div>
+                  <p className="text-xs md:text-sm font-semibold text-orange-800">
+                    Feedback Recorded: Not Helpful (Models Recalibrated & Archived)
+                  </p>
+                  <p className="text-xs text-orange-700 hidden md:block">
+                    Association weights updated and stale forecast caches purged.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
@@ -401,6 +465,7 @@ export function Feedback() {
                     </div>
                   </div>
                 </div>
+                {renderFeedbackControls(promo)}
               </div>
             ))}
           </div>
@@ -501,69 +566,7 @@ export function Feedback() {
                     </div>
                   </div>
 
-                  {/* Feedback Section */}
-                  <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
-                    {promo.feedback === null ? (
-                      <div className="space-y-2 md:space-y-3">
-                        <p className="text-xs md:text-sm font-semibold text-[#223047]">
-                          Was this recommendation helpful?
-                        </p>
-                        <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
-                          <Button
-                            onClick={() => handleFeedback(promo.id, true)}
-                            disabled={submittingId === promo.id}
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white gap-2 text-xs md:text-sm"
-                          >
-                            <ThumbsUp className="w-3 h-3 md:w-4 md:h-4" />
-                            <span className="hidden sm:inline">Yes, Helpful</span>
-                            <span className="sm:hidden">Helpful</span>
-                          </Button>
-                          <Button
-                            onClick={() => handleFeedback(promo.id, false)}
-                            disabled={submittingId === promo.id}
-                            variant="outline"
-                            className="flex-1 border-[#FFD9EC] hover:bg-[#FFF2FA] gap-2 text-xs md:text-sm"
-                          >
-                            <ThumbsDown className="w-3 h-3 md:w-4 md:h-4" />
-                            <span className="hidden sm:inline">No, Not Helpful</span>
-                            <span className="sm:hidden">Not Helpful</span>
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={`p-3 md:p-4 rounded-lg md:rounded-xl ${
-                        promo.feedback === "helpful" ? "bg-green-100/90" : "bg-orange-100/90"
-                      }`}>
-                        <div className="flex items-center gap-2 md:gap-3">
-                          {promo.feedback === "helpful" ? (
-                            <>
-                              <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-green-600 flex-shrink-0" />
-                              <div>
-                                <p className="text-xs md:text-sm font-semibold text-green-800">
-                                  Feedback Recorded: Helpful (Saved to Supabase & AWS S3)
-                                </p>
-                                <p className="text-xs text-green-700 hidden md:block">
-                                  WOOF is learning from this successful pattern.
-                                </p>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <ThumbsDown className="w-4 h-4 md:w-5 md:h-5 text-orange-600 flex-shrink-0" />
-                              <div>
-                                <p className="text-xs md:text-sm font-semibold text-orange-800">
-                                  Feedback Recorded: Not Helpful (Models Recalibrated & Archived)
-                                </p>
-                                <p className="text-xs text-orange-700 hidden md:block">
-                                  Association weights updated and stale forecast caches purged.
-                                </p>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  {renderFeedbackControls(promo)}
                 </div>
               );
             })}

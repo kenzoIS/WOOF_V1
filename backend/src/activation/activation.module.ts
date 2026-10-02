@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { SupabaseModule } from '../common/supabase/supabase.module';
@@ -12,7 +12,7 @@ import {
 
 @Module({
   imports: [
-    AnalyticsModule,
+    forwardRef(() => AnalyticsModule),
     SupabaseModule,
     RealtimeModule,
     MongooseModule.forFeature([
@@ -21,5 +21,6 @@ import {
   ],
   controllers: [ActivationController],
   providers: [ActivationService],
+  exports: [ActivationService],
 })
 export class ActivationModule {}
