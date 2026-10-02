@@ -375,12 +375,24 @@ export class AnalyticsController {
     @Query('hour') hour?: string,
     @Query('dateStart') dateStart?: string,
     @Query('dateEnd') dateEnd?: string,
+    @Query('referenceDate') referenceDate?: string,
+    @Query('scenarioMultiplier') scenarioMultiplier?: string,
+    @Query('scenarioDayOfWeekIndex') scenarioDayOfWeekIndex?: string,
+    @Query('scenarioLabel') scenarioLabel?: string,
   ) {
     const params = {
       hour,
       dateStart,
       dateEnd,
+      referenceDate,
+      scenarioMultiplier: scenarioMultiplier ? parseFloat(scenarioMultiplier) : undefined,
+      scenarioDayOfWeekIndex: scenarioDayOfWeekIndex !== undefined ? parseInt(scenarioDayOfWeekIndex, 10) : undefined,
+      scenarioLabel,
     };
+    // Scenario what-if calls are never cached — they must always recompute
+    if (scenarioMultiplier !== undefined || scenarioDayOfWeekIndex !== undefined) {
+      return this.analyticsService.getTrafficOptimizer(params);
+    }
     return this.cached(this.key('traffic-optimizer', params), () =>
       this.analyticsService.getTrafficOptimizer(params),
     );

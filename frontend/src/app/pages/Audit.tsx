@@ -24,6 +24,13 @@ type AuditEvent = {
 const formatDuration = (ms?: number) =>
   !Number.isFinite(ms) ? "N/A" : (ms || 0) < 1000 ? `${ms} ms` : `${((ms || 0) / 1000).toFixed(1)} s`;
 
+// Format module key to friendly display name
+const formatModuleName = (mod: string) => {
+  if (mod === "traffic_optimizer") return "Traffic Optimizer";
+  if (mod === "happy_hour") return "Happy Hour";
+  return mod.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
 const statusClass = (value: string) =>
   value === "failed"
     ? "bg-red-100 text-red-700 border-red-200"
@@ -106,7 +113,7 @@ function AuditDetailModal({ event, onClose }: { event: AuditEvent; onClose: () =
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/40">{event.category}</span>
             </div>
             <h3 className="text-base font-bold text-[#223047] leading-snug">{event.action}</h3>
-            <p className="text-xs text-[#223047]/50 mt-0.5">{event.module}</p>
+            <p className="text-xs text-[#223047]/50 mt-0.5">{formatModuleName(event.module)}</p>
           </div>
           <button
             onClick={onClose}
@@ -279,7 +286,7 @@ export function Audit() {
             <SelectContent>
               <SelectItem value="all">All Modules</SelectItem>
               {[...new Set(events.map((e) => e.module))].map((value) => (
-                <SelectItem key={value} value={value}>{value}</SelectItem>
+                <SelectItem key={value} value={value}>{formatModuleName(value)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -346,7 +353,7 @@ export function Audit() {
                     <TableCell className="text-xs">{event.target || "System"}</TableCell>
                     <TableCell className="text-xs">
                       <div className="font-medium">{event.action}</div>
-                      <div className="opacity-60">{event.module}</div>
+                      <div className="opacity-60">{formatModuleName(event.module)}</div>
                     </TableCell>
                     <TableCell className="text-xs">
                       {event.state_before || event.state_after

@@ -52,10 +52,15 @@ export class AuditService {
           user_agent: input.userAgent || null,
           metadata: input.metadata || {},
         });
-      if (error) throw error;
-    } catch (error) {
+      if (error) {
+        this.logger.warn(
+          `Audit event could not be persisted: ${error.message || JSON.stringify(error)}`,
+        );
+        return;
+      }
+    } catch (error: any) {
       this.logger.warn(
-        `Audit event could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+        `Audit event could not be persisted: ${error?.message || (error instanceof Error ? error.message : JSON.stringify(error))}`,
       );
     }
   }

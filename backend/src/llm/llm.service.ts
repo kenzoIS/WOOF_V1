@@ -168,7 +168,12 @@ export class LlmService {
       return 'Forecast values are available from the WOOF analytics engine. Configure the assigned GLM provider for a generated narrative.';
     }
     if (request.feature === 'prescriptive_explanation') {
-      return 'This recommendation is based on verified WOOF business signals. Configure the assigned GLM provider for a generated rationale.';
+      if (request.context && (request.context.scheduledStaff || request.context.predictedVisits !== undefined)) {
+        const ctx = request.context as any;
+        const staff = Array.isArray(ctx.scheduledStaff) ? ctx.scheduledStaff.join(', ') : ctx.scheduledStaff || 'Active roster';
+        return `At ${ctx.hour || 'this hour'} on ${ctx.dayOfWeek || 'today'}, ${ctx.staffCount || 'scheduled'} staff (${staff}) are on shift for an estimated ${ctx.predictedVisits ?? 0} customer visit${ctx.predictedVisits === 1 ? '' : 's'}. Operational coverage is aligned with current demand.`;
+      }
+      return 'This recommendation is based on verified WOOF business signals and active staff schedules.';
     }
     if (request.feature === 'forecast_explanation') {
       return 'Forecast values are available from the WOOF analytics engine. Configure the assigned GLM provider to generate a narrative summary.';

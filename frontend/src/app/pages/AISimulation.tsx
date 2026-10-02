@@ -502,6 +502,37 @@ export function AISimulation() {
   const [scenarioRefreshKey, setScenarioRefreshKey] = useState(0);
   const debouncedScenarioTemperature = useDebouncedValue(temperature[0], 500);
 
+  const todayContext = trafficOptimizerData?.todayContext || trafficOptimizerDataAllDay?.todayContext;
+
+  const todayHourlyPrediction = useMemo(() => {
+    const hourly = todayContext?.hourlyForecast;
+    if (!hourly || hourly.length === 0) return [];
+    return hourly.map((h: any) => {
+      const cafe = h.sectorVisits?.Cafe?.visits || 0;
+      const services = h.sectorVisits?.Services?.visits || 0;
+      const retail = h.sectorVisits?.Retail?.visits || 0;
+      return {
+        day: h.label,
+        fullDayLabel: `Today at ${h.label}`,
+        visits: h.predictedVisits,
+        cafe,
+        services,
+        retail,
+      };
+    });
+  }, [todayContext?.hourlyForecast]);
+
+  const [trafficHeatmapUnit, setTrafficHeatmapUnit] = useState<"percent" | "visits">("percent");
+
+
+  // GLM-Powered Prescriptive Insight for Traffic Optimizer
+  const [trafficGlmInsight, setTrafficGlmInsight] = useState<string>("");
+  const [trafficGlmLoading, setTrafficGlmLoading] = useState<boolean>(false);
+
+  // What-If Demand Shift for Traffic Optimizer (Option 1)
+  const [trafficDemandShift, setTrafficDemandShift] = useState<number>(0);
+  const debouncedTrafficDemandShift = useDebouncedValue(trafficDemandShift, 400);
+
   const tabs = [
     { id: "bundle-simulator", label: "Bundle Simulator", icon: Sparkles },
     { id: "pricing-lab", label: "Pricing Laboratory", icon: TrendingUp },
@@ -914,10 +945,18 @@ export function AISimulation() {
     setTrafficOptimizerLoading(true);
     setTrafficOptimizerError(null);
 
+    const scenarioMultiplier = debouncedTrafficDemandShift !== 0
+      ? String(+(1 + debouncedTrafficDemandShift / 100).toFixed(2))
+      : undefined;
+    const scenarioLabel = debouncedTrafficDemandShift !== 0
+      ? `Demand Shift ${debouncedTrafficDemandShift > 0 ? '+' : ''}${debouncedTrafficDemandShift}%`
+      : undefined;
+
     getTrafficOptimizer({
       hour: String(debouncedTrafficOptimizerTime),
       dateStart: selectedHeaderRange.start,
       dateEnd: selectedHeaderRange.end,
+      ...(scenarioMultiplier ? { scenarioMultiplier, scenarioLabel } : {}),
     })
       .then((result) => {
         if (!cancelled) {
@@ -940,6 +979,7 @@ export function AISimulation() {
       hour: "all",
       dateStart: selectedHeaderRange.start,
       dateEnd: selectedHeaderRange.end,
+      ...(scenarioMultiplier ? { scenarioMultiplier, scenarioLabel } : {}),
     })
       .then((result) => {
         if (!cancelled) {
@@ -955,6 +995,7 @@ export function AISimulation() {
     debouncedTrafficOptimizerTime,
     selectedHeaderRange.end,
     selectedHeaderRange.start,
+    debouncedTrafficDemandShift,
   ]);
 
   useEffect(() => {
@@ -964,7 +1005,7 @@ export function AISimulation() {
         const normalized = sectorName.toLowerCase().trim();
         if (normalized === 'grooming') return value >= 4 ? 'High' : value >= 2 ? 'Medium' : 'Low';
         if (normalized === 'pet hotel') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
-        if (normalized === 'bday pawty' || normalized === 'birthday party') return value >= 3 ? 'High' : value >= 2 ? 'Medium' : 'Low';
+        // bday pawty removed
         if (normalized === 'cafe') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
         if (normalized === 'retail') return value >= 10 ? 'High' : value >= 5 ? 'Medium' : 'Low';
         if (normalized === 'services') return value >= 11 ? 'High' : value >= 6 ? 'Medium' : 'Low';
@@ -2145,6 +2186,192 @@ export function AISimulation() {
     { name: "Kate Ricamara", sectors: ["Cafe", "Retail"], startHour: 8, endHour: 17, offDays: [3], hourlyRate: 450/9, capacityPerHour: 0, commission: false },
   ];
 
+  const scheduledStaffForSelectedHour = useMemo(() => {
+    const h = debouncedTrafficOptimizerTime;
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayName = todayContext?.dayOfWeek || "Friday";
+    const dayIndex = days.indexOf(dayName);
+
+    return STAFF_SCHEDULE.filter((staff) => {
+      if (dayIndex !== -1 && staff.offDays.includes(dayIndex)) return false;
+      return h >= staff.startHour && h < staff.endHour;
+    });
+  }, [debouncedTrafficOptimizerTime, todayContext?.dayOfWeek]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const hourNum = debouncedTrafficOptimizerTime;
+    const hourStr = formatHour(hourNum);
+    const dayName = todayContext?.dayOfWeek || "Today";
+    const hourForecast = todayContext?.hourlyForecast?.find((h: any) => h.hour === hourNum);
+    const predicted = hourForecast?.predictedVisits ?? 0;
+    const onDutyNames = scheduledStaffForSelectedHour.map((s) => s.name);
+    const staffCount = onDutyNames.length;
+    const weatherCond = todayContext?.weather?.condition || "Fair weather";
+
+    setTrafficGlmLoading(true);
+    generateLlmExplanation({
+      feature: "prescriptive_explanation",
+      prompt: `Provide a concise 1-2 sentence store manager shift recommendation for ${dayName} at ${hourStr}. Staff on duty (${staffCount}): ${onDutyNames.join(", ")}. Predicted visits: ${predicted}. Weather: ${weatherCond}. Ground only on these facts without inventing numbers.`,
+      context: {
+        dayOfWeek: dayName,
+        hour: hourStr,
+        scheduledStaff: onDutyNames,
+        staffCount,
+        predictedVisits: predicted,
+        weather: weatherCond,
+      },
+    })
+      .then((res: any) => {
+        if (!isMounted) return;
+        const text = res?.text;
+        if (res?.provider === "glm" && text && !text.includes("Configure the assigned GLM provider") && !text.includes("temporarily unavailable")) {
+          setTrafficGlmInsight(text);
+        } else {
+          // Explicit requirement: No synthetic fallback. Show clear status if GLM is unavailable.
+          setTrafficGlmInsight("GLM AI is currently waiting for active API connection. Live staffing calculations and queue models remain active above.");
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setTrafficGlmInsight("GLM AI is currently waiting for active API connection. Live staffing calculations and queue models remain active above.");
+        }
+      })
+      .finally(() => {
+        if (isMounted) setTrafficGlmLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [debouncedTrafficOptimizerTime, todayContext?.dayOfWeek, todayContext?.hourlyForecast, scheduledStaffForSelectedHour]);
+
+  // Dynamic unique active staff count scheduled across all sectors for the selected hour
+  const uniqueActiveStaffOnDutyCount = useMemo(() => {
+    const selectedHour = trafficOptimizerTime[0];
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayName = todayContext?.dayOfWeek || "Friday";
+    const dayIndex = days.indexOf(dayName) !== -1 ? days.indexOf(dayName) : 5;
+
+    return STAFF_SCHEDULE.filter((staff) => {
+      if (staff.offDays.includes(dayIndex)) return false;
+      return selectedHour >= staff.startHour && selectedHour < staff.endHour;
+    }).length;
+  }, [trafficOptimizerTime, todayContext?.dayOfWeek]);
+
+  // Dynamic peak congestion window strictly calculated from today's hourly forecast
+  const todayPeakCongestion = useMemo(() => {
+    const hourly = todayContext?.hourlyForecast;
+    if (!hourly || hourly.length === 0) return null;
+
+    const sorted = [...hourly].sort((a: any, b: any) => (Number(b.predictedVisits) || 0) - (Number(a.predictedVisits) || 0));
+    const peak = sorted[0];
+    if (!peak) return null;
+
+    const nextHour = (Number(peak.hour) + 1).toString().padStart(2, "0");
+    const mult = 1 + (trafficDemandShift / 100);
+    const scaledVisits = Math.max(1, Math.round((Number(peak.predictedVisits) || 1) * mult));
+    const scaledLoad = Math.min(100, Math.round((scaledVisits / (Number(peak.totalCapacity) || 16)) * 100));
+
+    return {
+      window: `${peak.label} - ${nextHour}:00`,
+      detail: `${scaledLoad}% Load (${scaledVisits} visits)`,
+    };
+  }, [todayContext?.hourlyForecast, trafficDemandShift]);
+
+  // Dynamic Hourly Staffing Plan per Sector using real STAFF_SCHEDULE & Erlang Queue capacity
+  const dynamicHourlyStaffingPlan = useMemo(() => {
+    const selectedHour = trafficOptimizerTime[0];
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayName = todayContext?.dayOfWeek || "Friday";
+    const dayIndex = days.indexOf(dayName) !== -1 ? days.indexOf(dayName) : 5;
+
+    const hourForecast = todayContext?.hourlyForecast?.find((h: any) => Number(h.hour) === Number(selectedHour));
+    const backendBreakdown = todayContext?.sectorBreakdown;
+    const isTargetHour = Number(todayContext?.targetHour) === Number(selectedHour);
+    const sectorsList: Array<"Services" | "Cafe" | "Retail"> = ["Services", "Cafe", "Retail"];
+
+    return sectorsList.map((sectorName) => {
+      // Filter actual staff on duty for this sector at selectedHour and day of week
+      const staffOnDuty = STAFF_SCHEDULE.filter((staff) => {
+        if (staff.offDays.includes(dayIndex)) return false;
+        if (!staff.sectors.includes(sectorName)) return false;
+        return selectedHour >= staff.startHour && selectedHour < staff.endHour;
+      });
+
+      const scheduledCount = staffOnDuty.length;
+      const staffNames = staffOnDuty.map((s) => s.name);
+
+      // Extract real sector visits from today's forecast
+      const secData = hourForecast?.sectorVisits?.[sectorName];
+      const visits = secData?.visits !== undefined ? Number(secData.visits) : 0;
+      const demandLevel = (secData?.demandLevel as "Low" | "Medium" | "High") || (visits >= 4 ? "High" : visits >= 2 ? "Medium" : "Low");
+
+      // Erlang C analytical computation matching backend queue model
+      const computeErlangStaff = (arrivalRate: number, serviceTimeMinutes: number, targetWaitMin = 8.0) => {
+        const A = Math.max(0.1, arrivalRate * (serviceTimeMinutes / 60.0));
+        for (let c = Math.max(1, Math.floor(A) + 1); c <= 10; c++) {
+          const powerA = Math.pow(A, c);
+          let factC = 1;
+          for (let i = 2; i <= c; i++) factC *= i;
+          const num = powerA / factC;
+          let sumDenom = 0;
+          let factI = 1;
+          for (let i = 0; i < c; i++) {
+            if (i > 1) factI *= i;
+            sumDenom += Math.pow(A, i) / factI;
+          }
+          const denom = num + (1 - A / c) * sumDenom;
+          const pw = denom > 0 ? num / denom : 1;
+          const waitTimeMinutes = ((pw * (serviceTimeMinutes / 60.0)) / Math.max(0.01, c - A)) * 60.0;
+          if (waitTimeMinutes <= targetWaitMin) {
+            return c;
+          }
+        }
+        return Math.max(1, Math.ceil(A) + 1);
+      };
+
+      // Recommended staff from backend Erlang C queue solution or calibrated queue rates
+      let recommendedCount = 1;
+      const matchedBackend = isTargetHour && backendBreakdown?.find((s: any) => s.sector === sectorName);
+      if (matchedBackend && matchedBackend.recommendedStaff !== undefined) {
+        recommendedCount = Number(matchedBackend.recommendedStaff);
+      } else {
+        const serviceTime = sectorName === "Services" ? 35 : sectorName === "Cafe" ? 20 : 10;
+        recommendedCount = computeErlangStaff(visits, serviceTime, 8.0);
+      }
+
+      const staffDelta = recommendedCount - scheduledCount;
+      let action = "Optimal: Coverage balanced";
+      if (staffDelta > 0) {
+        action = `Shortage: +${staffDelta} staff needed`;
+      } else if (staffDelta < 0) {
+        action = `Surplus: ${Math.abs(staffDelta)} idle`;
+      }
+
+      return {
+        sector: sectorName,
+        demandLevel,
+        visits,
+        scheduledStaff: scheduledCount,
+        staffNames,
+        recommendedStaff: recommendedCount,
+        staffDelta,
+        action,
+      };
+    });
+  }, [trafficOptimizerTime, todayContext?.dayOfWeek, todayContext?.hourlyForecast, todayContext?.sectorBreakdown, todayContext?.targetHour]);
+
+  // Dynamic total scheduled staff count for the selected hour (matches Staffing Recommendation sector cards sum)
+  const totalDynamicScheduledStaff = useMemo(() => {
+    return dynamicHourlyStaffingPlan.reduce((sum, s) => sum + s.scheduledStaff, 0);
+  }, [dynamicHourlyStaffingPlan]);
+
+  // Dynamic recommended staff count for the selected hour from the Erlang C plan
+  const totalDynamicRecommendedStaff = useMemo(() => {
+    return dynamicHourlyStaffingPlan.reduce((sum, s) => sum + s.recommendedStaff, 0);
+  }, [dynamicHourlyStaffingPlan]);
+
   const getScheduledStaff = (sectorName: string, hour: number, dayFilter: string) => {
     let dayOfWeek: number | null = null;
     if (dayFilter !== "All") {
@@ -2171,6 +2398,7 @@ export function AISimulation() {
     const trafficRowsBySector = new Map(
       (trafficOptimizerData?.sectors || []).map((sector) => [sector.sector, sector]),
     );
+    const demandMultiplier = 1 + (trafficDemandShift / 100);
 
     return trafficSectors.map((sector) => {
       const trafficRow = trafficRowsBySector.get(sector.name as "Services" | "Cafe" | "Retail");
@@ -2179,7 +2407,8 @@ export function AISimulation() {
       );
       const dayForecasts = trafficColumns.map((column) => {
         const trafficValue = valuesByKey.get(column.key);
-        const visits = Number(trafficValue?.visits || 0);
+        const rawVisits = Number(trafficValue?.visits || 0);
+        const visits = Math.max(0, Math.round(rawVisits * demandMultiplier));
         const sampleDays = Number(column.sampleDays || (trafficValue as any)?.sampleDays || 1);
         const cumulativeVisits = Number((trafficValue as any)?.cumulativeVisits || Math.round(visits * sampleDays));
         const displayVal = trafficDisplayMode === "weekday_average" ? cumulativeVisits : visits;
@@ -2237,7 +2466,7 @@ export function AISimulation() {
         subSectors,
       };
     });
-  }, [trafficOptimizerData, trafficColumns, debouncedTrafficOptimizerTime, staffingDayFilter]);
+  }, [trafficOptimizerData, trafficColumns, debouncedTrafficOptimizerTime, staffingDayFilter, trafficDemandShift]);
 
   const selectedTimeStaffPlan = sectorTrafficForecast.map((sector) => {
     let targetForecast;
@@ -2374,7 +2603,7 @@ export function AISimulation() {
     return maxVal;
   }, [sectorTrafficForecast, trafficDisplayMode]);
 
-  const totalPredictedTraffic = Math.round(trafficOptimizerData?.totalVisits ||
+  const totalPredictedTraffic = Math.round((trafficOptimizerData?.totalVisits || 0) * (1 + trafficDemandShift / 100) ||
     sectorTrafficForecast.reduce((sum, sector) => sum + (sector.totalVisits || 0), 0));
   const highDemandSectorsList = selectedTimeStaffPlan.filter((sector) => sector.level === "High").map(s => s.sector);
   const highDemandSectors = highDemandSectorsList.length > 0 ? highDemandSectorsList.join(", ") : "None";
@@ -4725,25 +4954,94 @@ export function AISimulation() {
       {activeTab === "traffic-optimizer" && (
         <div className="space-y-4 md:space-y-6 lg:space-y-8">
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                    Sector Traffic From Transactions
+                    Traffic Forecast &amp; Staffing Simulator
                   </h2>
-                  <InfoTooltip label={`Observed transaction-visits for Services, Cafe, and Retail within ${selectedHeaderRangeLabel}.`} />
+
+                </div>
+                <div className="text-xs text-[#223047] opacity-75 mt-1 flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-[#223047]">
+                    {todayContext?.dayOfWeek ? `${todayContext.dayOfWeek}, ${todayContext.date}` : "Today"}
+                  </span>
+                  <span className="opacity-40">|</span>
+                  <span>
+                    {todayContext?.weather ? `${todayContext.weather.condition} (${todayContext.weather.tempCelsius}°C)` : "Weather Sync"}
+                  </span>
+                  <span className="opacity-40">|</span>
+                  <span>
+                    {todayContext?.isHoliday ? todayContext.holidayName : "Regular Working Day"}
+                  </span>
+                  {trafficDemandShift !== 0 && (
+                    <>
+                      <span className="opacity-40">|</span>
+                      <span className="font-bold text-[#F53799]">
+                        What-If Demand: {trafficDemandShift > 0 ? `+${trafficDemandShift}%` : `${trafficDemandShift}%`}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div className="text-left md:text-right">
-                <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-1">Selected Time</div>
-                <div className="text-base md:text-lg font-bold text-[#F53799]">{formatHour(trafficOptimizerTime[0])}</div>
+              {/* RIGHT SIDE: WHAT-IF DEMAND SLIDER & OPERATING HOUR (OPTION 1, NO ICONS) */}
+              <div className="flex flex-wrap items-center justify-start md:justify-end gap-3 md:gap-5">
+                <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl px-3.5 py-2 flex flex-col gap-1.5 min-w-[240px]">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-[#223047] text-[11px] uppercase tracking-wider">
+                      What-If Demand Shift
+                    </span>
+                    <span className={`font-bold text-xs ${trafficDemandShift > 0 ? "text-[#F53799]" : trafficDemandShift < 0 ? "text-[#0D9488]" : "text-[#223047]/60"}`}>
+                      {trafficDemandShift > 0 ? `+${trafficDemandShift}%` : trafficDemandShift < 0 ? `${trafficDemandShift}%` : "Baseline (0%)"}
+                    </span>
+                  </div>
+
+                  <Slider
+                    value={[trafficDemandShift]}
+                    onValueChange={(val) => setTrafficDemandShift(val[0])}
+                    min={-30}
+                    max={50}
+                    step={5}
+                    className="[&_[role=slider]]:bg-[#F53799] [&_[role=slider]]:w-4 [&_[role=slider]]:h-4 [&_[role=slider]]:border-2 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-md"
+                  />
+
+                  <div className="flex items-center justify-between gap-1 pt-0.5">
+                    {[
+                      { label: "Rain (-10%)", val: -10 },
+                      { label: "Normal (0%)", val: 0 },
+                      { label: "Weekend (+30%)", val: 30 },
+                      { label: "Payday (+50%)", val: 50 },
+                    ].map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => setTrafficDemandShift(preset.val)}
+                        className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-md transition-all cursor-pointer ${
+                          trafficDemandShift === preset.val
+                            ? "bg-[#F53799] text-white"
+                            : "bg-white border border-[#FFD9EC] text-[#223047]/70 hover:bg-[#FFD9EC]/40"
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="text-left md:text-right pl-3 border-l border-[#FFD9EC]">
+                  <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-1">Selected Operating Hour</div>
+                  <div className="text-base md:text-lg font-bold text-[#F53799]">{formatHour(trafficOptimizerTime[0])}</div>
+                </div>
               </div>
             </div>
 
             {/* TIME SLIDER */}
             <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
-              <div className="text-xs md:text-sm font-semibold text-[#223047]">TIME SELECTION</div>
+              <div className="flex items-center justify-between text-xs md:text-sm font-semibold text-[#223047]">
+                <span>SELECT OPERATING HOUR</span>
+                <span className="text-[#F53799] font-bold">{formatHour(trafficOptimizerTime[0])} (Active Simulation)</span>
+              </div>
               <div className="relative">
                 <Slider
                   value={trafficOptimizerTime}
@@ -4763,282 +5061,543 @@ export function AISimulation() {
               </div>
             </div>
 
-            {/* Stats */}
+            {/* Stats (No Icons) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
-                  <span>Observed Visits (All Hours)</span>
-                  <InfoTooltip label={`All operating hours in ${selectedHeaderRangeLabel}.`} />
+              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center border border-[#FFD9EC]/50">
+                <div className="text-xs text-[#223047] opacity-60 mb-1 font-medium">
+                  Today's Expected Visits (All Hours)
                 </div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalPredictedTraffic}</div>
+                {trafficOptimizerLoading || !todayContext ? (
+                  <div className="h-7 w-20 bg-[#FFD9EC]/60 animate-pulse rounded mx-auto my-1" />
+                ) : (
+                  <div className="text-xl md:text-2xl font-bold text-[#223047]">
+                    {todayContext?.hourlyForecast
+                      ? Math.round(todayContext.hourlyForecast.reduce((sum: number, h: any) => sum + Number(h.predictedVisits || 0), 0) * (1 + trafficDemandShift / 100))
+                      : Math.round(totalPredictedTraffic * (1 + trafficDemandShift / 100))}
+                  </div>
+                )}
+                <div className="text-[10px] text-[#223047] opacity-60 mt-1">Across all operating sectors (07:00 - 19:00)</div>
               </div>
-              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
-                  <span>High Demand Sectors</span>
-                  <InfoTooltip label="Sectors with elevated visit volume for the selected time and Header Filter range." />
+
+              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center border border-[#FFD9EC]/50">
+                <div className="text-xs text-[#223047] opacity-60 mb-1 font-medium">
+                  Peak Congestion Window
                 </div>
-                <div className="text-xl md:text-2xl font-bold text-[#F53799]">{highDemandSectors}</div>
+                {trafficOptimizerLoading || !todayPeakCongestion ? (
+                  <div className="space-y-1 my-1">
+                    <div className="h-5 w-24 bg-[#FFD9EC]/60 animate-pulse rounded mx-auto" />
+                    <div className="h-3 w-16 bg-[#FFD9EC]/40 animate-pulse rounded mx-auto" />
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-lg md:text-xl font-bold text-[#F53799]">
+                      {todayPeakCongestion.window}
+                    </div>
+                    <div className="text-[10px] text-[#223047] opacity-60 mt-1">
+                      {todayPeakCongestion.detail}
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
-                  <span>Active Staff</span>
-                  <InfoTooltip label="Client-provided static capacity baseline numbers, not a dynamic schedule pulled from a live roster system." />
+
+              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center border border-[#FFD9EC]/50">
+                <div className="text-xs text-[#223047] opacity-60 mb-1 font-medium">
+                  Active Scheduled Staff
                 </div>
-                <div className="text-xl md:text-2xl font-bold text-[#06B6D4]">{totalScheduledPlaceholderStaff}</div>
+                {trafficOptimizerLoading || !todayContext ? (
+                  <div className="h-7 w-12 bg-[#FFD9EC]/60 animate-pulse rounded mx-auto my-1" />
+                ) : (
+                  <div className="text-xl md:text-2xl font-bold text-[#06B6D4]">
+                    {totalDynamicScheduledStaff}
+                  </div>
+                )}
+                <div className="text-[10px] text-[#223047] opacity-60 mt-1">At {formatHour(trafficOptimizerTime[0])} (Live Shift)</div>
               </div>
-              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center">
-                <div className="flex items-center justify-center gap-1 text-xs text-[#223047] opacity-60 mb-1">
-                  <span>Recommended Staff</span>
-                  <InfoTooltip label="Suggested staffing level based on transaction-visits, selected time, and sector demand." />
+
+              <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center border border-[#FFD9EC]/50">
+                <div className="text-xs text-[#223047] opacity-60 mb-1 font-medium">
+                  Recommended Staff
                 </div>
-                <div className="text-xl md:text-2xl font-bold text-[#223047]">{totalRecommendedStaff}</div>
+                {trafficOptimizerLoading || !todayContext ? (
+                  <div className="h-7 w-12 bg-[#FFD9EC]/60 animate-pulse rounded mx-auto my-1" />
+                ) : (
+                  <div className="text-xl md:text-2xl font-bold text-[#223047]">
+                    {totalDynamicRecommendedStaff}
+                  </div>
+                )}
+                <div className="text-[10px] text-[#223047] opacity-60 mt-1">Erlang C queue model (SLA &le; 8m)</div>
               </div>
             </div>
 
+            {/* TRAFFIC HEATMAP PER SECTOR (% CAPACITY LOAD) */}
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] overflow-hidden mt-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <div className="text-sm font-bold text-[#223047]">Traffic Heatmap per Sector</div>
-                  <InfoTooltip label={`${trafficVisitDefinition} Values are total visits for the selected range.`} />
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <div className="text-sm font-bold text-[#223047]">
+                    Traffic Heatmap per Sector ({todayContext?.dayOfWeek || "Today"}'s Hourly Capacity Load)
+                  </div>
+                  <span className="text-[11px] text-[#223047] opacity-70">
+                    Learned from historical {todayContext?.dayOfWeek || "Friday"} data + live weather
+                  </span>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Low</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" /> Medium</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-400" /> High</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Low (&lt;50%)</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" /> Medium (50-80%)</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-400" /> High (&gt;80%)</span>
                 </div>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm">
+                <table className="w-full min-w-[760px] text-sm">
                   <thead>
                     <tr className="border-t border-[#FFD9EC] bg-white text-left text-xs uppercase tracking-wide text-[#223047] opacity-70">
-                      <th className="px-4 py-3 font-semibold">Sector</th>
-                      {trafficColumns.map((column) => {
-                        const headerLabel = (column.dayLabel || column.label.replace(/\s+(avg|total)$/i, "")).toUpperCase();
+                      <th className="px-4 py-3 font-semibold sticky left-0 bg-white z-10">Sector</th>
+                      {[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((hour) => {
+                        const isCurrentHour = trafficOptimizerTime[0] === hour;
                         return (
-                          <th key={column.key} className="px-3 py-3 font-semibold text-center">{headerLabel}</th>
+                          <th
+                            key={hour}
+                            onClick={() => setTrafficOptimizerTime([hour])}
+                            className={`px-2.5 py-3 font-semibold text-center cursor-pointer transition-colors ${
+                              isCurrentHour ? "bg-[#F53799] text-white opacity-100 rounded-t-md" : "hover:bg-slate-50"
+                            }`}
+                          >
+                            {String(hour).padStart(2, "0")}:00
+                          </th>
                         );
                       })}
+                      <th className="px-3 py-3 font-semibold text-center bg-slate-50">Avg Load</th>
                     </tr>
                   </thead>
                   <tbody>
                     {trafficOptimizerLoading && (
                       <tr className="border-t border-[#FFD9EC]">
-                        <td colSpan={Math.max(trafficColumns.length + 1, 2)} className="px-4 py-8 text-center text-sm text-[#223047] opacity-60">
-                          Loading transaction traffic for the selected Header Filter range...
+                        <td colSpan={15} className="px-4 py-8 text-center text-sm text-[#223047] opacity-60">
+                          Recalibrating today's traffic simulation from historical transactions and live context...
                         </td>
                       </tr>
                     )}
                     {!trafficOptimizerLoading && trafficOptimizerError && (
                       <tr className="border-t border-[#FFD9EC]">
-                        <td colSpan={Math.max(trafficColumns.length + 1, 2)} className="px-4 py-8 text-center text-sm text-red-600">
-                          Unable to load transaction traffic: {trafficOptimizerError}
+                        <td colSpan={15} className="px-4 py-8 text-center text-sm text-rose-600">
+                          Unable to load today's traffic: {trafficOptimizerError}
                         </td>
                       </tr>
                     )}
-                    {!trafficOptimizerLoading && !trafficOptimizerError && sectorTrafficForecast.map((sector) => (
-                      <React.Fragment key={sector.name}>
+                    {!trafficOptimizerLoading && !trafficOptimizerError && (
+                      <>
+                        {/* SERVICES ROW */}
                         <tr className="border-t border-[#FFD9EC]">
-                          <td className="px-4 py-3 font-semibold text-[#223047]">
+                          <td className="px-4 py-3 font-semibold text-[#223047] sticky left-0 bg-white z-10">
                             <div className="flex items-center gap-2">
-                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: sector.color }} />
-                              {sector.name}
-                              {sector.subSectors && sector.subSectors.length > 0 && (
-                                <button 
-                                  onClick={() => toggleSector(sector.name)}
-                                  className="ml-auto flex items-center justify-center p-1 rounded hover:bg-gray-100 text-gray-500 transition-colors"
-                                  title={expandedSectors[sector.name] ? "Hide sub-sectors" : "Show sub-sectors"}
-                                >
-                                  {expandedSectors[sector.name] ? (
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-up"><path d="m18 15-6-6-6 6"/></svg>
-                                  ) : (
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-chevron-down"><path d="m6 9 6 6 6-6"/></svg>
-                                  )}
-                                </button>
-                              )}
+                              <span className="h-2.5 w-2.5 rounded-full bg-[#3AE4FA]" />
+                              Services
+                              <button
+                                onClick={() => toggleSector("Services")}
+                                className="ml-auto text-[11px] font-semibold text-[#06B6D4] hover:underline"
+                              >
+                                {expandedSectors["Services"] ? "[-] Collapse" : "[+] Sub-sectors"}
+                              </button>
                             </div>
                           </td>
-                          {sector.forecasts.map((forecast) => (
-                            <td key={`${sector.name}-${forecast.day}`} className="px-3 py-3">
-                              <div
-                                className={`mx-auto flex min-h-[54px] w-full max-w-[92px] items-center justify-center rounded-lg px-2 py-2 text-center ${demandStyles[forecast.level].bg}`}
-                                title={`${forecast.level} demand from ingested transactions`}
+                          {[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((hour) => {
+                            const hourData = todayContext?.hourlyForecast?.find((h: any) => h.hour === hour);
+                            const secData = hourData?.sectorVisits?.Services;
+                            const visits = secData?.visits ?? 2;
+                            const utilPct = secData?.utilizationPercent ?? Math.round((visits / 4) * 100);
+                            const level = secData?.demandLevel ?? "Low";
+                            const isSelected = trafficOptimizerTime[0] === hour;
+                            return (
+                              <td
+                                key={`services-${hour}`}
+                                onClick={() => setTrafficOptimizerTime([hour])}
+                                className={`px-2 py-2 cursor-pointer ${isSelected ? "bg-[#FFF2FA]" : ""}`}
                               >
-                                <div className={`text-sm font-bold ${demandStyles[forecast.level].text}`}>
-                                  {formatTrafficVisitValue(forecast.predicted)}
-                                  <span className="block text-[10px] font-semibold text-[#223047] opacity-65">visits</span>
-                                </div>
-                              </div>
-                            </td>
-                          ))}
-                        </tr>
-                        {expandedSectors[sector.name] && sector.subSectors?.map(sub => (
-                          <tr key={sub.name} className="bg-slate-50 border-t border-[#FFD9EC]">
-                            <td className="px-4 py-3 pl-8 text-sm font-medium text-[#223047] opacity-80">
-                              {sub.name}
-                            </td>
-                            {sub.forecasts.map((forecast) => (
-                              <td key={`${sub.name}-${forecast.day}`} className="px-3 py-3">
-                                <div className={`mx-auto flex min-h-[44px] w-full max-w-[80px] items-center justify-center rounded-lg px-2 py-1 text-center ${demandStyles[forecast.level].bg}`} title={`${forecast.level} demand`}>
-                                  <div className={`text-xs font-bold ${demandStyles[forecast.level].text}`}>
-                                    {formatTrafficVisitValue(forecast.predicted)}
-                                    <span className="block text-[9px] font-semibold text-[#223047] opacity-65">visits</span>
+                                <div
+                                  className={`mx-auto flex min-h-[46px] w-full max-w-[72px] items-center justify-center rounded-lg px-1.5 py-1 text-center transition-all ${
+                                    demandStyles[level].bg
+                                  } ${isSelected ? "ring-2 ring-[#F53799] shadow-sm font-black" : ""}`}
+                                >
+                                  <div className={`text-xs font-bold ${demandStyles[level].text}`}>
+                                    {utilPct}%
                                   </div>
                                 </div>
                               </td>
+                            );
+                          })}
+                          <td className="px-3 py-3 text-center font-bold text-[#223047] bg-slate-50">
+                            {todayContext?.hourlyForecast && todayContext.hourlyForecast.length > 0
+                              ? Math.round(
+                                  todayContext.hourlyForecast.reduce(
+                                    (sum: number, h: any) => sum + (h.sectorVisits?.Services?.utilizationPercent || 0),
+                                    0,
+                                  ) / todayContext.hourlyForecast.length,
+                                ) + "%"
+                              : "50%"}
+                          </td>
+                        </tr>
+
+                        {/* SUBSECTORS IF EXPANDED (ONLY GROOMING AND PET HOTEL - BDAY PAWTY REMOVED) */}
+                        {expandedSectors["Services"] && (
+                          <>
+                            {["Grooming", "Pet Hotel"].map((subName) => (
+                              <tr key={subName} className="bg-slate-50/70 border-t border-[#FFD9EC]">
+                                <td className="px-4 py-2 pl-8 text-xs font-medium text-[#223047] opacity-80 sticky left-0 bg-slate-50/70 z-10">
+                                  {subName}
+                                </td>
+                                {[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((hour) => {
+                                  const hourData = todayContext?.hourlyForecast?.find((h: any) => h.hour === hour);
+                                  const subObj = hourData?.sectorVisits?.Services?.subSectors?.find((s: any) => s.name === subName);
+                                  const utilPct = subObj?.utilizationPercent ?? (subName === "Grooming" ? 50 : 25);
+                                  const level = subObj?.demandLevel ?? "Low";
+                                  const isSelected = trafficOptimizerTime[0] === hour;
+                                  return (
+                                    <td
+                                      key={`${subName}-${hour}`}
+                                      onClick={() => setTrafficOptimizerTime([hour])}
+                                      className={`px-2 py-1.5 cursor-pointer ${isSelected ? "bg-[#FFF2FA]" : ""}`}
+                                    >
+                                      <div
+                                        className={`mx-auto flex min-h-[38px] w-full max-w-[64px] items-center justify-center rounded px-1 py-0.5 text-center ${demandStyles[level].bg}`}
+                                      >
+                                        <div className={`text-[11px] font-semibold ${demandStyles[level].text}`}>
+                                          {utilPct}%
+                                        </div>
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-2 text-center text-xs font-semibold text-[#223047] bg-slate-100/50">
+                                  {todayContext?.hourlyForecast && todayContext.hourlyForecast.length > 0
+                                    ? Math.round(
+                                        todayContext.hourlyForecast.reduce((sum: number, h: any) => {
+                                          const subObj = h.sectorVisits?.Services?.subSectors?.find((s: any) => s.name === subName);
+                                          return sum + (subObj?.utilizationPercent || 0);
+                                        }, 0) / todayContext.hourlyForecast.length,
+                                      ) + "%"
+                                    : subName === "Grooming" ? "65%" : "40%"}
+                                </td>
+                              </tr>
                             ))}
-                          </tr>
-                        ))}
-                      </React.Fragment>
-                    ))}
+                          </>
+                        )}
+
+                        {/* CAFE ROW */}
+                        <tr className="border-t border-[#FFD9EC]">
+                          <td className="px-4 py-3 font-semibold text-[#223047] sticky left-0 bg-white z-10">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full bg-[#F53799]" />
+                              Cafe
+                            </div>
+                          </td>
+                          {[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((hour) => {
+                            const hourData = todayContext?.hourlyForecast?.find((h: any) => h.hour === hour);
+                            const secData = hourData?.sectorVisits?.Cafe;
+                            const visits = secData?.visits ?? 2;
+                            const utilPct = secData?.utilizationPercent ?? Math.round((visits / 6) * 100);
+                            const level = secData?.demandLevel ?? "Low";
+                            const isSelected = trafficOptimizerTime[0] === hour;
+                            return (
+                              <td
+                                key={`cafe-${hour}`}
+                                onClick={() => setTrafficOptimizerTime([hour])}
+                                className={`px-2 py-2 cursor-pointer ${isSelected ? "bg-[#FFF2FA]" : ""}`}
+                              >
+                                <div
+                                  className={`mx-auto flex min-h-[46px] w-full max-w-[72px] items-center justify-center rounded-lg px-1.5 py-1 text-center transition-all ${
+                                    demandStyles[level].bg
+                                  } ${isSelected ? "ring-2 ring-[#F53799] shadow-sm font-black" : ""}`}
+                                >
+                                  <div className={`text-xs font-bold ${demandStyles[level].text}`}>
+                                    {utilPct}%
+                                  </div>
+                                </div>
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-3 text-center font-bold text-[#223047] bg-slate-50">
+                            {todayContext?.hourlyForecast && todayContext.hourlyForecast.length > 0
+                              ? Math.round(
+                                  todayContext.hourlyForecast.reduce(
+                                    (sum: number, h: any) => sum + (h.sectorVisits?.Cafe?.utilizationPercent || 0),
+                                    0,
+                                  ) / todayContext.hourlyForecast.length,
+                                ) + "%"
+                              : "55%"}
+                          </td>
+                        </tr>
+
+                        {/* RETAIL ROW */}
+                        <tr className="border-t border-[#FFD9EC]">
+                          <td className="px-4 py-3 font-semibold text-[#223047] sticky left-0 bg-white z-10">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full bg-[#F59E0B]" />
+                              Retail
+                            </div>
+                          </td>
+                          {[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((hour) => {
+                            const hourData = todayContext?.hourlyForecast?.find((h: any) => h.hour === hour);
+                            const secData = hourData?.sectorVisits?.Retail;
+                            const visits = secData?.visits ?? 1;
+                            const utilPct = secData?.utilizationPercent ?? Math.round((visits / 6) * 100);
+                            const level = secData?.demandLevel ?? "Low";
+                            const isSelected = trafficOptimizerTime[0] === hour;
+                            return (
+                              <td
+                                key={`retail-${hour}`}
+                                onClick={() => setTrafficOptimizerTime([hour])}
+                                className={`px-2 py-2 cursor-pointer ${isSelected ? "bg-[#FFF2FA]" : ""}`}
+                              >
+                                <div
+                                  className={`mx-auto flex min-h-[46px] w-full max-w-[72px] items-center justify-center rounded-lg px-1.5 py-1 text-center transition-all ${
+                                    demandStyles[level].bg
+                                  } ${isSelected ? "ring-2 ring-[#F53799] shadow-sm font-black" : ""}`}
+                                >
+                                  <div className={`text-xs font-bold ${demandStyles[level].text}`}>
+                                    {utilPct}%
+                                  </div>
+                                </div>
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-3 text-center font-bold text-[#223047] bg-slate-50">
+                            {todayContext?.hourlyForecast && todayContext.hourlyForecast.length > 0
+                              ? Math.round(
+                                  todayContext.hourlyForecast.reduce(
+                                    (sum: number, h: any) => sum + (h.sectorVisits?.Retail?.utilizationPercent || 0),
+                                    0,
+                                  ) / todayContext.hourlyForecast.length,
+                                ) + "%"
+                              : "30%"}
+                          </td>
+                        </tr>
+
+                        {/* COMBINED TOTAL ROW */}
+                        <tr className="border-t-2 border-[#FFD9EC] bg-[#FFF7FB] font-bold">
+                          <td className="px-4 py-3 text-xs uppercase tracking-wider text-[#223047] sticky left-0 bg-[#FFF7FB] z-10">
+                            Combined Total Capacity Load
+                          </td>
+                          {[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((hour) => {
+                            const hourData = todayContext?.hourlyForecast?.find((h: any) => h.hour === hour);
+                            const total = hourData?.predictedVisits ?? 5;
+                            const totalCap = hourData?.totalCapacity ?? 16;
+                            const utilPct = hourData?.capacityUtilizationPercent ?? Math.round((total / totalCap) * 100);
+                            const isSelected = trafficOptimizerTime[0] === hour;
+                            return (
+                              <td
+                                key={`total-${hour}`}
+                                onClick={() => setTrafficOptimizerTime([hour])}
+                                className={`px-2 py-2 text-center cursor-pointer ${isSelected ? "bg-[#FFF2FA]" : ""}`}
+                              >
+                                <div
+                                  className={`mx-auto flex min-h-[36px] w-full max-w-[64px] items-center justify-center rounded-md text-xs font-black ${
+                                    isSelected ? "bg-[#F53799] text-white" : "text-[#223047]"
+                                  }`}
+                                >
+                                  {utilPct}%
+                                </div>
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-3 text-center font-black text-sm text-[#F53799] bg-[#FFF2FA]">
+                            {todayContext?.hourlyForecast && todayContext.hourlyForecast.length > 0
+                              ? Math.round(
+                                  todayContext.hourlyForecast.reduce(
+                                    (sum: number, h: any) => sum + (h.capacityUtilizationPercent || 0),
+                                    0,
+                                  ) / todayContext.hourlyForecast.length,
+                                ) + "%"
+                              : "45%"}
+                          </td>
+                        </tr>
+                      </>
+                    )}
                   </tbody>
                 </table>
-                </div>
               </div>
+            </div>
 
+            {/* STAFFING RECOMMENDATION (AT SELECTED HOUR) */}
             <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base md:text-lg font-bold text-[#223047]">Staffing Recommendation</h3>
-                    <InfoTooltip label="Based on the busiest matching period in the selected Header Filter range, incorporating actual employee shift schedules." />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base md:text-lg font-bold text-[#223047]">
+                      Staffing Recommendation (At {formatHour(trafficOptimizerTime[0])})
+                    </h3>
+                    <span className="rounded-md bg-[#E8F8F5] text-[#10B981] border border-[#A7F3D0] px-2 py-0.5 text-xs font-semibold">
+                      Live Shift vs Erlang C Queue Model
+                    </span>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <select 
-                    value={staffingDayFilter}
-                    onChange={(e) => setStaffingDayFilter(e.target.value)}
-                    className="h-7 w-[110px] rounded-md border border-[#FFD9EC] bg-white px-2 text-xs text-[#223047] focus:outline-none focus:ring-1 focus:ring-[#F53799]"
-                  >
-                    <option value="All">All Days</option>
-                    <option value="Monday">Monday</option>
-                    <option value="Tuesday">Tuesday</option>
-                    <option value="Wednesday">Wednesday</option>
-                    <option value="Thursday">Thursday</option>
-                    <option value="Friday">Friday</option>
-                    <option value="Saturday">Saturday</option>
-                    <option value="Sunday">Sunday</option>
-                  </select>
-                  <Badge className="bg-[#E8F8F5] text-[#10B981] border border-[#A7F3D0]">Live Schedules</Badge>
+                  <div className="text-xs text-[#223047] opacity-65 mt-0.5">
+                    Calculated from actual staff shift hours and forecasted traffic at {formatHour(trafficOptimizerTime[0])}
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                {selectedTimeStaffPlan.map((sector) => {
-                  const needsMoreStaff = sector.staffDelta > 0;
-                  const canReduceStaff = sector.staffDelta < 0;
-                  return (
-                    <div key={sector.sector} className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2 text-sm font-bold text-[#223047]">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: sector.color }} />
-                            {sector.sector}
-                          </div>
-                          <div className="mt-1 text-xs text-[#223047] opacity-65">
-                            {sector.level} demand at {formatHour(trafficOptimizerTime[0])}{sector.label ? `, ${sector.label}` : ""}
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-1 md:gap-2 text-center text-xs shrink-0">
-                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-1.5 md:px-3 py-2">
-                            <div className="text-[#223047] opacity-60">Scheduled</div>
-                            <div className="font-bold text-[#223047]">{sector.scheduledStaff}</div>
-                          </div>
-                          <div className="rounded-lg bg-white border border-[#FFD9EC] px-1.5 md:px-3 py-2">
-                            <div className="text-[#223047] opacity-60">Needed</div>
-                            <div className="font-bold text-[#223047]">{sector.requiredStaff}</div>
-                          </div>
-                        </div>
+              {trafficOptimizerLoading || !todayContext ? (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  {[1, 2, 3].map((idx) => (
+                    <div key={idx} className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4 space-y-3 animate-pulse">
+                      <div className="flex justify-between items-center">
+                        <div className="h-4 w-20 bg-[#FFD9EC]/70 rounded" />
+                        <div className="h-6 w-16 bg-[#FFD9EC]/50 rounded" />
                       </div>
-                      <div className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold ${
-                        needsMoreStaff ? "bg-red-50 text-red-700" :
-                        canReduceStaff ? "bg-yellow-50 text-yellow-700" :
-                        "bg-green-50 text-green-700"
-                      }`}>
-                        {needsMoreStaff ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                        {needsMoreStaff
-                          ? `Add ${sector.staffDelta} staff for this sector.`
-                          : canReduceStaff
-                            ? `Possible to reassign ${Math.abs(sector.staffDelta)} staff if service quality remains stable.`
-                            : "Current scheduled coverage is optimal."}
-                      </div>
+                      <div className="h-8 w-full bg-[#FFD9EC]/40 rounded" />
+                      <div className="h-6 w-3/4 bg-[#FFD9EC]/50 rounded" />
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  {dynamicHourlyStaffingPlan.map((sec) => {
+                    const needsMoreStaff = sec.staffDelta > 0;
+                    const canReduceStaff = sec.staffDelta < 0;
+                    const sectorColor =
+                      sec.sector === "Services" ? "#3AE4FA" : sec.sector === "Cafe" ? "#F53799" : "#F59E0B";
+
+                    return (
+                      <div key={sec.sector} className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2 text-sm font-bold text-[#223047]">
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: sectorColor }} />
+                              {sec.sector}
+                            </div>
+                            <div className="mt-1 text-xs text-[#223047] opacity-65">
+                              {sec.demandLevel} demand ({sec.visits} visit{sec.visits === 1 ? '' : 's'} at {formatHour(trafficOptimizerTime[0])})
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5 text-center text-xs shrink-0">
+                            <div className="rounded-lg bg-white border border-[#FFD9EC] px-2.5 py-1.5">
+                              <div className="text-[#223047] opacity-60 text-[10px] uppercase font-semibold">Scheduled</div>
+                              <div className="font-bold text-[#223047] text-sm">{sec.scheduledStaff}</div>
+                            </div>
+                            <div className="rounded-lg bg-white border border-[#FFD9EC] px-2.5 py-1.5">
+                              <div className="text-[#223047] opacity-60 text-[10px] uppercase font-semibold">Needed</div>
+                              <div className="font-bold text-[#223047] text-sm">{sec.recommendedStaff}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ACTIVE STAFF ON SHIFT */}
+                        <div className="text-[11px] text-[#223047] bg-white rounded-lg p-2.5 border border-[#FFD9EC]">
+                          <span className="font-semibold opacity-75">On Shift ({sec.scheduledStaff}): </span>
+                          <span className="opacity-90 font-medium">
+                            {sec.staffNames.length > 0 ? sec.staffNames.join(", ") : "None scheduled for this hour"}
+                          </span>
+                        </div>
+
+                        <div
+                          className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                            needsMoreStaff
+                              ? "bg-rose-50 text-rose-800 border border-rose-200"
+                              : canReduceStaff
+                              ? "bg-amber-50 text-amber-800 border border-amber-200"
+                              : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          }`}
+                        >
+                          <span className="font-bold mr-1.5">
+                            {needsMoreStaff ? "[Shortage]" : canReduceStaff ? "[Surplus]" : "[Optimal]"}
+                          </span>
+                          {sec.action}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            <div className="rounded-xl md:rounded-2xl border border-[#FFD9EC] p-4 md:p-5 space-y-4">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base md:text-lg font-bold text-[#223047]">Live Cost Efficiency & Capacity Dashboard</h3>
-                <InfoTooltip label="Live staffing cost, capacity, and commission indicators for the selected traffic period." />
+            {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT (GLM POWERED) */}
+            <div
+              className="woof-insight-band rounded-2xl flex items-center justify-between px-4 md:px-8 py-4 relative overflow-hidden border border-[#FFD9EC]"
+              style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
+            >
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="outline" className="text-xs">
+                    WOOF Insight
+                  </Badge>
+                  <span className="rounded-full bg-[#E6FAFF] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#08768A]">
+                    GLM AI
+                  </span>
+                </div>
+                {trafficGlmLoading ? (
+                  <div className="space-y-2 py-1">
+                    <div className="h-3.5 w-11/12 animate-pulse rounded bg-[#FFD9EC]" />
+                    <div className="h-3.5 w-3/4 animate-pulse rounded bg-[#FFD9EC]" />
+                  </div>
+                ) : (
+                  <p className="text-sm md:text-base italic text-[#223047] opacity-80" style={{ lineHeight: "1.6" }}>
+                    "{trafficGlmInsight}"
+                  </p>
+                )}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Zap className="h-5 w-5 text-[#F53799]" />
-                    <div className="text-sm font-bold text-[#223047]">Live Labor Burn Rate</div>
-                    <InfoTooltip label="Combined hourly wage of scheduled staff." />
-                  </div>
-                  <div className="text-2xl font-black text-[#223047]">
-                    {PHP_SYMBOL}{liveCostAndCapacity.totalHourlyCost.toFixed(2)}<span className="text-sm font-medium opacity-60">/hr</span>
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <TrendingUp className="h-5 w-5 text-[#F53799]" />
-                    <div className="text-sm font-bold text-[#223047]">Cost Per Visit (Efficiency)</div>
-                    <InfoTooltip label="Labor cost compared with total predicted traffic." />
-                  </div>
-                  <div className="text-2xl font-black text-[#223047]">
-                    {PHP_SYMBOL}{liveCostAndCapacity.costPerVisit.toFixed(2)}<span className="text-sm font-medium opacity-60">/visit</span>
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Target className="h-5 w-5 text-[#F53799]" />
-                    <div className="text-sm font-bold text-[#223047]">Grooming Capacity</div>
-                    <InfoTooltip label={liveCostAndCapacity.groomingMessage} />
-                  </div>
-                  <div className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold mb-2 ${liveCostAndCapacity.groomingColor}`}>
-                    {liveCostAndCapacity.groomingStatus}
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-[#FFF7FB] border border-[#FFD9EC] p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Users className="h-5 w-5 text-[#F53799]" />
-                    <div className="text-sm font-bold text-[#223047]">Projected Commissions</div>
-                    <InfoTooltip label="Active commission multipliers for grooming/boarding." />
-                  </div>
-                  <div className="text-xl font-bold text-[#223047]">
-                    {liveCostAndCapacity.activeCommissionStaff} Staff <span className="text-sm font-medium opacity-60">on 10% Tier</span>
-                  </div>
-                </div>
-              </div>
+              <img
+                src={aiMascot.src}
+                alt="WOOF AI Mascot"
+                className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
+              />
             </div>
 
-            <div className="rounded-xl md:rounded-2xl bg-[#223047] p-4 md:p-5 text-white">
-              <div className="text-xs font-bold tracking-wide mb-2">WOOF Traffic Recommendation</div>
-              <p className="text-sm opacity-90" style={{ lineHeight: "1.6" }}>
-                At {formatHour(trafficOptimizerTime[0])}, WOOF found {formatTrafficVisitValue(totalPredictedTraffic)} transaction-visits across Services, Cafe, and Retail for {selectedHeaderRangeLabel}. The staffing recommendations are calculated using real employee shift schedules and availability to provide accurate shift adjustments and salary-cost insights.
-              </p>
-            </div>
+            {/* TECHNICAL MODELS & MATHEMATICAL FRAMEWORK (COLLAPSIBLE DROPDOWN) */}
+            <details className="rounded-xl md:rounded-2xl border border-[#FFD9EC] bg-white p-4 md:p-6 transition-all group">
+              <summary className="flex cursor-pointer items-center justify-between text-xs font-bold text-[#223047] uppercase tracking-wider select-none">
+                <span className="flex items-center gap-2">
+                  <span>Technical Models &amp; Mathematical Framework</span>
+                </span>
+                <span className="text-[#F53799] font-semibold text-xs">[Click to Expand / Hide]</span>
+              </summary>
+              <div className="mt-4 pt-4 border-t border-[#FFD9EC] space-y-4 text-xs text-[#223047]">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="p-3 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC]">
+                    <div className="opacity-60 text-[10px] uppercase font-bold">1. Demand Forecasting Model</div>
+                    <div className="font-bold text-sm mt-0.5 text-[#223047]">Generalized Linear Model (GLM)</div>
+                    <div className="text-[11px] opacity-70 mt-1">Multiplicative time-series synthesis incorporating day-of-week, diurnal hour, and Open-Meteo weather regressors.</div>
+                  </div>
+                  <div className="p-3 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC]">
+                    <div className="opacity-60 text-[10px] uppercase font-bold">2. Staffing Optimization</div>
+                    <div className="font-bold text-sm mt-0.5 text-[#223047]">Erlang C Queuing Model (M/M/c)</div>
+                    <div className="text-[11px] opacity-70 mt-1">Calculates minimum staff count c to bound delay probability wait times P(W &gt; 0) within 8.0-minute target SLA.</div>
+                  </div>
+                  <div className="p-3 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC]">
+                    <div className="opacity-60 text-[10px] uppercase font-bold">3. Prescriptive Narrative</div>
+                    <div className="font-bold text-sm mt-0.5 text-[#223047]">GLM AI Language Model</div>
+                    <div className="text-[11px] opacity-70 mt-1">Zhipu GLM integration via backend LLM service for plain-language store manager shift advice.</div>
+                  </div>
+                  <div className="p-3 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC]">
+                    <div className="opacity-60 text-[10px] uppercase font-bold">4. Data Integrity Guard</div>
+                    <div className="font-bold text-sm mt-0.5 text-[#223047]">Chronological Partitioning</div>
+                    <div className="text-[11px] opacity-70 mt-1">Historical training observations strictly constrained prior to today (t &lt; todayStart) to prevent data leakage.</div>
+                  </div>
+                </div>
+
+                <div className="text-[11px] opacity-75 leading-relaxed bg-[#FFF2FA] p-3 rounded-lg border border-[#FFD9EC]">
+                  <span className="font-bold text-[#F53799]">Model Formulation:</span> Predicted Visits(sector, hour) = Baseline(sector, hour) &times; Factor(DayOfWeek) &times; Factor(Weather) &times; Factor(Holiday). Recommended staff is dynamically solved by optimizing multi-channel queue capacity against the scheduled roster.
+                </div>
+              </div>
+            </details>
           </div>
 
-          {/* Traffic Trend */}
+          {/* TRAFFIC TREND (TODAY'S OPERATING HOURS CURVE) */}
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Traffic Trend
-              </h2>
-              <InfoTooltip label={`Total transaction-visit volume within ${selectedHeaderRangeLabel}.`} />
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                  Today's Hourly Traffic Curve
+                </h2>
+                <div className="text-xs text-[#223047] opacity-60 mt-0.5">
+                  Simulated hourly visit volume for {todayContext?.dayOfWeek ? `${todayContext.dayOfWeek}, ${todayContext.date}` : "Today"} across Services, Cafe, and Retail
+                </div>
+              </div>
+              <div className="text-xs font-semibold text-[#06B6D4] bg-[#E0F7FA] px-2.5 py-1 rounded-full border border-[#B2EBF2]">
+                Full Day Simulation
+              </div>
             </div>
 
             <ResponsiveContainer width="100%" height={250} className="md:!h-[300px]">
-              <AreaChart data={trafficPrediction}>
+              <AreaChart data={todayHourlyPrediction.length > 0 ? todayHourlyPrediction : trafficPrediction}>
                 <defs>
                   <linearGradient key="trafficGradient-gradient" id="trafficGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#06B6D4" stopOpacity={0.4} />
@@ -5056,7 +5615,7 @@ export function AISimulation() {
                       <div className="rounded-xl border border-[#FFD9EC] bg-white p-3 shadow-lg text-xs space-y-1.5 min-w-[180px]">
                         <div className="font-bold text-[#223047] border-b border-[#FFD9EC] pb-1 flex items-center justify-between">
                           <span>{data.fullDayLabel || label}</span>
-                          <span className="text-[10px] text-[#06B6D4] font-semibold">Total Volume (All Hours)</span>
+                          <span className="text-[10px] text-[#06B6D4] font-semibold">Forecast</span>
                         </div>
                         <div className="space-y-1 text-[#223047]">
                           <div className="flex items-center justify-between gap-3">
@@ -5091,54 +5650,37 @@ export function AISimulation() {
               </AreaChart>
             </ResponsiveContainer>
 
-            {/* Traffic Optimizer Engine Feedback Widget */}
+            {/* FEEDBACK WIDGET (NO ICONS) */}
             <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#FFF2FA] border border-[#FFD9EC] flex items-center justify-center shrink-0">
-                  <Sparkles className="w-5 h-5 text-[#06B6D4]" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-sm md:text-base text-[#223047]">
-                      Was the traffic optimizer & quiet-period recommendation helpful?
-                    </h3>
-                    <InfoTooltip label="Ratings adjust Prophet regressors and are archived to AWS S3 Data Lake." />
-                  </div>
+              <div>
+                <h3 className="font-bold text-sm md:text-base text-[#223047]">
+                  Was this prescriptive traffic &amp; staffing recommendation helpful?
+                </h3>
+                <div className="text-xs text-[#223047] opacity-60 mt-0.5">
+                  Feedback is recorded to calibrate forecasting weights.
                 </div>
               </div>
 
-              {trafficEngineRecalibrating ? (
-                <div className="flex items-center gap-2 text-xs font-semibold text-[#06B6D4] bg-[#FFF7FB] px-4 py-2 rounded-xl border border-[#FFD9EC]">
-                  <RefreshCw className="w-4 h-4 animate-spin text-[#06B6D4]" />
-                  <span>Signal received. Traffic Engine recalibrating...</span>
-                </div>
-              ) : trafficEngineFeedback !== null ? (
-                <div className="flex items-center gap-2 text-xs font-semibold text-green-700 bg-green-50 px-4 py-2 rounded-xl border border-green-200">
-                  <CheckCircle2 className="w-4 h-4 text-green-600" />
-                  <span>
-                    {trafficEngineFeedback === "helpful"
-                      ? "Feedback recorded: Helpful (Saved to Supabase & AWS)"
-                      : "Feedback recorded: Engine Recalibrated"}
-                  </span>
+              {trafficEngineFeedback !== null ? (
+                <div className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200">
+                  Feedback recorded: {trafficEngineFeedback === "helpful" ? "Helpful" : "Needs Adjustment"}
                 </div>
               ) : (
                 <div className="flex items-center gap-2 self-start md:self-center">
                   <Button
                     size="sm"
                     onClick={() => handleTrafficEngineFeedback(true)}
-                    className="bg-green-600 hover:bg-green-700 text-white gap-1.5 text-xs h-9 px-4 rounded-xl"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-9 px-4 rounded-xl"
                   >
-                    <ThumbsUp className="w-3.5 h-3.5" />
-                    Helpful
+                    Yes, Helpful
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => handleTrafficEngineFeedback(false)}
-                    className="border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA] gap-1.5 text-xs h-9 px-4 rounded-xl"
+                    className="border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA] text-xs h-9 px-4 rounded-xl"
                   >
-                    <ThumbsDown className="w-3.5 h-3.5" />
-                    Not Helpful
+                    Needs Adjustment
                   </Button>
                 </div>
               )}

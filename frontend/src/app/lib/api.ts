@@ -237,6 +237,104 @@ export interface TrafficOptimizerQuery {
   hour?: string;
   dateStart?: string;
   dateEnd?: string;
+  referenceDate?: string;
+  scenarioMultiplier?: string;
+  scenarioDayOfWeekIndex?: string;
+  scenarioLabel?: string;
+}
+
+export interface TodayTrafficContext {
+  date: string;
+  dayOfWeek: string;
+  dayOfWeekIndex: number;
+  isWeekend: boolean;
+  isHoliday: boolean;
+  holidayName: string | null;
+  holidayType: string | null;
+  weather: {
+    condition: string;
+    tempCelsius: number;
+    rainfallMm: number;
+    relativeHumidity: number;
+    isSynthetic: boolean;
+    source: 'api' | 'cache' | 'synthetic' | 'unavailable' | 'unknown';
+    fetchedAt?: string;
+  };
+  targetHour: number;
+  historicalBaseline: number;
+  predictedTraffic: number;
+  contextAdjustedPrediction: number;
+  factors: Array<{
+    factor?: string;
+    name: string;
+    value?: any;
+    effect?: number;
+    impactPercent: number;
+    direction: 'positive' | 'negative' | 'neutral';
+    source?: 'historically_estimated' | 'business_rule';
+    description: string;
+  }>;
+  sectorBreakdown: Array<{
+    sector: 'Services' | 'Cafe' | 'Retail';
+    baselineVisits: number;
+    contextAdjustedVisits: number;
+    demandLevel: 'Low' | 'Medium' | 'High';
+    scheduledStaff: number;
+    recommendedStaff: number;
+    staffDelta: number;
+    action: string;
+    hourlyWageCost: number;
+    capacityStatus: string;
+  }>;
+  recommendation: {
+    headline: string;
+    urgency: 'low' | 'medium' | 'high';
+    operationalDirectives: string[];
+    peakCongestionWindow: string;
+    recommendedShiftAdjustments: string[];
+    costEfficiencyNote: string;
+  };
+  reasoning: string[];
+  hourlyForecast: Array<{
+    hour: number;
+    label: string;
+    predictedVisits: number;
+    demandLevel: 'Low' | 'Medium' | 'High';
+    scheduledStaff: number;
+    recommendedStaff: number;
+    action: string;
+    totalCapacity?: number;
+    capacityUtilizationPercent?: number;
+    sectorVisits?: Record<
+      string,
+      {
+        visits: number;
+        baselineVisits: number;
+        demandLevel: 'Low' | 'Medium' | 'High';
+        capacity?: number;
+        utilizationPercent?: number;
+        subSectors?: Array<{
+          name: string;
+          visits: number;
+          demandLevel: 'Low' | 'Medium' | 'High';
+          capacity?: number;
+          utilizationPercent?: number;
+        }>;
+      }
+    >;
+  }>;
+  modelDiagnostics: {
+    modelName: string;
+    historicalSampleDays: number;
+    historicalObservationsCount?: number;
+    historicalDateRange?: string;
+    weatherCacheCoverage?: string;
+    baselineMaeVsActual: number;
+    contextAwareMae?: number;
+    exogenousImpactSummary?: string;
+    dataLeakageGuards: string;
+    timezone: string;
+  };
 }
 
 export interface TrafficOptimizerResponse {
@@ -285,6 +383,7 @@ export interface TrafficOptimizerResponse {
       }>;
     }>;
   }>;
+  todayContext?: TodayTrafficContext;
 }
 
 export interface AlertThresholds {
