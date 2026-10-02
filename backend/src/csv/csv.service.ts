@@ -208,6 +208,36 @@ export class CsvService {
       };
     }
 
+    // Auto-replace old upload for same Data Month
+    const txDates = transactions
+      .map((t) => (t.date ? new Date(t.date).getTime() : NaN))
+      .filter((time) => !isNaN(time));
+    let dataMonth: string | null = null;
+    if (txDates.length > 0) {
+      const maxDate = new Date(Math.max(...txDates));
+      dataMonth = `${maxDate.getUTCFullYear()}-${String(
+        maxDate.getUTCMonth() + 1,
+      ).padStart(2, '0')}`;
+    }
+
+    if (dataMonth) {
+      const { data: existingUploads } = await this.supabaseService.client
+        .from('csv_uploads')
+        .select('id, etl_report')
+        .eq('channel', channel)
+        .order('uploaded_at', { ascending: false })
+        .limit(20);
+
+      const oldUpload = existingUploads?.find(
+        (u) => u.etl_report?.dataMonth === dataMonth,
+      );
+
+      if (oldUpload) {
+        this.logger.log(`Found existing upload for channel ${channel} and data month ${dataMonth}. Auto-replacing...`);
+        await this.rollbackUpload(oldUpload.id);
+      }
+    }
+
     // Create upload record
     const uniqueTransactionIds = new Set(
       transactions.map((t) => t.transactionId),
@@ -298,6 +328,7 @@ export class CsvService {
             stage1_droppedCount: report.stage1_droppedCount,
             stage1_duplicateCount: report.stage1_duplicateCount,
             stage1_dropReasons: report.stage1_dropReasons,
+            dataMonth,
           },
         })
         .eq('id', uploadId);
@@ -575,23 +606,50 @@ export class CsvService {
     };
   }
 
-  private warmForecastCacheAfterUpload(
+  private async warmForecastCacheAfterUpload(
     uploadId: string,
     transactions: Partial<Transaction>[],
     forcedModules?: ForecastModule[],
   ) {
-    const modules = forcedModules?.length
-      ? forcedModules
-      : Array.from(
-          new Set(
-            transactions
-              .map((transaction) => transaction.sector)
-              .filter(
-                (sector): sector is ForecastModule =>
-                  sector === 'Cafe' || sector === 'Services',
-              ),
-          ),
-        );
+    const txDates = transactions
+      .map((t) => (t.date ? new Date(t.date).getTime() : NaN))
+      .filter((time) => !isNaN(time));
+    let dataMonth: string | null = null;
+    if (txDates.length > 0) {
+      const maxDate = new Date(Math.max(...txDates));
+      dataMonth = `${maxDate.getUTCFullYear()}-${String(
+        maxDate.getUTCMonth() + 1,
+      ).padStart(2, '0')}`;
+    }
+
+    let modulesToWarm: string[] = [];
+
+    if (forcedModules?.length) {
+      modulesToWarm = forcedModules;
+    } else if (dataMonth) {
+      const { data: uploads } = await this.supabaseService.client
+        .from('csv_uploads')
+        .select('channel, etl_report')
+        .order('uploaded_at', { ascending: false })
+        .limit(100);
+
+      const thisMonthUploads = (uploads || []).filter(
+        (u) => u.etl_report?.dataMonth === dataMonth
+      );
+      const hasPos = thisMonthUploads.some((u) => u.channel === 'POS');
+      const hasShopee = thisMonthUploads.some((u) => u.channel === 'Shopee');
+      const hasTikTok = thisMonthUploads.some((u) => u.channel === 'TikTok Shop');
+
+      if (hasPos) {
+        modulesToWarm.push('Cafe', 'Services');
+      }
+      if (hasPos && hasShopee && hasTikTok) {
+        modulesToWarm.push('Retail');
+      }
+      modulesToWarm = Array.from(new Set(modulesToWarm));
+    }
+
+    const modules = modulesToWarm;
 
     if (modules.length === 0) return;
 

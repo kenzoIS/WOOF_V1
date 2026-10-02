@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
@@ -8,10 +8,14 @@ import {
 } from '../csv/schemas/transaction.schema';
 
 import { CommonModule } from '../common/common.module';
+import { AuditModule } from '../audit/audit.module';
+import { ActivationModule } from '../activation/activation.module';
 
 @Module({
   imports: [
     CommonModule,
+    AuditModule,
+    forwardRef(() => ActivationModule),
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },
     ]),

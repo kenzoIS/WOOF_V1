@@ -862,7 +862,7 @@ export function Services() {
 
   const handleRetrainModel = () => {
     const toastId = toast.loading("Retraining model with latest data... This may take a few seconds.");
-    const params: Record<string, string> = { forceRefresh: "true" };
+    const params: Record<string, string> = {};
     if (forecastMode !== "production") {
       params.forecastMode = forecastMode;
       if (forecastMode === "latest-holdout") params.holdoutDays = "61";

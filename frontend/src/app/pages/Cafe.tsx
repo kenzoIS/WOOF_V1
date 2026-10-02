@@ -273,6 +273,7 @@ export function Cafe() {
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [currentPage, setCurrentPage] = useState(1);
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [activatedItems, setActivatedItems] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const saved = localStorage.getItem("globalDateRange") || "last-7-days";
@@ -367,6 +368,7 @@ export function Cafe() {
   useEffect(() => {
     getNextQuietPeriod().then((qp) => {
       setQuietPeriod(qp);
+      setActivatedItems({});
       if (qp?.recommendedItems) {
         const initial: Record<string, { selected: boolean, discountPercent: number }> = {};
         qp.recommendedItems.forEach((item: any) => {
@@ -377,6 +379,22 @@ export function Cafe() {
     }).catch(console.error);
     getPastHappyHours().then(setPastHappyHours).catch(console.error);
   }, [realtimeRefresh]);
+
+  useEffect(() => {
+    if (quietPeriod?.targetDate && quietPeriod?.targetHour && pastHappyHours.length > 0) {
+      const qpDate = new Date(`${quietPeriod.targetDate}T${quietPeriod.targetHour.toString().padStart(2, '0')}:00:00+08:00`);
+      const matches = pastHappyHours.filter(p => new Date(p.target_date).getTime() === qpDate.getTime() && p.status === 'approved');
+      const restored: Record<string, number> = {};
+      matches.forEach(match => {
+        if (match.metrics?.items) {
+          match.metrics.items.forEach((i: any) => {
+            restored[i.itemKey] = i.discountPercent;
+          });
+        }
+      });
+      setActivatedItems(restored);
+    }
+  }, [quietPeriod, pastHappyHours]);
 
   // Dynamically load Co-Attachment basket data filtered by globalDateRange
   useEffect(() => {
@@ -1103,7 +1121,7 @@ export function Cafe() {
 
   const handleRetrainModel = () => {
     const toastId = toast.loading("Retraining model with latest data... This may take a few seconds.");
-    const params: Record<string, string> = { forceRefresh: "true" };
+    const params: Record<string, string> = {};
     if (forecastMode !== "production") {
       params.forecastMode = forecastMode;
       if (forecastMode === "latest-holdout") params.holdoutDays = "61";
@@ -1132,7 +1150,7 @@ export function Cafe() {
   const handleRetryModelTraining = () => {
     setErrorModal({ isOpen: false, type: null });
     const toastId = toast.loading("Retrying model training...");
-    const params: Record<string, string> = { forceRefresh: "true" };
+    const params: Record<string, string> = {};
     if (forecastMode !== "production") {
       params.forecastMode = forecastMode;
       if (forecastMode === "latest-holdout") params.holdoutDays = "61";
@@ -1186,7 +1204,7 @@ export function Cafe() {
     if (!quietPeriod || quietPeriod.status !== 'success') return;
     try {
       const itemsPayload = Object.entries(selectedItems)
-        .filter(([_, data]) => data.selected)
+        .filter(([key, data]) => data.selected && activatedItems[key] === undefined)
         .map(([key, data]) => ({ itemKey: key, discountPercent: data.discountPercent, probabilityScore: quietPeriod.probabilityScore }));
         
       if (itemsPayload.length === 0) {
@@ -1201,6 +1219,11 @@ export function Cafe() {
         probabilityScore: quietPeriod.probabilityScore,
       });
       toast.success("Happy Hour activated!");
+      
+      const newlyActivated: Record<string, number> = {};
+      itemsPayload.forEach(i => { newlyActivated[i.itemKey] = i.discountPercent; });
+      setActivatedItems(prev => ({...prev, ...newlyActivated}));
+      
       // Refresh past happy hours
       getPastHappyHours().then(setPastHappyHours).catch(console.error);
     } catch (e: any) {
@@ -2278,22 +2301,31 @@ export function Cafe() {
               <div className="text-xs font-semibold uppercase tracking-wide text-white/55 mb-4">Recommended Items</div>
               {quietPeriod?.recommendedItems && quietPeriod.recommendedItems.length > 0 ? (
                 <div className="space-y-4 mb-6">
-                  {quietPeriod.recommendedItems.map((item: any) => (
+                  {quietPeriod.recommendedItems.map((item: any) => {
+                    const isActivated = activatedItems[item.itemKey] !== undefined;
+                    const activatedDiscount = activatedItems[item.itemKey];
+                    return (
                     <div key={item.itemKey} className="flex flex-col md:flex-row md:items-center gap-4">
                       <div className="flex-1">
-                        <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center justify-between gap-3 mb-3">
                           <label className="flex items-center gap-2 cursor-pointer text-sm font-bold tracking-wide text-white">
                             <input 
                               type="checkbox" 
-                              checked={selectedItems[item.itemKey]?.selected ?? false} 
+                              checked={isActivated ? true : (selectedItems[item.itemKey]?.selected ?? false)} 
                               onChange={(e) => setSelectedItems(prev => ({...prev, [item.itemKey]: {...prev[item.itemKey], selected: e.target.checked}}))}
-                              className="w-4 h-4 rounded border-white/20 bg-transparent text-[#F53799] focus:ring-[#F53799]"
+                              className="w-4 h-4 rounded border-white/20 bg-transparent text-[#F53799] focus:ring-[#F53799] disabled:opacity-50"
+                              disabled={!quietPeriod || quietPeriod.status !== 'success' || isActivated}
                             />
                             {item.itemKey}
                           </label>
-                          <span className="text-lg font-black text-white">{selectedItems[item.itemKey]?.discountPercent || 15}%</span>
+                          <span className="text-lg font-black text-white">{isActivated ? activatedDiscount : (selectedItems[item.itemKey]?.discountPercent || 15)}%</span>
                         </div>
                         <div className="flex items-center gap-3">
+                          {isActivated ? (
+                            <Badge className="bg-green-500/20 text-green-400 hover:bg-green-500/20 border-green-500/30 w-full justify-center py-1.5 rounded-[6px] font-bold">
+                              ✓ Activated with {activatedDiscount}% discount
+                            </Badge>
+                          ) : (
                           <Slider
                             defaultValue={[item.recommendedDiscount || 15]}
                             value={[selectedItems[item.itemKey]?.discountPercent || 15]}
@@ -2304,18 +2336,29 @@ export function Cafe() {
                             className="flex-1"
                             disabled={!quietPeriod || quietPeriod.status !== 'success' || !selectedItems[item.itemKey]?.selected}
                           />
+                          )}
                         </div>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               ) : (
                 <div className="mb-6 text-white/65 text-sm">No specific items recommended. Check backend.</div>
               )}
 
               <div className="flex flex-col sm:flex-row md:w-auto gap-2">
-                <Button onClick={handleActivateHappyHour} className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm px-6" disabled={!quietPeriod || quietPeriod.status !== 'success'}>
-                  Activate Happy Hour
+                <Button 
+                  onClick={handleActivateHappyHour} 
+                  className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm px-6 disabled:opacity-75" 
+                  disabled={
+                    !quietPeriod || 
+                    quietPeriod.status !== 'success' || 
+                    Object.keys(selectedItems).every(k => !selectedItems[k].selected || activatedItems[k] !== undefined)
+                  }
+                >
+                  {quietPeriod?.recommendedItems?.every((i: any) => activatedItems[i.itemKey] !== undefined) 
+                    ? "All Items Activated" 
+                    : "Activate Happy Hour"}
                 </Button>
                 <Button
                   variant="outline"
@@ -2364,57 +2407,6 @@ export function Cafe() {
         </div>
       </div>
 
-      {/* PAST HAPPY HOURS */}
-      {pastHappyHours.length > 0 && (
-        <div className="mt-8 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg md:text-xl font-extrabold text-[#223047]">Approved Happy Hours</h3>
-              <p className="text-xs md:text-sm text-[#223047]/65 mt-0.5">Historical log of activated promotions.</p>
-            </div>
-          </div>
-          <div className="bg-white border border-[#223047]/10 rounded-2xl md:rounded-3xl shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-[#223047]/[0.02] border-b border-[#223047]/10">
-                  <tr>
-                    <th className="px-6 py-4 font-bold text-[#223047] w-[20%]">Date Activated</th>
-                    <th className="px-6 py-4 font-bold text-[#223047] w-[25%]">Target Slot</th>
-                    <th className="px-6 py-4 font-bold text-[#223047] w-[45%]">Items</th>
-                    <th className="px-6 py-4 font-bold text-[#223047] text-right w-[10%]">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#223047]/5">
-                  {pastHappyHours.map((promo, idx) => (
-                    <tr key={promo.id || idx} className="hover:bg-[#223047]/[0.02] transition-colors">
-                      <td className="px-6 py-4 text-[#223047]/70">
-                        {new Date(promo.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 font-semibold text-[#06B6D4]">
-                        {new Date(promo.target_date).toLocaleDateString()} @ {new Date(promo.target_date).getHours()}:00
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2">
-                          {promo.items_json?.map((item: any, i: number) => (
-                            <Badge key={i} variant="outline" className="border-[#223047]/15 bg-white text-xs font-normal">
-                              {item.itemKey} <span className="font-bold text-[#F53799] ml-1">-{item.discountPercent}%</span>
-                            </Badge>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/10 border-green-500/20">
-                          {promo.status}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Error Modal */}
       {errorModal.type && (
