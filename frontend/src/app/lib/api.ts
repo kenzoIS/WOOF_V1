@@ -1199,18 +1199,22 @@ export async function activateHappyHour(dto: {
 
 export interface FeedbackPromotion {
   id: string;
+  sourceId?: string;
+  sourceType?: 'recommendation_feedback' | 'bundle_archive' | 'dynamic_promo' | 'activation_campaign' | string;
   type: 'bundle' | 'discount' | 'happy-hour' | 'flash-sale' | 'forecast';
   title: string;
   deployedDate: string;
   targetTime: string;
-  discount: string;
-  predictedLift: string;
+  discount: string | null;
+  predictedLift: string | null;
   actualLift: string | null;
   confidence: string;
   sector: string;
   status: 'active' | 'completed' | 'failed';
   feedback: 'helpful' | 'not-helpful' | null;
   feedbackNotes?: string | null;
+  pethubLinked?: boolean;
+  pethubStatus?: string | null;
 }
 
 export interface FeedbackSummary {
@@ -1250,12 +1254,28 @@ export async function submitFeedbackRating(dto: {
   id: string;
   feedback: 'helpful' | 'not-helpful';
   notes?: string;
+  endPromotion?: boolean;
 }): Promise<{
   promotion: FeedbackPromotion;
   recalibrated: boolean;
   recalibration?: any;
 }> {
   return fetchApi('/analytics/feedback/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
+export async function endFeedbackPromotion(dto: {
+  id: string;
+  feedback?: 'helpful' | 'not-helpful';
+  notes?: string;
+}): Promise<{
+  promotion: FeedbackPromotion;
+  sourceResult?: any;
+}> {
+  return fetchApi('/analytics/feedback/end', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(dto),

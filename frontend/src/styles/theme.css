@@ -425,6 +425,76 @@
   background-color: color-mix(in srgb, var(--woof-theme-surface) 82%, white) !important;
 }
 
+button.feedback-pagination-button,
+[data-slot="button"].feedback-pagination-button {
+  border-color: var(--woof-theme-border) !important;
+  background-color: var(--woof-theme-surface) !important;
+  color: var(--woof-theme-text) !important;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--woof-theme-border) 45%, transparent) !important;
+}
+
+button.feedback-pagination-button:hover:not(:disabled),
+[data-slot="button"].feedback-pagination-button:hover:not(:disabled) {
+  border-color: var(--woof-theme-primary) !important;
+  background-color: color-mix(in srgb, var(--woof-theme-primary) 12%, var(--woof-theme-surface)) !important;
+  color: var(--woof-theme-primary-strong) !important;
+}
+
+button.feedback-end-promotion-button,
+[data-slot="button"].feedback-end-promotion-button {
+  border: 1px solid color-mix(in srgb, var(--woof-theme-primary) 58%, var(--woof-theme-border)) !important;
+  background-color: var(--woof-theme-primary) !important;
+  color: #ffffff !important;
+}
+
+button.feedback-end-promotion-button:hover:not(:disabled),
+[data-slot="button"].feedback-end-promotion-button:hover:not(:disabled) {
+  background-color: var(--woof-theme-primary-strong) !important;
+  color: #ffffff !important;
+}
+
+.feedback-not-helpful-button {
+  border-color: color-mix(in srgb, var(--woof-theme-primary) 34%, var(--woof-theme-border)) !important;
+  background-color: var(--woof-theme-surface) !important;
+  color: var(--woof-theme-text) !important;
+}
+
+button.feedback-not-helpful-button:hover:not(:disabled),
+[data-slot="button"].feedback-not-helpful-button:hover:not(:disabled) {
+  border-color: var(--woof-theme-primary) !important;
+  background-color: color-mix(in srgb, var(--woof-theme-primary) 12%, var(--woof-theme-surface)) !important;
+  color: var(--woof-theme-primary-strong) !important;
+}
+
+.feedback-page-indicator {
+  color: color-mix(in srgb, var(--woof-theme-text) 68%, transparent) !important;
+}
+
+.woof-dark button.feedback-pagination-button,
+.woof-dark [data-slot="button"].feedback-pagination-button,
+.woof-dark button.feedback-not-helpful-button,
+.woof-dark [data-slot="button"].feedback-not-helpful-button {
+  border-color: color-mix(in srgb, var(--woof-theme-primary) 42%, #f8fbff) !important;
+  background-color: color-mix(in srgb, var(--woof-theme-surface) 78%, #0f172a) !important;
+  color: #f8fbff !important;
+}
+
+.woof-dark button.feedback-pagination-button:hover:not(:disabled),
+.woof-dark [data-slot="button"].feedback-pagination-button:hover:not(:disabled),
+.woof-dark button.feedback-not-helpful-button:hover:not(:disabled),
+.woof-dark [data-slot="button"].feedback-not-helpful-button:hover:not(:disabled) {
+  border-color: var(--woof-theme-accent) !important;
+  background-color: color-mix(in srgb, var(--woof-theme-primary) 28%, #0f172a) !important;
+  color: #ffffff !important;
+}
+
+.woof-dark button.feedback-end-promotion-button,
+.woof-dark [data-slot="button"].feedback-end-promotion-button {
+  border-color: color-mix(in srgb, var(--woof-theme-primary) 70%, #ffffff) !important;
+  background-color: var(--woof-theme-primary) !important;
+  color: #ffffff !important;
+}
+
 .woof-dark body,
 .woof-dark .woof-main {
   background: #111827;

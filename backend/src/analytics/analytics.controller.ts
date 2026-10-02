@@ -542,9 +542,22 @@ export class AnalyticsController {
       id: string;
       feedback: 'helpful' | 'not-helpful';
       notes?: string;
+      endPromotion?: boolean;
     },
   ) {
     return this.analyticsService.submitFeedback(dto.id, dto);
+  }
+
+  @Post('feedback/end')
+  async endFeedbackPromotion(
+    @Body()
+    dto: {
+      id: string;
+      feedback?: 'helpful' | 'not-helpful';
+      notes?: string;
+    },
+  ) {
+    return this.analyticsService.endFeedbackPromotion(dto.id, dto);
   }
 
   @Post('feedback/recalibrate')

@@ -9,6 +9,7 @@ import feedbackMascot from "../../imports/no_bg_Insight.png";
 import {
   FeedbackPromotion,
   FeedbackSummary,
+  generateLlmExplanation,
   getFeedbackPromotions,
   getFeedbackSummary,
   submitFeedbackRating,
@@ -23,6 +24,12 @@ export function Feedback() {
   const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
   const [isRecalibrating, setIsRecalibrating] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const [endingPromptIds, setEndingPromptIds] = useState<string[]>([]);
+  const [activePage, setActivePage] = useState(1);
+  const [completedPage, setCompletedPage] = useState(1);
+  const [insightText, setInsightText] = useState("");
+  const [insightLoading, setInsightLoading] = useState(false);
+  const PAGE_SIZE = 3;
 
   const loadData = async () => {
     try {
@@ -44,19 +51,20 @@ export function Feedback() {
     loadData();
   }, []);
 
-  const handleFeedback = async (id: string, helpful: boolean) => {
+  const handleFeedback = async (id: string, helpful: boolean, endPromotion = false) => {
     const feedbackVal = helpful ? "helpful" : "not-helpful";
     setSubmittingId(id);
 
     // Optimistic UI update
     setPromotions((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, feedback: feedbackVal } : p))
+      prev.map((p) => (p.id === id ? { ...p, feedback: feedbackVal, status: endPromotion ? "completed" : p.status } : p))
     );
 
     try {
       const res = await submitFeedbackRating({
         id,
         feedback: feedbackVal,
+        endPromotion,
       });
 
       if (helpful) {
@@ -71,9 +79,14 @@ export function Feedback() {
         });
       }
 
-      // Refresh summary
-      const updatedSummary = await getFeedbackSummary();
-      setSummary(updatedSummary);
+      if (endPromotion) {
+        toast.success("Promotion ended and moved to Completed", {
+          description: "Feedback was recorded and any linked PetHub campaign was processed by the backend.",
+        });
+      }
+
+      await loadData();
+      setEndingPromptIds((prev) => prev.filter((item) => item !== id));
     } catch (err) {
       console.error("Error submitting feedback:", err);
       toast.error("Failed to sync feedback with server", {
@@ -133,8 +146,8 @@ export function Feedback() {
     return "#06B6D4";
   };
 
-  const calculateAccuracy = (predicted: string, actual: string | null) => {
-    if (!actual) return null;
+  const calculateAccuracy = (predicted: string | null, actual: string | null) => {
+    if (!predicted || !actual) return null;
     const predVal = parseInt(predicted.replace(/[^0-9]/g, ""));
     const actVal = parseInt(actual.replace(/[^0-9]/g, ""));
     if (!predVal || !actVal) return null;
@@ -144,11 +157,103 @@ export function Feedback() {
 
   const completedPromotions = promotions.filter((p) => p.status === "completed");
   const activePromotions = promotions.filter((p) => p.status === "active");
+  const activePageCount = Math.max(1, Math.ceil(activePromotions.length / PAGE_SIZE));
+  const completedPageCount = Math.max(1, Math.ceil(completedPromotions.length / PAGE_SIZE));
+  const pagedActivePromotions = activePromotions.slice((activePage - 1) * PAGE_SIZE, activePage * PAGE_SIZE);
+  const pagedCompletedPromotions = completedPromotions.slice((completedPage - 1) * PAGE_SIZE, completedPage * PAGE_SIZE);
   const helpfulCount = summary?.helpfulCount ?? promotions.filter((p) => p.feedback === "helpful").length;
   const notHelpfulCount = summary?.notHelpfulCount ?? promotions.filter((p) => p.feedback === "not-helpful").length;
   const pendingFeedback = summary?.pendingCount ?? promotions.filter((p) => p.feedback === null).length;
   const avgAccuracy = summary?.avgAccuracy ?? 89.2;
-  const renderFeedbackControls = (promo: FeedbackPromotion) => (
+  const fallbackInsight =
+    summary?.aiInsight?.summary ||
+    (completedPromotions.length > 0
+      ? `${completedPromotions.length} completed campaigns analyzed. Feedback loop is tracking an average model prediction accuracy of ${avgAccuracy.toFixed(1)}% across deployed actions.`
+      : "Your feedback helps WOOF learn and adapt to live business operations.");
+
+  useEffect(() => {
+    setActivePage((page) => Math.min(page, Math.max(1, Math.ceil(activePromotions.length / PAGE_SIZE))));
+    setCompletedPage((page) => Math.min(page, Math.max(1, Math.ceil(completedPromotions.length / PAGE_SIZE))));
+  }, [activePromotions.length, completedPromotions.length]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    let cancelled = false;
+    setInsightLoading(true);
+    generateLlmExplanation({
+      feature: "recommendation_explanation",
+      prompt:
+        "Generate a concise WOOF Insight for the Feedback & Learning Center. Explain what the feedback signals mean for future recommendations. Use only the verified context.",
+      context: {
+        summary,
+        activePromotions: activePromotions.slice(0, 5).map((promo) => ({
+          title: promo.title,
+          type: promo.type,
+          sector: promo.sector,
+          confidence: promo.confidence,
+          predictedLift: promo.predictedLift,
+          sourceType: promo.sourceType,
+          pethubLinked: promo.pethubLinked,
+        })),
+        completedPromotions: completedPromotions.slice(0, 5).map((promo) => ({
+          title: promo.title,
+          type: promo.type,
+          sector: promo.sector,
+          feedback: promo.feedback,
+          predictedLift: promo.predictedLift,
+          actualLift: promo.actualLift,
+        })),
+      },
+    })
+      .then((res) => {
+        if (!cancelled) setInsightText(res?.text || fallbackInsight);
+      })
+      .catch(() => {
+        if (!cancelled) setInsightText(fallbackInsight);
+      })
+      .finally(() => {
+        if (!cancelled) setInsightLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, summary, promotions.length, helpfulCount, notHelpfulCount, pendingFeedback, avgAccuracy]);
+
+  const renderPagination = (
+    currentPage: number,
+    pageCount: number,
+    setPage: (page: number) => void,
+    totalItems: number,
+  ) => {
+    if (totalItems <= PAGE_SIZE) return null;
+
+    return (
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <Button
+          variant="outline"
+          onClick={() => setPage(Math.max(1, currentPage - 1))}
+          disabled={currentPage === 1}
+          className="feedback-pagination-button text-xs md:text-sm"
+        >
+          Previous
+        </Button>
+        <div className="feedback-page-indicator text-xs md:text-sm">
+          Page {currentPage} of {pageCount}
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => setPage(Math.min(pageCount, currentPage + 1))}
+          disabled={currentPage === pageCount}
+          className="feedback-pagination-button text-xs md:text-sm"
+        >
+          Next
+        </Button>
+      </div>
+    );
+  };
+  const renderFeedbackControls = (promo: FeedbackPromotion, options?: { endPromotion?: boolean }) => (
     <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
       {promo.feedback === null ? (
         <div className="space-y-2 md:space-y-3">
@@ -157,7 +262,7 @@ export function Feedback() {
           </p>
           <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
             <Button
-              onClick={() => handleFeedback(promo.id, true)}
+              onClick={() => handleFeedback(promo.id, true, Boolean(options?.endPromotion))}
               disabled={submittingId === promo.id}
               className="flex-1 bg-green-600 hover:bg-green-700 text-white gap-2 text-xs md:text-sm"
             >
@@ -166,10 +271,10 @@ export function Feedback() {
               <span className="sm:hidden">Helpful</span>
             </Button>
             <Button
-              onClick={() => handleFeedback(promo.id, false)}
+              onClick={() => handleFeedback(promo.id, false, Boolean(options?.endPromotion))}
               disabled={submittingId === promo.id}
               variant="outline"
-              className="flex-1 border-[#FFD9EC] hover:bg-[#FFF2FA] gap-2 text-xs md:text-sm"
+              className="feedback-not-helpful-button flex-1 gap-2 text-xs md:text-sm"
             >
               <ThumbsDown className="w-3 h-3 md:w-4 md:h-4" />
               <span className="hidden sm:inline">No, Not Helpful</span>
@@ -212,6 +317,29 @@ export function Feedback() {
       )}
     </div>
   );
+
+  const renderActivePromotionAction = (promo: FeedbackPromotion) => {
+    if (promo.feedback !== null || endingPromptIds.includes(promo.id)) {
+      return renderFeedbackControls(promo, { endPromotion: true });
+    }
+
+    return (
+      <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
+        <Button
+          onClick={() => setEndingPromptIds((prev) => [...prev, promo.id])}
+          disabled={submittingId === promo.id}
+          className="feedback-end-promotion-button w-full gap-2 text-xs md:text-sm"
+        >
+          End Promotion
+        </Button>
+        {promo.pethubLinked && (
+          <p className="feedback-page-indicator mt-2 text-xs">
+            This promotion is linked to PetHub and will be processed for takedown when feedback is submitted.
+          </p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
@@ -374,31 +502,6 @@ export function Feedback() {
         </div>
       </div>
 
-      {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
-      <div
-        className="woof-insight-band rounded-2xl flex items-center justify-between px-4 md:px-6 lg:px-8 py-4 relative overflow-hidden"
-        style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
-      >
-        <div className="flex-1">
-          <div className="mb-2">
-            <Badge variant="outline" className="text-xs border-[#FFD9EC] text-[#F53799] bg-white">
-              WOOF Insight
-            </Badge>
-          </div>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            {summary?.aiInsight?.summary ||
-              (completedPromotions.length > 0
-                ? `${completedPromotions.length} completed campaigns analyzed. Feedback loop is tracking an average model prediction accuracy of ${avgAccuracy.toFixed(1)}% across deployed actions.`
-                : "Your feedback helps WOOF learn and adapt to live business operations.")}
-          </p>
-        </div>
-        <img
-          src={feedbackMascot.src}
-          alt="Feedback Mascot"
-          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
-        />
-      </div>
-
       {/* EMPTY STATE */}
       {!loading && promotions.length === 0 ? (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-8 md:p-12 space-y-4 text-center">
@@ -427,7 +530,7 @@ export function Feedback() {
           </div>
 
           <div className="grid gap-3 md:gap-4">
-            {activePromotions.map((promo) => (
+            {pagedActivePromotions.map((promo) => (
               <div
                 key={promo.id}
                 className="p-4 md:p-6 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl space-y-3 md:space-y-4"
@@ -441,6 +544,11 @@ export function Feedback() {
                       <Badge variant="outline" className="border-green-500 text-green-600 text-xs">
                         ● ACTIVE
                       </Badge>
+                      {promo.pethubLinked && (
+                        <Badge variant="outline" className="border-[#06B6D4] text-[#06B6D4] text-xs">
+                          PetHub
+                        </Badge>
+                      )}
                     </div>
                     <h3 className="text-base md:text-lg font-bold text-[#223047] mb-2 md:mb-3">
                       {promo.title}
@@ -465,10 +573,11 @@ export function Feedback() {
                     </div>
                   </div>
                 </div>
-                {renderFeedbackControls(promo)}
+                {renderActivePromotionAction(promo)}
               </div>
             ))}
           </div>
+          {renderPagination(activePage, activePageCount, setActivePage, activePromotions.length)}
         </div>
       )}
 
@@ -489,7 +598,11 @@ export function Feedback() {
           </div>
         ) : (
           <div className="grid gap-4 md:gap-6">
-            {completedPromotions.map((promo) => {
+            {completedPromotions.length === 0 ? (
+              <div className="p-8 text-center text-sm text-[#223047] opacity-70">
+                No completed promotions yet.
+              </div>
+            ) : pagedCompletedPromotions.map((promo) => {
               const accuracy = calculateAccuracy(promo.predictedLift, promo.actualLift);
               const isPositive = accuracy !== null && accuracy >= 90;
 
@@ -572,6 +685,30 @@ export function Feedback() {
             })}
           </div>
         )}
+        {!loading && renderPagination(completedPage, completedPageCount, setCompletedPage, completedPromotions.length)}
+      </div>
+
+      {/* VISUAL RELIEF DIVIDER - GLM INSIGHT WITH MASCOT */}
+      <div
+        className="woof-insight-band rounded-2xl flex items-center justify-between px-4 md:px-6 lg:px-8 py-4 relative overflow-hidden"
+        style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
+      >
+        <div className="flex-1">
+          <div className="mb-2 flex items-center gap-2">
+            <Badge variant="outline" className="text-xs border-[#FFD9EC] text-[#F53799] bg-white">
+              WOOF Insight
+            </Badge>
+            {insightLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#F53799]" />}
+          </div>
+          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
+            {insightText || fallbackInsight}
+          </p>
+        </div>
+        <img
+          src={feedbackMascot.src}
+          alt="Feedback Mascot"
+          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
+        />
       </div>
       </>
       )}

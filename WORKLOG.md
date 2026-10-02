@@ -3841,6 +3841,47 @@ This file records requested revisions, implementation details, verification, and
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
 - Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
 
+### Feedback Not Helpful and Pagination Dark Mode Fix (2026-10-03)
+
+- Added a theme-aware `feedback-not-helpful-button` style to the Feedback page `No, Not Helpful` button.
+- Strengthened Feedback pagination button selectors to target the actual button element and shared `data-slot="button"` output.
+- Added explicit dark-mode overrides for Feedback pagination, Not Helpful, and End Promotion buttons so they remain visible against dark theme surfaces.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`.
+
+### Feedback Theme-Aware Pagination and End Button Fix (2026-10-03)
+
+- Replaced hard-coded Feedback pagination button styling with theme-aware `feedback-pagination-button` styles.
+- Replaced hard-coded `End Promotion` button colors with `feedback-end-promotion-button` so it adapts to the selected theme and remains visible in dark mode.
+- Added `feedback-page-indicator` styling for pagination labels and PetHub takedown helper text so muted text remains readable across themes.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`.
+
+### Feedback GLM Insight, Pagination, and End Promotion Flow (2026-10-03)
+
+- Connected the Feedback page WOOF Insight section to the existing GLM-backed `/llm/generate` client path using verified Feedback summary and promotion context, with the backend summary retained as a safe fallback.
+- Moved the WOOF Insight section below the Completed Promotions section.
+- Added three-at-a-time pagination for Active Promotions and Completed Promotions.
+- Changed active promotion feedback flow so users first click `End Promotion`, then choose `Yes, Helpful` or `No, Not Helpful`.
+- Extended feedback submission with an `endPromotion` option so the backend records feedback and moves the promotion into the completed feedback state in one flow.
+- Added a backend `/analytics/feedback/end` path for directly ending a feedback promotion when needed.
+- Changed Feedback promotion loading to merge persisted `recommendation_feedback` rows with active source records instead of allowing `recommendation_feedback` to hide other promotion sources.
+- Included eligible activation-layer PetHub campaigns in the Feedback promotion feed, alongside bundle archives and dynamic promos.
+- Added best-effort PetHub campaign deactivation for published activation campaigns when they are ended from Feedback; local records are still completed even if remote PetHub takedown is unavailable or not configured.
+- Preserved Not Helpful recalibration behavior after feedback is submitted.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
 ### Feedback Active Promotion Loop Alignment (2026-10-02)
 
 - Added the same Helpful and Not Helpful feedback prompt under active Feedback page promotions, not only completed promotions.

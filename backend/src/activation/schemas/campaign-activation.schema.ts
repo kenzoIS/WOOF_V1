@@ -28,9 +28,9 @@ export class CampaignActivation {
 
   @Prop({
     default: 'draft',
-    enum: ['draft', 'approved', 'queued', 'published'],
+    enum: ['draft', 'approved', 'queued', 'published', 'completed'],
   })
-  status: 'draft' | 'approved' | 'queued' | 'published';
+  status: 'draft' | 'approved' | 'queued' | 'published' | 'completed';
 
   @Prop({ type: Object, required: true })
   analyticsContext: Record<string, unknown>;

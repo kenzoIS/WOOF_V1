@@ -10369,26 +10369,26 @@ export class AnalyticsService {
 
   async getFeedbackPromotions(status?: string, type?: string): Promise<any[]> {
     try {
+      const sourcePromotions = await this.getSeededFeedbackPromotions();
+      const persistedPromotions: any[] = [];
       let query = this.supabaseService.client
         .from('recommendation_feedback')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (status && status !== 'all') {
-        query = query.eq('status', status);
-      }
-      if (type && type !== 'all') {
-        query = query.eq('type', type);
-      }
-
       const { data, error } = await query;
 
-      if (error || !data || data.length === 0) {
-        // If table doesn't exist yet or is empty, seed from active system state
-        return this.getSeededFeedbackPromotions(status, type);
+      if (!error && data && data.length > 0) {
+        persistedPromotions.push(
+          ...data.map((row: any) => this.mapFeedbackPromotion(row)),
+        );
       }
 
-      return data.map((row: any) => this.mapFeedbackPromotion(row));
+      return this.filterFeedbackPromotions(
+        this.mergeFeedbackPromotions(sourcePromotions, persistedPromotions),
+        status,
+        type,
+      );
     } catch (err) {
       console.warn(
         'Failed to load feedback promotions from Supabase, falling back to dynamic seed:',
@@ -10400,7 +10400,11 @@ export class AnalyticsService {
 
   async submitFeedback(
     id: string,
-    dto: { feedback: 'helpful' | 'not-helpful'; notes?: string },
+    dto: {
+      feedback: 'helpful' | 'not-helpful';
+      notes?: string;
+      endPromotion?: boolean;
+    },
   ): Promise<any> {
     const feedbackValue =
       dto?.feedback === 'helpful' ? 'helpful' : 'not-helpful';
@@ -10512,10 +10516,121 @@ export class AnalyticsService {
       );
     }
 
+    if (dto?.endPromotion) {
+      const ended = await this.endFeedbackPromotion(id, {
+        feedback: feedbackValue,
+        notes: notes || undefined,
+      });
+      if (ended?.promotion) {
+        updatedRow = ended.promotion;
+      }
+    }
+
     return {
       promotion: updatedRow,
       recalibrated: feedbackValue === 'not-helpful',
       recalibration: recalibrationResult,
+    };
+  }
+
+  async endFeedbackPromotion(
+    id: string,
+    dto?: { feedback?: 'helpful' | 'not-helpful'; notes?: string },
+  ): Promise<any> {
+    const now = new Date().toISOString();
+    const promotions = await this.getFeedbackPromotions();
+    const promotion =
+      promotions.find((p) => p.id === id) ||
+      promotions.find((p) => p.sourceId === id);
+
+    const target = promotion || {
+      id,
+      sourceId: id,
+      sourceType: 'recommendation_feedback',
+      type: 'bundle',
+      title: 'Promotional Recommendation',
+      sector: 'Cafe + Retail',
+      targetTime: 'Campaign window',
+      discount: 'Promotion',
+      predictedLift: null,
+      actualLift: null,
+      confidence: 'N/A',
+      deployedDate: now,
+    };
+
+    const sourceResult = await this.endFeedbackSourcePromotion(
+      target,
+      dto?.feedback,
+    );
+
+    const metadata = {
+      sourceType: target.sourceType || 'recommendation_feedback',
+      sourceId: target.sourceId || target.id,
+      endedAt: now,
+      sourceResult,
+    };
+
+    const payload = {
+      promotion_id: target.sourceId || target.id,
+      type: target.type || 'bundle',
+      title: target.title || 'Promotional Recommendation',
+      sector: target.sector || 'Cafe + Retail',
+      target_time: target.targetTime || 'Campaign window',
+      discount: target.discount || 'Promotion',
+      predicted_lift: target.predictedLift || null,
+      actual_lift: target.actualLift || null,
+      confidence: target.confidence || 'N/A',
+      status: 'completed',
+      feedback: dto?.feedback || target.feedback || null,
+      feedback_notes: dto?.notes || target.feedbackNotes || null,
+      deployed_at: this.parseFeedbackDate(target.deployedDate) || now,
+      updated_at: now,
+      metadata,
+    };
+
+    let row: any = null;
+
+    try {
+      const { data } = await this.supabaseService.client
+        .from('recommendation_feedback')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+      row = data;
+    } catch {}
+
+    if (!row && payload.promotion_id) {
+      try {
+        const { data } = await this.supabaseService.client
+          .from('recommendation_feedback')
+          .update(payload)
+          .eq('promotion_id', payload.promotion_id)
+          .select()
+          .maybeSingle();
+        row = data;
+      } catch {}
+    }
+
+    if (!row) {
+      const { data } = await this.supabaseService.client
+        .from('recommendation_feedback')
+        .insert(payload)
+        .select()
+        .single();
+      row = data;
+    }
+
+    return {
+      promotion: row
+        ? this.mapFeedbackPromotion(row)
+        : {
+            ...target,
+            status: 'completed',
+            feedback: payload.feedback,
+            feedbackNotes: payload.feedback_notes,
+          },
+      sourceResult,
     };
   }
 
@@ -10640,8 +10755,12 @@ export class AnalyticsService {
   }
 
   private mapFeedbackPromotion(row: any): any {
+    const metadata =
+      row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
     return {
       id: String(row.id || row.promotion_id),
+      sourceId: String(row.promotion_id || metadata.sourceId || row.id),
+      sourceType: metadata.sourceType || 'recommendation_feedback',
       type: row.type || 'bundle',
       title: row.title || 'Promotional Bundle',
       sector: row.sector || 'Cafe + Services',
@@ -10653,6 +10772,8 @@ export class AnalyticsService {
       status: row.status || 'completed',
       feedback: row.feedback || null,
       feedbackNotes: row.feedback_notes || null,
+      pethubLinked: Boolean(metadata.pethubLinked),
+      pethubStatus: metadata.pethubStatus || null,
       deployedDate: row.deployed_at
         ? new Date(row.deployed_at).toLocaleDateString('en-US', {
             month: 'short',
@@ -10661,6 +10782,126 @@ export class AnalyticsService {
           })
         : 'Apr 14, 2026',
     };
+  }
+
+  private mergeFeedbackPromotions(
+    sourcePromotions: any[],
+    persistedPromotions: any[],
+  ): any[] {
+    const merged = new Map<string, any>();
+
+    for (const promo of sourcePromotions) {
+      const key = String(promo.sourceId || promo.id);
+      merged.set(key, promo);
+    }
+
+    for (const promo of persistedPromotions) {
+      const key = String(promo.sourceId || promo.id);
+      const source = merged.get(key);
+      merged.set(key, {
+        ...(source || {}),
+        ...promo,
+        sourceId: promo.sourceId || source?.sourceId || promo.id,
+        sourceType: promo.sourceType || source?.sourceType,
+        pethubLinked: source?.pethubLinked || promo.pethubLinked || false,
+        pethubStatus: source?.pethubStatus || promo.pethubStatus || null,
+      });
+    }
+
+    return [...merged.values()].sort((left, right) => {
+      const leftDate = new Date(left.deployedDate || left.createdAt || 0).getTime();
+      const rightDate = new Date(right.deployedDate || right.createdAt || 0).getTime();
+      return rightDate - leftDate;
+    });
+  }
+
+  private filterFeedbackPromotions(
+    promotions: any[],
+    status?: string,
+    type?: string,
+  ): any[] {
+    return promotions.filter((p) => {
+      if (status && status !== 'all' && p.status !== status) return false;
+      if (type && type !== 'all' && p.type !== type) return false;
+      return p.status === 'active' || p.status === 'completed' || p.status === 'failed';
+    });
+  }
+
+  private async endFeedbackSourcePromotion(
+    promotion: any,
+    feedback?: 'helpful' | 'not-helpful',
+  ): Promise<any> {
+    const sourceId = String(promotion.sourceId || promotion.id || '');
+    const now = new Date().toISOString();
+
+    try {
+      if (promotion.sourceType === 'bundle_archive') {
+        const rawId = sourceId.replace(/^bundle-/, '');
+        const { error } = await this.supabaseService.client
+          .from('bundle_archives')
+          .update({
+            status: 'archived',
+            archived_at: now,
+            updated_at: now,
+            metadata: {
+              ...(promotion.metadata || {}),
+              feedback,
+              endedFromFeedback: true,
+              endedAt: now,
+            },
+          })
+          .eq('id', rawId);
+        return error
+          ? { status: 'failed', sourceType: promotion.sourceType, message: error.message }
+          : { status: 'completed', sourceType: promotion.sourceType };
+      }
+
+      if (promotion.sourceType === 'dynamic_promo') {
+        const rawId = sourceId.replace(/^promo-/, '');
+        const { error } = await this.supabaseService.client
+          .from('dynamic_promos')
+          .update({
+            status: 'completed',
+            updated_at: now,
+            metadata: {
+              ...(promotion.metadata || {}),
+              feedback,
+              endedFromFeedback: true,
+              endedAt: now,
+            },
+          })
+          .eq('id', rawId);
+        return error
+          ? { status: 'failed', sourceType: promotion.sourceType, message: error.message }
+          : { status: 'completed', sourceType: promotion.sourceType };
+      }
+
+      if (promotion.sourceType === 'activation_campaign') {
+        if (!this.activationService?.endCampaignForFeedback) {
+          return {
+            status: 'skipped',
+            sourceType: promotion.sourceType,
+            reason: 'Activation service is unavailable.',
+          };
+        }
+        return this.activationService.endCampaignForFeedback(sourceId, feedback);
+      }
+
+      return { status: 'skipped', sourceType: promotion.sourceType || 'unknown' };
+    } catch (error) {
+      return {
+        status: 'failed',
+        sourceType: promotion.sourceType || 'unknown',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private parseFeedbackDate(value: unknown): string | null {
+    if (!value) return null;
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString();
   }
 
   private async getSeededFeedbackPromotions(
@@ -10690,8 +10931,16 @@ export class AnalyticsService {
     const items: any[] = [];
 
     bundleArchives.forEach((bundle) => {
+      const normalizedStatus =
+        bundle.status === 'active'
+          ? 'active'
+          : bundle.status === 'deleted'
+            ? 'failed'
+            : 'completed';
       items.push({
         id: `bundle-${bundle.id}`,
+        sourceId: `bundle-${bundle.id}`,
+        sourceType: 'bundle_archive',
         type: 'bundle',
         title: bundle.bundle_name || 'Promotional Bundle',
         deployedDate: bundle.created_at
@@ -10714,14 +10963,24 @@ export class AnalyticsService {
           : null,
         confidence: bundle.confidence ? `${bundle.confidence}%` : '80%',
         sector: bundle.items?.[0]?.sector || 'Cafe + Services',
-        status: bundle.status || 'completed',
+        status: normalizedStatus,
         feedback: bundle.metadata?.feedback || null,
+        feedbackNotes: bundle.metadata?.feedbackNotes || null,
+        metadata: bundle.metadata || {},
       });
     });
 
     dynamicHappyHours.forEach((promo) => {
+      const normalizedStatus =
+        promo.status === 'approved' || promo.status === 'active'
+          ? 'active'
+          : promo.status === 'failed'
+            ? 'failed'
+            : 'completed';
       items.push({
         id: `promo-${promo.id}`,
+        sourceId: `promo-${promo.id}`,
+        sourceType: 'dynamic_promo',
         type: 'happy-hour',
         title: `Happy Hour Promo`,
         deployedDate: promo.created_at
@@ -10750,17 +11009,29 @@ export class AnalyticsService {
           ? `${promo.probability_score}%`
           : '80%',
         sector: 'Cafe',
-        status:
-          promo.status === 'approved' ? 'active' : promo.status || 'completed',
+        status: normalizedStatus,
         feedback: promo.metadata?.feedback || null,
+        feedbackNotes: promo.metadata?.feedbackNotes || null,
+        metadata: promo.metadata || {},
       });
     });
 
-    return items.filter((p) => {
-      if (status && status !== 'all' && p.status !== status) return false;
-      if (type && type !== 'all' && p.type !== type) return false;
-      return true;
-    });
+    try {
+      if (this.activationService?.getFeedbackCampaigns) {
+        const campaigns = await this.activationService.getFeedbackCampaigns();
+        if (Array.isArray(campaigns)) {
+          items.push(...campaigns);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to include activation campaigns in feedback feed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return this.filterFeedbackPromotions(items, status, type);
   }
 
   // ----------------------------------------------------------------

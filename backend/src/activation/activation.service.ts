@@ -14,7 +14,12 @@ import {
   CampaignActivationDocument,
 } from './schemas/campaign-activation.schema';
 
-type CampaignStatus = 'draft' | 'approved' | 'queued' | 'published';
+type CampaignStatus =
+  | 'draft'
+  | 'approved'
+  | 'queued'
+  | 'published'
+  | 'completed';
 
 interface GeneratedCampaignAssets {
   headline: string;
@@ -162,6 +167,96 @@ export class ActivationService {
       .lean()
       .exec();
     return { campaigns };
+  }
+
+  async getFeedbackCampaigns() {
+    const campaigns = await this.campaignModel
+      .find({ status: { $in: ['approved', 'queued', 'published', 'completed'] } })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean()
+      .exec();
+
+    return campaigns.map((campaign: any) => ({
+      id: `activation-${campaign.campaignId}`,
+      sourceType: 'activation_campaign',
+      sourceId: campaign.campaignId,
+      type: this.inferFeedbackType(campaign),
+      title: campaign.title || campaign.generatedAssets?.headline || 'PetHub Campaign',
+      deployedDate: campaign.createdAt
+        ? new Date(campaign.createdAt).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })
+        : 'N/A',
+      targetTime: 'PetHub campaign window',
+      discount: campaign.promoMechanic || campaign.pethubPayload?.promoMechanic || 'PetHub offer',
+      predictedLift:
+        campaign.analyticsContext?.expectedLift ||
+        campaign.analyticsContext?.lift ||
+        'N/A',
+      actualLift: campaign.analyticsContext?.actualLift || null,
+      confidence:
+        campaign.analyticsContext?.confidence ||
+        campaign.analyticsContext?.confidenceScore ||
+        'N/A',
+      sector: this.inferCampaignSector(this.rebuildRecommendationFromCampaign(campaign)),
+      status: campaign.status === 'completed' ? 'completed' : 'active',
+      feedback: campaign.analyticsContext?.feedback || null,
+      feedbackNotes: campaign.analyticsContext?.feedbackNotes || null,
+      pethubLinked: campaign.status === 'published',
+      pethubStatus: campaign.status,
+    }));
+  }
+
+  async endCampaignForFeedback(campaignId: string, feedback?: string) {
+    const campaign = await this.campaignModel
+      .findOne({ campaignId })
+      .lean()
+      .exec();
+    if (!campaign) {
+      return { status: 'not_found' };
+    }
+
+    const takedown = await this.deactivatePetHubCampaign(campaign);
+    const analyticsContext = {
+      ...(campaign.analyticsContext || {}),
+      feedback: feedback || campaign.analyticsContext?.feedback || null,
+      endedAt: new Date().toISOString(),
+      pethubTakedown: takedown,
+    };
+    const pethubPayload = {
+      ...(campaign.pethubPayload || {}),
+      isActive: false,
+    };
+
+    const updated = await this.campaignModel
+      .findOneAndUpdate(
+        { campaignId },
+        {
+          status: 'completed',
+          analyticsContext,
+          pethubPayload,
+        },
+        { new: true },
+      )
+      .lean()
+      .exec();
+
+    void this.auditService.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Ended feedback campaign',
+      module: 'campaign_activation',
+      category: 'workflow',
+      target: campaign.title || campaignId,
+      stateBefore: campaign.status,
+      stateAfter: 'Completed',
+      metadata: { campaignId, takedown },
+    });
+
+    return { status: 'completed', campaign: updated, takedown };
   }
 
   async generateCampaign(body: Record<string, unknown>) {
@@ -397,7 +492,7 @@ export class ActivationService {
     status: CampaignStatus,
     actor = 'Owner',
   ) {
-    if (!['draft', 'approved', 'queued', 'published'].includes(status)) {
+    if (!['draft', 'approved', 'queued', 'published', 'completed'].includes(status)) {
       throw new BadRequestException('Invalid campaign status');
     }
     const current = await this.campaignModel
@@ -442,7 +537,8 @@ export class ActivationService {
       draft: ['approved'],
       approved: ['queued'],
       queued: ['published'],
-      published: [],
+      published: ['completed'],
+      completed: [],
     };
 
     if (!allowedTransitions[currentStatus]?.includes(nextStatus)) {
@@ -674,6 +770,53 @@ export class ActivationService {
     };
   }
 
+  private async deactivatePetHubCampaign(campaign: any) {
+    if (campaign.status !== 'published') {
+      return { status: 'skipped', reason: 'Campaign is not published to PetHub.' };
+    }
+
+    const endpoint = this.getPetHubCampaignsEndpoint();
+    if (!endpoint) {
+      return {
+        status: 'skipped',
+        reason: 'PETHUB_CAMPAIGNS_ENDPOINT or PETHUB_API_BASE_URL is not configured.',
+      };
+    }
+
+    const remoteId = this.safeString(
+      campaign.pethubPayload?.id ||
+        campaign.pethubPayload?.campaignId ||
+        campaign.pethubPayload?.campaign_id,
+      campaign.campaignId,
+    );
+    const targetEndpoint = `${endpoint.replace(/\/$/, '')}/${encodeURIComponent(remoteId)}`;
+
+    try {
+      await axios.patch(
+        targetEndpoint,
+        { isActive: false, status: 'inactive', source: 'WOOF' },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(process.env.PETHUB_API_TOKEN
+              ? { Authorization: `Bearer ${process.env.PETHUB_API_TOKEN}` }
+              : {}),
+          },
+          timeout: 15000,
+        },
+      );
+      return { status: 'deactivated', endpoint: targetEndpoint };
+    } catch (error) {
+      const message = axios.isAxiosError(error)
+        ? this.extractRemoteErrorMessage(error.response?.data) || error.message
+        : error instanceof Error
+          ? error.message
+          : 'Unknown PetHub takedown error';
+      this.logger.warn(`PetHub campaign takedown failed for ${campaign.campaignId}: ${message}`);
+      return { status: 'failed', endpoint: targetEndpoint, message };
+    }
+  }
+
   private async generateAndStoreCampaignImage(
     campaignId: string,
     recommendation: ActivationRecommendation,
@@ -826,6 +969,27 @@ export class ActivationService {
       return 'Cafe';
     }
     return 'Retail';
+  }
+
+  private inferFeedbackType(campaign: any):
+    | 'bundle'
+    | 'discount'
+    | 'happy-hour'
+    | 'flash-sale'
+    | 'forecast' {
+    const text = [
+      campaign.source,
+      campaign.title,
+      campaign.promoMechanic,
+      campaign.pethubPayload?.promoMechanic,
+    ]
+      .join(' ')
+      .toLowerCase();
+    if (text.includes('bundle')) return 'bundle';
+    if (text.includes('happy hour')) return 'happy-hour';
+    if (text.includes('flash')) return 'flash-sale';
+    if (text.includes('forecast')) return 'forecast';
+    return 'discount';
   }
 
   private wrapSvgText(
