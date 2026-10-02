@@ -7885,6 +7885,8 @@ export class AnalyticsService {
         },
       );
 
+      const heatmapData = await this.getHomeHeatmapForecastData();
+
       return {
         source: 'Supabase',
         range: normalizedRange,
@@ -7927,8 +7929,9 @@ export class AnalyticsService {
         channelSummary,
         retailBreakdown,
         channelBalance,
-        heatmapDays: this.buildHomeHeatmapDays(end),
-        heatmap: this.formatHomeHeatmap(heatmapRawRows),
+        heatmapAnchorDate: heatmapData.heatmapAnchorDate,
+        heatmapDays: heatmapData.heatmapDays,
+        heatmap: heatmapData.heatmap,
         suggestions,
         nextAction: suggestions[0] || null,
       };
@@ -8412,6 +8415,81 @@ export class AnalyticsService {
     start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - 6);
     return start;
+  }
+
+  private async getHomeHeatmapForecastData(targetDate?: string): Promise<{
+    heatmapAnchorDate: string;
+    heatmapDays: any[];
+    heatmap: any[];
+  }> {
+    const heatmapAnchorDate =
+      targetDate || this.formatDateInTimeZone(new Date(), 'Asia/Manila');
+    const heatmapTodayStart = new Date(
+      `${heatmapAnchorDate}T00:00:00.000+08:00`,
+    );
+    const heatmapHistoryStart = new Date(heatmapTodayStart);
+    heatmapHistoryStart.setUTCFullYear(
+      heatmapHistoryStart.getUTCFullYear() - 2,
+    );
+
+    const heatmapRows = await this.aggregateWithDiskUse([
+      {
+        $match: {
+          sector: { $in: ['Cafe', 'Services'] },
+          date: { $gte: heatmapHistoryStart, $lt: heatmapTodayStart },
+        },
+      },
+      {
+        $project: {
+          sector: 1,
+          netSales: 1,
+          dateKey: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$date',
+              timezone: 'Asia/Manila',
+            },
+          },
+          dayOfWeek: {
+            $dayOfWeek: {
+              date: '$date',
+              timezone: 'Asia/Manila',
+            },
+          },
+          hour: {
+            $hour: {
+              date: '$date',
+              timezone: 'Asia/Manila',
+            },
+          },
+        },
+      },
+      { $match: { hour: { $gte: 7, $lte: 18 } } },
+      {
+        $group: {
+          _id: {
+            date: '$dateKey',
+            dayOfWeek: '$dayOfWeek',
+            hourBucket: '$hour',
+            sector: '$sector',
+          },
+          revenue: { $sum: '$netSales' },
+        },
+      },
+    ]);
+
+    const heatmapForecast = this.buildHomeHeatmapForecast(
+      heatmapRows,
+      heatmapAnchorDate,
+    );
+
+    return {
+      heatmapAnchorDate,
+      heatmapDays: this.buildHomeHeatmapDays(
+        new Date(`${heatmapAnchorDate}T12:00:00.000Z`),
+      ),
+      heatmap: this.formatHomeHeatmap(heatmapForecast),
+    };
   }
 
   private buildHomeHeatmapDays(end: Date): any[] {

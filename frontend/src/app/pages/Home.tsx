@@ -389,7 +389,10 @@ export function Home() {
     () => buildHeatmapDaysFromAnchor(homeOverview?.heatmapAnchorDate),
     [homeOverview?.heatmapAnchorDate],
   );
-  const displayHeatmapDays = clientHeatmapDays;
+  const displayHeatmapDays =
+    homeOverview?.heatmapDays && homeOverview.heatmapDays.length > 0
+      ? homeOverview.heatmapDays
+      : clientHeatmapDays;
   const carouselSuggestions = useMemo(
     () => (suggestions.length > 2 ? [...suggestions, ...suggestions] : suggestions),
     [suggestions],
