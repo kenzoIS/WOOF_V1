@@ -8566,6 +8566,7 @@ export class AnalyticsService {
             totalWeight += weight;
           }
 
+          const baseline = totalWeight > 0 ? weightedRevenue / totalWeight : 0;
           forecast.push({
             _id: {
               date: forecastDate,
@@ -8573,7 +8574,8 @@ export class AnalyticsService {
               hourBucket: hour,
               sector,
             },
-            revenue: totalWeight > 0 ? weightedRevenue / totalWeight : 0,
+            revenue: baseline,
+            baselineRevenue: baseline,
             sampleDays: matchingDays.length,
           });
         }
@@ -8596,6 +8598,7 @@ export class AnalyticsService {
       hourBucket: Number(row._id?.hourBucket) || 0,
       sector: row._id?.sector || 'Unknown',
       revenue: this.round(Number(row.revenue) || 0),
+      baselineRevenue: this.round(Number(row.baselineRevenue || row.revenue) || 0),
       intensity: this.round(((Number(row.revenue) || 0) / maxRevenue) * 100),
       sampleDays: Number(row.sampleDays) || 0,
     }));
