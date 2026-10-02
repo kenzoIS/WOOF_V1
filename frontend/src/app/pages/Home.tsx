@@ -110,7 +110,7 @@ interface HomeOverview {
   channelSummary: Array<{ channel: string; revenue: number; count: number }>;
   channelBalance: Array<{ category: string; channel: string; physical: number; online: number; count: number }>;
   heatmapDays: Array<{ date: string; dayLabel: string; label: string }>;
-  heatmap: Array<{ date?: string; dayOfWeek: number; dayLabel?: string; hourBucket: number; sector: string; revenue: number; baselineRevenue?: number; intensity: number; sampleDays?: number }>;
+  heatmap: Array<{ date?: string; dayOfWeek: number; dayLabel?: string; hourBucket: number; sector: string; revenue: number; intensity: number; sampleDays?: number }>;
   suggestions: HomeSuggestion[];
   nextAction: HomeSuggestion | null;
 }
@@ -460,16 +460,12 @@ export function Home() {
   }, [homeOverview]);
 
   const [heatmapFilter, setHeatmapFilter] = useState("allsectors");
-  const [exogenousScenario, setExogenousScenario] = useState<"live" | "heavy_rain" | "quezon_holiday">("live");
   const [hoveredHeatmapCell, setHoveredHeatmapCell] = useState<{
     label: string;
     revenue: number;
-    baselineRevenue: number;
-    multiplier: number;
     intensity: number;
     x: number;
     y: number;
-    contextNote?: string;
   } | null>(null);
   const [visibleSeries, setVisibleSeries] = useState({
     cafe: true,
@@ -889,7 +885,7 @@ export function Home() {
     return "#F53799";
   };
 
-  const getHeatmapBaselineRevenue = (date: string, hour: number) =>
+  const getHeatmapRevenue = (date: string, hour: number) =>
     (homeOverview?.heatmap || [])
       .filter((row) => {
         const sector = row.sector.toLowerCase();
@@ -900,141 +896,38 @@ export function Home() {
           (heatmapFilter === "allsectors" || sector === heatmapFilter)
         );
       })
-      .reduce((total, row) => total + toNumber(row.baselineRevenue ?? row.revenue), 0);
-
-  const getExogenousAdjustment = (
-    date: string,
-    hour: number,
-    sectorFilter: string,
-    scenario: "live" | "heavy_rain" | "quezon_holiday",
-    weather: CurrentWeather | null,
-    dayIndex: number,
-    isWeekend: boolean
-  ) => {
-    let multiplier = 1.0;
-    const factors: string[] = [];
-
-    if (scenario === "heavy_rain") {
-      // Monsoon / Tropical downpour in Lucena City (1290 Bonifacio Dr)
-      // Open tricycle transit halts -> grooming cancellations and walk-in suppression
-      if (sectorFilter === "services") {
-        multiplier *= 0.65; // -35%
-        factors.push("Monsoon Downpour: Bonifacio Dr open tricycle transit halted; grooming deferrals (-35%)");
-      } else if (sectorFilter === "cafe") {
-        multiplier *= 0.78; // -22%
-        factors.push("Monsoon Downpour: Pedestrian walk-in dine-in suppressed (-22%)");
-      } else {
-        multiplier *= 0.72; // -28%
-        factors.push("Monsoon Downpour: Flash puddles on Bonifacio Dr; footfall dampened (-28%)");
-      }
-    } else if (scenario === "quezon_holiday") {
-      // Official Quezon Day / Pasayahan Festival holiday in Lucena
-      if (sectorFilter === "cafe") {
-        multiplier *= 1.32; // +32%
-        factors.push("Araw ng Quezon Holiday: Pleasantville family pet leisure & cafe surge (+32%)");
-      } else if (sectorFilter === "services") {
-        multiplier *= 1.20; // +20%
-        factors.push("Araw ng Quezon Holiday: High daycare & pet wellness bookings (+20%)");
-      } else {
-        multiplier *= 1.26; // +26%
-        factors.push("Araw ng Quezon Holiday: City-wide holiday footfall & pet pampering surge (+26%)");
-      }
-    } else {
-      // Live Lucena Climate (Open-Meteo live feed + time-of-day dynamics)
-      const rain = weather ? toNumber(weather.rainfallMm) : 0;
-      const temp = weather ? toNumber(weather.tempCelsius) : 28;
-
-      if (dayIndex === 0) {
-        if (rain >= 2.0) {
-          const cut = rain >= 8.0 ? 0.70 : 0.82;
-          multiplier *= cut;
-          factors.push(`Rainfall (${rain.toFixed(1)} mm): Road dampening on Bonifacio Dr (${Math.round((cut - 1) * 100)}%)`);
-        } else if (temp >= 32 && hour >= 11 && hour <= 14) {
-          multiplier *= 0.88;
-          factors.push(`Peak Heat (${Math.round(temp)}°C): Asphalt heat lull 11 AM–2 PM (-12%)`);
-        }
-      }
-
-      // Micro-location footfall dynamics around AMCJ Bldg, Pleasantville
-      if (hour >= 7 && hour <= 8) {
-        multiplier *= 1.12;
-        factors.push("Pleasantville morning pet walking window (+12%)");
-      } else if (hour >= 16 && hour <= 18) {
-        multiplier *= 1.15;
-        factors.push("MSEUF student & post-work dwell window (+15%)");
-      }
-
-      if (isWeekend) {
-        multiplier *= 1.15;
-        factors.push("Pleasantville weekend family pet outing peak (+15%)");
-      }
-    }
-
-    const note = factors.length > 0 ? factors.join(" • ") : "Normal climate: Stable historical footfall baseline";
-    return { multiplier, note };
-  };
-
-  const getHeatmapAdjusted = (date: string, hour: number, dayIndex: number, isWeekend: boolean) => {
-    const baselineRevenue = getHeatmapBaselineRevenue(date, hour);
-    const { multiplier, note } = getExogenousAdjustment(
-      date,
-      hour,
-      heatmapFilter,
-      exogenousScenario,
-      currentWeather,
-      dayIndex,
-      isWeekend
-    );
-    const revenue = Math.round(baselineRevenue * multiplier);
-    return {
-      baselineRevenue,
-      revenue,
-      multiplier,
-      note,
-    };
-  };
+      .reduce((total, row) => total + toNumber(row.revenue), 0);
 
   const maxHeatmapRevenue = useMemo(() => {
     let max = 0;
-    displayHeatmapDays.forEach((day, dayIdx) => {
-      const dayDate = new Date(`${day.date}T12:00:00.000Z`);
-      const isWeekend = dayDate.getUTCDay() === 0 || dayDate.getUTCDay() === 6;
+    displayHeatmapDays.forEach((day) => {
       heatmapHours.forEach((hour) => {
-        const { revenue } = getHeatmapAdjusted(day.date, hour, dayIdx, isWeekend);
-        if (revenue > max) max = revenue;
+        const rev = getHeatmapRevenue(day.date, hour);
+        if (rev > max) max = rev;
       });
     });
     return Math.max(1, max);
-  }, [displayHeatmapDays, homeOverview?.heatmap, heatmapFilter, exogenousScenario, currentWeather]);
+  }, [displayHeatmapDays, homeOverview?.heatmap, heatmapFilter]);
 
-  const getHeatmapRevenue = (date: string, hour: number, dayIdx = 0, isWeekend = false) =>
-    getHeatmapAdjusted(date, hour, dayIdx, isWeekend).revenue;
-
-  const getHeatmapIntensity = (date: string, hour: number, dayIdx = 0, isWeekend = false) => {
-    const rev = getHeatmapRevenue(date, hour, dayIdx, isWeekend);
-    return maxHeatmapRevenue > 0 ? (rev / maxHeatmapRevenue) * 100 : 0;
-  };
+  const getHeatmapIntensity = (date: string, hour: number) =>
+    maxHeatmapRevenue > 0
+      ? (getHeatmapRevenue(date, hour) / maxHeatmapRevenue) * 100
+      : 0;
 
   const updateHeatmapTooltip = (
     event: React.MouseEvent<HTMLDivElement> | React.FocusEvent<HTMLDivElement>,
     label: string,
     revenue: number,
-    baselineRevenue: number,
-    multiplier: number,
     intensity: number,
-    contextNote?: string,
   ) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const isMouseEvent = "clientX" in event && event.clientX > 0;
     setHoveredHeatmapCell({
       label,
       revenue,
-      baselineRevenue,
-      multiplier,
       intensity,
       x: isMouseEvent ? event.clientX : rect.left + rect.width / 2,
       y: isMouseEvent ? event.clientY : rect.top,
-      contextNote,
     });
   };
   const heatmapDateLabel = `${displayHeatmapDays[0]?.label || "Today"} – ${displayHeatmapDays[displayHeatmapDays.length - 1]?.label || ""}`;
@@ -1744,7 +1637,7 @@ export function Home() {
                 <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                   Sales Intensity Map
                 </h2>
-                <InfoTooltip label="Estimated hourly revenue for the next 7 days, anchored to the current date. Combines 2-year weighted historical Cafe and Services transactions with real-time weather and exogenous footfall calibration for 1290 Bonifacio Drive, Lucena City." />
+                <InfoTooltip label="Estimated hourly revenue for the next 7 days, anchored to the current date. Based on the same weekday and hour over the previous two years. Recent history receives more weight." />
               </div>
               <div className="mt-1 text-sm text-[#06B6D4] font-medium">
                 7-day forecast · Starting Today ({displayHeatmapDays[0]?.label || "Today"}) – {displayHeatmapDays[displayHeatmapDays.length - 1]?.label || ""}
@@ -1770,84 +1663,9 @@ export function Home() {
             </div>
           </div>
 
-          {/* Exogenous Scenario Controls & Lucena City Context Bar (No icons) */}
-          <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF9FC] p-3 md:p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#223047]/70">
-                  Condition:
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <Button
-                    size="sm"
-                    variant={exogenousScenario === "live" ? "default" : "outline"}
-                    onClick={() => setExogenousScenario("live")}
-                    className={
-                      exogenousScenario === "live"
-                        ? "bg-[#06B6D4] hover:bg-[#0891B2] text-white text-xs h-7 px-2.5 font-medium"
-                        : "border-[#BAE6FD] text-[#223047] hover:bg-[#F0F9FF] text-xs h-7 px-2.5"
-                    }
-                  >
-                    Live Lucena Climate
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={exogenousScenario === "heavy_rain" ? "default" : "outline"}
-                    onClick={() => setExogenousScenario("heavy_rain")}
-                    className={
-                      exogenousScenario === "heavy_rain"
-                        ? "bg-[#0EA5E9] hover:bg-[#0284C7] text-white text-xs h-7 px-2.5 font-medium"
-                        : "border-[#BAE6FD] text-[#223047] hover:bg-[#F0F9FF] text-xs h-7 px-2.5"
-                    }
-                  >
-                    Simulate Heavy Rain (Bonifacio Dr)
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={exogenousScenario === "quezon_holiday" ? "default" : "outline"}
-                    onClick={() => setExogenousScenario("quezon_holiday")}
-                    className={
-                      exogenousScenario === "quezon_holiday"
-                        ? "bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs h-7 px-2.5 font-medium"
-                        : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA] text-xs h-7 px-2.5"
-                    }
-                  >
-                    Simulate Quezon Day Holiday
-                  </Button>
-                </div>
-              </div>
-
-              <div className="text-[11px] text-[#223047]/60">
-                Anchor: 1290 Bonifacio Dr, Lucena City
-              </div>
-            </div>
-
-            <div className="text-xs text-[#223047] bg-white border border-[#FFD9EC]/70 rounded-lg px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-[#06B6D4]">
-                  {exogenousScenario === "live"
-                    ? "Live Dynamic Calibration:"
-                    : exogenousScenario === "heavy_rain"
-                    ? "Active Simulation:"
-                    : "Active Simulation:"}
-                </span>
-                <span>
-                  {exogenousScenario === "live"
-                    ? `${weatherSummary} · ${rainfallSummary} · Historical 2-yr baseline dynamically adjusted for current hour & local traffic`
-                    : exogenousScenario === "heavy_rain"
-                    ? "Bonifacio Dr open tricycle transit halted · Grooming deferrals (-35%) & walk-in suppression (-22%)"
-                    : "Araw ng Quezon / Pasayahan local holiday · Pleasantville family pet leisure & cafe surge (+26% to +32%)"}
-                </span>
-              </div>
-              <div className="text-[10px] text-[#223047]/50 font-medium">
-                Baseline: 2-Year History
-              </div>
-            </div>
-          </div>
-
           <div className="overflow-x-auto pb-1">
-            <div className="min-w-[780px] space-y-2">
-              <div className="grid grid-cols-[6.5rem_repeat(12,minmax(0,1fr))] gap-1.5 md:gap-2">
+            <div className="min-w-[760px] space-y-2">
+              <div className="grid grid-cols-[6rem_repeat(12,minmax(0,1fr))] gap-1.5 md:gap-2">
                 <div className="text-xs font-semibold text-[#223047] opacity-60">Day</div>
                 {heatmapHours.map((hour) => (
                   <div key={hour} className="text-center text-[10px] md:text-xs text-[#223047] opacity-60">
@@ -1856,11 +1674,9 @@ export function Home() {
                 ))}
               </div>
               {displayHeatmapDays.map((day, dayIdx) => {
-                const dayDate = new Date(`${day.date}T12:00:00.000Z`);
-                const isWeekend = dayDate.getUTCDay() === 0 || dayDate.getUTCDay() === 6;
                 const isToday = dayIdx === 0;
                 return (
-                  <div key={day.date} className="grid grid-cols-[6.5rem_repeat(12,minmax(0,1fr))] items-center gap-1.5 md:gap-2">
+                  <div key={day.date} className="grid grid-cols-[6rem_repeat(12,minmax(0,1fr))] items-center gap-1.5 md:gap-2">
                     <div className="flex items-center gap-1 min-w-0 pr-1">
                       <span className="text-xs font-bold text-[#223047] truncate">
                         {isToday ? "Today" : day.dayLabel}
@@ -1868,19 +1684,15 @@ export function Home() {
                       <span className="text-[10px] text-[#223047]/60 truncate">
                         {day.label.replace(day.dayLabel, "").trim()}
                       </span>
-                      {isToday ? (
+                      {isToday && (
                         <span className="px-1 py-0.5 text-[8px] font-bold rounded bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC]">
                           NOW
                         </span>
-                      ) : isWeekend ? (
-                        <span className="px-1 py-0.5 text-[8px] font-medium rounded bg-[#F0F9FF] text-[#0284C7] border border-[#BAE6FD]">
-                          WKND
-                        </span>
-                      ) : null}
+                      )}
                     </div>
                     {heatmapHours.map((hour) => {
-                      const { baselineRevenue, revenue, multiplier, note } = getHeatmapAdjusted(day.date, hour, dayIdx, isWeekend);
-                      const intensity = maxHeatmapRevenue > 0 ? (revenue / maxHeatmapRevenue) * 100 : 0;
+                      const revenue = getHeatmapRevenue(day.date, hour);
+                      const intensity = getHeatmapIntensity(day.date, hour);
                       const hourLabel = hour === 12 ? "12 PM" : hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
                       const periodEnd = hour + 1;
                       const intervalLabel = `${hourLabel}–${periodEnd === 12 ? "12 PM" : periodEnd < 12 ? `${periodEnd} AM` : `${periodEnd - 12} PM`}`;
@@ -1891,10 +1703,10 @@ export function Home() {
                           tabIndex={0}
                           role="img"
                           aria-label={`${dayTitle}, ${intervalLabel} forecast ${formatCurrency(revenue)}, ${intensity.toFixed(0)}% intensity`}
-                          onMouseEnter={(event) => updateHeatmapTooltip(event, `${dayTitle} · ${intervalLabel}`, revenue, baselineRevenue, multiplier, intensity, note)}
-                          onMouseMove={(event) => updateHeatmapTooltip(event, `${dayTitle} · ${intervalLabel}`, revenue, baselineRevenue, multiplier, intensity, note)}
+                          onMouseEnter={(event) => updateHeatmapTooltip(event, `${dayTitle} · ${intervalLabel}`, revenue, intensity)}
+                          onMouseMove={(event) => updateHeatmapTooltip(event, `${dayTitle} · ${intervalLabel}`, revenue, intensity)}
                           onMouseLeave={() => setHoveredHeatmapCell(null)}
-                          onFocus={(event) => updateHeatmapTooltip(event, `${dayTitle} · ${intervalLabel}`, revenue, baselineRevenue, multiplier, intensity, note)}
+                          onFocus={(event) => updateHeatmapTooltip(event, `${dayTitle} · ${intervalLabel}`, revenue, intensity)}
                           onBlur={() => setHoveredHeatmapCell(null)}
                           className="h-8 md:h-11 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] focus:ring-2 focus:ring-[#F53799] transition-all"
                           style={{ backgroundColor: getHeatmapColor(intensity) }}
@@ -1910,36 +1722,12 @@ export function Home() {
           {hoveredHeatmapCell && (
             <div
               role="status"
-              className="fixed z-[100] pointer-events-none -translate-x-1/2 -translate-y-full rounded-xl border border-[#FFD9EC] bg-white p-3 shadow-2xl text-xs text-[#223047] space-y-1.5 min-w-[240px] max-w-[320px]"
-              style={{ left: hoveredHeatmapCell.x, top: hoveredHeatmapCell.y - 12 }}
+              className="fixed z-[100] pointer-events-none -translate-x-1/2 -translate-y-full rounded-lg border border-[#FFD9EC] bg-white px-3 py-2 shadow-lg text-xs text-[#223047]"
+              style={{ left: hoveredHeatmapCell.x, top: hoveredHeatmapCell.y - 10 }}
             >
-              <div className="flex items-center justify-between border-b border-[#FFD9EC] pb-1">
-                <span className="font-bold text-[#223047]">{hoveredHeatmapCell.label}</span>
-                <span className="font-bold text-[#06B6D4]">{hoveredHeatmapCell.intensity.toFixed(0)}% Intensity</span>
-              </div>
-              <div className="space-y-0.5">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-[#223047]/70">Calibrated Forecast:</span>
-                  <span className="font-bold text-[#F53799]">{formatCurrency(hoveredHeatmapCell.revenue)}</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-[#223047]/70">Historical Baseline:</span>
-                  <span className="font-medium text-[#223047]">{formatCurrency(hoveredHeatmapCell.baselineRevenue)}</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-[#223047]/70">Exogenous Impact:</span>
-                  <span className={`font-semibold ${hoveredHeatmapCell.multiplier >= 1 ? "text-emerald-600" : "text-amber-600"}`}>
-                    {hoveredHeatmapCell.multiplier >= 1 ? "+" : ""}
-                    {Math.round((hoveredHeatmapCell.multiplier - 1) * 100)}%
-                  </span>
-                </div>
-              </div>
-              {hoveredHeatmapCell.contextNote && (
-                <div className="pt-1 border-t border-[#FFD9EC]/70 text-[10px] text-[#223047]/80 leading-snug">
-                  <span className="font-semibold text-[#06B6D4]">Driver: </span>
-                  {hoveredHeatmapCell.contextNote}
-                </div>
-              )}
+              <div className="font-semibold">{hoveredHeatmapCell.label}</div>
+              <div className="font-bold text-[#06B6D4]">{hoveredHeatmapCell.intensity.toFixed(0)}% intensity</div>
+              <div>Forecast revenue: {formatCurrency(hoveredHeatmapCell.revenue)}</div>
             </div>
           )}
 
