@@ -3841,6 +3841,36 @@ This file records requested revisions, implementation details, verification, and
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
 - Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
 
+### Feedback Active Promotion Loop Alignment (2026-10-02)
+
+- Added the same Helpful and Not Helpful feedback prompt under active Feedback page promotions, not only completed promotions.
+- Reused one shared feedback control for active and completed promotion cards so both paths submit through the existing `/analytics/feedback/submit` backend flow.
+- Updated Feedback page fallback KPI counts so helpful, not-helpful, and pending feedback include all deployed promotions.
+- Updated backend feedback summary counts so owner feedback signals from active promotions are included in helpful, not-helpful, pending, positive ratio, and recalibration counters.
+- Preserved prediction accuracy logic on completed promotions with actual lift values, since active promotions may not have measurable actual lift yet.
+- Preserved the existing not-helpful recalibration behavior: cache invalidation, background Cafe/Services forecast refresh, and AWS recalibration archive.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+
+### Feedback Module Backend Functionality Audit (2026-10-02)
+
+- Audited the Feedback & Learning Center frontend wiring and backend analytics endpoints.
+- Confirmed the page loads deployed feedback promotions and summary metrics through `/analytics/feedback/promotions` and `/analytics/feedback/summary`.
+- Confirmed owner helpful/not-helpful ratings are submitted through `/analytics/feedback/submit`, persisted to the `recommendation_feedback` Supabase table when available, and archived through the AWS feedback archive path.
+- Confirmed not-helpful ratings trigger the recalibration workflow, which clears stale cross-sell and forecast caches, starts background Cafe and Services forecast refreshes, and archives recalibration metadata through AWS.
+- Confirmed manual `Recalibrate System` uses `/analytics/feedback/recalibrate` and the same backend recalibration workflow.
+- Confirmed the module can fall back to real system state from `bundle_archives` and `dynamic_promos` when `recommendation_feedback` has no rows.
+- Confirmed daily scheduled lift tracking updates actual lift metadata for bundle archives and dynamic promos from transaction history.
+- Noted audit findings only; no frontend or backend feature code was changed.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
+- Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+
 ### Cafe Forecast Cached Payload Fix (2026-09-07)
 
 - Fixed the cached Cafe/Services forecast response path so Supabase forecast rows are treated as plain objects instead of always calling `.toObject()`.

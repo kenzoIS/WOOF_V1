@@ -9528,11 +9528,11 @@ export class AnalyticsService {
     const promotions = await this.getFeedbackPromotions();
     const completed = promotions.filter((p) => p.status === 'completed');
     const active = promotions.filter((p) => p.status === 'active');
-    const helpful = completed.filter((p) => p.feedback === 'helpful').length;
-    const notHelpful = completed.filter(
+    const helpful = promotions.filter((p) => p.feedback === 'helpful').length;
+    const notHelpful = promotions.filter(
       (p) => p.feedback === 'not-helpful',
     ).length;
-    const pending = completed.filter((p) => p.feedback === null).length;
+    const pending = promotions.filter((p) => p.feedback === null).length;
 
     const accuracies = completed
       .map((p) => {
