@@ -144,6 +144,25 @@ export class ExogenousDataService {
     };
   }
 
+  /** Return only observed weather already present in cache; never synthesize values. */
+  async getCachedRealWeatherHistory(
+    startDate: string,
+    endDate: string,
+  ): Promise<WeatherRecord[]> {
+    if (!this.weatherCacheModel) return [];
+    const { lat, lng } = this.getDefaultCoordinates();
+    const rows = await this.weatherCacheModel
+      .find({
+        date: { $gte: startDate, $lte: endDate },
+        lat,
+        lng,
+        isSynthetic: false,
+      })
+      .sort({ date: 1 })
+      .lean();
+    return rows.map((row: any) => this.toWeatherRecord(row));
+  }
+
   async fetchWeatherHistory(
     lat: number,
     lng: number,

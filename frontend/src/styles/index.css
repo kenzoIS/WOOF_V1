@@ -1,3 +1,21 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
+@keyframes woof-mascot-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-6px) rotate(-1.25deg); }
+}
+
+.woof-mascot-motion {
+  transform-origin: 50% 85%;
+  animation: woof-mascot-float 4.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .woof-mascot-motion {
+    animation: none;
+    will-change: auto;
+  }
+}

@@ -1586,7 +1586,7 @@ export function Services() {
         <img
           src={servicesMascot.src}
           alt="Services Mascot"
-          className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-6"
+          className="woof-mascot-motion w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-6"
         />
       </div>
 

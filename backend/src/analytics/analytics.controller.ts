@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -146,6 +147,33 @@ export class AnalyticsController {
     return this.cached(
       this.key('dashboard', { sector }),
       () => this.analyticsService.getDashboard(sector),
+      { forceRefresh },
+    );
+  }
+
+  @Get('root-cause')
+  async getRootCauseAnalysis(
+    @Query('period') period = '30d',
+    @Query('sector') sector = 'all',
+    @Query('dateStart') dateStart?: string,
+    @Query('dateEnd') dateEnd?: string,
+    @Query('forceRefresh') forceRefresh?: string,
+  ) {
+    const validDate = (value?: string) => {
+      if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const date = new Date(`${value}T00:00:00.000Z`);
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    };
+    if ((dateStart || dateEnd) && (!validDate(dateStart) || !validDate(dateEnd) || dateStart! > dateEnd!)) {
+      throw new BadRequestException('Custom analysis requires valid dateStart and dateEnd values in YYYY-MM-DD format, with start on or before end.');
+    }
+    const safePeriod = dateStart && dateEnd ? 'custom' : ['30d', '90d', 'ytd'].includes(period) ? period : '30d';
+    const safeSector = ['all', 'cafe', 'services', 'retail'].includes(sector.toLowerCase()) ? sector.toLowerCase() : 'all';
+    const safeDateStart = dateStart && dateEnd ? dateStart : undefined;
+    const safeDateEnd = dateStart && dateEnd ? dateEnd : undefined;
+    return this.cached(
+      this.key('root-cause', { period: safePeriod, sector: safeSector, dateStart: safeDateStart, dateEnd: safeDateEnd }),
+      () => this.analyticsService.getRootCauseAnalysis(safePeriod, safeSector, safeDateStart, safeDateEnd),
       { forceRefresh },
     );
   }

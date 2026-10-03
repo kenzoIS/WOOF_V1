@@ -4515,7 +4515,7 @@ export function AISimulation() {
                 <img
                   src={aiMascot.src}
                   alt="AI Simulation Mascot"
-                  className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 self-end sm:self-auto"
+                  className="woof-mascot-motion w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 self-end sm:self-auto"
                 />
               </div>
             </div>
@@ -5537,7 +5537,7 @@ export function AISimulation() {
               <img
                 src={aiMascot.src}
                 alt="WOOF AI Mascot"
-                className="w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
+                className="woof-mascot-motion w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-4 md:ml-6"
               />
             </div>
 

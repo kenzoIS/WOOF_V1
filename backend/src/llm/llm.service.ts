@@ -60,7 +60,8 @@ export class LlmService {
         {
           model: config.model,
           temperature: request.feature === 'business_assistant' ? 0.3 : 0.1,
-          max_tokens: 700,
+          max_tokens: provider === 'glm' ? 1600 : 700,
+          ...(provider === 'glm' ? { reasoning_effort: 'low' } : {}),
           messages: [
             {
               role: 'system',
@@ -88,9 +89,25 @@ export class LlmService {
           timeout: 20000,
         },
       );
-      const text = response.data?.choices?.[0]?.message?.content;
-      if (!text || typeof text !== 'string') {
-        throw new Error('LLM returned an empty response');
+      const choice = response.data?.choices?.[0];
+      const message = choice?.message;
+      const content = message?.content;
+      const text = Array.isArray(content)
+        ? content
+            .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
+            .map((block: any) => block.text)
+            .join('\n')
+        : typeof content === 'string'
+          ? content
+          : typeof message?.refusal === 'string'
+            ? message.refusal
+            : '';
+      if (!text.trim()) {
+        const finishReason = String(choice?.finish_reason || 'unknown');
+        const completionTokens = Number(response.data?.usage?.completion_tokens);
+        throw new Error(
+          `Provider returned no visible text (finish_reason=${finishReason}${Number.isFinite(completionTokens) ? `, completion_tokens=${completionTokens}` : ''})`,
+        );
       }
       return {
         feature: request.feature,
@@ -146,7 +163,7 @@ export class LlmService {
       manual_bundle_explanation:
         'Explain the manual bundle score, margin fit, generated baseline, and weather/calendar fit in plain business language.',
       business_assistant:
-        'Answer the owner conversationally, preserving context and asking a concise clarification when the data is insufficient.',
+        'Sound like a helpful, thoughtful person having a conversation. Answer the question directly first, then explain only what helps. Use plain, natural language and short paragraphs. When presenting several metrics or rows, use a clear bulleted or numbered list with one item per line; name each metric and keep its value and unit together. Do not pack many numbers into one sentence, repeat the same figures, or add unexplained jargon. Keep all verified numbers, dates, units, and comparisons exactly as supplied. Briefly explain what the figures mean when supported by the data. Separate observed facts from interpretation, never invent a cause, and say clearly when the data cannot answer something. Ask one concise follow-up only when needed.',
       forecast_explanation:
         'Explain forecast direction, confidence or limitations, and the practical business implication without changing numbers.',
       recommendation_explanation:

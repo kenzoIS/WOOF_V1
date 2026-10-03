@@ -649,6 +649,123 @@ export class AnalyticsService {
     };
   }
 
+  async getRootCauseAnalysis(
+    period = '30d',
+    sector = 'all',
+    customStart?: string,
+    customEnd?: string,
+  ): Promise<any> {
+    const todayKey = this.formatDateInTimeZone(new Date(), 'Asia/Manila');
+    const today = new Date(`${todayKey}T00:00:00.000+08:00`);
+    let currentStart = new Date(today);
+    let previousStart = new Date(today);
+    let previousEnd = new Date(today);
+    let currentEnd = new Date(today);
+    currentEnd.setUTCDate(currentEnd.getUTCDate() + 1);
+    if (period === 'custom' && customStart && customEnd) {
+      currentStart = new Date(`${customStart}T00:00:00.000+08:00`);
+      currentEnd = new Date(`${customEnd}T00:00:00.000+08:00`);
+      currentEnd.setUTCDate(currentEnd.getUTCDate() + 1);
+      const duration = currentEnd.getTime() - currentStart.getTime();
+      previousEnd = new Date(currentStart);
+      previousStart = new Date(currentStart.getTime() - duration);
+    } else if (period === 'ytd') {
+      const year = Number(todayKey.slice(0, 4));
+      currentStart = new Date(`${year}-01-01T00:00:00.000+08:00`);
+      previousStart = new Date(`${year - 1}-01-01T00:00:00.000+08:00`);
+      previousEnd = new Date(currentStart);
+    } else {
+      const days = period === '90d' ? 90 : 30;
+      currentStart.setUTCDate(currentStart.getUTCDate() - (days - 1));
+      previousEnd = new Date(currentStart);
+      previousStart = new Date(currentStart);
+      previousStart.setUTCDate(previousStart.getUTCDate() - days);
+    }
+    if (period === 'ytd') previousEnd = new Date(previousStart.getTime() + (currentEnd.getTime() - currentStart.getTime()));
+    const currentStartKey = this.formatDateInTimeZone(currentStart, 'Asia/Manila');
+    const previousStartKey = this.formatDateInTimeZone(previousStart, 'Asia/Manila');
+    const endKey = this.formatDateInTimeZone(new Date(currentEnd.getTime() - 1), 'Asia/Manila');
+    const normalizedSector = sector === 'all' ? 'all' : this.normalizeSector(sector);
+    const match: any = { $or: [
+      { date: { $gte: previousStart, $lt: previousEnd } },
+      { date: { $gte: currentStart, $lt: currentEnd } },
+    ] };
+    if (normalizedSector !== 'all') match.sector = normalizedSector;
+
+    const [result] = await this.aggregateWithDiskUse([
+      { $match: match },
+      { $set: {
+        _period: { $cond: [{ $gte: ['$date', currentStart] }, 'current', 'previous'] },
+        _dateKey: { $dateToString: { date: '$date', format: '%Y-%m-%d', timezone: 'Asia/Manila' } },
+        _weekday: { $dayOfWeek: { date: '$date', timezone: 'Asia/Manila' } },
+        _hour: { $hour: { date: '$date', timezone: 'Asia/Manila' } },
+      } },
+      { $facet: {
+        totals: [
+          { $group: { _id: '$_period', revenue: { $sum: '$netSales' }, grossSales: { $sum: '$totalAmount' }, discounts: { $sum: '$discount' }, quantity: { $sum: '$quantity' }, orderIds: { $addToSet: '$transactionId' }, rows: { $sum: 1 } } },
+          { $project: { revenue: 1, grossSales: 1, discounts: 1, quantity: 1, rows: 1, orders: { $size: '$orderIds' } } },
+        ],
+        daily: [ { $group: { _id: { period: '$_period', date: '$_dateKey' }, revenue: { $sum: '$netSales' } } }, { $sort: { '_id.date': 1 } } ],
+        channels: [ { $group: { _id: { period: '$_period', name: '$channel' }, revenue: { $sum: '$netSales' }, quantity: { $sum: '$quantity' } } }, { $sort: { revenue: -1 } } ],
+        categories: [ { $group: { _id: { period: '$_period', name: '$category' }, revenue: { $sum: '$netSales' }, quantity: { $sum: '$quantity' } } }, { $sort: { revenue: -1 } } ],
+        products: [ { $group: { _id: { period: '$_period', name: '$productName', sku: '$sku', category: '$category' }, revenue: { $sum: '$netSales' }, quantity: { $sum: '$quantity' } } }, { $sort: { revenue: -1 } } ],
+        heatmap: [ { $match: { _period: 'current' } }, { $group: { _id: { weekday: '$_weekday', hour: '$_hour' }, revenue: { $sum: '$netSales' }, orders: { $addToSet: '$transactionId' } } }, { $project: { revenue: 1, orders: { $size: '$orders' } } } ],
+      } },
+    ]);
+
+    const totalByPeriod = Object.fromEntries((result?.totals || []).map((row: any) => [row._id, row]));
+    const current = totalByPeriod.current || { revenue: 0, grossSales: 0, discounts: 0, quantity: 0, orders: 0, rows: 0 };
+    const previous = totalByPeriod.previous || { revenue: 0, grossSales: 0, discounts: 0, quantity: 0, orders: 0, rows: 0 };
+    const compare = (rows: any[], nameFn: (row: any) => string) => {
+      const map = new Map<string, any>();
+      for (const row of rows) {
+        const name = nameFn(row);
+        const entry = map.get(name) || { name, current: 0, previous: 0, currentQuantity: 0, previousQuantity: 0 };
+        entry[row._id.period] = row.revenue;
+        entry[`${row._id.period}Quantity`] = row.quantity;
+        map.set(name, entry);
+      }
+      return [...map.values()].map((entry) => ({ ...entry, variance: entry.current - entry.previous, pctChange: entry.previous ? ((entry.current - entry.previous) / Math.abs(entry.previous)) * 100 : null, quantityVariance: entry.currentQuantity - entry.previousQuantity })).sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+    };
+    const dateOffset = (date: string, start: string) => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / (24 * 60 * 60 * 1000));
+    const dailyRows = (result?.daily || []).map((row: any) => ({ period: row._id.period, date: row._id.date, dayOffset: dateOffset(row._id.date, row._id.period === 'current' ? currentStartKey : previousStartKey), revenue: Number(row.revenue) || 0 }));
+    const currentDailyMap = new Map(dailyRows.filter((row: any) => row.period === 'current').map((row: any) => [row.date, row.revenue]));
+    const daily: any[] = [...dailyRows];
+    const addMissingDaily = (series: 'current' | 'previous', start: string, end: string) => {
+      const values = new Map(dailyRows.filter((row: any) => row.period === series).map((row: any) => [row.dayOffset, row.date]));
+      const first = new Date(`${start}T12:00:00.000Z`);
+      const last = new Date(`${end}T12:00:00.000Z`);
+      for (let cursor = new Date(first), offset = 0; cursor <= last; cursor.setUTCDate(cursor.getUTCDate() + 1), offset += 1) {
+        if (!values.has(offset)) daily.push({ period: series, date: cursor.toISOString().slice(0, 10), dayOffset: offset, revenue: null, hasTransactions: false });
+      }
+    };
+    addMissingDaily('current', currentStartKey, endKey);
+    const previousEndKey = this.formatDateInTimeZone(new Date(previousEnd.getTime() - 1), 'Asia/Manila');
+    addMissingDaily('previous', previousStartKey, previousEndKey);
+    daily.sort((a, b) => a.date.localeCompare(b.date));
+    const weatherRecords = await this.exogenousDataService.getCachedRealWeatherHistory(previousStartKey, endKey);
+    const weatherRows = weatherRecords.filter((row) => row.date >= currentStartKey && row.date <= endKey && currentDailyMap.has(row.date)).map((row) => ({ date: row.date, rainfallMm: row.rainfallMm, tempCelsius: row.tempCelsius, revenue: Number(currentDailyMap.get(row.date) || 0) }));
+    const rainy = weatherRows.filter((row) => row.rainfallMm >= 1);
+    const dry = weatherRows.filter((row) => row.rainfallMm < 1);
+    const average = (rows: any[]) => rows.length ? rows.reduce((sum, row) => sum + row.revenue, 0) / rows.length : null;
+    const hm = (result?.heatmap || []).map((row: any) => ({ weekday: row._id.weekday, hour: row._id.hour, revenue: Number(row.revenue) || 0, orders: Number(row.orders) || 0 }));
+    return {
+      period, sector: normalizedSector,
+      window: { currentStart: currentStartKey, currentEnd: endKey, previousStart: previousStartKey, previousEnd: previousEndKey, timezone: 'Asia/Manila' },
+      totals: { current, previous, variance: current.revenue - previous.revenue, pctChange: previous.revenue ? ((current.revenue - previous.revenue) / Math.abs(previous.revenue)) * 100 : null, discountRate: current.grossSales ? current.discounts / current.grossSales * 100 : null },
+      daily,
+      channels: compare(result?.channels || [], (row) => row._id.name || 'Unknown'),
+      categories: compare(result?.categories || [], (row) => row._id.name || 'Uncategorized'),
+      products: compare(result?.products || [], (row) => `${row._id.name || 'Unnamed'}${row._id.sku ? ` (${row._id.sku})` : ''}`),
+      heatmap: hm,
+      stockouts: { available: false, reason: 'Walang inventory o stockout records na naka-store para patunayan ang stockout at lost sales.' },
+      promotions: { available: false, reason: 'Walang campaign exposure/control data para makuwenta ang promotion lift.' },
+      discounts: { available: current.grossSales > 0 || current.discounts > 0, grossSales: current.grossSales, discounts: current.discounts, netSales: current.revenue, rate: current.grossSales ? current.discounts / current.grossSales * 100 : null },
+      weather: { available: weatherRows.length > 0, source: 'Observed non-synthetic weather cache', rainyDays: rainy.length, dryDays: dry.length, rainyAverageRevenue: average(rainy), dryAverageRevenue: average(dry), rows: weatherRows, footfallAvailable: false, caveat: 'Observed association only; this comparison does not establish that weather caused a revenue change.' },
+      dataStatus: { currentTransactionRows: current.rows, previousTransactionRows: previous.rows, weatherRows: weatherRows.length, inventoryData: false, campaignExposureData: false },
+    };
+  }
+
   async getDashboard(sector: string): Promise<any> {
     const normalizedSector =
       sector === 'all' ? 'all' : this.normalizeSector(sector);

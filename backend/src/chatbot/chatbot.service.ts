@@ -1765,14 +1765,14 @@ export class ChatbotService {
     }
 
     if (input.plan.intent === 'top_items') {
-      return 'Ranked result: introduce the scope in one short phrase, then keep the ranked item list compact and readable.';
+      return 'Conversational ranked result: answer in a friendly, natural tone; briefly introduce the date/filter scope, then put each ranked item on its own numbered line. Keep each item name, revenue, and units together. Add at most one short takeaway if the verified data supports it.';
     }
 
     if (
       input.plan.intent === 'sector_breakdown' ||
       input.plan.intent === 'channel_breakdown'
     ) {
-      return 'Breakdown: summarize that this is a warehouse breakdown, then present each row compactly without inventing percentages.';
+      return 'Conversational breakdown: briefly say what is being compared, then show each row as a separate bullet. Keep the label, revenue, orders, and units together; avoid a dense paragraph. Do not invent percentages or causes.';
     }
 
     if (
@@ -1789,7 +1789,7 @@ export class ChatbotService {
       return 'Unsupported dashboard detail: be friendly but explain the current dashboard limitation briefly.';
     }
 
-    return 'Metric narrative: answer naturally using the exact verified metric, date/range, orders, and units, then add a concise interpretation from comparison facts if available.';
+    return 'Conversational metric answer: lead with the direct answer in one short sentence. If there are several metrics, use bullets and label every number with its unit. Briefly explain the result only when the verified comparison supports it; avoid long number-heavy sentences.';
   }
 
   private fallbackStyledAnswer(
@@ -1798,6 +1798,10 @@ export class ChatbotService {
   ): string {
     if (styleDirective.startsWith('Verification:')) {
       return `Yes, I rechecked the Supabase warehouse facts. ${factualAnswer}`;
+    }
+    const lines = factualAnswer.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (lines.length > 1 && !lines.every((line) => /^\d+[.)]\s/.test(line))) {
+      return `Here is the breakdown:\n${lines.map((line) => `- ${line}`).join('\n')}`;
     }
     return factualAnswer;
   }

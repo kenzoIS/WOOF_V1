@@ -793,6 +793,17 @@ export async function getDashboard(sector: string) {
   return fetchApi(`/analytics/dashboard/${sector}`);
 }
 
+export async function getRootCauseAnalysis(
+  period: string,
+  sector: string,
+  forceRefresh = false,
+  dateStart?: string,
+  dateEnd?: string,
+) {
+  const query = toQueryString({ period, sector, dateStart, dateEnd, ...(forceRefresh ? { forceRefresh: 'true' } : {}) });
+  return fetchApi(`/analytics/root-cause${query}`);
+}
+
 export async function getHomeOverview(range?: string) {
   const query = range ? `?range=${encodeURIComponent(range)}` : '';
   return fetchApi(`/analytics/home${query}`);
