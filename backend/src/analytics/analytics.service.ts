@@ -774,51 +774,17 @@ export class AnalyticsService {
 
     const [kpis, topItems, dailyRevenue, channelBreakdown] = await Promise.all([
       // KPIs
-      this.aggregateWithDiskUse([
-        { $match: sectorFilter },
-        {
-          $group: {
-            _id: null,
-            totalRevenue: { $sum: '$netSales' },
-            totalOrders: { $addToSet: '$transactionId' },
-            totalQuantity: { $sum: '$quantity' },
-            totalItems: { $sum: 1 },
-          },
-        },
-      ]),
+      this.supabaseService.client
+        .rpc('get_dashboard_kpis', { p_sector_filter: normalizedSector })
+        .then(({ data }) => data || []),
       // Top items by revenue
-      this.aggregateWithDiskUse([
-        { $match: sectorFilter },
-        {
-          $group: {
-            _id: '$productName',
-            revenue: { $sum: '$netSales' },
-            quantity: { $sum: '$quantity' },
-            transactions: { $addToSet: '$transactionId' },
-            avgPrice: { $avg: '$unitPrice' },
-            category: { $first: '$category' },
-          },
-        },
-        { $addFields: { orderCount: { $size: '$transactions' } } },
-        { $sort: { revenue: -1 } },
-        { $limit: 20 },
-        { $project: { transactions: 0 } },
-      ]),
+      this.supabaseService.client
+        .rpc('get_dashboard_top_items', { p_sector_filter: normalizedSector })
+        .then(({ data }) => data || []),
       // Daily revenue over time
-      this.aggregateWithDiskUse([
-        { $match: sectorFilter },
-        {
-          $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
-            revenue: { $sum: '$netSales' },
-            orders: { $addToSet: '$transactionId' },
-            quantity: { $sum: '$quantity' },
-          },
-        },
-        { $addFields: { orderCount: { $size: '$orders' } } },
-        { $sort: { _id: 1 } },
-        { $project: { orders: 0 } },
-      ]),
+      this.supabaseService.client
+        .rpc('get_dashboard_daily_revenue', { p_sector_filter: normalizedSector })
+        .then(({ data }) => data || []),
       // Channel breakdown with full omnichannel economics (pull from Supabase with matched dates for Retail)
       normalizedSector === 'Retail'
         ? this.getRetailChannelBreakdownFromSupabase().then((res) => {
@@ -829,47 +795,27 @@ export class AnalyticsService {
             ) {
               return res;
             }
-            return this.aggregateWithDiskUse([
-              { $match: sectorFilter },
-              {
-                $group: {
-                  _id: '$channel',
-                  revenue: { $sum: '$netSales' },
-                  grossSales: { $sum: '$totalAmount' },
-                  discount: { $sum: '$discount' },
-                  costOfGoods: { $sum: '$costOfGoods' },
-                  grossProfit: { $sum: '$grossProfit' },
-                  orders: { $addToSet: '$transactionId' },
-                  quantity: { $sum: '$quantity' },
-                  count: { $sum: 1 },
-                },
-              },
-            ]);
+            return this.supabaseService.client
+              .rpc('get_dashboard_channel_breakdown', { p_sector_filter: normalizedSector })
+              .then(({ data }) => data || []);
           })
-        : this.aggregateWithDiskUse([
-            { $match: sectorFilter },
-            {
-              $group: {
-                _id: '$channel',
-                revenue: { $sum: '$netSales' },
-                grossSales: { $sum: '$totalAmount' },
-                discount: { $sum: '$discount' },
-                costOfGoods: { $sum: '$costOfGoods' },
-                grossProfit: { $sum: '$grossProfit' },
-                orders: { $addToSet: '$transactionId' },
-                quantity: { $sum: '$quantity' },
-                count: { $sum: 1 },
-              },
-            },
-          ]),
+        : this.supabaseService.client
+            .rpc('get_dashboard_channel_breakdown', { p_sector_filter: normalizedSector })
+            .then(({ data }) => data || []),
     ]);
 
     const kpi = kpis[0] || {
       totalRevenue: 0,
-      totalOrders: [],
+      totalOrders: 0,
       totalQuantity: 0,
       totalItems: 0,
     };
+    
+    // Map snake_case to camelCase for KPI
+    kpi.totalRevenue = kpi.total_revenue ?? kpi.totalRevenue;
+    kpi.totalQuantity = kpi.total_quantity ?? kpi.totalQuantity;
+    kpi.totalItems = kpi.total_items ?? kpi.totalItems;
+    kpi.totalOrders = kpi.total_orders ?? kpi.totalOrders;
 
     const enhancedChannelBreakdown = channelBreakdown.map((c: any) => {
       if (c.netTakehomeProfit !== undefined && c.grossMargin !== undefined) {
@@ -877,9 +823,9 @@ export class AnalyticsService {
       }
       const netSales = Math.round((Number(c.revenue) || 0) * 100) / 100;
       const grossSales =
-        Math.round((Number(c.grossSales) || netSales) * 100) / 100;
+        Math.round((Number(c.grossSales ?? c.gross_sales) || netSales) * 100) / 100;
       const discount = Math.round((Number(c.discount) || 0) * 100) / 100;
-      const costOfGoods = Math.round((Number(c.costOfGoods) || 0) * 100) / 100;
+      const costOfGoods = Math.round((Number(c.costOfGoods ?? c.cost_of_goods) || 0) * 100) / 100;
 
       // Data-backed Retail Pet Supplies Merchandise Cost:
       // Physical Store POS has an empirical weighted average COGS of 70.8% (HappyTailsPOS.csv).
@@ -895,7 +841,7 @@ export class AnalyticsService {
       const grossProfit = Math.round((netSales - effectiveCogs) * 100) / 100;
       const orderCount = Array.isArray(c.orders)
         ? c.orders.length
-        : Number(c.count) || 0;
+        : Number(c.orderCount ?? c.order_count ?? c.count) || 0;
       const grossMargin =
         netSales > 0 ? Math.round((grossProfit / netSales) * 1000) / 10 : 0;
 
@@ -1051,25 +997,25 @@ export class AnalyticsService {
         totalRevenue: Math.round(kpi.totalRevenue * 100) / 100,
         totalOrders: Array.isArray(kpi.totalOrders)
           ? kpi.totalOrders.length
-          : 0,
+          : Number(kpi.totalOrders) || 0,
         totalQuantity: kpi.totalQuantity,
         totalItems: kpi.totalItems,
-        avgOrderValue: kpi.totalOrders?.length
-          ? Math.round((kpi.totalRevenue / kpi.totalOrders.length) * 100) / 100
+        avgOrderValue: kpi.totalOrders && (Array.isArray(kpi.totalOrders) ? kpi.totalOrders.length > 0 : kpi.totalOrders > 0)
+          ? Math.round((kpi.totalRevenue / (Array.isArray(kpi.totalOrders) ? kpi.totalOrders.length : kpi.totalOrders)) * 100) / 100
           : 0,
       },
       topItems: topItems.map((item: any) => ({
         name: item._id,
         revenue: Math.round(item.revenue * 100) / 100,
         quantity: item.quantity,
-        orderCount: item.orderCount,
-        avgPrice: Math.round(item.avgPrice * 100) / 100,
+        orderCount: item.orderCount ?? item.order_count,
+        avgPrice: Math.round((item.avgPrice ?? item.avg_price) * 100) / 100,
         category: item.category || 'Uncategorized',
       })),
       dailyRevenue: dailyRevenue.map((d: any) => ({
         date: d._id,
         revenue: Math.round(d.revenue * 100) / 100,
-        orders: d.orderCount,
+        orders: d.orderCount ?? d.order_count,
         quantity: d.quantity,
       })),
       channelBreakdown: enhancedChannelBreakdown,
@@ -2655,107 +2601,14 @@ export class AnalyticsService {
       match.sector = this.normalizeSector(sector);
     }
 
-    const [summaryRows, itemRows] = await Promise.all([
-      this.aggregateWithDiskUse([
-        { $match: match },
-        {
-          $group: {
-            _id: '$transactionId',
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalTransactions: { $sum: 1 },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            totalTransactions: 1,
-          },
-        },
-      ]).exec(),
-      this.aggregateWithDiskUse([
-        { $match: match },
-        {
-          $project: {
-            productName: 1,
-            sector: 1,
-            transactionId: 1,
-            quantity: { $ifNull: ['$quantity', 0] },
-            unitPrice: { $ifNull: ['$unitPrice', 0] },
-            unitCost: {
-              $cond: [
-                { $gt: ['$quantity', 0] },
-                { $divide: [{ $ifNull: ['$costOfGoods', 0] }, '$quantity'] },
-                { $ifNull: ['$costOfGoods', 0] },
-              ],
-            },
-            unitGrossProfit: {
-              $cond: [
-                { $gt: ['$quantity', 0] },
-                { $divide: [{ $ifNull: ['$grossProfit', 0] }, '$quantity'] },
-                { $ifNull: ['$grossProfit', 0] },
-              ],
-            },
-            margin: { $ifNull: ['$margin', null] },
-          },
-        },
-        {
-          $group: {
-            _id: '$productName',
-            sectors: { $addToSet: '$sector' },
-            transactions: { $addToSet: '$transactionId' },
-            lineItems: { $sum: 1 },
-            totalQuantity: { $sum: '$quantity' },
-            avgPrice: {
-              $avg: {
-                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
-              },
-            },
-            prices: {
-              $push: {
-                $cond: [{ $gt: ['$unitPrice', 0] }, '$unitPrice', null],
-              },
-            },
-            avgUnitCost: {
-              $avg: {
-                $cond: [{ $gte: ['$unitCost', 0] }, '$unitCost', null],
-              },
-            },
-            avgUnitGrossProfit: {
-              $avg: {
-                $cond: [
-                  { $ne: ['$unitGrossProfit', null] },
-                  '$unitGrossProfit',
-                  null,
-                ],
-              },
-            },
-            avgMargin: { $avg: '$margin' },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            item: '$_id',
-            sectors: 1,
-            lineItems: 1,
-            totalQuantity: 1,
-            transactionCount: { $size: '$transactions' },
-            avgPrice: 1,
-            prices: 1,
-            avgUnitCost: 1,
-            avgUnitGrossProfit: 1,
-            avgMargin: 1,
-          },
-        },
-        { $sort: { transactionCount: -1, item: 1 } },
-      ]).exec(),
-    ]);
+    const { data } = await this.supabaseService.client.rpc('get_pricing_catalog', {
+      p_sector: sector,
+      p_start_date: dateWindow.start.toISOString(),
+      p_end_date: dateWindow.end.toISOString(),
+    });
 
-    const totalTransactions = Number(summaryRows?.[0]?.totalTransactions || 0);
+    const itemRows = data || [];
+    const totalTransactions = itemRows.length > 0 ? Number(itemRows[0].total_transactions) : 0;
     const totalItems = itemRows.length;
     const itemMetrics = itemRows.map((row: any, index: number) => {
       const sectors = Array.from(
@@ -5129,31 +4982,13 @@ export class AnalyticsService {
 
   async getWeatherImpact(sector = 'cafe', days = 30): Promise<any> {
     try {
-      const sectorMatch = this.normalizeSector(sector);
-      const dailyRows = await this.aggregateWithDiskUse([
-        { $match: { sector: sectorMatch } },
-        {
-          $group: {
-            _id: {
-              $dateToString: {
-                format: '%Y-%m-%d',
-                date: '$date',
-                timezone: 'Asia/Manila',
-              },
-            },
-            revenue: { $sum: '$netSales' },
-            orders: { $addToSet: '$transactionId' },
-          },
-        },
-        {
-          $project: {
-            date: '$_id',
-            revenue: 1,
-            orders: { $size: '$orders' },
-          },
-        },
-        { $sort: { date: 1 } },
-      ]);
+      const sectorMatch = this.normalizeSector(sector) as ForecastModule;
+      const rawDailyData = await this.getPreprocessedDailyData(sectorMatch);
+      const dailyRows = rawDailyData.map((row: any) => ({
+        date: row._id,
+        revenue: Number(row.revenue) || 0,
+        orders: Number(row.orderCount) || 0,
+      }));
 
       if (!dailyRows.length) {
         return { series: [], summary: null };
@@ -5249,58 +5084,16 @@ export class AnalyticsService {
         }
       }
 
-      const baskets = await this.aggregateWithDiskUse([
-        { $match: match },
-        {
-          $group: {
-            _id: '$transactionId',
-            categories: { $addToSet: '$category' },
-            totalSpent: { $sum: '$netSales' },
-            itemCount: { $sum: '$quantity' },
-          },
-        },
-        {
-          $project: {
-            hasPetBakery: { $in: ['Pet bakery', '$categories'] },
-            hasHumanItem: {
-              $gt: [
-                {
-                  $size: {
-                    $setIntersection: [
-                      '$categories',
-                      ['Coffee', 'Pasta/snacks', 'Rice meals', 'Non-caffeine'],
-                    ],
-                  },
-                },
-                0,
-              ],
-            },
-            totalSpent: 1,
-            itemCount: 1,
-          },
-        },
-        {
-          $group: {
-            _id: {
-              type: {
-                $cond: [
-                  { $and: ['$hasPetBakery', '$hasHumanItem'] },
-                  'Dual-Diner (Human + Pet)',
-                  {
-                    $cond: [
-                      '$hasHumanItem',
-                      'Solo Human Dine-in',
-                      'Solo Pet Treat Only',
-                    ],
-                  },
-                ],
-              },
-            },
-            basketCount: { $sum: 1 },
-            totalRevenue: { $sum: '$totalSpent' },
-          },
-        },
-      ]);
+      const { data } = await this.supabaseService.client.rpc('get_cafe_co_attachment', {
+        p_start_date: match.date?.$gte ? match.date.$gte.toISOString() : '2000-01-01T00:00:00Z',
+        p_end_date: match.date?.$lte ? match.date.$lte.toISOString() : '2099-12-31T23:59:59Z',
+      });
+
+      const baskets = (data || []).map((row: any) => ({
+        _id: { type: row.type },
+        basketCount: Number(row.basket_count),
+        totalRevenue: Number(row.total_revenue),
+      }));
 
       const totalBaskets = baskets.reduce((sum, b) => sum + b.basketCount, 0);
       const totalRevenue = baskets.reduce((sum, b) => sum + b.totalRevenue, 0);
@@ -7284,28 +7077,13 @@ export class AnalyticsService {
   private async getForecastModuleTransactionStamp(
     module: ForecastModule,
   ): Promise<{ count: number; latestTransactionTime: number | null }> {
-    const rows = await this.aggregateWithDiskUse([
-      { $match: { sector: module } },
-      {
-        $group: {
-          _id: null,
-          count: { $sum: 1 },
-          latestTransactionTime: {
-            $max: {
-              $ifNull: ['$updatedAt', '$createdAt'],
-            },
-          },
-        },
-      },
-    ]);
-    const row = rows[0] || {};
-    const latest = row.latestTransactionTime
-      ? new Date(row.latestTransactionTime).getTime()
-      : null;
-
+    const { data } = await this.supabaseService.client
+      .rpc('get_forecast_transaction_stamp', { p_sector_filter: module });
+      
+    const row = data?.[0] || {};
     return {
       count: Number(row.count) || 0,
-      latestTransactionTime: Number.isFinite(latest) ? latest : null,
+      latestTransactionTime: row.latestTransactionTime ? Number(row.latestTransactionTime) : null,
     };
   }
 
@@ -7499,92 +7277,10 @@ export class AnalyticsService {
         : 'python3';
   }
 
-  private getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {
-    return this.aggregateWithDiskUse([
-      { $match: this.buildForecastTransactionMatch(module) },
-      {
-        $project: {
-          dateKey: {
-            $dateToString: {
-              format: '%Y-%m-%d',
-              date: '$date',
-              timezone: 'Asia/Manila',
-            },
-          },
-          transactionId: {
-            $ifNull: ['$transactionId', { $toString: '$_id' }],
-          },
-          productName: '$productName',
-          quantity: { $ifNull: ['$quantity', 0] },
-          revenue: { $ifNull: ['$netSales', 0] },
-          discount: { $ifNull: ['$discount', 0] },
-          grossProfit: { $ifNull: ['$grossProfit', 0] },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            date: '$dateKey',
-            transactionId: '$transactionId',
-          },
-          quantity: { $sum: '$quantity' },
-          revenue: { $sum: '$revenue' },
-          discountAmount: { $sum: '$discount' },
-          grossProfit: { $sum: '$grossProfit' },
-          lineItems: { $sum: 1 },
-          uniqueItems: { $addToSet: '$productName' },
-        },
-      },
-      {
-        $addFields: {
-          basketItems: { $size: '$uniqueItems' },
-          hasPromotion: { $gt: ['$discountAmount', 0] },
-        },
-      },
-      {
-        $group: {
-          _id: '$_id.date',
-          revenue: { $sum: '$revenue' },
-          quantity: { $sum: '$quantity' },
-          grossProfit: { $sum: '$grossProfit' },
-          orderCount: { $sum: 1 },
-          lineItems: { $sum: '$lineItems' },
-          basketItems: { $sum: '$basketItems' },
-          discountAmount: { $sum: '$discountAmount' },
-          promoTransactions: {
-            $sum: {
-              $cond: ['$hasPromotion', 1, 0],
-            },
-          },
-        },
-      },
-      {
-        $addFields: {
-          avgBasketSize: {
-            $cond: [
-              { $gt: ['$orderCount', 0] },
-              { $divide: ['$basketItems', '$orderCount'] },
-              0,
-            ],
-          },
-          avgOrderValue: {
-            $cond: [
-              { $gt: ['$orderCount', 0] },
-              { $divide: ['$revenue', '$orderCount'] },
-              0,
-            ],
-          },
-          averageUnitPrice: {
-            $cond: [
-              { $gt: ['$quantity', 0] },
-              { $divide: ['$revenue', '$quantity'] },
-              0,
-            ],
-          },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]);
+  private async getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {
+    const { data } = await this.supabaseService.client
+      .rpc('get_forecast_daily_data', { p_sector_filter: module });
+    return data || [];
   }
 
   private buildForecastTransactionMatch(
@@ -8484,7 +8180,12 @@ export class AnalyticsService {
         }
       });
 
-      pythonProcess.stdin.on('error', (error) => {
+      pythonProcess.stdin.on('error', (error: any) => {
+        if (error.code === 'EPIPE' || error.code === 'EOF') {
+          // Do not reject immediately. The process is closing, and the 'close' event
+          // will fire shortly with the actual exit code and stderr.
+          return;
+        }
         if (!settled) {
           settled = true;
           clearTimeout(timeout);
@@ -10156,23 +9857,14 @@ export class AnalyticsService {
   private async getLegacyRetailForecast(
     overrides?: ForecastOverrides,
   ): Promise<any> {
-    const dailyData = await this.aggregateWithDiskUse([
-      { $match: { sector: 'Retail' } },
-      {
-        $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
-          revenue: { $sum: '$netSales' },
-          orders: { $addToSet: '$transactionId' },
-        },
-      },
-      { $addFields: { orderCount: { $size: '$orders' } } },
-      { $sort: { _id: 1 } },
-      { $project: { orders: 0 } },
-    ]);
+    const dailyData = await this.supabaseService.client
+      .rpc('get_dashboard_daily_revenue', { p_sector_filter: 'retail' })
+      .then(({ data }) => data || []);
+      
     const inputData = dailyData.map((point: any) => ({
       date: point._id,
       revenue: this.round(point.revenue),
-      orders: point.orderCount,
+      orders: point.order_count ?? point.orderCount,
     }));
     if (inputData.length < 14) {
       return {
