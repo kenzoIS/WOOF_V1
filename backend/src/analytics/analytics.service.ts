@@ -769,21 +769,22 @@ export class AnalyticsService {
   async getDashboard(sector: string): Promise<any> {
     const normalizedSector =
       sector === 'all' ? 'all' : this.normalizeSector(sector);
+    const rpcSector = normalizedSector === 'Services' ? 'Service' : normalizedSector;
     const sectorFilter =
       normalizedSector === 'all' ? {} : { sector: normalizedSector };
 
     const [kpis, topItems, dailyRevenue, channelBreakdown] = await Promise.all([
       // KPIs
       this.supabaseService.client
-        .rpc('get_dashboard_kpis', { p_sector_filter: normalizedSector })
+        .rpc('get_dashboard_kpis', { p_sector_filter: rpcSector })
         .then(({ data }) => data || []),
       // Top items by revenue
       this.supabaseService.client
-        .rpc('get_dashboard_top_items', { p_sector_filter: normalizedSector })
+        .rpc('get_dashboard_top_items', { p_sector_filter: rpcSector })
         .then(({ data }) => data || []),
       // Daily revenue over time
       this.supabaseService.client
-        .rpc('get_dashboard_daily_revenue', { p_sector_filter: normalizedSector })
+        .rpc('get_dashboard_daily_revenue', { p_sector_filter: rpcSector })
         .then(({ data }) => data || []),
       // Channel breakdown with full omnichannel economics (pull from Supabase with matched dates for Retail)
       normalizedSector === 'Retail'
@@ -796,11 +797,11 @@ export class AnalyticsService {
               return res;
             }
             return this.supabaseService.client
-              .rpc('get_dashboard_channel_breakdown', { p_sector_filter: normalizedSector })
+              .rpc('get_dashboard_channel_breakdown', { p_sector_filter: rpcSector })
               .then(({ data }) => data || []);
           })
         : this.supabaseService.client
-            .rpc('get_dashboard_channel_breakdown', { p_sector_filter: normalizedSector })
+            .rpc('get_dashboard_channel_breakdown', { p_sector_filter: rpcSector })
             .then(({ data }) => data || []),
     ]);
 
@@ -2601,8 +2602,9 @@ export class AnalyticsService {
       match.sector = this.normalizeSector(sector);
     }
 
+    const rpcSector = sector === 'Services' ? 'Service' : sector;
     const { data } = await this.supabaseService.client.rpc('get_pricing_catalog', {
-      p_sector: sector,
+      p_sector: rpcSector,
       p_start_date: dateWindow.start.toISOString(),
       p_end_date: dateWindow.end.toISOString(),
     });
@@ -7077,8 +7079,9 @@ export class AnalyticsService {
   private async getForecastModuleTransactionStamp(
     module: ForecastModule,
   ): Promise<{ count: number; latestTransactionTime: number | null }> {
+    const rpcSector = module === 'Services' ? 'Service' : module;
     const { data } = await this.supabaseService.client
-      .rpc('get_forecast_transaction_stamp', { p_sector_filter: module });
+      .rpc('get_forecast_transaction_stamp', { p_sector_filter: rpcSector });
       
     const row = data?.[0] || {};
     return {
@@ -7278,8 +7281,9 @@ export class AnalyticsService {
   }
 
   private async getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {
+    const rpcSector = module === 'Services' ? 'Service' : module;
     const { data } = await this.supabaseService.client
-      .rpc('get_forecast_daily_data', { p_sector_filter: module });
+      .rpc('get_forecast_daily_data', { p_sector_filter: rpcSector });
     return data || [];
   }
 
@@ -8552,11 +8556,12 @@ export class AnalyticsService {
     normalizedRange: HomeRange,
   ): Promise<any | null> {
     try {
-      // 1. Fetch latest transaction timestamp dynamically from Supabase
+      // 1. Fetch latest transaction timestamp dynamically from Supabase (anchor to POS to align with main operations)
       const { data: latestRows, error: latestErr } =
         await this.supabaseService.client
           .from('fact_cross_channel_transactions')
           .select('transaction_timestamp')
+          .eq('channel_id', 'CH_POS')
           .order('transaction_timestamp', { ascending: false })
           .limit(1);
 
@@ -8980,8 +8985,13 @@ export class AnalyticsService {
         );
       }
 
+      this.logger.log(`[ChannelBalance Debug] minTiktok: ${JSON.stringify(minTiktok)}`);
+      this.logger.log(`[ChannelBalance Debug] maxTiktok: ${JSON.stringify(maxTiktok)}`);
+      
       const tiktokStart = minTiktok?.[0]?.transaction_timestamp;
       const tiktokEnd = maxTiktok?.[0]?.transaction_timestamp;
+
+      this.logger.log(`[ChannelBalance Debug] parsed start: ${tiktokStart}, end: ${tiktokEnd}`);
 
       if (!tiktokStart || !tiktokEnd) {
         throw new Error('No TikTok Shop transaction bounds found in Supabase');
