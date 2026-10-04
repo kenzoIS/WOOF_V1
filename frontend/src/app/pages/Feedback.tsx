@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
-import { MessageSquareHeart, TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Box, ChevronRight } from "lucide-react";
+import { MessageSquareHeart, TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Box, ChevronRight, RotateCcw } from "lucide-react";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Progress } from "../components/ui/progress";
 import { toast } from "sonner";
 import feedbackMascot from "../../imports/no_bg_Insight.png";
 import {
@@ -67,6 +66,10 @@ export function Feedback() {
         endPromotion,
       });
 
+      if (endPromotion && res.promotion?.status !== "completed") {
+        throw new Error("The backend did not confirm completed promotion history storage.");
+      }
+
       if (helpful) {
         toast.success("Feedback recorded in Supabase & AWS S3!", {
           description: "WOOF will weight this successful recommendation pattern higher.",
@@ -89,6 +92,7 @@ export function Feedback() {
       setEndingPromptIds((prev) => prev.filter((item) => item !== id));
     } catch (err) {
       console.error("Error submitting feedback:", err);
+      await loadData();
       toast.error("Failed to sync feedback with server", {
         description: err instanceof Error ? err.message : String(err),
       });
@@ -146,6 +150,23 @@ export function Feedback() {
     return "#06B6D4";
   };
 
+  const getPromotionSourceDescription = (promo: FeedbackPromotion) => {
+    switch (promo.sourceType) {
+      case "bundle_archive":
+        return "Bundle Simulator promotion stored in bundle archives.";
+      case "dynamic_promo":
+        return "Dynamic Happy Hour or discount promo from the traffic and demand engine.";
+      case "activation_campaign":
+        return promo.pethubLinked
+          ? "Published PetHub activation campaign currently linked for takedown."
+          : "Activation campaign queued, approved, or published through the campaign layer.";
+      case "recommendation_feedback":
+        return "Feedback history promotion manually stored for tracking.";
+      default:
+        return "Active promotion available for owner feedback and learning.";
+    }
+  };
+
   const calculateAccuracy = (predicted: string | null, actual: string | null) => {
     if (!predicted || !actual) return null;
     const predVal = parseInt(predicted.replace(/[^0-9]/g, ""));
@@ -157,14 +178,29 @@ export function Feedback() {
 
   const completedPromotions = promotions.filter((p) => p.status === "completed");
   const activePromotions = promotions.filter((p) => p.status === "active");
+  const localAccuracies = completedPromotions
+    .map((promo) => calculateAccuracy(promo.predictedLift, promo.actualLift))
+    .filter((value): value is number => value !== null);
   const activePageCount = Math.max(1, Math.ceil(activePromotions.length / PAGE_SIZE));
   const completedPageCount = Math.max(1, Math.ceil(completedPromotions.length / PAGE_SIZE));
   const pagedActivePromotions = activePromotions.slice((activePage - 1) * PAGE_SIZE, activePage * PAGE_SIZE);
   const pagedCompletedPromotions = completedPromotions.slice((completedPage - 1) * PAGE_SIZE, completedPage * PAGE_SIZE);
+  const activeCount = summary?.activeCount ?? activePromotions.length;
+  const completedCount = summary?.completedCount ?? completedPromotions.length;
   const helpfulCount = summary?.helpfulCount ?? promotions.filter((p) => p.feedback === "helpful").length;
   const notHelpfulCount = summary?.notHelpfulCount ?? promotions.filter((p) => p.feedback === "not-helpful").length;
   const pendingFeedback = summary?.pendingCount ?? promotions.filter((p) => p.feedback === null).length;
-  const avgAccuracy = summary?.avgAccuracy ?? 89.2;
+  const completedHelpfulCount = completedPromotions.filter((p) => p.feedback === "helpful").length;
+  const completedNotHelpfulCount = completedPromotions.filter((p) => p.feedback === "not-helpful").length;
+  const totalFeedbackSignals = helpfulCount + notHelpfulCount;
+  const avgAccuracy = summary?.avgAccuracy ?? (localAccuracies.length > 0
+    ? localAccuracies.reduce((sum, value) => sum + value, 0) / localAccuracies.length
+    : 0);
+  const positiveRatio = summary?.positiveRatio ?? (totalFeedbackSignals > 0 ? Math.round((helpfulCount / totalFeedbackSignals) * 100) : 0);
+  const accuracyImprovement = totalFeedbackSignals > 0 ? Math.max(0, avgAccuracy - 80) : 0;
+  const patternsLearned = totalFeedbackSignals;
+  const nextDeploymentConfidence = totalFeedbackSignals > 0 ? Math.min(98, Math.round((avgAccuracy + positiveRatio) / 2)) : 0;
+  const learningStatus = totalFeedbackSignals > 0 ? "Active Learning" : "Awaiting Signals";
   const fallbackInsight =
     summary?.aiInsight?.summary ||
     (completedPromotions.length > 0
@@ -257,9 +293,23 @@ export function Feedback() {
     <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
       {promo.feedback === null ? (
         <div className="space-y-2 md:space-y-3">
-          <p className="text-xs md:text-sm font-semibold text-[#223047]">
-            Was this recommendation helpful?
-          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs md:text-sm font-semibold text-[#223047]">
+              Was this recommendation helpful?
+            </p>
+            {options?.endPromotion && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setEndingPromptIds((prev) => prev.filter((item) => item !== promo.id))}
+                disabled={submittingId === promo.id}
+                className="feedback-return-button w-fit gap-1.5 px-2.5 py-1 text-xs"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Return
+              </Button>
+            )}
+          </div>
           <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
             <Button
               onClick={() => handleFeedback(promo.id, true, Boolean(options?.endPromotion))}
@@ -326,7 +376,7 @@ export function Feedback() {
     return (
       <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
         <Button
-          onClick={() => setEndingPromptIds((prev) => [...prev, promo.id])}
+          onClick={() => setEndingPromptIds((prev) => prev.includes(promo.id) ? prev : [...prev, promo.id])}
           disabled={submittingId === promo.id}
           className="feedback-end-promotion-button w-full gap-2 text-xs md:text-sm"
         >
@@ -337,6 +387,61 @@ export function Feedback() {
             This promotion is linked to PetHub and will be processed for takedown when feedback is submitted.
           </p>
         )}
+      </div>
+    );
+  };
+
+  const renderCompletedFeedbackSummary = (promo: FeedbackPromotion) => {
+    if (promo.feedback === "helpful") {
+      return (
+        <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
+          <div className="p-3 md:p-4 rounded-lg md:rounded-xl bg-green-100/90">
+            <div className="flex items-center gap-2 md:gap-3">
+              <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-green-600 flex-shrink-0" />
+              <div>
+                <p className="text-xs md:text-sm font-semibold text-green-800">
+                  Completed: Helpful
+                </p>
+                <p className="text-xs text-green-700 hidden md:block">
+                  This promotion is stored as a positive feedback signal.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (promo.feedback === "not-helpful") {
+      return (
+        <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
+          <div className="p-3 md:p-4 rounded-lg md:rounded-xl bg-orange-100/90">
+            <div className="flex items-center gap-2 md:gap-3">
+              <ThumbsDown className="w-4 h-4 md:w-5 md:h-5 text-orange-600 flex-shrink-0" />
+              <div>
+                <p className="text-xs md:text-sm font-semibold text-orange-800">
+                  Completed: Not Helpful
+                </p>
+                <p className="text-xs text-orange-700 hidden md:block">
+                  This promotion is stored as a recalibration signal.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
+        <div className="p-3 md:p-4 rounded-lg md:rounded-xl bg-[#FFF7FB] border border-[#FFD9EC]">
+          <p className="text-xs md:text-sm font-semibold text-[#223047]">
+            Completed: Feedback not recorded
+          </p>
+          <p className="text-xs text-[#223047] opacity-60 hidden md:block">
+            Historical promotion is completed, but no Helpful/Not Helpful rating was stored for it yet.
+          </p>
+        </div>
       </div>
     );
   };
@@ -377,128 +482,128 @@ export function Feedback() {
       <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
 
       {/* SYSTEM PERFORMANCE OVERVIEW */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 lg:gap-6">
+      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <div
-          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
+          className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Total Deployed Campaigns",
-            current: promotions.length,
-            formatter: (v) => `${v} Campaigns`,
+            title: "Total Active Promotions",
+            current: activeCount,
+            formatter: (v) => `${v} Active`,
             icon: <MessageSquareHeart className="w-5 h-5 text-[#F53799]" />,
-            description: "Total count of AI-generated promotional campaigns deployed across retail channels, cafe offers, and service bundles.",
+            description: "Active promotions currently running and still awaiting an end-of-promotion feedback rating.",
             extraStats: [
-              { label: "Active Promotions", value: `${activePromotions.length} active` },
-              { label: "Completed Promotions", value: `${completedPromotions.length} completed` },
+              { label: "Total Active", value: `${activeCount} active` },
+              { label: "Completed Promotions", value: `${completedCount} completed` },
             ],
           })}
         >
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
-              Total Deployed
-            </h3>
-            <div className="flex items-center gap-1">
-              <MessageSquareHeart className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />
-              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+          <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+            <MessageSquareHeart className="w-4 h-4 md:w-5 md:h-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+              <span>Total Active</span>
+              <InfoTooltip label="Active promotions currently running and still awaiting an end-of-promotion feedback rating." />
+            </div>
+            <div className="text-base md:text-xl font-bold text-[#223047]">{activeCount}</div>
+            <div className="text-[11px] text-[#223047] opacity-60 hidden md:block">
+              Awaiting completion feedback
             </div>
           </div>
-          <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
-            {promotions.length}
-          </div>
-          <p className="text-xs text-[#223047] opacity-50 hidden md:block">
-            {activePromotions.length} active, {completedPromotions.length} completed
-          </p>
+          <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
         </div>
 
         <div
-          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
+          className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+          onClick={() => setSelectedKpi({
+            title: "Total Completed Promotions",
+            current: completedCount,
+            formatter: (v) => `${v} Completed`,
+            icon: <ThumbsUp className="w-5 h-5 text-[#06B6D4]" />,
+            description: "Completed promotions stored for historical tracking and feedback learning.",
+            extraStats: [
+              { label: "Helpful Completed", value: `${completedHelpfulCount} helpful` },
+              { label: "Not Helpful Completed", value: `${completedNotHelpfulCount} not helpful` },
+            ],
+          })}
+        >
+          <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
+            <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+              <span>Total Completed</span>
+              <InfoTooltip label="Completed promotions stored for historical tracking and feedback learning." />
+            </div>
+            <div className="text-base md:text-xl font-bold text-[#223047]">{completedCount}</div>
+            <div className="text-[11px] text-[#223047] opacity-60 hidden md:block">
+              Stored historical promotions
+            </div>
+          </div>
+          <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
+        </div>
+
+        <div
+          className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
           onClick={() => setSelectedKpi({
             title: "Avg Promotion Accuracy",
             current: `${avgAccuracy.toFixed(1)}%`,
             formatter: (v) => String(v),
-            icon: <TrendingUp className="w-5 h-5 text-[#06B6D4]" />,
-            description: "Average accuracy rate of revenue predictions for deployed promotions vs actual sales realized in POS history.",
+            icon: <TrendingUp className="w-5 h-5 text-[#F53799]" />,
+            description: "Average accuracy rate of revenue predictions for completed promotions with both predicted and actual lift values.",
             extraStats: [
-              { label: "Accuracy Target", value: "85.0%" },
-              { label: "Variance", value: `+${(avgAccuracy - 85).toFixed(1)}%` },
+              { label: "Completed With Lift Data", value: `${localAccuracies.length} promotions` },
+              { label: "Completed Promotions", value: `${completedCount} completed` },
             ],
           })}
         >
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
-              Avg Accuracy
-            </h3>
-            <div className="flex items-center gap-1">
-              <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
-              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+          <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
+            <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+              <span>Avg Accuracy</span>
+              <InfoTooltip label="Average accuracy from completed promotions that have both predicted and actual lift values." />
+            </div>
+            <div className="text-base md:text-xl font-bold text-[#223047]">{avgAccuracy.toFixed(1)}%</div>
+            <div className="text-[11px] text-[#223047] opacity-60 hidden md:block">
+              {localAccuracies.length} completed with lift data
             </div>
           </div>
-          <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
-            {avgAccuracy.toFixed(1)}%
-          </div>
-          <Progress value={avgAccuracy} className="h-2 hidden md:block" />
+          <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
         </div>
 
         <div
-          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
+          className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Helpful Feedback Score",
-            current: helpfulCount,
-            formatter: (v) => `${v} Upvotes`,
-            icon: <ThumbsUp className="w-5 h-5 text-[#F53799]" />,
-            description: "Number of deployed recommendations marked as helpful by store managers and decision makers.",
-            extraStats: [
-              { label: "Helpful", value: `${helpfulCount} ratings` },
-              { label: "Not Helpful", value: `${notHelpfulCount} ratings` },
-              { label: "Pending Review", value: `${pendingFeedback} promotions` },
-            ],
-          })}
-        >
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
-              Helpful Feedback
-            </h3>
-            <div className="flex items-center gap-1">
-              <ThumbsUp className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />
-              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
-            </div>
-          </div>
-          <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
-            {helpfulCount}
-          </div>
-          <p className="text-xs text-[#223047] opacity-50 hidden md:block">
-            {notHelpfulCount} not helpful, {pendingFeedback} pending
-          </p>
-        </div>
-
-        <div
-          className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-2 md:space-y-3 lg:space-y-4 cursor-pointer hover:border-[#F53799] hover:shadow-md transition-all group"
-          onClick={() => setSelectedKpi({
-            title: "Model Learning Rate",
-            current: summary?.positiveRatio ? `${summary.positiveRatio}%` : "High",
+            title: "Helpful Feedback",
+            current: `${completedHelpfulCount}/${completedCount}`,
             formatter: (v) => String(v),
             icon: <RefreshCw className="w-5 h-5 text-[#06B6D4]" />,
-            description: "Continuous model retraining rate driven by human feedback loops, recalibrating Prophet and FP-Growth association models.",
+            description: "Completed promotions marked Helpful compared with total completed promotions.",
             extraStats: [
-              { label: "Recalibrations Synced", value: `${summary?.recalibrationsTriggered ?? 0} cycles` },
-              { label: "Status", value: "Active Learning" },
+              { label: "Helpful Completed", value: `${completedHelpfulCount} helpful` },
+              { label: "Completed Promotions", value: `${completedCount} completed` },
+              { label: "Not Helpful Completed", value: `${completedNotHelpfulCount} not helpful` },
             ],
           })}
         >
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs md:text-sm font-medium text-[#223047] opacity-70">
-              Learning Rate
-            </h3>
-            <div className="flex items-center gap-1">
-              <RefreshCw className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />
-              <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+          <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
+            <RefreshCw className="w-4 h-4 md:w-5 md:h-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
+              <span>Helpful Feedback</span>
+              <InfoTooltip label="Completed promotions marked Helpful compared with total completed promotions." />
+            </div>
+            <div className="text-base md:text-xl font-bold text-[#223047]">{completedHelpfulCount}/{completedCount}</div>
+            <div className="text-[11px] text-[#223047] opacity-60 hidden md:block">
+              Helpful out of completed
             </div>
           </div>
-          <div className="text-2xl md:text-3xl lg:text-[44px] font-extrabold text-[#223047] leading-none">
-            {summary?.positiveRatio ? `${summary.positiveRatio}%` : "High"}
-          </div>
-          <p className="text-xs text-[#223047] opacity-50 hidden md:block">
-            {summary?.recalibrationsTriggered ?? 0} recalibrations synced
-          </p>
+          <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
+        </div>
         </div>
       </div>
 
@@ -553,6 +658,9 @@ export function Feedback() {
                     <h3 className="text-base md:text-lg font-bold text-[#223047] mb-2 md:mb-3">
                       {promo.title}
                     </h3>
+                    <p className="mb-3 text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
+                      {getPromotionSourceDescription(promo)}
+                    </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-4 text-xs md:text-sm">
                       <div>
                         <span className="text-[#223047] opacity-60">Target Time:</span>
@@ -603,8 +711,35 @@ export function Feedback() {
                 No completed promotions yet.
               </div>
             ) : pagedCompletedPromotions.map((promo) => {
-              const accuracy = calculateAccuracy(promo.predictedLift, promo.actualLift);
-              const isPositive = accuracy !== null && accuracy >= 90;
+              const feedbackResult =
+                promo.feedback === "helpful"
+                  ? "Helpful"
+                  : promo.feedback === "not-helpful"
+                  ? "Not Helpful"
+                  : "Not Rated";
+              const completedOn = promo.deployedDate || "Date unavailable";
+              const sourceLabel =
+                promo.sourceType === "bundle_archive"
+                  ? "Bundle"
+                  : promo.sourceType === "dynamic_promo"
+                  ? "Happy Hour"
+                  : promo.sourceType === "activation_campaign"
+                  ? "PetHub Campaign"
+                  : promo.sourceType === "recommendation_feedback"
+                  ? "Feedback Log"
+                  : "Promotion";
+              const learningAction =
+                promo.feedback === "helpful"
+                  ? "Reinforced"
+                  : promo.feedback === "not-helpful"
+                  ? "Recalibration Triggered"
+                  : "Archived Only";
+              const feedbackToneClass =
+                promo.feedback === "helpful"
+                  ? "text-green-700"
+                  : promo.feedback === "not-helpful"
+                  ? "text-orange-700"
+                  : "text-[#223047]";
 
               return (
                 <div
@@ -614,7 +749,7 @@ export function Feedback() {
                       ? "bg-green-50/70 border-green-300"
                       : promo.feedback === "not-helpful"
                       ? "bg-orange-50/70 border-orange-300"
-                      : "bg-white border-[#FFD9EC] hover:border-[#F53799]"
+                      : "bg-white border-[#FFD9EC]"
                   }`}
                 >
                   <div className="flex items-start justify-between">
@@ -631,11 +766,17 @@ export function Feedback() {
                           {promo.sector}
                         </Badge>
                         <span className="text-xs text-[#223047] opacity-50">{promo.deployedDate}</span>
+                        <Badge className="bg-orange-500 text-white border border-orange-400 hover:bg-orange-500 text-xs shadow-sm">
+                          Completed
+                        </Badge>
                       </div>
 
                       <h3 className="text-base md:text-lg lg:text-xl font-bold text-[#223047] mb-3 md:mb-4">
                         {promo.title}
                       </h3>
+                      <p className="mb-4 text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
+                        {getPromotionSourceDescription(promo)}
+                      </p>
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-6 mb-4 md:mb-6">
                         <div>
@@ -652,34 +793,28 @@ export function Feedback() {
                         </div>
                       </div>
 
-                      {/* Performance Comparison */}
-                      <div className="grid grid-cols-3 gap-3 md:gap-4 p-4 md:p-6 bg-[#FFF7FB] rounded-lg md:rounded-xl">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 p-4 md:p-6 bg-[#FFF7FB] rounded-lg md:rounded-xl">
                         <div className="text-center">
-                          <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Predicted Lift</div>
-                          <div className="text-lg md:text-xl lg:text-2xl font-bold text-[#223047]">{promo.predictedLift}</div>
+                          <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Feedback Result</div>
+                          <div className={`text-base md:text-lg lg:text-xl font-bold ${feedbackToneClass}`}>{feedbackResult}</div>
                         </div>
                         <div className="text-center">
-                          <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Actual Lift</div>
-                          <div className="text-lg md:text-xl lg:text-2xl font-bold text-[#F53799]">{promo.actualLift}</div>
+                          <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Completed On</div>
+                          <div className="text-base md:text-lg lg:text-xl font-bold text-[#223047]">{completedOn}</div>
                         </div>
                         <div className="text-center">
-                          <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Accuracy</div>
-                          <div className={`text-lg md:text-xl lg:text-2xl font-bold flex items-center justify-center gap-1 md:gap-2 ${
-                            isPositive ? "text-green-600" : "text-orange-600"
-                          }`}>
-                            {accuracy !== null && (
-                              <>
-                                {isPositive ? <TrendingUp className="w-4 h-4 md:w-5 md:h-5" /> : <TrendingDown className="w-4 h-4 md:w-5 md:h-5" />}
-                                {accuracy.toFixed(1)}%
-                              </>
-                            )}
-                          </div>
+                          <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Source</div>
+                          <div className="text-base md:text-lg lg:text-xl font-bold text-[#F53799]">{sourceLabel}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-[#223047] opacity-60 mb-1 md:mb-2">Learning Action</div>
+                          <div className={`text-base md:text-lg lg:text-xl font-bold ${feedbackToneClass}`}>{learningAction}</div>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {renderFeedbackControls(promo)}
+                  {renderCompletedFeedbackSummary(promo)}
                 </div>
               );
             })}
@@ -714,7 +849,7 @@ export function Feedback() {
       )}
 
       {/* LEARNING INSIGHTS */}
-      <div className="bg-gradient-to-br from-[#F53799] to-[#D42A7D] text-white rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 shadow-md">
+      <div className="feedback-learning-insights rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 shadow-md">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold">Continuous Learning Insights</h2>
@@ -726,24 +861,22 @@ export function Feedback() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 lg:gap-6">
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg md:rounded-xl p-4 md:p-6">
-            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">+{((avgAccuracy - 80) / 2).toFixed(1)}%</div>
+          <div className="feedback-learning-metric rounded-lg md:rounded-xl p-4 md:p-6">
+            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">+{accuracyImprovement.toFixed(1)}%</div>
             <div className="text-xs md:text-sm opacity-90">Accuracy improvement from feedback</div>
           </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg md:rounded-xl p-4 md:p-6">
-            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">{helpfulCount + notHelpfulCount + 6}</div>
+          <div className="feedback-learning-metric rounded-lg md:rounded-xl p-4 md:p-6">
+            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">{patternsLearned}</div>
             <div className="text-xs md:text-sm opacity-90">Patterns learned this cycle</div>
           </div>
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg md:rounded-xl p-4 md:p-6">
-            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">{Math.min(98, Math.round(avgAccuracy + 4))}%</div>
+          <div className="feedback-learning-metric rounded-lg md:rounded-xl p-4 md:p-6">
+            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">{nextDeploymentConfidence}%</div>
             <div className="text-xs md:text-sm opacity-90">Confidence in next deployment</div>
           </div>
         </div>
 
         <p className="text-xs md:text-sm opacity-90" style={{ lineHeight: "1.7" }}>
-          Your feedback signals have helped WOOF identify that <strong>afternoon cross-sell bundles</strong> perform
-          better than static pairings, while <strong>off-peak flash sales</strong> gain higher response when scheduled within quiet-period windows.
-          All feedback ratings are archived to AWS S3 Data Lake for long-term analytics.
+          {summary?.aiInsight?.summary || `${totalFeedbackSignals} submitted feedback signal${totalFeedbackSignals === 1 ? "" : "s"} are currently informing WOOF's recommendation weighting, with ${notHelpfulCount} recalibration trigger${notHelpfulCount === 1 ? "" : "s"} recorded for future promotion suggestions.`}
         </p>
       </div>
     </div>

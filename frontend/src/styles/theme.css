@@ -470,6 +470,32 @@ button.feedback-not-helpful-button:hover:not(:disabled),
   color: color-mix(in srgb, var(--woof-theme-text) 68%, transparent) !important;
 }
 
+button.feedback-return-button,
+[data-slot="button"].feedback-return-button {
+  background-color: transparent !important;
+  color: color-mix(in srgb, var(--woof-theme-text) 68%, transparent) !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+
+button.feedback-return-button:hover:not(:disabled),
+[data-slot="button"].feedback-return-button:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--woof-theme-primary) 10%, transparent) !important;
+  border-color: color-mix(in srgb, var(--woof-theme-primary) 24%, transparent) !important;
+  color: var(--woof-theme-primary-strong) !important;
+}
+
+.feedback-learning-insights {
+  background: linear-gradient(135deg, var(--woof-theme-primary), var(--woof-theme-primary-strong));
+  color: #ffffff;
+}
+
+.feedback-learning-metric {
+  background-color: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(8px);
+}
+
 .woof-dark button.feedback-pagination-button,
 .woof-dark [data-slot="button"].feedback-pagination-button,
 .woof-dark button.feedback-not-helpful-button,
@@ -493,6 +519,29 @@ button.feedback-not-helpful-button:hover:not(:disabled),
   border-color: color-mix(in srgb, var(--woof-theme-primary) 70%, #ffffff) !important;
   background-color: var(--woof-theme-primary) !important;
   color: #ffffff !important;
+}
+
+.woof-dark button.feedback-return-button,
+.woof-dark [data-slot="button"].feedback-return-button {
+  color: rgba(248, 251, 255, 0.72) !important;
+}
+
+.woof-dark button.feedback-return-button:hover:not(:disabled),
+.woof-dark [data-slot="button"].feedback-return-button:hover:not(:disabled) {
+  background-color: rgba(248, 251, 255, 0.08) !important;
+  border-color: rgba(248, 251, 255, 0.18) !important;
+  color: #ffffff !important;
+}
+
+.woof-dark .feedback-learning-insights {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--woof-theme-primary) 72%, #111827), #182235);
+  border: 1px solid color-mix(in srgb, var(--woof-theme-primary) 42%, rgba(255, 255, 255, 0.18));
+  color: #f8fbff;
+}
+
+.woof-dark .feedback-learning-metric {
+  background-color: rgba(248, 251, 255, 0.08);
+  border-color: rgba(248, 251, 255, 0.14);
 }
 
 .woof-dark body,

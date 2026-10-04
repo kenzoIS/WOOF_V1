@@ -2,6 +2,184 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-10-05 - Feedback Completed Operational Metrics
+
+### Requested
+- Replace completed promotion `Predicted Lift`, `Actual Lift`, and `Accuracy` with metrics better suited to the Feedback module.
+- Make the Completed badge more noticeable by changing it from gray to orange.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Feedback.tsx`.
+- Replaced completed-card performance tiles with operational Feedback metrics: `Feedback Result`, `Completed On`, `Source`, and `Learning Action`.
+- Learning Action now displays `Reinforced`, `Recalibration Triggered`, or `Archived Only` based on the stored feedback result.
+- Updated the Completed badge to a stronger orange badge so completed historical promos stand out clearly.
+
+### Verification
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Feedback KPI Labels and Completed Card State
+
+### Requested
+- Change Feedback KPIs to `Total Active`, `Total Completed`, `Avg Accuracy`, and `Helpful Feedback`.
+- Make Helpful Feedback display as helpful completed promotions over total completed promotions, such as `1/2`.
+- Fix Completed Promotions so they no longer look like Active Promotions and no longer show Helpful/Not Helpful action buttons.
+- Ensure completed cards show readable Predicted Lift, Actual Lift, and Accuracy values/states.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Feedback.tsx`.
+- Replaced the KPI row with the requested four metrics using the live feedback summary/promotions feed.
+- Helpful Feedback now displays `completedHelpfulCount/completedCount`, where the denominator is the completed promotion count.
+- Completed promotion cards now render a read-only feedback summary instead of the active Yes/No feedback buttons.
+- Completed performance tiles now show `Not available`, `Pending lift data`, or `Pending` when lift/accuracy data is not present instead of rendering empty values.
+- Added a completed status badge and source description to completed cards for clearer historical context.
+
+### Verification
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Feedback KPI Metric Source Cleanup
+
+### Requested
+- Make sure the Feedback KPI cards show actual metrics instead of hard-coded values.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Feedback.tsx`.
+- Changed the Feedback KPI row to use backend summary totals for total deployed, active count, and completed count when available.
+- Removed the hard-coded `85.0%` accuracy target and variance from the Avg Accuracy KPI detail modal.
+- Replaced the hard-coded accuracy detail stats with live completed-promotion counts and completed-with-lift-data counts.
+
+### Verification
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Feedback Source Completion Metadata Compatibility
+
+### Requested
+- Fix the runtime error where fallback source completion failed because `dynamic_promos.metadata` does not exist in the connected Supabase schema.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Added a metadata-column compatibility retry for Feedback source completion updates.
+- `dynamic_promos` now first attempts to save status plus feedback metadata, then retries with only `status` and `updated_at` if Supabase reports that `metadata` is missing.
+- `bundle_archives` now uses the same safe fallback, preserving source completion even if an older schema is missing optional metadata.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+
+## 2026-10-05 - Feedback Supabase Table Migration Runner
+
+### Requested
+- Create the Supabase table needed for Feedback completed-promotion history.
+
+### Backend Changes
+- Added `backend/scripts/ensure-recommendation-feedback.js`.
+- Added the `npm run db:ensure-feedback` script in `backend/package.json`.
+- The runner applies `backend/database/migrations/20260831_recommendation_feedback.sql` and verifies `public.recommendation_feedback` afterward.
+- The runner accepts `DATABASE_URL`, `POSTGRES_URL`, `SUPABASE_DB_URL`, or `SUPABASE_DATABASE_URL`; alternatively it can build the Supabase Postgres URL from `SUPABASE_URL` plus `SUPABASE_DB_PASSWORD`.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Attempted: `npm run db:ensure-feedback`.
+- Blocked: The current environment has `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, but does not include a Postgres connection string or `SUPABASE_DB_PASSWORD`, which is required to create Supabase tables.
+
+## 2026-10-05 - Feedback Missing History Table Source Fallback
+
+### Requested
+- Fix the runtime error `PGRST205` when Supabase reports that `public.recommendation_feedback` does not exist.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Added a source-backed fallback for ending promotions when the central `recommendation_feedback` table is missing from Supabase.
+- Bundle archive, dynamic promo, and activation campaign promotions can now still be completed durably in their source tables/collections and return to the Completed Promotions feed after reload.
+- The backend still uses `public.recommendation_feedback` as the preferred completed-history table whenever it exists.
+- If both the central feedback history table is missing and the source record cannot be completed, the backend returns a specific error instead of a generic runtime failure.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+
+## 2026-10-05 - Feedback Completion Save Order Fix
+
+### Requested
+- Fix the runtime error shown when ending a promotion and clicking `Yes, Helpful`.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Changed `endFeedbackPromotion` to save the completed history row in `public.recommendation_feedback` before ending/taking down the source promotion.
+- After the completed history row is safely saved, the backend ends the source promotion and patches the source result back into the feedback history metadata when the column is available.
+- Added a compatibility retry for older `recommendation_feedback` schemas that do not have the optional `metadata` column, so the core completed history fields still persist.
+- Improved Supabase error reporting so future failures include the actual database error instead of the generic persistence message.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+
+## 2026-10-05 - Feedback Completion Persistence Confirmation Fix
+
+### Requested
+- Fix the Feedback flow where clicking `End Promotion` then `Yes, Helpful` briefly moved a promotion to Completed Promotions but it disappeared after the completion toast/reload.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Changed `endFeedbackPromotion` so it no longer returns a synthetic completed promotion when the durable `public.recommendation_feedback` write fails.
+- The endpoint now throws a clear error if the source promotion is ended but WOOF cannot save the completed history row, preventing false success states.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Feedback.tsx`.
+- Added a response check so the end-promotion flow only shows success when the backend returns a promotion with `status = 'completed'`.
+- Reloads Feedback data from the backend after a failed submit so the optimistic UI state cannot linger if persistence did not complete.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Feedback Completed Promotion History Persistence
+
+### Requested
+- Make sure ended promotions are durably stored in Completed Promotions for historical keeping and tracking.
+- Identify where completed promotions are stored in the database.
+- Clarify which other promotion sources can appear back in Active Promotions and add brief identifying information for each active promo.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Hardened `endFeedbackPromotion` so every ended promotion is persisted to the Supabase `public.recommendation_feedback` table with `status = 'completed'`.
+- Added a canonical completed-history persistence path that first finds an existing `recommendation_feedback` row by UUID `id` or `promotion_id`, updates that row if found, and inserts a new row only when no history row exists.
+- Preserved the source-specific completion updates for `bundle_archives`, `dynamic_promos`, and MongoDB activation campaigns while using `recommendation_feedback` as the long-term Feedback page history table.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Feedback.tsx`.
+- Added a brief source description to each Active Promotions card so users can identify whether the promo is a Bundle Simulator archive, Dynamic Happy Hour promo, PetHub/campaign activation, stored feedback record, or general active promotion.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Feedback End Promotion Return, Live Learning Metrics, and KPI Styling
+
+### Requested
+- Add a subtle return/fallback action after `End Promotion` is clicked so accidental clicks can restore the original button.
+- Make ended promotions reflect in Completed Promotions.
+- Ensure Continuous Learning Insights uses real backend/feed-derived values instead of hard-coded metrics and remains theme-aware.
+- Match the Feedback KPI row design to the compact KPI rows used by Cafe, Services, Retail, and other dashboard pages.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Feedback.tsx`.
+- Added a subtle `Return` action in the active-promotion end confirmation state; clicking it removes the promotion from the local end-confirmation list and restores `End Promotion`.
+- Kept the existing optimistic end flow that marks a promotion completed immediately after Helpful/Not Helpful is submitted with `endPromotion: true`, followed by a backend reload.
+- Reworked the four Feedback KPI cards into the shared compact KPI-row pattern with icon blocks, tight labels, detail-modal clicks, and responsive sizing matching Cafe/Services/Retail.
+- Removed the hard-coded `89.2%`, `+6` pattern count, and artificial next-deployment confidence fallback from the Feedback UI.
+- Derived Learning Insight metrics from the live Feedback summary and currently loaded promotion/feedback data.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Changed Feedback summary defaults so `avgAccuracy` and `positiveRatio` return `0` when there is not enough completed promotion/feedback data yet instead of simulated positive baselines.
+- Updated the backend Continuous Learning Insight summary copy to report live feedback signal counts, helpful alignment, recalibration triggers, and whether completed promotion accuracy data is available.
+
+### Styling Changes
+- Updated `frontend/src/styles/theme.css`.
+- Added theme-aware styles for the new Feedback `Return` button.
+- Added theme-aware Continuous Learning Insights and metric tile styles so the section remains readable in light and dark themes.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Passed: Frontend production build with `npm run build`.
+
 ## 2026-09-30 - Settings Data Management Reorder
 
 ### Requested
@@ -3840,6 +4018,19 @@ This file records requested revisions, implementation details, verification, and
 - Passed: Backend production TypeScript build with `npm run build`.
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
 - Passed: Frontend production build with `npm run build`. The first sandboxed attempt hit Windows `spawn EPERM`, then the approved rerun completed successfully.
+
+### PetHub Campaign Remote Takedown Hardening (2026-10-05)
+
+- Verified the Feedback `End Promotion` flow already routes published activation campaigns through the PetHub takedown helper.
+- Persisted the remote PetHub campaign reference returned by the publish response into `pethubPayload` and `analyticsContext` so later takedown can target the actual PetHub campaign instead of only the local WOOF campaign ID.
+- Added optional PetHub remote ID fields to the campaign activation schema payload shape.
+- Hardened PetHub takedown to support `PATCH`, `POST`, or `DELETE` through `PETHUB_CAMPAIGN_TAKEDOWN_METHOD`.
+- Added support for `PETHUB_CAMPAIGN_TAKEDOWN_ENDPOINT` templates with `{campaignId}` or `{id}` placeholders, while keeping the default `/api/campaigns/:id` endpoint behavior.
+- Preserved safe local completion and audit logging when PetHub takedown is unavailable or fails.
+
+### Verification
+
+- Passed: Backend production TypeScript build with `npm run build`.
 
 ### Feedback Not Helpful and Pagination Dark Mode Fix (2026-10-03)
 

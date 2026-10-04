@@ -10465,16 +10465,11 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       deployedDate: now,
     };
 
-    const sourceResult = await this.endFeedbackSourcePromotion(
-      target,
-      dto?.feedback,
-    );
-
     const metadata = {
       sourceType: target.sourceType || 'recommendation_feedback',
       sourceId: target.sourceId || target.id,
       endedAt: now,
-      sourceResult,
+      sourceResult: null,
     };
 
     const payload = {
@@ -10496,36 +10491,43 @@ Active Recommendations: ${suggestions.length} actions pending.`,
     };
 
     let row: any = null;
+    let historyPersistenceError: unknown = null;
 
     try {
-      const { data } = await this.supabaseService.client
-        .from('recommendation_feedback')
-        .update(payload)
-        .eq('id', id)
-        .select()
-        .maybeSingle();
-      row = data;
-    } catch {}
-
-    if (!row && payload.promotion_id) {
-      try {
-        const { data } = await this.supabaseService.client
-          .from('recommendation_feedback')
-          .update(payload)
-          .eq('promotion_id', payload.promotion_id)
-          .select()
-          .maybeSingle();
-        row = data;
-      } catch {}
+      row = await this.persistCompletedFeedbackPromotion(id, payload);
+    } catch (error) {
+      if (!this.isMissingFeedbackHistoryTableError(error)) {
+        throw error;
+      }
+      historyPersistenceError = error;
+      this.logger.warn(
+        `recommendation_feedback table is unavailable; completing source promotion history instead. ${this.errorMessage(error)}`,
+      );
     }
 
-    if (!row) {
-      const { data } = await this.supabaseService.client
-        .from('recommendation_feedback')
-        .insert(payload)
-        .select()
-        .single();
-      row = data;
+    const sourceResult = await this.endFeedbackSourcePromotion(
+      target,
+      dto?.feedback,
+    );
+
+    if (!row && sourceResult?.status !== 'completed') {
+      throw new BadRequestException(
+        `WOOF could not save completed promotion history. recommendation_feedback is unavailable and the source promotion was not completed: ${sourceResult?.message || sourceResult?.reason || sourceResult?.status || 'Unknown source completion error'}`,
+      );
+    }
+
+    if (row) {
+      const rowWithSourceResult = await this.persistCompletedFeedbackPromotion(
+        id,
+        {
+          ...payload,
+          metadata: {
+            ...metadata,
+            sourceResult,
+          },
+        },
+      );
+      row = rowWithSourceResult || row;
     }
 
     return {
@@ -10536,9 +10538,159 @@ Active Recommendations: ${suggestions.length} actions pending.`,
             status: 'completed',
             feedback: payload.feedback,
             feedbackNotes: payload.feedback_notes,
+            historyPersistence: {
+              status: 'source_fallback',
+              reason: this.errorMessage(historyPersistenceError),
+            },
           },
       sourceResult,
     };
+  }
+
+  private async persistCompletedFeedbackPromotion(
+    requestedId: string,
+    payload: Record<string, any>,
+  ): Promise<any> {
+    const existing = await this.findFeedbackHistoryRow(
+      requestedId,
+      payload.promotion_id,
+    );
+
+    if (existing?.id) {
+      const { data, error } = await this.writeFeedbackHistoryPayload(
+        'update',
+        payload,
+        existing.id,
+      );
+
+      if (error) {
+        const message = this.formatSupabaseError(error);
+        throw new BadRequestException(
+          `WOOF could not update completed feedback history in recommendation_feedback: ${message}`,
+        );
+      }
+
+      return data;
+    }
+
+    const { data, error } = await this.writeFeedbackHistoryPayload(
+      'insert',
+      payload,
+    );
+
+    if (error) {
+      const message = this.formatSupabaseError(error);
+      throw new BadRequestException(
+        `WOOF could not insert completed feedback history in recommendation_feedback: ${message}`,
+      );
+    }
+
+    return data;
+  }
+
+  private async writeFeedbackHistoryPayload(
+    operation: 'insert' | 'update',
+    payload: Record<string, any>,
+    id?: string,
+  ): Promise<{ data: any | null; error: any | null }> {
+    const write = async (candidate: Record<string, any>) => {
+      if (operation === 'update') {
+        return this.supabaseService.client
+          .from('recommendation_feedback')
+          .update(candidate)
+          .eq('id', id)
+          .select()
+          .single();
+      }
+
+      return this.supabaseService.client
+        .from('recommendation_feedback')
+        .insert(candidate)
+        .select()
+        .single();
+    };
+
+    const first = await write(payload);
+    if (!first.error || !this.isMissingMetadataColumnError(first.error)) {
+      return first;
+    }
+
+    const { metadata: _metadata, ...compatiblePayload } = payload;
+    this.logger.warn(
+      'recommendation_feedback.metadata column is unavailable; saving completed feedback history without optional metadata.',
+    );
+    return write(compatiblePayload);
+  }
+
+  private isMissingMetadataColumnError(error: any): boolean {
+    const message = this.formatSupabaseError(error).toLowerCase();
+    return message.includes('metadata') && message.includes('column');
+  }
+
+  private formatSupabaseError(error: any): string {
+    return [
+      error?.message,
+      error?.details,
+      error?.hint,
+      error?.code,
+    ]
+      .filter(Boolean)
+      .join(' | ') || 'Unknown Supabase error';
+  }
+
+  private isMissingFeedbackHistoryTableError(error: unknown): boolean {
+    const message = this.errorMessage(error).toLowerCase();
+    return (
+      message.includes('recommendation_feedback') &&
+      (message.includes('pgrst205') ||
+        message.includes('schema cache') ||
+        message.includes('could not find the table'))
+    );
+  }
+
+  private errorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    return this.formatSupabaseError(error);
+  }
+
+  private async findFeedbackHistoryRow(
+    requestedId?: string,
+    promotionId?: string,
+  ): Promise<any | null> {
+    const candidates = [
+      this.isUuid(requestedId) ? { column: 'id', value: requestedId } : null,
+      promotionId ? { column: 'promotion_id', value: promotionId } : null,
+      requestedId ? { column: 'promotion_id', value: requestedId } : null,
+    ].filter((candidate): candidate is { column: string; value: string } =>
+      Boolean(candidate?.value),
+    );
+
+    for (const candidate of candidates) {
+      try {
+        const { data, error } = await this.supabaseService.client
+          .from('recommendation_feedback')
+          .select('*')
+          .eq(candidate.column, candidate.value)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+
+        if (!error && Array.isArray(data) && data[0]) {
+          return data[0];
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
+  private isUuid(value: unknown): value is string {
+    return (
+      typeof value === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value,
+      )
+    );
   }
 
   async recalibrateModels(
@@ -10637,11 +10789,18 @@ Active Recommendations: ${suggestions.length} actions pending.`,
             (accuracies.reduce((sum, a) => sum + a, 0) / accuracies.length) *
               10,
           ) / 10
-        : 89.2;
+        : 0;
 
     const totalSignals = helpful + notHelpful;
     const positiveRatio =
-      totalSignals > 0 ? Math.round((helpful / totalSignals) * 100) : 85;
+      totalSignals > 0 ? Math.round((helpful / totalSignals) * 100) : 0;
+    const signalLabel =
+      totalSignals === 1 ? '1 feedback signal' : `${totalSignals} feedback signals`;
+    const signalVerb = totalSignals === 1 ? 'is' : 'are';
+    const accuracyLabel =
+      accuracies.length > 0
+        ? `an average prediction accuracy of ${avgAccuracy}% across ${accuracies.length} completed promotion${accuracies.length === 1 ? '' : 's'} with predicted and actual lift data`
+        : 'no completed promotion accuracy yet because predicted and actual lift data is still pending';
 
     return {
       totalDeployed: promotions.length,
@@ -10655,7 +10814,7 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       recalibrationsTriggered: notHelpful,
       aiInsight: {
         title: 'Continuous System Learning Insight',
-        summary: `Your feedback signals have helped WOOF identify that afternoon cross-sell bundles (Cafe + Services) achieve an average prediction accuracy of ${avgAccuracy}%. The system continuously recalibrates association rules and off-peak discount elasticity upon each feedback rating.`,
+        summary: `${signalLabel} ${signalVerb} currently shaping WOOF's recommendation weights. The feedback loop shows ${positiveRatio}% helpful alignment, ${notHelpful} recalibration trigger${notHelpful === 1 ? '' : 's'}, and ${accuracyLabel}.`,
         lastRecalibration: new Date().toISOString(),
       },
     };
@@ -10744,9 +10903,7 @@ Active Recommendations: ${suggestions.length} actions pending.`,
     try {
       if (promotion.sourceType === 'bundle_archive') {
         const rawId = sourceId.replace(/^bundle-/, '');
-        const { error } = await this.supabaseService.client
-          .from('bundle_archives')
-          .update({
+        const fullUpdate = {
             status: 'archived',
             archived_at: now,
             updated_at: now,
@@ -10756,8 +10913,17 @@ Active Recommendations: ${suggestions.length} actions pending.`,
               endedFromFeedback: true,
               endedAt: now,
             },
-          })
-          .eq('id', rawId);
+          };
+        const { error } = await this.updateSupabaseSourceWithMetadataFallback(
+          'bundle_archives',
+          rawId,
+          fullUpdate,
+          {
+            status: 'archived',
+            archived_at: now,
+            updated_at: now,
+          },
+        );
         return error
           ? { status: 'failed', sourceType: promotion.sourceType, message: error.message }
           : { status: 'completed', sourceType: promotion.sourceType };
@@ -10765,9 +10931,7 @@ Active Recommendations: ${suggestions.length} actions pending.`,
 
       if (promotion.sourceType === 'dynamic_promo') {
         const rawId = sourceId.replace(/^promo-/, '');
-        const { error } = await this.supabaseService.client
-          .from('dynamic_promos')
-          .update({
+        const fullUpdate = {
             status: 'completed',
             updated_at: now,
             metadata: {
@@ -10776,8 +10940,16 @@ Active Recommendations: ${suggestions.length} actions pending.`,
               endedFromFeedback: true,
               endedAt: now,
             },
-          })
-          .eq('id', rawId);
+          };
+        const { error } = await this.updateSupabaseSourceWithMetadataFallback(
+          'dynamic_promos',
+          rawId,
+          fullUpdate,
+          {
+            status: 'completed',
+            updated_at: now,
+          },
+        );
         return error
           ? { status: 'failed', sourceType: promotion.sourceType, message: error.message }
           : { status: 'completed', sourceType: promotion.sourceType };
@@ -10802,6 +10974,32 @@ Active Recommendations: ${suggestions.length} actions pending.`,
         message: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  private async updateSupabaseSourceWithMetadataFallback(
+    table: string,
+    id: string,
+    payload: Record<string, any>,
+    fallbackPayload: Record<string, any>,
+  ): Promise<{ error: any | null }> {
+    const result = await this.supabaseService.client
+      .from(table)
+      .update(payload)
+      .eq('id', id);
+
+    if (!result.error || !this.isMissingMetadataColumnError(result.error)) {
+      return { error: result.error || null };
+    }
+
+    this.logger.warn(
+      `${table}.metadata column is unavailable; completing source promotion without optional metadata.`,
+    );
+    const fallbackResult = await this.supabaseService.client
+      .from(table)
+      .update(fallbackPayload)
+      .eq('id', id);
+
+    return { error: fallbackResult.error || null };
   }
 
   private parseFeedbackDate(value: unknown): string | null {

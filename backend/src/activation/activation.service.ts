@@ -44,6 +44,14 @@ interface PetHubCampaignPayload {
   source: string;
   sortOrder: number;
   isActive: boolean;
+  id?: string;
+  campaignId?: string;
+  campaign_id?: string;
+  remoteId?: string;
+  remote_id?: string;
+  pethubId?: string;
+  pethub_id?: string;
+  publishedAt?: string;
 }
 
 interface ActivationRecommendation {
@@ -329,15 +337,36 @@ export class ActivationService {
     });
 
     try {
-      campaign = await this.ensureCampaignHasImage(campaign);
-      const payload = this.buildPublishPayload(campaign);
+      const publishableCampaign = await this.ensureCampaignHasImage(campaign);
+      const payload = this.buildPublishPayload(publishableCampaign);
       const token = process.env.PETHUB_API_TOKEN;
       const response = await this.postPetHubCampaign(endpoint, payload, token);
+      const remoteReference = this.extractPetHubCampaignReference(
+        response.data,
+        campaignId,
+      );
+      const publishedPayload = {
+        ...(publishableCampaign.pethubPayload || {}),
+        ...payload,
+        ...remoteReference.payload,
+        isActive: true,
+        publishedAt: new Date().toISOString(),
+      };
+      const publishedAnalyticsContext = {
+        ...(publishableCampaign.analyticsContext || {}),
+        pethubPublishedAt: publishedPayload.publishedAt,
+        pethubRemoteId: remoteReference.id,
+        pethubPublishResponse: this.compactRemoteResponse(response.data),
+      };
 
       const updated = await this.campaignModel
         .findOneAndUpdate(
           { campaignId },
-          { status: 'published' },
+          {
+            status: 'published',
+            pethubPayload: publishedPayload,
+            analyticsContext: publishedAnalyticsContext,
+          },
           { new: true },
         )
         .lean()
@@ -352,7 +381,7 @@ export class ActivationService {
         target: campaignTitle,
         stateBefore: 'Queued',
         stateAfter: 'Published',
-        metadata: { campaignId },
+        metadata: { campaignId, pethubRemoteId: remoteReference.id },
       });
 
       this.realtimeService.emit({
@@ -775,37 +804,55 @@ export class ActivationService {
       return { status: 'skipped', reason: 'Campaign is not published to PetHub.' };
     }
 
-    const endpoint = this.getPetHubCampaignsEndpoint();
+    const endpoint = this.getPetHubTakedownEndpoint(campaign);
     if (!endpoint) {
       return {
         status: 'skipped',
-        reason: 'PETHUB_CAMPAIGNS_ENDPOINT or PETHUB_API_BASE_URL is not configured.',
+        reason:
+          'PETHUB_CAMPAIGNS_ENDPOINT, PETHUB_CAMPAIGN_TAKEDOWN_ENDPOINT, or PETHUB_API_BASE_URL is not configured.',
       };
     }
 
-    const remoteId = this.safeString(
-      campaign.pethubPayload?.id ||
-        campaign.pethubPayload?.campaignId ||
-        campaign.pethubPayload?.campaign_id,
-      campaign.campaignId,
-    );
-    const targetEndpoint = `${endpoint.replace(/\/$/, '')}/${encodeURIComponent(remoteId)}`;
+    const method = this.getPetHubTakedownMethod();
+    const body = {
+      isActive: false,
+      status: 'inactive',
+      source: 'WOOF',
+      endedAt: new Date().toISOString(),
+      woofCampaignId: campaign.campaignId,
+    };
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(process.env.PETHUB_API_TOKEN
+        ? { Authorization: `Bearer ${process.env.PETHUB_API_TOKEN}` }
+        : {}),
+    };
 
     try {
-      await axios.patch(
-        targetEndpoint,
-        { isActive: false, status: 'inactive', source: 'WOOF' },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(process.env.PETHUB_API_TOKEN
-              ? { Authorization: `Bearer ${process.env.PETHUB_API_TOKEN}` }
-              : {}),
-          },
+      if (method === 'DELETE') {
+        await axios.delete(endpoint, {
+          headers,
+          data: body,
           timeout: 15000,
-        },
-      );
-      return { status: 'deactivated', endpoint: targetEndpoint };
+        });
+      } else if (method === 'POST') {
+        await axios.post(endpoint, body, {
+          headers,
+          timeout: 15000,
+        });
+      } else {
+        await axios.patch(endpoint, body, {
+          headers,
+          timeout: 15000,
+        });
+      }
+
+      return {
+        status: 'deactivated',
+        method,
+        endpoint,
+        remoteId: this.resolvePetHubRemoteId(campaign),
+      };
     } catch (error) {
       const message = axios.isAxiosError(error)
         ? this.extractRemoteErrorMessage(error.response?.data) || error.message
@@ -813,8 +860,119 @@ export class ActivationService {
           ? error.message
           : 'Unknown PetHub takedown error';
       this.logger.warn(`PetHub campaign takedown failed for ${campaign.campaignId}: ${message}`);
-      return { status: 'failed', endpoint: targetEndpoint, message };
+      return {
+        status: 'failed',
+        method,
+        endpoint,
+        remoteId: this.resolvePetHubRemoteId(campaign),
+        message,
+      };
     }
+  }
+
+  private extractPetHubCampaignReference(
+    responseData: unknown,
+    fallbackId: string,
+  ): { id: string; payload: Partial<PetHubCampaignPayload> } {
+    const candidates = this.collectPetHubResponseObjects(responseData);
+    const id =
+      candidates
+        .map((item) =>
+          this.firstString(
+            item.id,
+            item.campaignId,
+            item.campaign_id,
+            item.remoteId,
+            item.remote_id,
+            item.pethubId,
+            item.pethub_id,
+          ),
+        )
+        .find(Boolean) || fallbackId;
+
+    return {
+      id,
+      payload: {
+        id,
+        campaignId: id,
+        campaign_id: id,
+        remoteId: id,
+        remote_id: id,
+        pethubId: id,
+        pethub_id: id,
+      },
+    };
+  }
+
+  private collectPetHubResponseObjects(value: unknown): Record<string, unknown>[] {
+    if (!value || typeof value !== 'object') return [];
+    const body = value as Record<string, unknown>;
+    const nested = [body.campaign, body.data, body.result]
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+    return [body, ...nested];
+  }
+
+  private compactRemoteResponse(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object') return null;
+    const body = value as Record<string, unknown>;
+    const campaign = this.collectPetHubResponseObjects(body)[0] || {};
+    return {
+      id: this.firstString(
+        campaign.id,
+        campaign.campaignId,
+        campaign.campaign_id,
+        campaign.remoteId,
+        campaign.remote_id,
+        campaign.pethubId,
+        campaign.pethub_id,
+      ),
+      status: this.firstString(campaign.status, body.status),
+      message: this.firstString(campaign.message, body.message),
+    };
+  }
+
+  private firstString(...values: unknown[]): string | undefined {
+    return values.find(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    )?.trim();
+  }
+
+  private resolvePetHubRemoteId(campaign: any): string {
+    return this.safeString(
+      campaign.pethubPayload?.remoteId ||
+        campaign.pethubPayload?.remote_id ||
+        campaign.pethubPayload?.pethubId ||
+        campaign.pethubPayload?.pethub_id ||
+        campaign.pethubPayload?.campaignId ||
+        campaign.pethubPayload?.campaign_id ||
+        campaign.pethubPayload?.id ||
+        campaign.analyticsContext?.pethubRemoteId,
+      campaign.campaignId,
+    );
+  }
+
+  private getPetHubTakedownMethod(): 'PATCH' | 'POST' | 'DELETE' {
+    const configured = String(
+      process.env.PETHUB_CAMPAIGN_TAKEDOWN_METHOD || 'PATCH',
+    )
+      .trim()
+      .toUpperCase();
+    if (configured === 'DELETE' || configured === 'POST') return configured;
+    return 'PATCH';
+  }
+
+  private getPetHubTakedownEndpoint(campaign: any): string | null {
+    const remoteId = encodeURIComponent(this.resolvePetHubRemoteId(campaign));
+    const explicit = process.env.PETHUB_CAMPAIGN_TAKEDOWN_ENDPOINT?.trim();
+    if (explicit) {
+      return explicit
+        .replace(/\{campaignId\}/g, remoteId)
+        .replace(/\{id\}/g, remoteId);
+    }
+
+    const campaignsEndpoint = this.getPetHubCampaignsEndpoint();
+    if (!campaignsEndpoint) return null;
+    return `${campaignsEndpoint.replace(/\/$/, '')}/${remoteId}`;
   }
 
   private async generateAndStoreCampaignImage(

@@ -60,6 +60,14 @@ export class CampaignActivation {
     source: string;
     sortOrder: number;
     isActive: boolean;
+    id?: string;
+    campaignId?: string;
+    campaign_id?: string;
+    remoteId?: string;
+    remote_id?: string;
+    pethubId?: string;
+    pethub_id?: string;
+    publishedAt?: string;
   };
 }
 
