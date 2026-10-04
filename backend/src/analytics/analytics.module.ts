@@ -10,11 +10,13 @@ import {
 import { CommonModule } from '../common/common.module';
 import { AuditModule } from '../audit/audit.module';
 import { ActivationModule } from '../activation/activation.module';
+import { LlmModule } from '../llm/llm.module';
 
 @Module({
   imports: [
     CommonModule,
     AuditModule,
+    LlmModule,
     forwardRef(() => ActivationModule),
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },

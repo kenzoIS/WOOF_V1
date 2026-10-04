@@ -394,6 +394,44 @@ export function AISimulation() {
   const [trafficOptimizerDataAllDay, setTrafficOptimizerDataAllDay] = useState<TrafficOptimizerResponse | null>(null);
   const [trafficOptimizerLoading, setTrafficOptimizerLoading] = useState(false);
   const [trafficOptimizerError, setTrafficOptimizerError] = useState<string | null>(null);
+  const [simulationTargetDay, setSimulationTargetDay] = useState<"today" | "tomorrow">("today");
+
+  const todayManilaStr = useMemo(() => {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  }, []);
+
+  const tomorrowManilaStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+  }, []);
+
+  const currentManilaHour = useMemo(() => {
+    try {
+      return Number(
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: "Asia/Manila",
+          hour: "numeric",
+          hour12: false,
+        }).format(new Date())
+      );
+    } catch {
+      return 14;
+    }
+  }, []);
+
+  const isStoreOperatingNow = currentManilaHour >= 7 && currentManilaHour < 19;
+  const activeReferenceDate = simulationTargetDay === "tomorrow" ? tomorrowManilaStr : todayManilaStr;
   const [erlangStaffing, setErlangStaffing] = useState<Record<string, number>>({});
   const [staffingDayFilter, setStaffingDayFilter] = useState("All");
   const [bundleEngineFeedback, setBundleEngineFeedback] = useState<"helpful" | "not-helpful" | null>(null);
@@ -513,14 +551,14 @@ export function AISimulation() {
       const retail = h.sectorVisits?.Retail?.visits || 0;
       return {
         day: h.label,
-        fullDayLabel: `Today at ${h.label}`,
+        fullDayLabel: `${simulationTargetDay === "tomorrow" ? "Tomorrow" : "Today"} at ${h.label}`,
         visits: h.predictedVisits,
         cafe,
         services,
         retail,
       };
     });
-  }, [todayContext?.hourlyForecast]);
+  }, [todayContext?.hourlyForecast, simulationTargetDay]);
 
   const [trafficHeatmapUnit, setTrafficHeatmapUnit] = useState<"percent" | "visits">("percent");
 
@@ -956,6 +994,7 @@ export function AISimulation() {
       hour: String(debouncedTrafficOptimizerTime),
       dateStart: selectedHeaderRange.start,
       dateEnd: selectedHeaderRange.end,
+      referenceDate: activeReferenceDate,
       ...(scenarioMultiplier ? { scenarioMultiplier, scenarioLabel } : {}),
     })
       .then((result) => {
@@ -979,6 +1018,7 @@ export function AISimulation() {
       hour: "all",
       dateStart: selectedHeaderRange.start,
       dateEnd: selectedHeaderRange.end,
+      referenceDate: activeReferenceDate,
       ...(scenarioMultiplier ? { scenarioMultiplier, scenarioLabel } : {}),
     })
       .then((result) => {
@@ -996,6 +1036,7 @@ export function AISimulation() {
     selectedHeaderRange.end,
     selectedHeaderRange.start,
     debouncedTrafficDemandShift,
+    activeReferenceDate,
   ]);
 
   useEffect(() => {
@@ -2208,12 +2249,14 @@ export function AISimulation() {
     const onDutyNames = scheduledStaffForSelectedHour.map((s) => s.name);
     const staffCount = onDutyNames.length;
     const weatherCond = todayContext?.weather?.condition || "Fair weather";
+    const dayTargetLabel = simulationTargetDay === "tomorrow" ? `tomorrow (${dayName})` : `today (${dayName})`;
 
     setTrafficGlmLoading(true);
     generateLlmExplanation({
       feature: "prescriptive_explanation",
-      prompt: `Provide a concise 1-2 sentence store manager shift recommendation for ${dayName} at ${hourStr}. Staff on duty (${staffCount}): ${onDutyNames.join(", ")}. Predicted visits: ${predicted}. Weather: ${weatherCond}. Ground only on these facts without inventing numbers.`,
+      prompt: `Provide a concise 1-2 sentence store manager shift recommendation for ${dayTargetLabel} at ${hourStr}. Staff on duty (${staffCount}): ${onDutyNames.join(", ")}. Predicted visits: ${predicted}. Weather: ${weatherCond}. Ground only on these facts without inventing numbers.`,
       context: {
+        simulationTargetDay,
         dayOfWeek: dayName,
         hour: hourStr,
         scheduledStaff: onDutyNames,
@@ -2244,7 +2287,7 @@ export function AISimulation() {
     return () => {
       isMounted = false;
     };
-  }, [debouncedTrafficOptimizerTime, todayContext?.dayOfWeek, todayContext?.hourlyForecast, scheduledStaffForSelectedHour]);
+  }, [debouncedTrafficOptimizerTime, todayContext?.dayOfWeek, todayContext?.hourlyForecast, scheduledStaffForSelectedHour, simulationTargetDay]);
 
   // Dynamic unique active staff count scheduled across all sectors for the selected hour
   const uniqueActiveStaffOnDutyCount = useMemo(() => {
@@ -4955,16 +4998,43 @@ export function AISimulation() {
         <div className="space-y-4 md:space-y-6 lg:space-y-8">
           <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div className="flex-1">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                     Traffic Forecast &amp; Staffing Simulator
                   </h2>
 
+                  {/* APPROACH B: DAY SELECTOR TOGGLE (TODAY VS TOMORROW) - NO ICONS */}
+                  <div className="inline-flex items-center p-1 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl text-xs font-semibold shadow-xs">
+                    <button
+                      type="button"
+                      onClick={() => setSimulationTargetDay("today")}
+                      className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                        simulationTargetDay === "today"
+                          ? "bg-[#F53799] text-white shadow-sm font-bold"
+                          : "text-[#223047]/70 hover:text-[#223047] hover:bg-[#FFD9EC]/40"
+                      }`}
+                    >
+                      <span>Today (Live Shifts)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSimulationTargetDay("tomorrow")}
+                      className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                        simulationTargetDay === "tomorrow"
+                          ? "bg-[#F53799] text-white shadow-sm font-bold"
+                          : "text-[#223047]/70 hover:text-[#223047] hover:bg-[#FFD9EC]/40"
+                      }`}
+                    >
+                      <span>Tomorrow (Next-Day Planning)</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="text-xs text-[#223047] opacity-75 mt-1 flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-[#223047]">
-                    {todayContext?.dayOfWeek ? `${todayContext.dayOfWeek}, ${todayContext.date}` : "Today"}
+
+                <div className="text-xs text-[#223047] opacity-75 flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-[#223047] px-2 py-0.5 rounded-md bg-[#FFF7FB] border border-[#FFD9EC]/70">
+                    {simulationTargetDay === "tomorrow" ? "Next-Day Planning Mode:" : "Live Operations Mode:"}{" "}
+                    {todayContext?.dayOfWeek ? `${todayContext.dayOfWeek}, ${todayContext.date}` : (simulationTargetDay === "tomorrow" ? "Tomorrow" : "Today")}
                   </span>
                   <span className="opacity-40">|</span>
                   <span>
@@ -4982,62 +5052,101 @@ export function AISimulation() {
                       </span>
                     </>
                   )}
+                  {!isStoreOperatingNow && simulationTargetDay === "today" && (
+                    <span className="text-[11px] text-[#F53799] font-medium bg-[#FFF2FA] px-2 py-0.5 rounded border border-[#FFD9EC]">
+                      Store Closed (7:00 AM – 7:00 PM) • Select "Tomorrow" for advance shift scheduling
+                    </span>
+                  )}
                 </div>
               </div>
 
               {/* RIGHT SIDE: WHAT-IF DEMAND SLIDER & OPERATING HOUR (OPTION 1, NO ICONS) */}
-              <div className="flex flex-wrap items-center justify-start md:justify-end gap-3 md:gap-5">
-                <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl px-3.5 py-2 flex flex-col gap-1.5 min-w-[240px]">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-[#223047] text-[11px] uppercase tracking-wider">
-                      What-If Demand Shift
-                    </span>
-                    <span className={`font-bold text-xs ${trafficDemandShift > 0 ? "text-[#F53799]" : trafficDemandShift < 0 ? "text-[#0D9488]" : "text-[#223047]/60"}`}>
-                      {trafficDemandShift > 0 ? `+${trafficDemandShift}%` : trafficDemandShift < 0 ? `${trafficDemandShift}%` : "Baseline (0%)"}
-                    </span>
-                  </div>
-
-                  <Slider
-                    value={[trafficDemandShift]}
-                    onValueChange={(val) => setTrafficDemandShift(val[0])}
-                    min={-30}
-                    max={50}
-                    step={5}
-                    className="[&_[role=slider]]:bg-[#F53799] [&_[role=slider]]:w-4 [&_[role=slider]]:h-4 [&_[role=slider]]:border-2 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-md"
-                  />
-
-                  <div className="flex items-center justify-between gap-1 pt-0.5">
-                    {[
-                      { label: "Rain (-10%)", val: -10 },
-                      { label: "Normal (0%)", val: 0 },
-                      { label: "Weekend (+30%)", val: 30 },
-                      { label: "Payday (+50%)", val: 50 },
-                    ].map((preset) => (
-                      <button
-                        key={preset.label}
-                        type="button"
-                        onClick={() => setTrafficDemandShift(preset.val)}
-                        className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-md transition-all cursor-pointer ${
-                          trafficDemandShift === preset.val
-                            ? "bg-[#F53799] text-white"
-                            : "bg-white border border-[#FFD9EC] text-[#223047]/70 hover:bg-[#FFD9EC]/40"
-                        }`}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
+              {simulationTargetDay === "today" && !isStoreOperatingNow ? (
                 <div className="text-left md:text-right pl-3 border-l border-[#FFD9EC]">
-                  <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-1">Selected Operating Hour</div>
-                  <div className="text-base md:text-lg font-bold text-[#F53799]">{formatHour(trafficOptimizerTime[0])}</div>
+                  <div className="text-xs text-[#223047] opacity-60 mb-0.5">Live Shift Status</div>
+                  <div className="text-sm font-bold text-[#F53799]">Store Closed</div>
+                  <div className="text-[10px] text-[#223047]/60">Reopens 7:00 AM</div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-start md:justify-end gap-3 md:gap-5">
+                  <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl px-3.5 py-2 flex flex-col gap-1.5 min-w-[240px]">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-[#223047] text-[11px] uppercase tracking-wider">
+                        What-If Demand Shift
+                      </span>
+                      <span className={`font-bold text-xs ${trafficDemandShift > 0 ? "text-[#F53799]" : trafficDemandShift < 0 ? "text-[#0D9488]" : "text-[#223047]/60"}`}>
+                        {trafficDemandShift > 0 ? `+${trafficDemandShift}%` : trafficDemandShift < 0 ? `${trafficDemandShift}%` : "Baseline (0%)"}
+                      </span>
+                    </div>
+
+                    <Slider
+                      value={[trafficDemandShift]}
+                      onValueChange={(val) => setTrafficDemandShift(val[0])}
+                      min={-30}
+                      max={50}
+                      step={5}
+                      className="[&_[role=slider]]:bg-[#F53799] [&_[role=slider]]:w-4 [&_[role=slider]]:h-4 [&_[role=slider]]:border-2 [&_[role=slider]]:border-white [&_[role=slider]]:shadow-md"
+                    />
+
+                    <div className="flex items-center justify-between gap-1 pt-0.5">
+                      {[
+                        { label: "Rain (-10%)", val: -10 },
+                        { label: "Normal (0%)", val: 0 },
+                        { label: "Weekend (+30%)", val: 30 },
+                        { label: "Payday (+50%)", val: 50 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => setTrafficDemandShift(preset.val)}
+                          className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-md transition-all cursor-pointer ${
+                            trafficDemandShift === preset.val
+                              ? "bg-[#F53799] text-white"
+                              : "bg-white border border-[#FFD9EC] text-[#223047]/70 hover:bg-[#FFD9EC]/40"
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="text-left md:text-right pl-3 border-l border-[#FFD9EC]">
+                    <div className="text-xs md:text-sm text-[#223047] opacity-60 mb-1">Selected Operating Hour</div>
+                    <div className="text-base md:text-lg font-bold text-[#F53799]">{formatHour(trafficOptimizerTime[0])}</div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* TIME SLIDER */}
-            <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
+            {simulationTargetDay === "today" && !isStoreOperatingNow ? (
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-8 md:p-12 text-center space-y-4">
+                <div className="space-y-2 max-w-lg mx-auto">
+                  <div className="inline-block px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC]">
+                    Store Closed • Offline
+                  </div>
+                  <h3 className="text-lg md:text-xl font-bold text-[#223047]">
+                    Physical Operations Have Ended for Today
+                  </h3>
+                  <p className="text-xs md:text-sm text-[#223047]/70 leading-relaxed">
+                    Physical store operating hours are strictly <strong>7:00 AM – 7:00 PM</strong> (Asia/Manila). All shifts for {todayContext?.dayOfWeek ? `${todayContext.dayOfWeek}, ${todayContext.date}` : "Today"} have ended. Real-time customer queue tracking and active shift dispatching are offline.
+                  </p>
+                </div>
+
+                <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSimulationTargetDay("tomorrow")}
+                    className="bg-[#F53799] hover:bg-[#d92680] text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl shadow-sm transition-all cursor-pointer"
+                  >
+                    Switch to Tomorrow (Next-Day Planning Mode)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* TIME SLIDER */}
+                <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 space-y-3 md:space-y-4">
               <div className="flex items-center justify-between text-xs md:text-sm font-semibold text-[#223047]">
                 <span>SELECT OPERATING HOUR</span>
                 <span className="text-[#F53799] font-bold">{formatHour(trafficOptimizerTime[0])} (Active Simulation)</span>
@@ -5065,7 +5174,7 @@ export function AISimulation() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center border border-[#FFD9EC]/50">
                 <div className="text-xs text-[#223047] opacity-60 mb-1 font-medium">
-                  Today's Expected Visits (All Hours)
+                  {simulationTargetDay === "tomorrow" ? "Tomorrow's" : "Today's"} Expected Visits (All Hours)
                 </div>
                 {trafficOptimizerLoading || !todayContext ? (
                   <div className="h-7 w-20 bg-[#FFD9EC]/60 animate-pulse rounded mx-auto my-1" />
@@ -5111,7 +5220,9 @@ export function AISimulation() {
                     {totalDynamicScheduledStaff}
                   </div>
                 )}
-                <div className="text-[10px] text-[#223047] opacity-60 mt-1">At {formatHour(trafficOptimizerTime[0])} (Live Shift)</div>
+                <div className="text-[10px] text-[#223047] opacity-60 mt-1">
+                  At {formatHour(trafficOptimizerTime[0])} ({simulationTargetDay === "tomorrow" ? "Scheduled Shift" : "Live Shift"})
+                </div>
               </div>
 
               <div className="p-3 md:p-4 bg-[#FFF2FA] rounded-lg md:rounded-xl text-center border border-[#FFD9EC]/50">
@@ -5134,10 +5245,10 @@ export function AISimulation() {
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-[#FFF7FB] px-4 py-3">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <div className="text-sm font-bold text-[#223047]">
-                    Traffic Heatmap per Sector ({todayContext?.dayOfWeek || "Today"}'s Hourly Capacity Load)
+                    Traffic Heatmap per Sector ({todayContext?.dayOfWeek || (simulationTargetDay === "tomorrow" ? "Tomorrow" : "Today")}'s Hourly Capacity Load)
                   </div>
                   <span className="text-[11px] text-[#223047] opacity-70">
-                    Learned from historical {todayContext?.dayOfWeek || "Friday"} data + live weather
+                    Learned from historical {todayContext?.dayOfWeek || (simulationTargetDay === "tomorrow" ? "Monday" : "Sunday")} data + live weather
                   </span>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-[#223047]">
@@ -5426,7 +5537,7 @@ export function AISimulation() {
                       Staffing Recommendation (At {formatHour(trafficOptimizerTime[0])})
                     </h3>
                     <span className="rounded-md bg-[#E8F8F5] text-[#10B981] border border-[#A7F3D0] px-2 py-0.5 text-xs font-semibold">
-                      Live Shift vs Erlang C Queue Model
+                      {simulationTargetDay === "tomorrow" ? "Scheduled Shift vs Erlang C Queue Model" : "Live Shift vs Erlang C Queue Model"}
                     </span>
                   </div>
                   <div className="text-xs text-[#223047] opacity-65 mt-0.5">
@@ -5578,17 +5689,20 @@ export function AISimulation() {
                 </div>
               </div>
             </details>
+              </>
+            )}
           </div>
 
           {/* TRAFFIC TREND (TODAY'S OPERATING HOURS CURVE) */}
-          <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
+          {(simulationTargetDay === "tomorrow" || isStoreOperatingNow) && (
+            <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                  Today's Hourly Traffic Curve
+                  {simulationTargetDay === "tomorrow" ? "Tomorrow's" : "Today's"} Hourly Traffic Curve
                 </h2>
                 <div className="text-xs text-[#223047] opacity-60 mt-0.5">
-                  Simulated hourly visit volume for {todayContext?.dayOfWeek ? `${todayContext.dayOfWeek}, ${todayContext.date}` : "Today"} across Services, Cafe, and Retail
+                  Simulated hourly visit volume for {todayContext?.dayOfWeek ? `${todayContext.dayOfWeek}, ${todayContext.date}` : (simulationTargetDay === "tomorrow" ? "Tomorrow" : "Today")} across Services, Cafe, and Retail
                 </div>
               </div>
               <div className="text-xs font-semibold text-[#06B6D4] bg-[#E0F7FA] px-2.5 py-1 rounded-full border border-[#B2EBF2]">
@@ -5686,6 +5800,7 @@ export function AISimulation() {
               )}
             </div>
           </div>
+          )}
         </div>
       )}
 

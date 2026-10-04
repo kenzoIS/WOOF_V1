@@ -9,7 +9,8 @@ export type LlmFeature =
   | 'business_assistant'
   | 'forecast_explanation'
   | 'recommendation_explanation'
-  | 'report_summary';
+  | 'report_summary'
+  | 'home_executive_insight';
 
 export interface LlmRequest {
   feature: LlmFeature;
@@ -39,6 +40,7 @@ export class LlmService {
     forecast_explanation: 'glm',
     recommendation_explanation: 'glm',
     report_summary: 'glm',
+    home_executive_insight: 'glm',
   };
 
   async generate(request: LlmRequest): Promise<LlmResponse> {
@@ -170,11 +172,20 @@ export class LlmService {
         'Explain why a bundle recommendation is strong or weak using support, confidence, lift, margin, and context signals.',
       report_summary:
         'Write a short executive summary from the verified report data. Separate observed facts from recommendations.',
+      home_executive_insight:
+        'You are an executive AI revenue advisor for WOOF Happy Tails. Produce a punchy, 1-2 sentence executive business insight highlighting current channel strength, key revenue driver, and immediate strategic action. Be direct, authoritative, and data-backed. Never invent numbers.',
     };
     return `${shared} ${featureGuidance[feature]}`;
   }
 
   private fallback(request: LlmRequest) {
+    if (request.feature === 'home_executive_insight') {
+      const ctx = request.context as any;
+      const topSector = ctx?.topSector || 'Retail';
+      const topChannel = ctx?.topChannel || 'Shopee';
+      const revFormatted = ctx?.totalRevenueFormatted || '';
+      return `${topSector} is anchoring total business revenue${revFormatted ? ` at ${revFormatted}` : ''}, propelled by robust marketplace volume on ${topChannel}. Maintain physical POS cross-promotions while scaling high-demand pet care supplies online.`;
+    }
     if (request.feature === 'manual_bundle_explanation') {
       return 'The bundle score is based on its generated-bundle baseline, margin fit, and weather/calendar context. Configure the assigned GLM provider to generate a detailed explanation.';
     }

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun, Layers, Receipt } from "lucide-react";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun, Layers, Receipt, Sparkles, RotateCcw, Calendar } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -140,8 +140,12 @@ const getManilaDateKey = () =>
 
 export function Home() {
   const router = useRouter();
-  const [timeRange, setTimeRange] = useState("today");
-  const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
+  // Dedicated Home graph filter state: defaults to "matched" (Matched 1-Year, 2025-2026) to display seamless omnichannel trends across all sectors
+  const [homeActiveFilter, setHomeActiveFilter] = useState("matched");
+  const [showCustomFilterSection4, setShowCustomFilterSection4] = useState(false);
+  const [showCustomFilterSection5, setShowCustomFilterSection5] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState("2025-05-02");
+  const [customEndDate, setCustomEndDate] = useState("2026-05-02");
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
   const [expandedSuggestions, setExpandedSuggestions] = useState<number[]>([]);
   const [approvedSuggestions, setApprovedSuggestions] = useState<number[]>([]);
@@ -161,20 +165,20 @@ export function Home() {
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("globalDateRange") || "last-7-days";
-    setGlobalDateRange(saved);
+  const [filterTrigger, setFilterTrigger] = useState(0);
 
-    const handleGlobalDateChange = (e: Event) => {
-      const customEvent = e as CustomEvent<string>;
-      setGlobalDateRange(customEvent.detail);
-    };
+  const handleApplyGraphFilter = (filterKey: string) => {
+    setHomeActiveFilter(filterKey);
+    setFilterTrigger((prev) => prev + 1);
+  };
 
-    window.addEventListener("globalDateRangeChanged", handleGlobalDateChange);
-    return () => {
-      window.removeEventListener("globalDateRangeChanged", handleGlobalDateChange);
-    };
-  }, []);
+  const handleApplyCustomFilter = () => {
+    if (!customStartDate || !customEndDate) return;
+    const filterKey = `custom:${customStartDate}:${customEndDate}`;
+    handleApplyGraphFilter(filterKey);
+    setShowCustomFilterSection4(false);
+    setShowCustomFilterSection5(false);
+  };
 
   // Auto-recalibrate when new data arrives (CSV upload processed, warehouse ETL complete)
   useEffect(() => {
@@ -197,33 +201,6 @@ export function Home() {
     };
   }, []);
 
-  // Map globalDateRange changes to local timeRange state
-  useEffect(() => {
-    if (globalDateRange === "today" || globalDateRange === "yesterday") {
-      setTimeRange("today");
-    } else if (globalDateRange === "last-7-days") {
-      setTimeRange("week");
-    } else if (globalDateRange === "last-30-days") {
-      setTimeRange("month");
-    } else if (globalDateRange === "last-12-months" || globalDateRange === "last-90-days") {
-      setTimeRange("custom");
-    } else if (globalDateRange === "custom") {
-      setTimeRange("custom");
-    }
-  }, [globalDateRange]);
-
-  const handleLocalTimeRangeChange = (localVal: string) => {
-    setTimeRange(localVal);
-    let targetRange = "last-7-days";
-    if (localVal === "today") targetRange = "today";
-    else if (localVal === "week") targetRange = "last-7-days";
-    else if (localVal === "month") targetRange = "last-30-days";
-    else if (localVal === "custom") targetRange = "custom";
-    setGlobalDateRange(targetRange);
-    localStorage.setItem("globalDateRange", targetRange);
-    window.dispatchEvent(new CustomEvent("globalDateRangeChanged", { detail: targetRange }));
-  };
-
   const toggleSuggestionExplanation = (id: number) => {
     setExpandedSuggestions(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
@@ -233,7 +210,7 @@ export function Home() {
   useEffect(() => {
     let active = true;
     setHomeLoading(true);
-    getHomeOverview(globalDateRange)
+    getHomeOverview(homeActiveFilter)
       .then((data) => {
         if (!active) return;
         setHomeOverview(data);
@@ -250,7 +227,7 @@ export function Home() {
     return () => {
       active = false;
     };
-  }, [globalDateRange, realtimeRefresh, manilaDateKey]);
+  }, [homeActiveFilter, filterTrigger, realtimeRefresh, manilaDateKey]);
 
   useEffect(() => {
     let active = true;
@@ -1053,10 +1030,6 @@ export function Home() {
 
       {/* SECTION 2 — PRIMARY KPI ROW */}
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
-        <div className="mb-3 flex items-center gap-2 text-xs md:text-sm text-[#223047] opacity-80">
-          <span>Selected-period KPIs from uploaded transaction data</span>
-          <InfoTooltip label="KPIs are the key numbers WOOF uses to summarize business performance for the selected date range." />
-        </div>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Total Revenue Today */}
           <div
@@ -1153,23 +1126,68 @@ export function Home() {
 
       {/* SECTION 4 — OMNICHANNEL REVENUE STREAM */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              <span className="inline-flex items-center gap-2">
-                Omnichannel Revenue Accumulation
-                <InfoTooltip label="Real-time revenue buildup across all sectors today. Omnichannel means WOOF combines sales from different channels such as POS, Shopee, TikTok, and PetHub." />
-              </span>
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div className="flex items-center gap-2 shrink-0">
+            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047] whitespace-nowrap">
+              Omnichannel Revenue Accumulation
             </h2>
+            <InfoTooltip label="Revenue buildup across channels. Omnichannel combines sales from POS, Shopee, TikTok Shop, and PetHub." />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* View Mode Toggle: Sectors vs Split Retail Platforms */}
-            <div className="flex items-center gap-1 bg-[#FFF2FA] border border-[#FFD9EC] p-0.5 rounded-lg text-xs">
+          {/* Recommended Time Range Filters (Identical to Section 5) */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { key: "matched", label: "Matched 1-Year (2025-2026)" },
+              { key: "all", label: "All-Time" },
+              { key: "last-90-days", label: "Last 90 Days" },
+              { key: "last-30-days", label: "Last 30 Days" },
+            ].map((item) => (
+              <Button
+                key={item.key}
+                size="sm"
+                variant={homeActiveFilter === item.key ? "default" : "outline"}
+                onClick={() => {
+                  setShowCustomFilterSection4(false);
+                  handleApplyGraphFilter(item.key);
+                }}
+                className={`text-xs transition-all ${
+                  homeActiveFilter === item.key
+                    ? "bg-[#F53799] hover:bg-[#D42A7D] text-white shadow-xs font-semibold"
+                    : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+                }`}
+              >
+                {item.label}
+              </Button>
+            ))}
+            <Button
+              size="sm"
+              variant={homeActiveFilter.startsWith("custom:") || showCustomFilterSection4 ? "default" : "outline"}
+              onClick={() => setShowCustomFilterSection4((prev) => !prev)}
+              className={`text-xs transition-all ${
+                homeActiveFilter.startsWith("custom:") || showCustomFilterSection4
+                  ? "bg-[#F53799] hover:bg-[#D42A7D] text-white shadow-xs font-semibold"
+                  : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5 mr-1" />
+              <span>
+                {homeActiveFilter.startsWith("custom:")
+                  ? `Custom (${homeActiveFilter.split(":")[1]} – ${homeActiveFilter.split(":")[2]})`
+                  : "Custom"}
+              </span>
+            </Button>
+          </div>
+        </div>
+
+        {/* View Mode Toolbar: Sectors vs Split Retail Platforms */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-[#FFD9EC]/60">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-[#223047]/70">Breakdown:</span>
+            <div className="inline-flex items-center bg-[#FFF2FA] border border-[#FFD9EC] p-0.5 rounded-lg text-xs">
               <button
                 type="button"
                 onClick={() => handleSetRetailSplitMode(false)}
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
                   !retailSplitMode
                     ? "bg-white text-[#223047] shadow-xs"
                     : "text-[#223047] opacity-70 hover:opacity-100"
@@ -1180,7 +1198,7 @@ export function Home() {
               <button
                 type="button"
                 onClick={() => handleSetRetailSplitMode(true)}
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
                   retailSplitMode
                     ? "bg-white text-[#223047] shadow-xs"
                     : "text-[#223047] opacity-70 hover:opacity-100"
@@ -1189,27 +1207,53 @@ export function Home() {
                 Distinguish Retail Platforms
               </button>
             </div>
-
-            {/* Time range buttons */}
-            <div className="flex flex-wrap gap-1.5">
-              {["Today", "Week", "Month", "Custom"].map((range) => (
-                <Button
-                  key={range}
-                  size="sm"
-                  variant={timeRange === range.toLowerCase() ? "default" : "outline"}
-                  onClick={() => handleLocalTimeRangeChange(range.toLowerCase())}
-                  className={
-                    timeRange === range.toLowerCase()
-                      ? "bg-[#F53799] hover:bg-[#D42A7D]"
-                      : "border-[#FFD9EC] hover:bg-[#FFF2FA]"
-                  }
-                >
-                  {range}
-                </Button>
-              ))}
-            </div>
           </div>
+          <span className="text-xs text-[#223047]/50 italic">
+            {!retailSplitMode
+              ? "Showing aggregated Cafe, Services, and Retail"
+              : "Splitting Retail into In-Store POS, Shopee, and TikTok Shop"}
+          </span>
         </div>
+
+        {showCustomFilterSection4 && (
+          <div className="flex flex-wrap items-center gap-2 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#D42A7D]">
+              <Calendar className="w-3.5 h-3.5 text-[#F53799]" />
+              <span>Select Custom Range:</span>
+            </div>
+            <input
+              type="date"
+              min="2020-01-01"
+              max="2026-12-31"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              className="h-8 rounded-lg border border-[#FFD9EC] bg-white px-2.5 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+            />
+            <span className="text-xs text-[#223047]/60 font-semibold">to</span>
+            <input
+              type="date"
+              min={customStartDate || "2020-01-01"}
+              max="2026-12-31"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              className="h-8 rounded-lg border border-[#FFD9EC] bg-white px-2.5 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+            />
+            <Button
+              size="sm"
+              onClick={handleApplyCustomFilter}
+              className="h-8 bg-[#F53799] hover:bg-[#D42A7D] text-white text-xs font-semibold px-3 shadow-xs"
+            >
+              Apply Filter
+            </Button>
+            <button
+              type="button"
+              onClick={() => setShowCustomFilterSection4(false)}
+              className="text-xs text-[#223047]/60 hover:text-[#223047] ml-1 px-2 py-1 rounded hover:bg-[#FFE5F4]"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         <div className="w-full h-[280px] md:h-[320px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -1241,8 +1285,37 @@ export function Home() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-              <XAxis dataKey="hour" stroke="#223047" style={{ fontSize: "12px" }} />
-              <YAxis stroke="#223047" style={{ fontSize: "12px" }} />
+              <XAxis
+                dataKey="hour"
+                stroke="#223047"
+                style={{ fontSize: "12px" }}
+                minTickGap={35}
+                tickFormatter={(val) => {
+                  if (!val) return "";
+                  if (typeof val === "string" && val.includes("-")) {
+                    const parts = val.split("-");
+                    if (parts.length === 3) {
+                      const d = new Date(`${val}T12:00:00Z`);
+                      if (!isNaN(d.getTime())) {
+                        return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                      }
+                    }
+                  }
+                  return String(val);
+                }}
+              />
+              <YAxis
+                stroke="#223047"
+                style={{ fontSize: "12px" }}
+                width={65}
+                tickFormatter={(value) => {
+                  const num = Number(value);
+                  if (!Number.isFinite(num) || num === 0) return "₱0";
+                  if (num >= 1000000) return `₱${(num / 1000000).toFixed(num % 1000000 === 0 ? 0 : 1)}M`;
+                  if (num >= 1000) return `₱${Math.round(num / 1000)}k`;
+                  return `₱${num}`;
+                }}
+              />
               <Tooltip content={<CustomOmnichannelTooltip />} />
               {visibleSeries.cafe && (
                 <Area
@@ -1544,38 +1617,130 @@ export function Home() {
         style={{ background: "linear-gradient(to right, #FFF7FB, #FFF2FA)" }}
       >
         <div className="flex-1">
-          <Badge variant="outline" className="text-xs mb-2">
-            WOOF Insight
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <Badge variant="outline" className="text-xs border-[#F53799]/40 text-[#D42A7D] bg-white font-semibold">
+              WOOF Insight
+            </Badge>
+            <Badge variant="outline" className="border-[#8B5CF6]/40 text-[#8B5CF6] bg-[#8B5CF6]/10 text-[10px] font-bold tracking-wide uppercase px-2 py-0.5">
+              GLM-4 Intelligence
+            </Badge>
+          </div>
           <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "{homeLoading ? "Loading live Home analytics..." : homeOverview?.insight || "Upload transaction data to activate live Home insights."}"
+            "{homeLoading ? "Synthesizing executive intelligence with GLM..." : homeOverview?.insight || "Upload transaction data to activate live Home insights."}"
           </p>
         </div>
         <img
           src={homeInsightImg.src}
-          alt="Home Insight"
+          alt="Home Insight Mascot"
           className="woof-mascot-motion w-24 h-24 md:w-32 md:h-32 object-contain flex-shrink-0 ml-6"
         />
       </div>
 
       {/* SECTION 5 — CHANNEL EQUILIBRIUM */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-5 md:space-y-7 mb-4 md:mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div className="flex items-center gap-2">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               Offline vs. Online Channel Balance
             </h2>
-            <InfoTooltip label="Fair comparison pulled from Supabase using TikTok Shop's exact start and end date window to match across POS and Shopee (same year, same period). Click any bar or channel badge to view detailed breakdown in Retail." />
+            <InfoTooltip label="Fair comparison matching channel revenue. When you click any filter button here, top KPI cards recalculate for this period." />
           </div>
-          <button
-            type="button"
-            onClick={() => router.push('/retail#retail-revenue-by-channel')}
-            className="inline-flex items-center gap-1.5 text-xs md:text-sm font-semibold text-[#D42A7D] hover:text-[#B01E64] transition-all group cursor-pointer self-start sm:self-auto px-3 py-1.5 rounded-xl hover:bg-[#FFF2FA] border border-transparent hover:border-[#FFD9EC]"
-          >
-            <span>View Retail Revenue by Channel</span>
-            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-          </button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Filter buttons */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { key: "matched", label: "Matched 1-Year (2025-2026)" },
+                { key: "all", label: "All-Time" },
+                { key: "last-90-days", label: "Last 90 Days" },
+                { key: "last-30-days", label: "Last 30 Days" },
+              ].map((item) => (
+                <Button
+                  key={item.key}
+                  size="sm"
+                  variant={homeActiveFilter === item.key ? "default" : "outline"}
+                  onClick={() => {
+                    setShowCustomFilterSection5(false);
+                    handleApplyGraphFilter(item.key);
+                  }}
+                  className={`text-xs transition-all ${
+                    homeActiveFilter === item.key
+                      ? "bg-[#D42A7D] hover:bg-[#B01E64] text-white shadow-xs font-semibold"
+                      : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+                  }`}
+                >
+                  {item.label}
+                </Button>
+              ))}
+              <Button
+                size="sm"
+                variant={homeActiveFilter.startsWith("custom:") || showCustomFilterSection5 ? "default" : "outline"}
+                onClick={() => setShowCustomFilterSection5((prev) => !prev)}
+                className={`text-xs transition-all ${
+                  homeActiveFilter.startsWith("custom:") || showCustomFilterSection5
+                    ? "bg-[#D42A7D] hover:bg-[#B01E64] text-white shadow-xs font-semibold"
+                    : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 mr-1" />
+                <span>
+                  {homeActiveFilter.startsWith("custom:")
+                    ? `Custom (${homeActiveFilter.split(":")[1]} – ${homeActiveFilter.split(":")[2]})`
+                    : "Custom"}
+                </span>
+              </Button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => router.push('/retail#retail-revenue-by-channel')}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#D42A7D] hover:text-[#B01E64] transition-all group cursor-pointer px-2.5 py-1.5 rounded-lg hover:bg-[#FFF2FA] border border-[#FFD9EC]"
+            >
+              <span>Retail Breakdown</span>
+              <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
+            </button>
+          </div>
         </div>
+
+        {showCustomFilterSection5 && (
+          <div className="flex flex-wrap items-center gap-2 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#D42A7D]">
+              <Calendar className="w-3.5 h-3.5 text-[#F53799]" />
+              <span>Select Custom Range:</span>
+            </div>
+            <input
+              type="date"
+              min="2020-01-01"
+              max="2026-12-31"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              className="h-8 rounded-lg border border-[#FFD9EC] bg-white px-2.5 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+            />
+            <span className="text-xs text-[#223047]/60 font-semibold">to</span>
+            <input
+              type="date"
+              min={customStartDate || "2020-01-01"}
+              max="2026-12-31"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              className="h-8 rounded-lg border border-[#FFD9EC] bg-white px-2.5 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#F53799]"
+            />
+            <Button
+              size="sm"
+              onClick={handleApplyCustomFilter}
+              className="h-8 bg-[#D42A7D] hover:bg-[#B01E64] text-white text-xs font-semibold px-3 shadow-xs"
+            >
+              Apply Filter
+            </Button>
+            <button
+              type="button"
+              onClick={() => setShowCustomFilterSection5(false)}
+              className="text-xs text-[#223047]/60 hover:text-[#223047] ml-1 px-2 py-1 rounded hover:bg-[#FFE5F4]"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         {separatedEquilibriumData.length === 0 && (
           <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
@@ -1604,7 +1769,11 @@ export function Home() {
                 interval={0}
                 stroke="#223047"
                 style={{ fontSize: "12px" }}
-                tickFormatter={(val) => `₱${Number(val).toLocaleString()}`}
+                tickFormatter={(val) => {
+                  const n = Number(val);
+                  if (n >= 1000000) return `₱${(n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1)}M`;
+                  return `₱${n.toLocaleString()}`;
+                }}
               />
               <YAxis
                 type="category"
