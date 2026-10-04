@@ -1626,16 +1626,11 @@ export class CsvService {
   }
 
   private async rollbackUpload(uploadId: string): Promise<void> {
-    const transactions = await this.transactionModel
-      .find({ csvUploadId: uploadId }, { transactionId: 1 })
-      .exec();
-    const transactionIds = Array.from(
-      new Set(transactions.map((t) => t.transactionId)),
-    );
-
-    if (transactionIds.length > 0) {
-      await this.etlService.deleteTransactions(transactionIds);
-    }
+    // Delete directly from Supabase fact table using the new column
+    await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .delete()
+      .eq('csv_upload_id', uploadId);
 
     await this.transactionModel.deleteMany({ csvUploadId: uploadId }).exec();
     await this.supabaseService.client
@@ -1645,19 +1640,16 @@ export class CsvService {
   }
 
   async deleteUpload(id: string): Promise<{ deleted: boolean }> {
-    const transactions = await this.transactionModel
-      .find({ csvUploadId: id }, { transactionId: 1 })
-      .exec();
-    const transactionIds = Array.from(
-      new Set(transactions.map((t) => t.transactionId)),
-    );
+    // Delete directly from Supabase fact table using the new column
+    await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .delete()
+      .eq('csv_upload_id', id);
 
-    if (transactionIds.length > 0) {
-      await this.etlService.deleteTransactions(transactionIds);
-    }
-
+    // Clear from staging DB and upload history
     await this.transactionModel.deleteMany({ csvUploadId: id }).exec();
     await this.supabaseService.client.from('csv_uploads').delete().eq('id', id);
+    
     return { deleted: true };
   }
 

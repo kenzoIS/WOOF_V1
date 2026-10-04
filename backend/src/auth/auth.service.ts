@@ -67,11 +67,11 @@ export class AuthService {
     const user = await this.findSupabaseUserByEmail(adminEmail);
     const twoFactor = this.getUserTwoFactor(user);
 
-    const { data, error } =
-      await this.supabaseService.client.auth.signInWithPassword({
-        email: adminEmail,
-        password,
-      });
+    const authClient = this.supabaseService.createAuthClient();
+    const { data, error } = await authClient.auth.signInWithPassword({
+      email: adminEmail,
+      password,
+    });
 
     if (error || !data.session) {
       throw new UnauthorizedException('Invalid dashboard credentials');
@@ -150,11 +150,11 @@ export class AuthService {
 
     await this.ensureSupabaseAdminUser(adminEmail);
 
-    const { error: signInError } =
-      await this.supabaseService.client.auth.signInWithPassword({
-        email: adminEmail,
-        password: currentPassword,
-      });
+    const authClient = this.supabaseService.createAuthClient();
+    const { error: signInError } = await authClient.auth.signInWithPassword({
+      email: adminEmail,
+      password: currentPassword,
+    });
 
     if (signInError) {
       throw new UnauthorizedException('Current password is incorrect');

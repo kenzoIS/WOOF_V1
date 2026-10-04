@@ -29,4 +29,12 @@ export class SupabaseService {
     }
     return this.supabaseClient;
   }
+
+  public createAuthClient(): SupabaseClient {
+    const supabaseUrl = this.configService.get<string>('SUPABASE_URL');
+    const supabaseKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+    return createClient(supabaseUrl!, supabaseKey!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
 }

@@ -334,6 +334,7 @@ export class EtlService {
           refunds: Number(t.refunds || 0),
           discount_depth: discountDepth,
           payment_type: t.paymentType || 'Cash',
+          csv_upload_id: (t as any).csvUploadId || null,
         });
       }
 
