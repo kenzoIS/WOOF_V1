@@ -30,6 +30,9 @@ function getRequestMethod(options?: RequestInit) {
 }
 
 function shouldCacheRequest(path: string, options?: RequestInit) {
+  if (path.startsWith('/analytics/home')) {
+    return false;
+  }
   return getRequestMethod(options) === 'GET' && !path.includes('forceRefresh=true');
 }
 
@@ -805,7 +808,9 @@ export async function getRootCauseAnalysis(
 }
 
 export async function getHomeOverview(range?: string) {
-  const query = range ? `?range=${encodeURIComponent(range)}` : '';
+  const query = range
+    ? `?range=${encodeURIComponent(range)}&forceRefresh=true&_t=${Date.now()}`
+    : `?forceRefresh=true&_t=${Date.now()}`;
   return fetchApi(`/analytics/home${query}`);
 }
 

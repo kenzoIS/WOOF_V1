@@ -1104,38 +1104,54 @@ export class CsvService {
       grossSales - discount,
     );
 
-    return {
-      date:
-        this.parseDate(
-          this.getValue(row, [
-            'transaction date',
-            'transaction_date',
-            'date',
-            'order date',
-            'booking date',
-            'appointment date',
-            'service date',
-            'created at',
-            'created time',
-            'completed at',
-            'paid time',
-            'timestamp',
-          ]),
-        ) || options.fallbackDate,
-      transactionId:
+    const transactionId =
+      this.getValue(row, [
+        'transaction id',
+        'transaction_id',
+        'source id',
+        'source_id',
+        'order id',
+        'booking id',
+        'invoice id',
+        'receipt id',
+        'reference id',
+        'reference no',
+        'id',
+      ]) || options.fallbackId;
+
+    const parsedDate =
+      this.parseDate(
         this.getValue(row, [
-          'transaction id',
-          'transaction_id',
-          'source id',
-          'source_id',
-          'order id',
-          'booking id',
-          'invoice id',
-          'receipt id',
-          'reference id',
-          'reference no',
-          'id',
-        ]) || options.fallbackId,
+          'order creation date',
+          'order_creation_date',
+          'order paid time',
+          'order_paid_time',
+          'order complete time',
+          'order_complete_time',
+          'transaction date',
+          'transaction_date',
+          'date',
+          'order date',
+          'order_date',
+          'booking date',
+          'booking_date',
+          'appointment date',
+          'service date',
+          'created at',
+          'created_at',
+          'created time',
+          'created_time',
+          'completed at',
+          'paid time',
+          'timestamp',
+        ]),
+      ) ||
+      this.extractDateFromTransactionId(transactionId) ||
+      options.fallbackDate;
+
+    return {
+      date: parsedDate,
+      transactionId,
       productName,
       sku: this.getValue(row, [
         'sku',
@@ -1348,6 +1364,26 @@ export class CsvService {
     );
   }
 
+  private extractDateFromTransactionId(id: string): Date | null {
+    if (!id || typeof id !== 'string') return null;
+    const match = id.trim().match(/^(\d{2})(\d{2})(\d{2})/);
+    if (!match) return null;
+    const year = 2000 + Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (
+      year >= 2020 &&
+      year <= 2035 &&
+      month >= 1 &&
+      month <= 12 &&
+      day >= 1 &&
+      day <= 31
+    ) {
+      return new Date(Date.UTC(year, month - 1, day, 4, 0, 0, 0));
+    }
+    return null;
+  }
+
   private cleanCell(value: unknown): string {
     return String(value ?? '')
       .replace(/\t/g, '')
@@ -1459,22 +1495,24 @@ export class CsvService {
           this.toNumber(row['Original Price'], 0),
         );
         const lineGross = dealPrice * quantity;
-        const lineNetSales = this.toNumber(
-          row['Total Buyer Payment'],
-          lineGross - this.toNumber(row['Total Discount(PHP)'], 0),
-        );
-        const totalDiscount = Math.max(0, lineGross - lineNetSales);
+        const orderId = this.cleanCell(row['Order ID']);
+        const rawDate =
+          row['Order Creation Date'] ?? row['Order Paid Time'] ?? '';
+        const date =
+          this.parseDate(String(rawDate)) ||
+          this.extractDateFromTransactionId(orderId) ||
+          new Date();
 
-        let date: Date;
-        try {
-          const dateStr =
-            this.cleanCell(row['Order Creation Date']) ||
-            this.cleanCell(row['Order Paid Time']);
-          date = new Date(dateStr);
-          if (isNaN(date.getTime())) date = new Date();
-        } catch {
-          date = new Date();
-        }
+        const totalDiscountFromCol = this.toNumber(
+          row['Total Discount(PHP)'],
+          0,
+        );
+        const buyerPayment = this.toNumber(row['Total Buyer Payment'], 0);
+        const lineNetSales =
+          buyerPayment > 0 && buyerPayment <= lineGross
+            ? buyerPayment
+            : Math.max(0, lineGross - totalDiscountFromCol);
+        const totalDiscount = Math.max(0, lineGross - lineNetSales);
 
         return {
           date,
