@@ -561,6 +561,11 @@ export class AnalyticsController {
     return this.analyticsService.getFeedbackPromotions(status, type);
   }
 
+  @Post('prescriptions/draft')
+  async savePrescriptionDraft(@Body() dto: any) {
+    return this.analyticsService.savePrescriptionDraft(dto);
+  }
+
   @Get('feedback/summary')
   async getFeedbackSummary() {
     return this.analyticsService.getFeedbackSummary();
@@ -594,5 +599,10 @@ export class AnalyticsController {
   @Post('feedback/recalibrate')
   async recalibrateModels(@Body() dto: { source?: string; reason?: string }) {
     return this.analyticsService.recalibrateModels(dto?.source, dto?.reason);
+  }
+
+  @Get('feedback/recalibration-events')
+  async getRecalibrationEvents(@Query('status') status?: string) {
+    return this.analyticsService.getRecalibrationEvents(status);
   }
 }

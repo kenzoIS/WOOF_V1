@@ -11,6 +11,7 @@ import { CommonModule } from '../common/common.module';
 import { AuditModule } from '../audit/audit.module';
 import { ActivationModule } from '../activation/activation.module';
 import { LlmModule } from '../llm/llm.module';
+import { RecalibrationService } from './recalibration.service';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { LlmModule } from '../llm/llm.module';
     ]),
   ],
   controllers: [AnalyticsController],
-  providers: [AnalyticsService],
+  providers: [AnalyticsService, RecalibrationService],
   exports: [AnalyticsService],
 })
 export class AnalyticsModule {}

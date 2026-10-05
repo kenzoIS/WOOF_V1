@@ -8,7 +8,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { BundleArchive, BundlePlanningContext, createBundleArchive, DataRange as ApiDataRange, deployPrescription, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getStrategicProximity, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
+import { BundleArchive, BundlePlanningContext, createBundleArchive, DataRange as ApiDataRange, deployPrescription, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getStrategicProximity, getTrafficOptimizer, getQueueRecommendation, savePrescriptionDraft, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import { InfoTooltip } from "../components/InfoTooltip";
@@ -1583,6 +1583,14 @@ export function AISimulation() {
 
   const bundlesPerPage = 5;
   const totalBundlePages = Math.ceil(filteredBundlePredictions.length / bundlesPerPage) || 1;
+  const visibleBundlePages = useMemo(() => {
+    const windowSize = Math.min(totalBundlePages, 7);
+    const startPage = Math.max(
+      1,
+      Math.min(bundlePage - 3, totalBundlePages - windowSize + 1),
+    );
+    return Array.from({ length: windowSize }, (_, index) => startPage + index);
+  }, [bundlePage, totalBundlePages]);
 
   const bundlePredictions = useMemo(() => {
     const startIndex = (bundlePage - 1) * bundlesPerPage;
@@ -1592,6 +1600,12 @@ export function AISimulation() {
   useEffect(() => {
     setBundlePage(1);
   }, [bundleCategoryFilter, bundleOpportunityMode, onlySignificant, debouncedDataTime, selectedHeaderRange]);
+
+  // A refreshed result set can have fewer pages than the previous one.
+  // Keep both the cards and the pagination controls on a valid page.
+  useEffect(() => {
+    setBundlePage((currentPage) => Math.min(currentPage, totalBundlePages));
+  }, [totalBundlePages]);
 
   useEffect(() => {
     if (
@@ -2443,6 +2457,26 @@ export function AISimulation() {
       };
     });
   }, [trafficOptimizerTime, todayContext?.dayOfWeek, todayContext?.hourlyForecast, todayContext?.sectorBreakdown, todayContext?.targetHour]);
+
+  // Each visible staffing card is a reviewable prescription before the owner
+  // accepts it. Its identity exactly matches the later deploy action.
+  useEffect(() => {
+    if (!dynamicHourlyStaffingPlan.length) return;
+    void Promise.all(dynamicHourlyStaffingPlan.map((plan) => {
+      const sectorName = String(plan.sector || "Operations");
+      return savePrescriptionDraft({
+        category: "staffing",
+        sourceType: "traffic_staffing_recommendation",
+        sourceId: `staffing-${sectorName}-${activeReferenceDate}-${debouncedTrafficOptimizerTime}`,
+        title: `${sectorName} Staffing Recommendation - ${activeReferenceDate} ${formatHour(debouncedTrafficOptimizerTime)}`,
+        sector: sectorName,
+        targetTime: `${activeReferenceDate} ${formatHour(debouncedTrafficOptimizerTime)}`,
+        mechanic: plan.action || "Review staffing allocation",
+        confidence: "Generated",
+        metadata: { recommendedPlan: plan, activeReferenceDate, selectedHour: debouncedTrafficOptimizerTime },
+      });
+    })).catch((error) => console.warn("Failed to sync staffing prescription drafts:", error));
+  }, [activeReferenceDate, debouncedTrafficOptimizerTime, dynamicHourlyStaffingPlan]);
 
   // Dynamic total scheduled staff count for the selected hour (matches Staffing Recommendation sector cards sum)
   const totalDynamicScheduledStaff = useMemo(() => {
@@ -4053,20 +4087,14 @@ export function AISimulation() {
                     Previous
                   </Button>
                   <div className="flex items-center gap-1">
-                    {Array.from({ length: Math.min(totalBundlePages, 7) }, (_, i) => {
-                      let pageNum = i + 1;
-                      if (totalBundlePages > 7) {
-                        if (bundlePage > 4) {
-                          pageNum = bundlePage - 3 + i;
-                          if (pageNum > totalBundlePages) {
-                            pageNum = totalBundlePages - 6 + i;
-                          }
-                        }
-                      }
+                    {visibleBundlePages.map((pageNum) => {
                       return (
                         <button
                           key={pageNum}
+                          type="button"
                           onClick={() => setBundlePage(pageNum)}
+                          aria-label={`Go to bundle opportunities page ${pageNum}`}
+                          aria-current={bundlePage === pageNum ? "page" : undefined}
                           className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
                             bundlePage === pageNum
                               ? "bg-[#F53799] text-white shadow-sm"

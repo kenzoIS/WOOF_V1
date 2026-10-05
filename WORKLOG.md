@@ -2,6 +2,43 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-10-06 - Draft-First Prescription Lifecycle Alignment
+
+### Requested
+- Make every system-generated recommendation visible in its feature UI persist as a `prescription_drafts` row before owner deployment, then promote that same identity into `active_prescriptions`.
+
+### Backend Changes
+- Added `POST /api/analytics/prescriptions/draft` and a duplicate-safe `savePrescriptionDraft` service path.
+- Deployment now guarantees that a matching draft exists before it writes the active prescription, while preserving a pre-existing draft's deployment/review status.
+- Rewired cross-sell draft syncing to use the same union of association rules and bundle candidates rendered by AI-Predicted Bundle Opportunities, including cached results.
+- Added Happy Hour draft creation when the quiet-period recommendation is generated. Activation promotes the same stable `dynamic_promo` draft identity and completion also marks its linked physical promo completed.
+- Kept campaign draft/activation handling intact; campaign generation already writes a draft before approval/queue/publish promotes it.
+
+### Frontend Changes
+- Staffing Recommendation cards now persist deterministic staffing drafts when the cards are generated. The existing Accept Recommendation action uses the exact same source identity.
+
+### Validation
+- Passed: backend `npm run build`.
+- Passed: analytics and traffic optimizer test suites — 17 tests.
+- Passed: frontend `npm run build` and type checking.
+- Passed: `git diff --check`.
+
+## 2026-10-06 - Feedback Recalibration Loop
+
+### Requested
+- Implement the feedback-to-model recalibration workflow documented in `FEEDBACK_PRESCRIPTION_HANDOFF.md`.
+
+### Backend Changes
+- Added `prescription_recalibration_events`, a durable, idempotent queue keyed by completed `recommendation_feedback.id`.
+- Added category/source-type routing for bundle, staffing/traffic, dynamic promo, PetHub/activation campaign, forecast, and general recommendations.
+- Feedback completion now queues a learning signal only after completed feedback history is durably written; a queue or model failure never rolls back the completed prescription.
+- Bundle, staffing/traffic, and forecast handlers invalidate the relevant model artefacts for the next generation. Dynamic promo, PetHub campaign, and general signals remain `pending` as auditable training examples until their model-specific workers are available.
+- Added `GET /api/analytics/feedback/recalibration-events?status=pending|processed|failed` for audit visibility and a five-minute worker for immediately processable pending events.
+
+### Validation
+- Passed: `npm run build` in `backend`.
+- Pending deployment step: apply `backend/database/migrations/20261006_prescription_recalibration_events.sql` through the Supabase migration workflow.
+
 ## 2026-10-05 - Feedback Prescription Handoff And Duplicate-Safe Draft Sync
 
 ### Requested

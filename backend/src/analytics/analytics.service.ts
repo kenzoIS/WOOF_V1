@@ -22,6 +22,7 @@ import { AuditService } from '../audit/audit.service';
 import { AwsService } from '../aws/aws.service';
 import type { ActivationService } from '../activation/activation.service';
 import { LlmService } from '../llm/llm.service';
+import { RecalibrationService } from './recalibration.service';
 
 /**
  * Forecasting limitations for the current capstone implementation:
@@ -192,6 +193,7 @@ export class AnalyticsService {
     private readonly activationService?: ActivationService,
     @Optional()
     private readonly llmService?: LlmService,
+    private readonly recalibrationService?: RecalibrationService,
   ) {}
 
   private aggregateWithDiskUse<T = any>(pipeline: any[]) {
@@ -1737,7 +1739,7 @@ export class AnalyticsService {
         const rules = Array.isArray(cachedResult.rules)
           ? cachedResult.rules
           : [];
-        return {
+        const cachedPayload = {
           ...cachedResult,
           rules,
           thresholds,
@@ -1749,6 +1751,16 @@ export class AnalyticsService {
             this.groupRulesBySector(rules),
           computedAt: cached.computedAt,
         };
+        this.syncBundleOpportunityDrafts(
+          [
+            ...(Array.isArray(cachedPayload.rules) ? cachedPayload.rules : []),
+            ...(Array.isArray(cachedPayload.bundleCandidates) ? cachedPayload.bundleCandidates : []),
+          ],
+          options,
+        ).catch((error) =>
+          this.logger.warn(`Failed to sync cached bundle drafts: ${this.errorMessage(error)}`),
+        );
+        return cachedPayload;
       }
     }
 
@@ -2055,6 +2067,16 @@ export class AnalyticsService {
         cleaned_items: payload.cleanedItems,
         sector_breakdown: payload.sectorBreakdown,
       });
+
+      // The Bundle Simulator renders both established association rules and
+      // candidate opportunities. Persist the same complete, de-duplicated
+      // list as deployable drafts rather than only the candidate subset.
+      this.syncBundleOpportunityDrafts(
+        [...rules, ...bundleCandidates],
+        options,
+      ).catch((syncError) =>
+        this.logger.warn(`Failed to sync bundle opportunity drafts: ${this.errorMessage(syncError)}`),
+      );
 
       // Archive cross-sell results to AWS S3 Data Lake (fire-and-forget)
       this.awsService
@@ -4199,12 +4221,6 @@ export class AnalyticsService {
         (Number(b.anchorSupport) || 0) - (Number(a.anchorSupport) || 0),
     );
 
-    this.syncBundleOpportunityDrafts(bundleCandidates, options).catch((error) =>
-      this.logger.warn(
-        `Failed to sync bundle opportunity drafts: ${this.errorMessage(error)}`,
-      ),
-    );
-
     return {
       ...result,
       bundleCandidates,
@@ -4256,7 +4272,7 @@ export class AnalyticsService {
             ? `${discount}% bundle discount`
             : 'Bundle discount',
         confidence: Number.isFinite(confidence)
-          ? `${Math.round(confidence)}%`
+          ? `${Math.round(confidence <= 1 ? confidence * 100 : confidence)}%`
           : 'N/A',
         status: 'pending',
         generated_by: 'system',
@@ -4459,6 +4475,17 @@ export class AnalyticsService {
       throw new BadRequestException('Prescription title is required.');
     }
 
+    // A deployment always promotes the exact draft identity. If an older UI
+    // path did not pre-save the generated recommendation, create the draft
+    // first instead of allowing an orphan active prescription.
+    await this.savePrescriptionDraft({
+      ...dto,
+      category,
+      sourceType,
+      sourceId,
+      title,
+    });
+
     const payload = {
       category,
       prescription_key: `${sourceType}:${sourceId}`,
@@ -4519,6 +4546,66 @@ export class AnalyticsService {
       'general',
     ]);
     return allowed.has(normalized) ? normalized : 'general';
+  }
+
+  async savePrescriptionDraft(dto: any): Promise<any> {
+    const now = new Date().toISOString();
+    const category = this.normalizePrescriptionCategory(dto?.category);
+    const sourceType = String(dto?.sourceType || category || 'system').trim();
+    const sourceId = String(dto?.sourceId || dto?.id || `${category}-${Date.now()}`).trim();
+    const prescriptionKey = `${sourceType}:${sourceId}`;
+    const { data: existing, error: lookupError } = await this.supabaseService.client
+      .from('prescription_drafts')
+      .select('*')
+      .eq('prescription_key', prescriptionKey)
+      .maybeSingle();
+    if (lookupError) {
+      if (this.isMissingSupabaseTableError(lookupError)) {
+        this.logger.warn('prescription_drafts is unavailable; continuing with the active-prescription fallback.');
+        return null;
+      }
+      throw new Error(`Failed to find prescription draft: ${lookupError.message}`);
+    }
+
+    if (existing) {
+      const { data, error } = await this.supabaseService.client
+        .from('prescription_drafts')
+        .update({ generated_at: now, updated_at: now })
+        .eq('id', existing.id)
+        .select()
+        .single();
+      if (error) throw new Error(`Failed to refresh prescription draft: ${error.message}`);
+      return data;
+    }
+
+    const payload = {
+      category,
+      prescription_key: prescriptionKey,
+      source_type: sourceType,
+      source_id: sourceId,
+      title: String(dto?.title || 'WOOF Prescription'),
+      description: dto?.description ? String(dto.description) : null,
+      sector: dto?.sector ? String(dto.sector) : 'General',
+      target_time: dto?.targetTime ? String(dto.targetTime) : 'Operational window',
+      mechanic: dto?.mechanic || dto?.discount ? String(dto.mechanic || dto.discount) : null,
+      confidence: dto?.confidence ? String(dto.confidence) : null,
+      status: 'pending',
+      generated_by: dto?.generatedBy ? String(dto.generatedBy) : 'system',
+      metadata: dto?.metadata && typeof dto.metadata === 'object' ? dto.metadata : {},
+      generated_at: now,
+      created_at: now,
+      updated_at: now,
+    };
+    const { data, error } = await this.supabaseService.client
+      .from('prescription_drafts')
+      .insert(payload)
+      .select()
+      .single();
+    if (error) {
+      if (this.isMissingSupabaseTableError(error)) return null;
+      throw new Error(`Failed to create prescription draft: ${error.message}`);
+    }
+    return data;
   }
 
   private async upsertPrescriptionDraft(payload: Record<string, any>) {
@@ -5610,6 +5697,25 @@ export class AnalyticsService {
       targetDayOfWeek: mlResult?.targetDayOfWeek ?? -1,
       recommendedItems: mlResult?.recommendedItems || [],
     };
+
+    // Save the generated recommendation before an owner decides whether to
+    // activate it. The same stable key is promoted by activateHappyHour.
+    const happyHourSourceId = `happy-hour-${finalResult.targetDate}-${finalResult.targetHour}`;
+    try {
+      await this.savePrescriptionDraft({
+        category: 'happy_hour',
+        sourceType: 'dynamic_promo',
+        sourceId: happyHourSourceId,
+        title: `Cafe Happy Hour - ${finalResult.targetDate} @ ${finalResult.targetHour}:00`,
+        sector: 'Cafe',
+        targetTime: `${finalResult.targetHour}:00`,
+        mechanic: 'Review recommended quiet-period promotion',
+        confidence: `${Math.round(finalResult.probabilityScore * 100)}%`,
+        metadata: { ...finalResult, happyHourSourceId },
+      });
+    } catch (error) {
+      this.logger.warn(`Failed to save Happy Hour prescription draft: ${this.errorMessage(error)}`);
+    }
     
     this.cachedQuietPeriod = finalResult;
     this.cachedQuietPeriodDate = todayManila;
@@ -5810,10 +5916,11 @@ export class AnalyticsService {
     this.generateHappyHourCampaignDraft(items, targetDate, targetHour, probabilityScore)
       .catch(err => this.logger.error(`[HappyHour→Campaign] Failed to generate campaign draft: ${err.message}`));
 
+    const happyHourSourceId = `happy-hour-${targetDate}-${targetHour}`;
     this.deployPrescription({
       category: 'happy_hour',
       sourceType: 'dynamic_promo',
-      sourceId: data.id,
+      sourceId: happyHourSourceId,
       title: `Cafe Happy Hour - ${targetDate} @ ${targetHour}:00`,
       sector: 'Cafe',
       targetTime: `${targetHour}:00`,
@@ -5824,6 +5931,7 @@ export class AnalyticsService {
       confidence: probabilityScore ? `${Math.round(probabilityScore * 100)}%` : 'N/A',
       metadata: {
         dynamicPromoId: data.id,
+        happyHourSourceId,
         targetDate,
         targetHour,
         items,
@@ -10777,14 +10885,9 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       .uploadFeedbackArchive(updatedRow?.type || 'general', s3Payload)
       .catch((err) => console.warn(`S3 feedback archive failed: ${err}`));
 
-    // 3. If negative feedback ('not-helpful'), trigger model recalibration
+    // Completion, rather than a provisional feedback click, is the learning
+    // boundary. endFeedbackPromotion persists and routes the durable signal.
     let recalibrationResult: any = null;
-    if (feedbackValue === 'not-helpful') {
-      recalibrationResult = await this.recalibrateModels(
-        'negative_feedback_trigger',
-        `Automatic model recalibration triggered by negative feedback on "${updatedRow?.title || id}"`,
-      );
-    }
 
     if (dto?.endPromotion) {
       const ended = await this.endFeedbackPromotion(id, {
@@ -10794,11 +10897,12 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       if (ended?.promotion) {
         updatedRow = ended.promotion;
       }
+      recalibrationResult = ended?.recalibration || null;
     }
 
     return {
       promotion: updatedRow,
-      recalibrated: feedbackValue === 'not-helpful',
+      recalibrated: Boolean(recalibrationResult),
       recalibration: recalibrationResult,
     };
   }
@@ -10880,6 +10984,32 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       row = rowWithSourceResult || row;
     }
 
+    // Recalibration is best-effort: a completed history row must survive a
+    // model or queue outage and can be replayed from the durable feedback row.
+    let recalibration: any = null;
+    if (row?.id && payload.feedback && this.recalibrationService) {
+      try {
+        recalibration = await this.recalibrationService.enqueueCompletedFeedback({
+          feedbackId: row.id,
+          category: target.category || target.type,
+          sourceType: target.sourceType,
+          sourceId: target.sourceId || target.id,
+          feedback: payload.feedback,
+          notes: payload.feedback_notes,
+          metadata: {
+            prescriptionTitle: target.title,
+            sector: target.sector,
+            completedAt: now,
+          },
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Completed feedback ${row.id} was saved but could not be queued for recalibration: ${this.errorMessage(error)}`,
+        );
+        recalibration = { status: 'pending', processing: 'unavailable' };
+      }
+    }
+
     return {
       promotion: row
         ? this.mapFeedbackPromotion(row)
@@ -10894,6 +11024,7 @@ Active Recommendations: ${suggestions.length} actions pending.`,
             },
           },
       sourceResult,
+      recalibration,
     };
   }
 
@@ -11153,6 +11284,11 @@ Active Recommendations: ${suggestions.length} actions pending.`,
     return recalibrationPayload;
   }
 
+  async getRecalibrationEvents(status?: string): Promise<any[]> {
+    if (!this.recalibrationService) return [];
+    return this.recalibrationService.listEvents(status);
+  }
+
   async getFeedbackSummary(): Promise<any> {
     const promotions = await this.getFeedbackPromotions();
     const completed = promotions.filter((p) => p.status === 'completed');
@@ -11273,7 +11409,7 @@ Active Recommendations: ${suggestions.length} actions pending.`,
 
     try {
       if (promotion.sourceType === 'active_prescription') {
-        const { error } = await this.supabaseService.client
+        const { data: completedPrescription, error } = await this.supabaseService.client
           .from('active_prescriptions')
           .update({
             status: 'completed',
@@ -11281,7 +11417,9 @@ Active Recommendations: ${suggestions.length} actions pending.`,
             ended_at: now,
             updated_at: now,
           })
-          .eq('id', sourceId);
+          .eq('id', sourceId)
+          .select('metadata')
+          .maybeSingle();
 
         if (error) {
           return {
@@ -11297,6 +11435,17 @@ Active Recommendations: ${suggestions.length} actions pending.`,
             promotion,
             feedback,
           );
+        }
+
+        const dynamicPromoId = completedPrescription?.metadata?.dynamicPromoId;
+        if (dynamicPromoId) {
+          const { error: promoError } = await this.supabaseService.client
+            .from('dynamic_promos')
+            .update({ status: 'completed', updated_at: now })
+            .eq('id', dynamicPromoId);
+          if (promoError && !this.isMissingSupabaseTableError(promoError)) {
+            this.logger.warn(`Failed to complete dynamic promo ${dynamicPromoId}: ${promoError.message}`);
+          }
         }
 
         return {

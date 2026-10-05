@@ -875,6 +875,14 @@ export async function getCrossSellBundles(params?: CrossSellQuery) {
   return fetchApi(`/analytics/cross-sell/bundles${query}`);
 }
 
+export async function savePrescriptionDraft(dto: Record<string, unknown>) {
+  return fetchApi('/analytics/prescriptions/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
 export async function createCampaignDraft(dto: {
   sourceType?: 'bundle_recommendation';
   bundleItems?: string[];
