@@ -1,3 +1,6 @@
+import { OperationsWhatIf } from "../components/simulation/OperationsWhatIf";
+import { InsightText } from "../components/InsightText";
+import { WoofInsight } from "../components/WoofInsight";
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { FlaskConical, Sparkles, TrendingUp, Target, Network, Map as MapIcon, Zap, HelpCircle, Info, Tag, ShoppingBag, Megaphone, Search, Users, CalendarDays, CalendarCheck2, CloudSun, CloudRain, Thermometer, AlertTriangle, CheckCircle2, Archive, RotateCcw, Trash2, PackagePlus, ThumbsUp, ThumbsDown, RefreshCw } from "lucide-react";
@@ -622,6 +625,7 @@ export function AISimulation() {
     { id: "bundle-simulator", label: "Bundle Simulator", icon: Sparkles },
     { id: "pricing-lab", label: "Pricing Laboratory", icon: TrendingUp },
     { id: "traffic-optimizer", label: "Traffic Optimizer", icon: MapIcon },
+    { id: "operations-what-if", label: "Operations What-If", icon: Users },
     { id: "scenario-builder", label: "Scenario Builder", icon: FlaskConical },
     { id: "activation-layer", label: "Activation Layer", icon: Megaphone },
   ];
@@ -637,6 +641,8 @@ export function AISimulation() {
       "bundle-simulator": "bundle-simulator",
       pricing: "pricing-lab",
       "pricing-lab": "pricing-lab",
+      "operations-what-if": "operations-what-if",
+      "what-if": "operations-what-if",
       scenario: "scenario-builder",
       "scenario-builder": "scenario-builder",
       activation: "activation-layer",
@@ -2910,7 +2916,7 @@ export function AISimulation() {
   ]);
 
   return (
-    <div className="space-y-6 md:space-y-8 lg:space-y-12">
+    <div className={activeTab === "operations-what-if" ? "space-y-4" : "space-y-6 md:space-y-8 lg:space-y-12"}>
       {/* PAGE HEADER */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-3 md:gap-4">
         <div className="flex-1">
@@ -2937,14 +2943,17 @@ export function AISimulation() {
           <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-3 md:px-4 py-1 text-xs md:text-sm">
             AI Laboratory
           </Badge>
+          {activeTab !== "operations-what-if" && (
           <Button onClick={handleRunSimulation} className="bg-[#F53799] hover:bg-[#D42A7D] gap-2 text-sm md:text-base">
             <FlaskConical className="w-4 h-4" />
             <span className="hidden sm:inline">Run Simulation</span>
             <span className="sm:hidden">Run</span>
           </Button>
+          )}
         </div>
       </div>
 
+      {activeTab !== "operations-what-if" && (<>
       {/* KPI ROW */}
       <TooltipProvider>
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
@@ -3040,6 +3049,7 @@ export function AISimulation() {
         </div>
       </TooltipProvider>
 
+      </>)}
       {/* TAB NAVIGATION */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-2 flex flex-wrap gap-2">
         {tabs.map((tab) => (
@@ -3058,6 +3068,7 @@ export function AISimulation() {
       </div>
 
       {/* TAB CONTENT */}
+      {activeTab === "operations-what-if" && <OperationsWhatIf />}
       {activeTab === "bundle-simulator" && (
         <div className="space-y-4 md:space-y-6 lg:space-y-8">
           {(crossSellLoading || crossSellError || crossSellData?.message) && (
@@ -4582,11 +4593,10 @@ export function AISimulation() {
                       WOOF Insight
                     </Badge>
                   </div>
-                  <p className="text-xs md:text-sm text-[#223047] opacity-80 italic" style={{ lineHeight: "1.6" }}>
-                    {proximityRecommendations.length > 0
-                      ? `${proximityRecommendations.length} retail shelf placement recommendations are active across ${totalProximityPages} pages, synthesized from POS in-store transactions and e-commerce marketplace patterns (Shopee & TikTok Shop). Every pair strictly recommends complementary physical retail goods for adjacent shelf and end-cap merchandising.`
-                      : `No placement recommendation is currently available for the selected date range; adjust thresholds to inspect weaker patterns.`}
-                  </p>
+                  <WoofInsight inline feature="prescriptive_explanation"
+                    prompt="Explain these retail shelf-placement recommendations in a concise WOOF Insight. Describe the evidence and suggested merchandising actions. Distinguish recommendations from measured outcomes; use only verified context."
+                    context={{ recommendations: proximityRecommendations, totalPages: totalProximityPages }}
+                  />
                 </div>
                 <img
                   src={aiMascot.src}
@@ -5675,7 +5685,7 @@ export function AISimulation() {
                     WOOF Insight
                   </Badge>
                   <span className="rounded-full bg-[#E6FAFF] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#08768A]">
-                    GLM AI
+                    GLM 5.3
                   </span>
                 </div>
                 {trafficGlmLoading ? (
@@ -5684,9 +5694,7 @@ export function AISimulation() {
                     <div className="h-3.5 w-3/4 animate-pulse rounded bg-[#FFD9EC]" />
                   </div>
                 ) : (
-                  <p className="text-sm md:text-base italic text-[#223047] opacity-80" style={{ lineHeight: "1.6" }}>
-                    "{trafficGlmInsight}"
-                  </p>
+                  <InsightText text={trafficGlmInsight} />
                 )}
               </div>
               <img

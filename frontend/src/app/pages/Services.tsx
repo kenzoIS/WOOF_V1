@@ -22,7 +22,7 @@ import {
   countDays,
 } from "../lib/dateRanges";
 import { getDashboardChartView, saveDashboardChartView } from "../lib/preferences";
-import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
+import { WoofInsight } from "../components/WoofInsight";
 import {
   LineChart,
   Line,
@@ -925,20 +925,6 @@ export function Services() {
         </Badge>
       </div>
 
-      {forecastRun && (
-        <GenAiExplanationCard
-          feature="descriptive_explanation"
-          title="Gen AI Services Performance Explanation"
-          prompt="Explain the observed Services performance using the verified historical data. Highlight the strongest services, booking or revenue patterns, and meaningful changes. Do not invent values or make unsupported forecasts."
-          context={{
-            sector: "Services",
-            kpis: forecastRun.kpis,
-            historical: forecastRun.historical?.slice(-14),
-            topItems: forecastRun.topItems?.slice(0, 8),
-            itemHistory: forecastRun.itemHistory?.slice(-20),
-          }}
-        />
-      )}
 
       <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
 
@@ -1577,11 +1563,22 @@ export function Services() {
               WOOF Insight
             </Badge>
           </div>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            {forecastRun?.topItems?.[0]
-              ? `${forecastRun.topItems[0].name} leads Services revenue at ₱${forecastRun.topItems[0].revenue.toLocaleString()} from ${forecastRun.topItems[0].orderCount} bookings.`
-              : "Upload Services history from POS or PetHub to populate service-level insights."}
-          </p>
+          {forecastRun ? (
+            <WoofInsight inline
+              feature="descriptive_explanation"
+              title="WOOF Insight"
+              prompt="Explain the observed Services performance using the verified historical data. Highlight the strongest services, booking or revenue patterns, and meaningful changes. Do not invent values or make unsupported forecasts."
+              context={{
+                sector: "Services",
+                kpis: forecastRun.kpis,
+                historical: forecastRun.historical?.slice(-14),
+                topItems: forecastRun.topItems?.slice(0, 8),
+                itemHistory: forecastRun.itemHistory?.slice(-20),
+              }}
+            />
+          ) : (
+            <p className="text-sm text-[#4A5568]">Upload transaction data to activate WOOF insights.</p>
+          )}
         </div>
         <img
           src={servicesMascot.src}

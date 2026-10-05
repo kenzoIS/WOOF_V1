@@ -1,3 +1,4 @@
+import { InsightText } from "../components/InsightText";
 import { useState, useEffect } from "react";
 import { MessageSquareHeart, TrendingUp, TrendingDown, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, Box, ChevronRight, RotateCcw } from "lucide-react";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
@@ -817,9 +818,7 @@ export function Feedback() {
             </Badge>
             {insightLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#F53799]" />}
           </div>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            {insightText || fallbackInsight}
-          </p>
+          <InsightText text={insightText || fallbackInsight} />
         </div>
         <img
           src={feedbackMascot.src}

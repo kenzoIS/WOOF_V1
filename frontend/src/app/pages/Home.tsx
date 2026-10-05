@@ -1,3 +1,4 @@
+import { InsightText } from "../components/InsightText";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
 import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun, Layers, Receipt, Sparkles, RotateCcw, Calendar } from "lucide-react";
@@ -1622,12 +1623,10 @@ export function Home() {
               WOOF Insight
             </Badge>
             <Badge variant="outline" className="border-[#8B5CF6]/40 text-[#8B5CF6] bg-[#8B5CF6]/10 text-[10px] font-bold tracking-wide uppercase px-2 py-0.5">
-              GLM-4 Intelligence
+              GLM 5.3
             </Badge>
           </div>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            "{homeLoading ? "Synthesizing executive intelligence with GLM..." : homeOverview?.insight || "Upload transaction data to activate live Home insights."}"
-          </p>
+          <InsightText text={homeLoading ? "Generating WOOF insight…" : homeOverview?.insight || "Upload transaction data to activate live Home insights."} />
         </div>
         <img
           src={homeInsightImg.src}

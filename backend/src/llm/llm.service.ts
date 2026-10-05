@@ -175,7 +175,9 @@ export class LlmService {
       home_executive_insight:
         'You are an executive AI revenue advisor for WOOF Happy Tails. Produce a punchy, 1-2 sentence executive business insight highlighting current channel strength, key revenue driver, and immediate strategic action. Be direct, authoritative, and data-backed. Never invent numbers.',
     };
-    return `${shared} ${featureGuidance[feature]}`;
+    const insightStyle = feature === 'business_assistant' ? '' :
+      'Use plain English for a store manager. Start with one short summary sentence. When presenting multiple metrics, products, or comparisons, use 2–4 bullet points with one point per line and keep each label, value, and unit together. Do not pack numerical lists into a sentence. Avoid jargon, repeated figures, and a repeated WOOF Insight heading. Separate any supported suggested action from observed facts. Do not infer consistent trends or causes from a short sample. Keep the response under 160 words unless the request requires a detailed report.';
+    return `${shared} ${featureGuidance[feature]} ${insightStyle}`;
   }
 
   private fallback(request: LlmRequest) {

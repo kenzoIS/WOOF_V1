@@ -12,7 +12,7 @@ import {
   Legend,
 } from "recharts";
 import { getDashboard, getForecast, getRetailForecastByChannel } from "../lib/api";
-import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
+import { WoofInsight } from "../components/WoofInsight";
 import { InfoTooltip } from "../components/InfoTooltip";
 
 export function ExecutiveOverview() {
@@ -214,9 +214,9 @@ export function ExecutiveOverview() {
       </div>
 
       {(cafeData || servicesData || retailData) && (
-        <GenAiExplanationCard
+        <WoofInsight
           feature="descriptive_explanation"
-          title="Gen AI Performance Explanation"
+          title="WOOF Insight"
           prompt="Explain the observed descriptive performance across Cafe, Services, and Retail. Highlight the strongest sectors, meaningful channel or revenue patterns, and any notable changes. Use only the verified values in the context."
           context={{
             cafe: cafeData?.kpis,

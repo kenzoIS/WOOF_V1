@@ -22,7 +22,7 @@ import {
   countDays,
 } from "../lib/dateRanges";
 import { getDashboardChartView, saveDashboardChartView } from "../lib/preferences";
-import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
+import { WoofInsight } from "../components/WoofInsight";
 import cafeMascot from "../../imports/no_bg_Cafe-2.png";
 import {
   LineChart,
@@ -1300,20 +1300,6 @@ export function Cafe() {
         </div>
       </div>
 
-      {forecastRun && (
-        <GenAiExplanationCard
-          feature="descriptive_explanation"
-          title="Gen AI Cafe Performance Explanation"
-          prompt="Explain the observed Cafe performance using the verified historical data. Highlight the strongest items, revenue or order patterns, and meaningful changes. Do not invent values or make unsupported forecasts."
-          context={{
-            sector: "Cafe",
-            kpis: forecastRun.kpis,
-            historical: forecastRun.historical?.slice(-14),
-            topItems: forecastRun.topItems?.slice(0, 8),
-            itemHistory: forecastRun.itemHistory?.slice(-20),
-          }}
-        />
-      )}
 
       {/* KPI ROW */}
       {/* KPI CARDS */}
@@ -2221,11 +2207,22 @@ export function Cafe() {
               WOOF Insight
             </Badge>
           </div>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            {forecastRun?.topItems?.[0]
-              ? `${forecastRun.topItems[0].name || "This item"} leads Cafe revenue at ${formatCurrency(forecastRun.topItems[0].revenue)} across ${formatNumber(forecastRun.topItems[0].quantity)} units.`
-              : "Upload Cafe history from POS or PetHub to populate item-level insights."}
-          </p>
+          {forecastRun ? (
+            <WoofInsight inline
+              feature="descriptive_explanation"
+              title="WOOF Insight"
+              prompt="Explain the observed Cafe performance using the verified historical data. Highlight the strongest items, revenue or order patterns, and meaningful changes. Do not invent values or make unsupported forecasts."
+              context={{
+                sector: "Cafe",
+                kpis: forecastRun.kpis,
+                historical: forecastRun.historical?.slice(-14),
+                topItems: forecastRun.topItems?.slice(0, 8),
+                itemHistory: forecastRun.itemHistory?.slice(-20),
+              }}
+            />
+          ) : (
+            <p className="text-sm text-[#4A5568]">Upload transaction data to activate WOOF insights.</p>
+          )}
         </div>
         <img
           src={cafeMascot.src}

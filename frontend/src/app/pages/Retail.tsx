@@ -7,7 +7,7 @@ import { Badge } from "../components/ui/badge";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { InfoTooltip } from "../components/InfoTooltip";
-import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
+import { WoofInsight } from "../components/WoofInsight";
 import { getDashboard, getRetailForecastByChannel } from "../lib/api";
 import {
   HISTORY_START_DATE,
@@ -786,21 +786,6 @@ export function Retail() {
         </Badge>
       </div>
 
-      {dashboardData && (
-        <GenAiExplanationCard
-          feature="descriptive_explanation"
-          title="Gen AI Retail Performance Explanation"
-          prompt="Explain the observed Retail performance using the verified dashboard and channel data. Highlight revenue, product, inventory, and channel patterns that are actually supported by the context. Do not invent values or recommendations."
-          context={{
-            sector: "Retail",
-            kpis: dashboardData.kpis,
-            topItems: dashboardData.topItems?.slice(0, 8),
-            channelBreakdown: dashboardData.channelBreakdown,
-            physicalHistory: channelForecast?.physical?.historical?.slice(-14),
-            onlineHistory: channelForecast?.online?.historical?.slice(-14),
-          }}
-        />
-      )}
 
       {/* KPI ROW */}
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
@@ -1045,13 +1030,23 @@ export function Retail() {
               WOOF Insight
             </Badge>
           </div>
-          <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-            {dashboardData?.topItems?.[0]
-              ? `${dashboardData.topItems[0].name} leads Retail sales at ₱${dashboardData.topItems[0].revenue.toLocaleString()} across ${dashboardData.topItems[0].orderCount || dashboardData.topItems[0].quantity || 0} units.`
-              : aggregatedKpis.totalRevenue > 0
-                ? `Retail revenue generated ₱${aggregatedKpis.totalRevenue.toLocaleString()} across physical and digital channels.`
-                : "Upload Retail POS or e-commerce transaction data to activate live item insights."}
-          </p>
+          {dashboardData ? (
+            <WoofInsight inline
+              feature="descriptive_explanation"
+              title="WOOF Insight"
+              prompt="Explain the observed Retail performance using the verified dashboard and channel data. Highlight revenue, product, inventory, and channel patterns that are actually supported by the context. Do not invent values or recommendations."
+              context={{
+                sector: "Retail",
+                kpis: dashboardData.kpis,
+                topItems: dashboardData.topItems?.slice(0, 8),
+                channelBreakdown: dashboardData.channelBreakdown,
+                physicalHistory: channelForecast?.physical?.historical?.slice(-14),
+                onlineHistory: channelForecast?.online?.historical?.slice(-14),
+              }}
+            />
+          ) : (
+            <p className="text-sm text-[#4A5568]">Upload transaction data to activate WOOF insights.</p>
+          )}
         </div>
         <img
           src={retailMascot.src}
@@ -1315,9 +1310,10 @@ export function Retail() {
                 WOOF Insight
               </Badge>
             </div>
-            <p className="text-sm md:text-base italic text-[#223047] opacity-70" style={{ lineHeight: "1.6" }}>
-              {omnichannelInsightText}
-            </p>
+            <WoofInsight inline feature="descriptive_explanation"
+              prompt="Explain Retail omnichannel profitability in a concise WOOF Insight. Describe channel tradeoffs using only the verified context; do not invent margins or causal claims."
+              context={{ channelSummary: omnichannelInsightText, channelEconomics, channelBreakdown: dashboardData?.channelBreakdown }}
+            />
           </div>
           <img
             src={retailMascot.src}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Lightbulb, Lock, Check, X } from "lucide-react";
 import { getHomeOverview } from "../lib/api";
-import { GenAiExplanationCard } from "../components/GenAiExplanationCard";
+import { WoofInsight } from "../components/WoofInsight";
 
 interface Suggestion {
   id: number;
@@ -51,9 +51,9 @@ export function PrescriptiveIntelligence() {
       </div>
 
       {suggestions.length > 0 && (
-        <GenAiExplanationCard
+        <WoofInsight
           feature="prescriptive_explanation"
-          title="Gen AI Recommendation Explanation"
+          title="WOOF Insight"
           prompt="Explain the active and suppressed WOOF recommendations. For each important recommendation, describe the evidence, confidence, expected lift, and operational action. Clearly distinguish recommendations from observed facts."
           context={{
             activeSuggestions,
