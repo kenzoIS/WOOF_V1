@@ -993,6 +993,27 @@ export async function updateBundleArchiveStatus(
   });
 }
 
+export async function deployPrescription(dto: {
+  category: 'bundle' | 'happy_hour' | 'pethub_campaign' | 'staffing' | 'traffic' | 'forecast' | 'general';
+  sourceType?: string;
+  sourceId?: string;
+  title: string;
+  description?: string | null;
+  sector?: string;
+  targetTime?: string;
+  mechanic?: string | null;
+  discount?: string | null;
+  confidence?: string | number | null;
+  acceptedBy?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<{ prescription: FeedbackPromotion; source: unknown }> {
+  return fetchApi('/analytics/prescriptions/deploy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
 export async function getRetailForecastByChannel() {
   return fetchApi('/analytics/forecast-by-channel/retail');
 }
@@ -1222,8 +1243,6 @@ export interface FeedbackPromotion {
   deployedDate: string;
   targetTime: string;
   discount: string | null;
-  predictedLift: string | null;
-  actualLift: string | null;
   confidence: string;
   sector: string;
   status: 'active' | 'completed' | 'failed';

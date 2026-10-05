@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
-import { BundleArchive, BundlePlanningContext, createBundleArchive, createCampaignDraft, DataRange as ApiDataRange, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getStrategicProximity, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
+import { BundleArchive, BundlePlanningContext, createBundleArchive, DataRange as ApiDataRange, deployPrescription, ForecastRun, generateLlmExplanation, getBundleArchives, getBundlePlanningContext, getCrossSell, getDataRange, getForecast, getNextQuietPeriod, getPricingCatalog, getSeasonalCrossSellBundles, getStrategicProximity, getTrafficOptimizer, getQueueRecommendation, TrafficOptimizerResponse, updateBundleArchiveStatus, submitFeedbackRating } from "../lib/api";
 import { CampaignActivationLayer } from "../components/CampaignActivationLayer";
 import { BundleExplanationDrawer, BundleCandidate as DrawerBundleCandidate } from "../components/BundleExplanationDrawer";
 import { InfoTooltip } from "../components/InfoTooltip";
@@ -438,6 +438,8 @@ export function AISimulation() {
   const [bundleEngineRecalibrating, setBundleEngineRecalibrating] = useState(false);
   const [trafficEngineFeedback, setTrafficEngineFeedback] = useState<"helpful" | "not-helpful" | null>(null);
   const [trafficEngineRecalibrating, setTrafficEngineRecalibrating] = useState(false);
+  const [staffingRecommendationAccepted, setStaffingRecommendationAccepted] = useState(false);
+  const [acceptedStaffingSectors, setAcceptedStaffingSectors] = useState<string[]>([]);
 
   const handleBundleEngineFeedback = async (helpful: boolean) => {
     const feedbackVal = helpful ? "helpful" : "not-helpful";
@@ -498,6 +500,51 @@ export function AISimulation() {
       setTimeout(() => {
         setTrafficEngineRecalibrating(false);
       }, 1500);
+    }
+  };
+
+  const handleAcceptStaffingRecommendation = async (sectorPlan?: any) => {
+    const sectorName = sectorPlan?.sector ? String(sectorPlan.sector) : "Operations";
+    const sourceId = sectorPlan?.sector
+      ? `staffing-${sectorName}-${activeReferenceDate}-${debouncedTrafficOptimizerTime}`
+      : `staffing-${activeReferenceDate}-${debouncedTrafficOptimizerTime}`;
+    try {
+      await deployPrescription({
+        category: "staffing",
+        sourceType: "traffic_staffing_recommendation",
+        sourceId,
+        title: sectorPlan?.sector
+          ? `${sectorName} Staffing Recommendation - ${activeReferenceDate} ${formatHour(debouncedTrafficOptimizerTime)}`
+          : `Staffing Recommendation - ${activeReferenceDate} ${formatHour(debouncedTrafficOptimizerTime)}`,
+        sector: sectorName,
+        targetTime: `${activeReferenceDate} ${formatHour(debouncedTrafficOptimizerTime)}`,
+        mechanic: sectorPlan?.action || "Accepted staffing prescription",
+        confidence: "Accepted",
+        metadata: {
+          activeReferenceDate,
+          selectedHour: debouncedTrafficOptimizerTime,
+          staffingDayFilter,
+          recommendedPlan: sectorPlan || dynamicHourlyStaffingPlan,
+          trafficSummary: {
+            totalVisits: trafficOptimizerData?.totalVisits || null,
+            displayMode: trafficOptimizerData?.displayMode || null,
+          },
+        },
+      });
+      if (sectorPlan?.sector) {
+        setAcceptedStaffingSectors((current) =>
+          current.includes(sectorName) ? current : [...current, sectorName],
+        );
+      } else {
+        setStaffingRecommendationAccepted(true);
+      }
+      toast.success("Staffing recommendation accepted", {
+        description: `${sectorName} prescription is now active and will appear in Feedback Active Prescription.`,
+      });
+    } catch (error) {
+      toast.error("Unable to accept staffing recommendation", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
     }
   };
 
@@ -630,7 +677,7 @@ export function AISimulation() {
     }
   }
 
-  const handleSubmitBundleForReview = async (bundle: {
+  const handleDeployBundlePrescription = async (bundle: {
     bundle: string;
     itemA: string;
     itemB: string;
@@ -653,35 +700,25 @@ export function AISimulation() {
     antecedentSectors?: string[];
     consequentSectors?: string[];
   }) => {
+    const [firstBundleItemSlug, secondBundleItemSlug] = [
+      slugify(bundle.itemA),
+      slugify(bundle.itemB),
+    ].sort();
+    const bundleSourceId = `bundle-${firstBundleItemSlug}-${secondBundleItemSlug}`;
     try {
-      await createCampaignDraft({
+      await deployPrescription({
+        category: "bundle",
         sourceType: "bundle_recommendation",
-        bundleItems: [bundle.itemA, bundle.itemB],
-        itemASector: bundle.antecedentSectors?.[0] || null,
-        itemBSector: bundle.consequentSectors?.[0] || null,
-        status: "pending",
-        bundleName: bundle.bundle,
-        itemA: bundle.itemA,
-        itemB: bundle.itemB,
-        regularPrice: bundle.regularPrice > 0 ? bundle.regularPrice : null,
-        proposedBundlePrice: bundle.bundlePrice > 0 ? bundle.bundlePrice : null,
-        regularCost: bundle.regularCost ?? null,
-        suggestedDiscountPercent: bundle.suggestedDiscountPercent ?? null,
-        selectedDiscountPercent: bundle.selectedDiscountPercent,
-        proposedDiscountPercent: bundle.selectedDiscountPercent,
-        projectedGrossProfit: bundle.projectedGrossProfit ?? null,
-        projectedMarginPercent: bundle.projectedMarginPercent ?? null,
-        minimumMarginPercent: bundle.minimumMarginPercent ?? null,
-        maxSafeDiscountPercent: bundle.maxSafeDiscountPercent ?? null,
-        support: bundle.support || 0,
-        confidence: bundle.confidence / 100,
-        lift: bundle.lift,
-      });
-      await createBundleArchive({
-        source: "generated",
-        status: "active",
-        bundleName: bundle.bundle,
-        items: [
+        sourceId: bundleSourceId,
+        title: bundle.bundle,
+        sector: "Cafe + Services",
+        targetTime: selectedHeaderRangeLabel,
+        mechanic: `${bundle.selectedDiscountPercent}% bundle discount`,
+        confidence: `${bundle.confidence}%`,
+        metadata: {
+          sourceType: "bundle_recommendation",
+          selectedHeaderRange: selectedHeaderRangeLabel,
+          items: [
           {
             name: bundle.itemA,
             sector: bundle.antecedentSectors?.[0] || null,
@@ -694,32 +731,28 @@ export function AISimulation() {
             price: bundle.itemBPrice ?? null,
             cost: bundle.itemBCost ?? null,
           },
-        ],
-        regularPrice: bundle.regularPrice > 0 ? bundle.regularPrice : null,
-        bundlePrice: bundle.bundlePrice > 0 ? bundle.bundlePrice : null,
-        savings:
+          ],
+          regularPrice: bundle.regularPrice > 0 ? bundle.regularPrice : null,
+          bundlePrice: bundle.bundlePrice > 0 ? bundle.bundlePrice : null,
+          savings:
           bundle.regularPrice > 0 && bundle.bundlePrice > 0
             ? bundle.regularPrice - bundle.bundlePrice
             : null,
-        discountPercent: bundle.selectedDiscountPercent,
-        promoMechanic: `${bundle.selectedDiscountPercent}% bundle discount`,
-        notes: bundle.bundle,
-        support: bundle.support || 0,
-        confidence: bundle.confidence / 100,
-        lift: bundle.lift,
-        projectedGrossProfit: bundle.projectedGrossProfit ?? null,
-        projectedMarginPercent: bundle.projectedMarginPercent ?? null,
-        metadata: {
-          sourceType: "bundle_recommendation",
-          selectedHeaderRange: selectedHeaderRangeLabel,
+          discountPercent: bundle.selectedDiscountPercent,
+          promoMechanic: `${bundle.selectedDiscountPercent}% bundle discount`,
+          notes: bundle.bundle,
+          support: bundle.support || 0,
+          confidence: bundle.confidence / 100,
+          lift: bundle.lift,
+          projectedGrossProfit: bundle.projectedGrossProfit ?? null,
+          projectedMarginPercent: bundle.projectedMarginPercent ?? null,
         },
       });
-      loadBundleArchives();
-      toast.success("Bundle submitted for owner review", {
-        description: `${bundle.bundle} is saved as a pending campaign draft and added to Bundle Archives.`,
+      toast.success("Bundle prescription deployed", {
+        description: `${bundle.bundle} is now active and will appear in Feedback Active Prescription.`,
       });
     } catch (error) {
-      toast.error("Unable to submit bundle", {
+      toast.error("Unable to deploy bundle", {
         description: error instanceof Error ? error.message : "Please try again.",
       });
     }
@@ -3982,10 +4015,10 @@ export function AISimulation() {
                       Why this bundle?
                     </Button>
                     <Button
-                      onClick={() => handleSubmitBundleForReview(bundle)}
+                      onClick={() => handleDeployBundlePrescription(bundle)}
                       className="bg-[#F53799] hover:bg-[#D42A7D] text-xs md:text-sm font-bold shadow-md"
                     >
-                      Submit for Review
+                      Deploy
                     </Button>
                   </div>
                 </div>
@@ -5564,6 +5597,7 @@ export function AISimulation() {
                   {dynamicHourlyStaffingPlan.map((sec) => {
                     const needsMoreStaff = sec.staffDelta > 0;
                     const canReduceStaff = sec.staffDelta < 0;
+                    const isAccepted = acceptedStaffingSectors.includes(sec.sector);
                     const sectorColor =
                       sec.sector === "Services" ? "#3AE4FA" : sec.sector === "Cafe" ? "#F53799" : "#F59E0B";
 
@@ -5613,6 +5647,16 @@ export function AISimulation() {
                           </span>
                           {sec.action}
                         </div>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleAcceptStaffingRecommendation(sec)}
+                          disabled={isAccepted}
+                          className="w-full h-8 rounded-lg border-[#06B6D4] text-[#06B6D4] hover:bg-[#E0F7FA] text-[11px] font-semibold"
+                        >
+                          {isAccepted ? "Recommendation Accepted" : "Accept Recommendation"}
+                        </Button>
                       </div>
                     );
                   })}
@@ -5780,7 +5824,16 @@ export function AISimulation() {
                   Feedback recorded: {trafficEngineFeedback === "helpful" ? "Helpful" : "Needs Adjustment"}
                 </div>
               ) : (
-                <div className="flex items-center gap-2 self-start md:self-center">
+                <div className="flex flex-wrap items-center gap-2 self-start md:self-center">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAcceptStaffingRecommendation}
+                    disabled={staffingRecommendationAccepted}
+                    className="border-[#06B6D4] text-[#06B6D4] hover:bg-[#E0F7FA] text-xs h-9 px-4 rounded-xl"
+                  >
+                    {staffingRecommendationAccepted ? "Accepted" : "Accept Recommendation"}
+                  </Button>
                   <Button
                     size="sm"
                     onClick={() => handleTrafficEngineFeedback(true)}

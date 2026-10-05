@@ -358,6 +358,11 @@ export class AnalyticsController {
     return this.analyticsService.createCrossSellCampaignDraft(dto);
   }
 
+  @Post('prescriptions/deploy')
+  async deployPrescription(@Body() dto: Record<string, unknown>) {
+    return this.analyticsService.deployPrescription(dto);
+  }
+
   @Get('bundles')
   async getBundleArchives(
     @Query('status') status?: string,

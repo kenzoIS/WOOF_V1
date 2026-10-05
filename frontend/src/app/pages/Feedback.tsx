@@ -160,6 +160,8 @@ export function Feedback() {
         return promo.pethubLinked
           ? "Published PetHub activation campaign currently linked for takedown."
           : "Activation campaign queued, approved, or published through the campaign layer.";
+      case "active_prescription":
+        return "Accepted prescription stored in the active prescription source of truth.";
       case "recommendation_feedback":
         return "Feedback history promotion manually stored for tracking.";
       default:
@@ -167,20 +169,8 @@ export function Feedback() {
     }
   };
 
-  const calculateAccuracy = (predicted: string | null, actual: string | null) => {
-    if (!predicted || !actual) return null;
-    const predVal = parseInt(predicted.replace(/[^0-9]/g, ""));
-    const actVal = parseInt(actual.replace(/[^0-9]/g, ""));
-    if (!predVal || !actVal) return null;
-    const accuracy = ((1 - Math.abs(predVal - actVal) / predVal) * 100).toFixed(1);
-    return parseFloat(accuracy);
-  };
-
   const completedPromotions = promotions.filter((p) => p.status === "completed");
   const activePromotions = promotions.filter((p) => p.status === "active");
-  const localAccuracies = completedPromotions
-    .map((promo) => calculateAccuracy(promo.predictedLift, promo.actualLift))
-    .filter((value): value is number => value !== null);
   const activePageCount = Math.max(1, Math.ceil(activePromotions.length / PAGE_SIZE));
   const completedPageCount = Math.max(1, Math.ceil(completedPromotions.length / PAGE_SIZE));
   const pagedActivePromotions = activePromotions.slice((activePage - 1) * PAGE_SIZE, activePage * PAGE_SIZE);
@@ -193,18 +183,16 @@ export function Feedback() {
   const completedHelpfulCount = completedPromotions.filter((p) => p.feedback === "helpful").length;
   const completedNotHelpfulCount = completedPromotions.filter((p) => p.feedback === "not-helpful").length;
   const totalFeedbackSignals = helpfulCount + notHelpfulCount;
-  const avgAccuracy = summary?.avgAccuracy ?? (localAccuracies.length > 0
-    ? localAccuracies.reduce((sum, value) => sum + value, 0) / localAccuracies.length
-    : 0);
   const positiveRatio = summary?.positiveRatio ?? (totalFeedbackSignals > 0 ? Math.round((helpfulCount / totalFeedbackSignals) * 100) : 0);
-  const accuracyImprovement = totalFeedbackSignals > 0 ? Math.max(0, avgAccuracy - 80) : 0;
+  const avgAccuracy = summary?.avgAccuracy ?? positiveRatio;
+  const feedbackAlignment = totalFeedbackSignals > 0 ? avgAccuracy : 0;
   const patternsLearned = totalFeedbackSignals;
   const nextDeploymentConfidence = totalFeedbackSignals > 0 ? Math.min(98, Math.round((avgAccuracy + positiveRatio) / 2)) : 0;
   const learningStatus = totalFeedbackSignals > 0 ? "Active Learning" : "Awaiting Signals";
   const fallbackInsight =
     summary?.aiInsight?.summary ||
     (completedPromotions.length > 0
-      ? `${completedPromotions.length} completed campaigns analyzed. Feedback loop is tracking an average model prediction accuracy of ${avgAccuracy.toFixed(1)}% across deployed actions.`
+      ? `${completedPromotions.length} completed campaigns analyzed. Feedback loop is tracking ${avgAccuracy.toFixed(1)}% helpful alignment across recorded feedback signals.`
       : "Your feedback helps WOOF learn and adapt to live business operations.");
 
   useEffect(() => {
@@ -228,7 +216,6 @@ export function Feedback() {
           type: promo.type,
           sector: promo.sector,
           confidence: promo.confidence,
-          predictedLift: promo.predictedLift,
           sourceType: promo.sourceType,
           pethubLinked: promo.pethubLinked,
         })),
@@ -237,8 +224,6 @@ export function Feedback() {
           type: promo.type,
           sector: promo.sector,
           feedback: promo.feedback,
-          predictedLift: promo.predictedLift,
-          actualLift: promo.actualLift,
         })),
       },
     })
@@ -487,11 +472,11 @@ export function Feedback() {
         <div
           className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Total Active Promotions",
+            title: "Total Active Prescriptions",
             current: activeCount,
             formatter: (v) => `${v} Active`,
             icon: <MessageSquareHeart className="w-5 h-5 text-[#F53799]" />,
-            description: "Active promotions currently running and still awaiting an end-of-promotion feedback rating.",
+            description: "Active prescriptions currently implemented and still awaiting end-of-cycle feedback.",
             extraStats: [
               { label: "Total Active", value: `${activeCount} active` },
               { label: "Completed Promotions", value: `${completedCount} completed` },
@@ -504,11 +489,11 @@ export function Feedback() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
               <span>Total Active</span>
-              <InfoTooltip label="Active promotions currently running and still awaiting an end-of-promotion feedback rating." />
+              <InfoTooltip label="Active prescriptions currently implemented and still awaiting end-of-cycle feedback." />
             </div>
             <div className="text-base md:text-xl font-bold text-[#223047]">{activeCount}</div>
             <div className="text-[11px] text-[#223047] opacity-60 hidden md:block">
-              Awaiting completion feedback
+              Awaiting end-of-cycle feedback
             </div>
           </div>
           <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
@@ -547,13 +532,14 @@ export function Feedback() {
         <div
           className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Avg Promotion Accuracy",
+            title: "Avg Feedback Accuracy",
             current: `${avgAccuracy.toFixed(1)}%`,
             formatter: (v) => String(v),
             icon: <TrendingUp className="w-5 h-5 text-[#F53799]" />,
-            description: "Average accuracy rate of revenue predictions for completed promotions with both predicted and actual lift values.",
+            description: "Helpful alignment rate from completed promotion feedback signals.",
             extraStats: [
-              { label: "Completed With Lift Data", value: `${localAccuracies.length} promotions` },
+              { label: "Helpful Signals", value: `${helpfulCount} helpful` },
+              { label: "Not Helpful Signals", value: `${notHelpfulCount} not helpful` },
               { label: "Completed Promotions", value: `${completedCount} completed` },
             ],
           })}
@@ -564,11 +550,11 @@ export function Feedback() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
               <span>Avg Accuracy</span>
-              <InfoTooltip label="Average accuracy from completed promotions that have both predicted and actual lift values." />
+              <InfoTooltip label="Helpful alignment rate from completed promotion feedback signals." />
             </div>
             <div className="text-base md:text-xl font-bold text-[#223047]">{avgAccuracy.toFixed(1)}%</div>
             <div className="text-[11px] text-[#223047] opacity-60 hidden md:block">
-              {localAccuracies.length} completed with lift data
+              Helpful feedback alignment
             </div>
           </div>
           <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
@@ -615,22 +601,22 @@ export function Feedback() {
               <Box className="w-8 h-8 text-[#F53799]" />
             </div>
           </div>
-          <h2 className="text-xl md:text-2xl font-bold text-[#223047]">No promotional feedback campaigns deployed yet</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-[#223047]">No active prescriptions deployed yet</h2>
           <p className="text-sm md:text-base text-[#223047] opacity-60 max-w-lg mx-auto" style={{ lineHeight: "1.6" }}>
-            Deploy a bundle from the Bundle Simulator to begin collecting real-world lift data and train the recommendation models.
+            Deploy or accept a prescription to begin collecting Helpful and Not Helpful feedback signals for WOOF's recommendation loop.
           </p>
         </div>
       ) : (
         <>
-          {/* ACTIVE PROMOTIONS */}
+          {/* ACTIVE PRESCRIPTIONS */}
       {activePromotions.length > 0 && (
         <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Active Promotions
+                Active Prescription
               </h2>
-              <InfoTooltip label="Currently running promotions awaiting results." />
+              <InfoTooltip label="Accepted or deployed prescriptions awaiting end-of-cycle feedback." />
             </div>
           </div>
 
@@ -661,7 +647,7 @@ export function Feedback() {
                     <p className="mb-3 text-xs md:text-sm text-[#223047] opacity-70" style={{ lineHeight: "1.5" }}>
                       {getPromotionSourceDescription(promo)}
                     </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-4 text-xs md:text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 md:gap-4 text-xs md:text-sm">
                       <div>
                         <span className="text-[#223047] opacity-60">Target Time:</span>
                         <span className="ml-2 font-semibold text-[#223047]">{promo.targetTime}</span>
@@ -669,10 +655,6 @@ export function Feedback() {
                       <div>
                         <span className="text-[#223047] opacity-60">Discount:</span>
                         <span className="ml-2 font-semibold text-[#223047]">{promo.discount}</span>
-                      </div>
-                      <div>
-                        <span className="text-[#223047] opacity-60">Predicted Lift:</span>
-                        <span className="ml-2 font-bold text-[#F53799]">{promo.predictedLift}</span>
                       </div>
                       <div>
                         <span className="text-[#223047] opacity-60">Confidence:</span>
@@ -862,8 +844,8 @@ export function Feedback() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 lg:gap-6">
           <div className="feedback-learning-metric rounded-lg md:rounded-xl p-4 md:p-6">
-            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">+{accuracyImprovement.toFixed(1)}%</div>
-            <div className="text-xs md:text-sm opacity-90">Accuracy improvement from feedback</div>
+            <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">{feedbackAlignment.toFixed(1)}%</div>
+            <div className="text-xs md:text-sm opacity-90">Helpful alignment from feedback</div>
           </div>
           <div className="feedback-learning-metric rounded-lg md:rounded-xl p-4 md:p-6">
             <div className="text-2xl md:text-3xl font-bold mb-1 md:mb-2">{patternsLearned}</div>

@@ -8,7 +8,6 @@
   "scripts": {
     "build": "nest build",
     "build:render": "python3 -m pip install -r requirements.txt && nest build",
-    "db:ensure-feedback": "node scripts/ensure-recommendation-feedback.js",
     "python:install": "python3 -m pip install -r requirements.txt",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",

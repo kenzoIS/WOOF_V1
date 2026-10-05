@@ -252,6 +252,12 @@ export class ActivationService {
       .lean()
       .exec();
 
+    await this.upsertActivePrescriptionForCampaign(updated);
+    await this.markPrescriptionDraftStatus(
+      `activation_campaign:${updated?.campaignId}`,
+      'deployed',
+    );
+
     void this.auditService.record({
       actor: 'Owner',
       actorType: 'user',
@@ -299,6 +305,8 @@ export class ActivationService {
       generatedAssets,
       pethubPayload,
     });
+
+    await this.upsertPrescriptionDraftForCampaign(campaign);
 
     return { campaign };
   }
@@ -371,6 +379,8 @@ export class ActivationService {
         )
         .lean()
         .exec();
+
+      await this.upsertActivePrescriptionForCampaign(updated);
 
       void this.auditService.record({
         actor,
@@ -551,7 +561,152 @@ export class ActivationService {
       stateAfter: status,
       metadata: { campaignId },
     });
+    await this.upsertActivePrescriptionForCampaign(campaign);
+    await this.markPrescriptionDraftStatus(
+      `activation_campaign:${campaign.campaignId}`,
+      status === 'completed' ? 'deployed' : 'reviewed',
+    );
     return { campaign };
+  }
+
+  private async upsertActivePrescriptionForCampaign(campaign: any) {
+    if (!campaign || campaign.status === 'draft') return;
+
+    const status =
+      campaign.status === 'completed'
+        ? 'completed'
+        : ['approved', 'queued', 'published'].includes(campaign.status)
+          ? 'active'
+          : 'failed';
+
+    const payload = {
+      category: 'pethub_campaign',
+      prescription_key: `activation_campaign:${campaign.campaignId}`,
+      source_type: 'activation_campaign',
+      source_id: campaign.campaignId,
+      title:
+        campaign.title ||
+        campaign.generatedAssets?.headline ||
+        'PetHub Campaign',
+      description:
+        campaign.generatedAssets?.shortCaption ||
+        campaign.generatedAssets?.longCaption ||
+        null,
+      sector: this.inferCampaignSector(
+        this.rebuildRecommendationFromCampaign(campaign),
+      ),
+      target_time: 'PetHub campaign window',
+      mechanic:
+        campaign.promoMechanic ||
+        campaign.pethubPayload?.promoMechanic ||
+        'PetHub offer',
+      confidence:
+        campaign.analyticsContext?.confidence ||
+        campaign.analyticsContext?.confidenceScore ||
+        'N/A',
+      status,
+      accepted_by: 'Owner',
+      accepted_at: campaign.updatedAt || new Date().toISOString(),
+      deployed_at: campaign.updatedAt || new Date().toISOString(),
+      ended_at: campaign.status === 'completed' ? new Date().toISOString() : null,
+      metadata: {
+        sourceType: 'activation_campaign',
+        campaignId: campaign.campaignId,
+        pethubLinked: campaign.status === 'published',
+        pethubStatus: campaign.status,
+        pethubPayload: campaign.pethubPayload || {},
+      },
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await this.supabaseService.client
+      .from('active_prescriptions')
+      .upsert(payload, { onConflict: 'prescription_key' });
+
+    if (error && !this.isMissingSupabaseTableError(error)) {
+      this.logger.warn(
+        `Failed to upsert active prescription for campaign ${campaign.campaignId}: ${error.message}`,
+      );
+    }
+  }
+
+  private async upsertPrescriptionDraftForCampaign(campaign: any) {
+    if (!campaign || campaign.status !== 'draft') return;
+
+    const payload = {
+      category: 'pethub_campaign',
+      prescription_key: `activation_campaign:${campaign.campaignId}`,
+      source_type: 'activation_campaign',
+      source_id: campaign.campaignId,
+      title:
+        campaign.title ||
+        campaign.generatedAssets?.headline ||
+        'PetHub Campaign Draft',
+      description:
+        campaign.generatedAssets?.shortCaption ||
+        campaign.generatedAssets?.longCaption ||
+        null,
+      sector: this.inferCampaignSector(
+        this.rebuildRecommendationFromCampaign(campaign),
+      ),
+      target_time: 'PetHub campaign window',
+      mechanic:
+        campaign.promoMechanic ||
+        campaign.pethubPayload?.promoMechanic ||
+        'PetHub offer',
+      confidence:
+        campaign.analyticsContext?.confidence ||
+        campaign.analyticsContext?.confidenceScore ||
+        'N/A',
+      status: 'draft',
+      generated_by: 'Owner',
+      metadata: {
+        sourceType: 'activation_campaign',
+        campaignId: campaign.campaignId,
+        sourceRecommendationId: campaign.sourceRecommendationId,
+        pethubPayload: campaign.pethubPayload || {},
+      },
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await this.supabaseService.client
+      .from('prescription_drafts')
+      .upsert(payload, { onConflict: 'prescription_key' });
+
+    if (error && !this.isMissingSupabaseTableError(error)) {
+      this.logger.warn(
+        `Failed to upsert prescription draft for campaign ${campaign.campaignId}: ${error.message}`,
+      );
+    }
+  }
+
+  private async markPrescriptionDraftStatus(
+    prescriptionKey: string,
+    status: 'reviewed' | 'deployed' | 'rejected',
+  ) {
+    const { error } = await this.supabaseService.client
+      .from('prescription_drafts')
+      .update({
+        status,
+        reviewed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('prescription_key', prescriptionKey);
+
+    if (error && !this.isMissingSupabaseTableError(error)) {
+      this.logger.warn(
+        `Failed to update prescription draft ${prescriptionKey}: ${error.message}`,
+      );
+    }
+  }
+
+  private isMissingSupabaseTableError(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      error?.code === 'PGRST205' ||
+      message.includes('could not find the table') ||
+      message.includes('schema cache')
+    );
   }
 
   private assertValidStatusTransition(

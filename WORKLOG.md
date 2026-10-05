@@ -2,6 +2,187 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-10-05 - Feedback Prescription Handoff And Duplicate-Safe Draft Sync
+
+### Requested
+- Ensure repeatedly generated bundle opportunities do not create duplicate `prescription_drafts`.
+- For regenerated duplicate bundles, refresh the generated timestamp instead of creating a new row.
+- Provide a Markdown handoff file covering the Feedback page, prescription source-of-truth workflow, and a prompt for future recalibration/retraining work.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Made generated bundle draft identity order-stable by sorting bundle item slugs before building the `bundle_recommendation` source ID.
+- Added in-memory de-duplication before writing generated bundle drafts so a single generated result cannot insert the same draft key twice.
+- Changed existing generated bundle draft handling to update only `generated_at` and `updated_at`, preserving status and review/deployment history.
+- Kept new generated bundle opportunities inserting into `public.prescription_drafts`.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Matched the Bundle Simulator `Deploy` source ID to the backend's sorted bundle item slug format.
+
+### Documentation
+- Added `FEEDBACK_PRESCRIPTION_HANDOFF.md`.
+- Documented `prescription_drafts`, `active_prescriptions`, `recommendation_feedback`, and `bundle_archives` responsibilities.
+- Documented Bundle, Staffing, Dynamic Promo, and PetHub/Activation feedback flows.
+- Added a reusable recalibration/retraining implementation prompt and suggested recalibration event table.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Passed: Frontend production build with `npm run build`.
+- Passed: Diff hygiene check with `git diff --check`.
+
+## 2026-10-05 - Staffing Recommendation Per-Sector Acceptance
+
+### Requested
+- Clarify whether regenerated AI-Predicted Bundle Opportunities drop previous `prescription_drafts`.
+- Add a subtle button that lets the user activate/accept a specific Staffing Recommendation.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Added automatic syncing of generated AI-Predicted Bundle Opportunities into `public.prescription_drafts`.
+- Bundle opportunity drafts use deterministic `bundle_recommendation:<bundle-item-a-item-b>` keys so regenerated opportunities update the same draft instead of creating duplicates.
+- Deploying a matching bundle prescription now marks its draft as `deployed`.
+- Old generated bundle drafts are not deleted when a new recommendation set is generated.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/AISimulation.tsx`.
+- Added per-sector `Accept Recommendation` buttons to Staffing Recommendation cards.
+- Accepted sector staffing prescriptions are deployed into `active_prescriptions` with sector-specific source IDs, target time, action text, and staffing metadata.
+- Updated bundle deployment to use the same deterministic source ID as generated bundle drafts.
+- Kept the existing broader traffic/staffing feedback controls separate from the new accept/deploy action.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Active Prescription Backfill
+
+### Requested
+- Move all applicable existing inactive/active prescription records into the correct source-of-truth tables.
+
+### Findings
+- Supabase `campaign_drafts` had 1 pending row, already backfilled into `prescription_drafts`.
+- Supabase `bundle_archives` had 0 rows, so there were no stored bundle archive records to backfill.
+- Supabase `dynamic_promos` had 11 rows: 10 `approved` and 1 `completed`.
+- MongoDB `campaignactivations` had 0 rows, so there were no Activation campaign drafts to backfill.
+
+### Backend Changes
+- Added `backend/scripts/inspect-prescription-sources.js` to summarize source table counts/statuses.
+- Added `backend/scripts/backfill-active-prescriptions.js` to migrate approved/active `dynamic_promos` into `active_prescriptions`.
+
+### Verification
+- Passed: Ran `node scripts/inspect-prescription-sources.js`.
+- Passed: Ran `node scripts/backfill-active-prescriptions.js`.
+- Backfilled 10 approved Dynamic Happy Hour promos into `active_prescriptions`.
+- Confirmed `active_prescriptions` now has 11 active rows and `prescription_drafts` has 1 pending row.
+
+## 2026-10-05 - Prescription Draft Backfill
+
+### Requested
+- Backfill existing applicable undeployed prescriptions into the new `public.prescription_drafts` table.
+
+### Backend Changes
+- Added `backend/scripts/backfill-prescription-drafts.js`.
+- The script copies existing Supabase `campaign_drafts` into `prescription_drafts` as bundle draft prescriptions.
+- The script also copies MongoDB draft `CampaignActivation` records into `prescription_drafts` as PetHub campaign draft prescriptions.
+- Raw AI suggestions that were never accepted/generated are not backfillable because they were not durably stored before this workflow.
+
+### Verification
+- Passed: Ran `node scripts/backfill-prescription-drafts.js`.
+- Backfilled 1 Supabase `campaign_drafts` row into `prescription_drafts`.
+- Checked MongoDB `campaignactivations`; no draft Activation campaigns were present to backfill.
+
+## 2026-10-05 - Active Prescription Source Of Truth
+
+### Requested
+- Add a single source-of-truth table for undeployed/generated prescriptions and a single source-of-truth table for active deployed/accepted prescriptions.
+- Keep Bundle Archives for completed/archived bundle promotions.
+- Reflect Activation/PetHub campaigns into the active prescription source of truth.
+- Replace Bundle Simulator `Submit for Review` with `Deploy`.
+- Add a subtle staffing `Accept Recommendation` action.
+- Rename Feedback `Active Promotions` to `Active Prescription`.
+- Provide Supabase SQL instead of attempting to create tables directly.
+
+### Backend Changes
+- Added `backend/database/migrations/20261005_prescription_sources.sql` with `prescription_drafts` and `active_prescriptions`.
+- Added `POST /analytics/prescriptions/deploy` to deploy accepted prescriptions into `active_prescriptions`.
+- Mirrored existing bundle campaign draft creation into `prescription_drafts` when the table exists.
+- Updated Feedback loading to prefer `active_prescriptions` and fall back to previous source scanning when the table is unavailable or empty.
+- Added active-prescription mapping into the Feedback promotion shape.
+- Updated end-feedback source handling so active prescriptions are marked completed.
+- Added bundle-specific completion archival so ended bundle prescriptions are inserted into `bundle_archives` as archived records.
+- Updated Happy Hour activation to also upsert an active prescription.
+- Updated Activation campaign draft/approval/queue/publish/completion flows to mirror campaign state into `prescription_drafts` and `active_prescriptions`.
+
+### Frontend Changes
+- Updated `frontend/src/app/lib/api.ts` with `deployPrescription`.
+- Changed AI Simulation bundle opportunities from `Submit for Review` to `Deploy`.
+- Changed bundle deployment to write to active prescriptions instead of creating a campaign draft and active Bundle Archive immediately.
+- Added `Accept Recommendation` for staffing prescriptions in AI Simulation.
+- Renamed the Feedback active section to `Active Prescription` and updated active-source description/copy.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Feedback Lift Metric Cleanup
+
+### Requested
+- Check whether `Predicted Lift` and `Actual Lift` still appear in the Feedback module after deciding not to use those metrics.
+- Clean up remaining Feedback-specific backend/frontend references while preserving unrelated analytics behavior.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Stopped writing `predicted_lift` and `actual_lift` values into new `public.recommendation_feedback` rows from Feedback completion flows.
+- Removed predicted/actual lift fields from Feedback AWS archive payloads and Feedback API promotion mappings.
+- Changed Feedback summary `avgAccuracy` to represent Helpful feedback alignment instead of prediction-vs-actual lift accuracy.
+- Left the broader scheduled promotion-lift tracker untouched because it is outside the Feedback page/history flow and may still support other analytics modules.
+
+### Frontend Changes
+- Updated `frontend/src/app/pages/Feedback.tsx`.
+- Removed local predicted-vs-actual lift accuracy calculations from the Feedback page.
+- Removed `Predicted Lift` from Active Promotion cards.
+- Updated Avg Accuracy KPI copy and Continuous Learning Insights copy to describe Helpful feedback alignment instead of lift prediction accuracy.
+- Removed predicted/actual lift fields from the GLM WOOF Insight context.
+- Updated `frontend/src/app/lib/api.ts` so the Feedback promotion client type no longer expects `predictedLift` or `actualLift`.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+- Passed: Frontend production build with `npm run build`.
+
+## 2026-10-05 - Feedback Completed Source Backfill
+
+### Requested
+- Move recently completed source-only promotions into the dedicated completed feedback table.
+- Clarify what data is stored in `public.recommendation_feedback`.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Added a safe backfill step when loading Feedback promotions: completed source promotions from bundle archives, dynamic promos, or activation campaigns that do not yet have a `recommendation_feedback` history row are inserted into `public.recommendation_feedback`.
+- Marked backfilled rows in `metadata` with `backfilledFromSource`, `backfilledAt`, `sourceType`, and `sourceId` so historical origin remains auditable.
+- Shared the completed-history payload builder between normal End Promotion writes and source backfills so completed records use the same table shape.
+- Preserved existing fallback behavior; if one backfill row fails, the Feedback page still loads and logs a warning instead of failing the whole module.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+
+## 2026-10-05 - Feedback History Table Rewire Cleanup
+
+### Requested
+- Rewire Feedback functionality now that `public.recommendation_feedback` exists in Supabase.
+- Remove temporary table-creation/compatibility code that was only needed before the table was available.
+- Keep the fallback mechanism for unexpected source-completion errors.
+
+### Backend Changes
+- Updated `backend/src/analytics/analytics.service.ts`.
+- Simplified completed-promotion history writes so `endFeedbackPromotion` writes directly to the canonical `public.recommendation_feedback` table with its `metadata` payload.
+- Removed the old compatibility branch that retried `recommendation_feedback` writes without `metadata`, because the created table now includes that column.
+- Kept source-completion fallback behavior for bundle archives, dynamic promos, and PetHub/activation campaigns so source-side ending remains resilient.
+- Removed the one-off `backend/scripts/ensure-recommendation-feedback.js` helper and the `db:ensure-feedback` package script, since table creation is now handled through Supabase SQL Editor.
+
+### Verification
+- Passed: Backend production build with `npm run build`.
+
 ## 2026-10-05 - Feedback Completed Operational Metrics
 
 ### Requested
