@@ -4378,3 +4378,19 @@ This file records requested revisions, implementation details, verification, and
 ### Verification
 
 - Passed: Frontend TypeScript validation with `npx tsc --noEmit --pretty false`.
+### Login Page Visual Redesign (2026-10-06)
+
+- Replaced the composed desktop design with the supplied full `login mockup.png` artwork and overlaid the live login controls directly on its matching email, password, recovery-link, and sign-in regions.
+- Kept a compact responsive form for smaller screens, where the complete wide mockup cannot remain legible.
+- Redesigned the dashboard login page around the supplied Happy Tails cafe and WOOF mascot artwork.
+- Added a responsive, glass-style sign-in panel with the refreshed WOOF welcome hierarchy, refined input/button styling, and desktop mascot accent.
+- Preserved existing login, password visibility, two-factor authentication, password-reset, toast, and routing behavior; no backend or authentication API behavior was changed.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: Frontend production build with `npm.cmd run build`.
+- Passed: Production login-route smoke test with `next start` on port 3003; `/login` returned HTTP 200.
+- Note: The existing development server on port 3002 returned HTTP 500 and could not be used for this check. The dedicated production test server rendered the login route successfully. Browser automation was unavailable because the `agent-browser` executable is not installed in this environment.
+- Passed after the full-mockup integration: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false` and frontend production build with `npm.cmd run build`.
+- Passed after the full-mockup integration: Production `/login` smoke test on port 3004 returned HTTP 200.
