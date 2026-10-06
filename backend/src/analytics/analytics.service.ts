@@ -353,7 +353,7 @@ export class AnalyticsService {
         },
       ]),
       this.aggregateHomeSeries(dateFilter, normalizedRange),
-      this.getChannelBalanceFromSupabase(targetChannelDateFilter),
+      this.getChannelBalanceFromMongo(targetChannelDateFilter),
       this.aggregateWithDiskUse([
         {
           $match: {
@@ -8764,7 +8764,14 @@ export class AnalyticsService {
     if (lower === 'today' || lower === 'yesterday') return 'today';
     if (lower === 'month' || lower === 'last-30-days' || lower === '30d') return 'month';
     if (lower === 'quarter' || lower === 'last-90-days' || lower === '90d') return 'month';
-    if (lower === 'custom' || lower.startsWith('custom:')) return 'custom';
+    if (lower.startsWith('custom:')) {
+      const parts = range.split(':');
+      if (parts[1] && parts[2] && parts[1] === parts[2]) {
+        return 'today';
+      }
+      return 'custom';
+    }
+    if (lower === 'custom') return 'custom';
     if (lower === 'all' || lower === 'all-time') return 'all';
     if (
       lower === 'year' ||
@@ -8791,22 +8798,20 @@ export class AnalyticsService {
 
     if (lower.startsWith('custom:')) {
       const parts = range.split(':');
-      const start = new Date(parts[1]);
-      const end = new Date(parts[2]);
+      const startStr = parts[1];
+      const endStr = parts[2];
+      const start = new Date(`${startStr}T00:00:00.000+08:00`);
+      const end = new Date(`${endStr}T23:59:59.999+08:00`);
       if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
-        start.setHours(0, 0, 0, 0);
-        end.setHours(23, 59, 59, 999);
-
         const dayCount = Math.max(
           1,
-          Math.floor(
+          Math.round(
             (end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000),
-          ) + 1,
+          ),
         );
-        const previousEnd = new Date(start);
-        previousEnd.setMilliseconds(previousEnd.getMilliseconds() - 1);
-        const previousStart = new Date(previousEnd);
-        previousStart.setDate(previousStart.getDate() - dayCount + 1);
+        const previousEnd = new Date(start.getTime() - 1);
+        const previousStart = new Date(start);
+        previousStart.setDate(previousStart.getDate() - dayCount);
         previousStart.setHours(0, 0, 0, 0);
 
         return { start, end, previousStart, previousEnd };
@@ -8814,11 +8819,11 @@ export class AnalyticsService {
     }
 
     if (lower === 'all' || lower === 'all-time') {
-      const allStart = new Date('2020-01-01T00:00:00.000Z');
+      const allStart = new Date('2020-01-01T00:00:00.000+08:00');
       const allEnd = new Date(latestDate);
       allEnd.setHours(23, 59, 59, 999);
       const previousEnd = new Date(allStart.getTime() - 1);
-      const previousStart = new Date('2015-01-01T00:00:00.000Z');
+      const previousStart = new Date('2015-01-01T00:00:00.000+08:00');
       return { start: allStart, end: allEnd, previousStart, previousEnd };
     }
 
@@ -8827,16 +8832,30 @@ export class AnalyticsService {
       lower === 'matched-1-year' ||
       lower === 'matched-year'
     ) {
-      const matchStart = new Date('2025-05-02T00:00:00.000Z');
-      const matchEnd = new Date('2026-05-02T23:59:59.999Z');
+      const matchStart = new Date('2025-05-02T00:00:00.000+08:00');
+      const matchEnd = new Date('2026-05-02T23:59:59.999+08:00');
       const duration = matchEnd.getTime() - matchStart.getTime();
       const previousEnd = new Date(matchStart.getTime() - 1);
       const previousStart = new Date(matchStart.getTime() - duration);
       return { start: matchStart, end: matchEnd, previousStart, previousEnd };
     }
 
-    const end = new Date(latestDate);
-    const start = new Date(latestDate);
+    // For last-30-days and last-90-days, anchor to the active omnichannel overlap ceiling (2026-05-02)
+    // so that digital marketplace channels (Shopee & TikTok Shop) remain active and directly comparable.
+    const isOmnichannelPreset =
+      lower === 'month' ||
+      lower === 'last-30-days' ||
+      lower === '30d' ||
+      lower === 'last-90-days' ||
+      lower === '90d' ||
+      lower === 'quarter';
+
+    const anchorBase = isOmnichannelPreset
+      ? new Date('2026-05-02T23:59:59.999+08:00')
+      : new Date(latestDate);
+
+    const end = new Date(anchorBase);
+    const start = new Date(anchorBase);
     start.setHours(0, 0, 0, 0);
 
     let dayCount = 7;
@@ -8860,8 +8879,6 @@ export class AnalyticsService {
       lower.includes('year')
     ) {
       // Align 12-month window to cover the full active omnichannel marketplace year (starting May 2, 2025).
-      // Since POS latest date is May 31, 2026, a strict 365-day rolling window cuts off May 2-31, 2025 of TikTok Shop (reducing ₱1,475,842.02 to ₱1,419,019).
-      // Setting dayCount to 396 days ensures 100% of the 1-year TikTok Shop transactions (₱1,475,842.02) are captured without truncation.
       dayCount = 396;
     }
 
@@ -8869,10 +8886,9 @@ export class AnalyticsService {
       start.setDate(start.getDate() - dayCount + 1);
     }
 
-    const previousEnd = new Date(start);
-    previousEnd.setMilliseconds(previousEnd.getMilliseconds() - 1);
-    const previousStart = new Date(previousEnd);
-    previousStart.setDate(previousStart.getDate() - dayCount + 1);
+    const previousEnd = new Date(start.getTime() - 1);
+    const previousStart = new Date(start);
+    previousStart.setDate(previousStart.getDate() - dayCount);
     previousStart.setHours(0, 0, 0, 0);
 
     return { start, end, previousStart, previousEnd };
@@ -8912,12 +8928,18 @@ export class AnalyticsService {
     const groupId =
       range === 'today'
         ? {
-            hour: { $hour: '$date' },
+            hour: { $hour: { date: '$date', timezone: 'Asia/Manila' } },
             sector: '$sector',
             channel: '$channel',
           }
         : {
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+            date: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$date',
+                timezone: 'Asia/Manila',
+              },
+            },
             sector: '$sector',
             channel: '$channel',
           };
@@ -9407,6 +9429,44 @@ export class AnalyticsService {
     }
   }
 
+  private async getChannelBalanceFromMongo(
+    targetDateFilter?: any,
+  ): Promise<any[]> {
+    try {
+      const baseFilter: any = {
+        channel: { $in: ['POS', 'Shopee', 'TikTok Shop', 'PetHub'] },
+      };
+
+      if (targetDateFilter?.date) {
+        baseFilter.date = targetDateFilter.date;
+      } else if (
+        targetDateFilter &&
+        Object.keys(targetDateFilter).length > 0
+      ) {
+        Object.assign(baseFilter, targetDateFilter);
+      }
+
+      const mongoRows = await this.aggregateWithDiskUse([
+        { $match: baseFilter },
+        {
+          $group: {
+            _id: '$channel',
+            revenue: { $sum: '$netSales' },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]);
+
+      return this.formatHomeChannelBalance(mongoRows);
+    } catch (err: any) {
+      this.logger.error(
+        `getChannelBalanceFromMongo failed: ${err?.message || err}`,
+      );
+      return [];
+    }
+  }
+
   private async getChannelBalanceFromSupabase(
     mongoFallbackFilter?: any,
   ): Promise<any[]> {
@@ -9494,7 +9554,8 @@ export class AnalyticsService {
         })),
       );
 
-      if (totals.some((t) => t.revenue > 0)) {
+      const shopeeTotal = totals.find((t) => t._id === 'Shopee')?.revenue || 0;
+      if (totals.some((t) => t.revenue > 0) && shopeeTotal > 0) {
         const formatted = this.formatHomeChannelBalance(totals);
         this.cachedChannelBalance = {
           data: formatted,
@@ -10204,7 +10265,10 @@ export class AnalyticsService {
 
     if (this.llmService) {
       try {
-        const response = await this.llmService.generate({
+        const timeoutPromise = new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), 1500),
+        );
+        const llmPromise = this.llmService.generate({
           feature: 'home_executive_insight' as any,
           prompt: `Summarize business performance for Happy Tails:
 Top Sector: ${topSector.sector} (PHP ${Math.round(topSector.revenue).toLocaleString()})
@@ -10218,6 +10282,8 @@ Active Recommendations: ${suggestions.length} actions pending.`,
             suggestionsCount: suggestions.length,
           },
         });
+
+        const response: any = await Promise.race([llmPromise, timeoutPromise]);
         if (response && response.text) {
           return response.text;
         }

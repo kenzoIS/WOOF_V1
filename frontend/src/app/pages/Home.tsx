@@ -360,8 +360,36 @@ export function Home() {
       }
     });
 
+    // Fallback: If Shopee is missing from flattened channel balance but exists in retailBreakdown
+    const hasShopee = flattened.some((d) => d.channel === "shopee" && d.revenue > 0);
+    if (!hasShopee && homeOverview?.retailBreakdown) {
+      const shopeeBreakdown = homeOverview.retailBreakdown.find((b) => b.channel === "shopee" && Number(b.revenue) > 0);
+      if (shopeeBreakdown) {
+        flattened.push({
+          category: "Shopee",
+          revenue: Number(shopeeBreakdown.revenue),
+          channel: "shopee",
+          fill: getFill("shopee"),
+        });
+      }
+    }
+
+    // Fallback: If TikTok Shop is missing but in retailBreakdown
+    const hasTiktok = flattened.some((d) => d.channel === "tiktok" && d.revenue > 0);
+    if (!hasTiktok && homeOverview?.retailBreakdown) {
+      const tiktokBreakdown = homeOverview.retailBreakdown.find((b) => b.channel === "tiktok" && Number(b.revenue) > 0);
+      if (tiktokBreakdown) {
+        flattened.push({
+          category: "TikTok Shop",
+          revenue: Number(tiktokBreakdown.revenue),
+          channel: "tiktok",
+          fill: getFill("tiktok"),
+        });
+      }
+    }
+
     return flattened;
-  }, [homeOverview?.channelBalance]);
+  }, [homeOverview?.channelBalance, homeOverview?.retailBreakdown]);
   const equilibriumData = separatedEquilibriumData;
   const channelBalanceAxis = useMemo(() => {
     const maxVal = Math.max(0, ...separatedEquilibriumData.map((d) => d.revenue));
@@ -371,17 +399,19 @@ export function Home() {
         ticks: [0, 100000, 200000, 300000, 400000, 500000],
       };
     }
-    // Clean, smaller step increments (replaces large 850k gaps with regular round milestones)
+    // Clean, realistic step increments (by 5k, 10k, 20k, 50k, 100k)
     let step = 500000;
-    if (maxVal <= 100000) step = 20000;
-    else if (maxVal <= 300000) step = 50000;
-    else if (maxVal <= 700000) step = 100000;
-    else if (maxVal <= 1500000) step = 250000;
+    if (maxVal <= 30000) step = 5000;
+    else if (maxVal <= 80000) step = 10000;
+    else if (maxVal <= 180000) step = 20000;
+    else if (maxVal <= 400000) step = 50000;
+    else if (maxVal <= 800000) step = 100000;
+    else if (maxVal <= 1800000) step = 250000;
     else if (maxVal <= 4000000) step = 500000;
     else if (maxVal <= 8000000) step = 1000000;
     else step = 2000000;
 
-    const upper = Math.ceil(maxVal / step) * step;
+    const upper = Math.ceil((maxVal * 1.05) / step) * step;
     const ticks: number[] = [];
     for (let v = 0; v <= upper; v += step) {
       ticks.push(v);
@@ -713,6 +743,63 @@ export function Home() {
     };
   }, [isRetailPlatformsOpen]);
 
+  // Dynamic Y-axis scale calibrated to user preference:
+  // - Sectors View: ₱3,000 (when <= ₱24k) or ₱5,000 (up to ₱70k)
+  // - Distinguish Retail Platforms: ₱5,000 (when <= ₱35k) or ₱10,000 (for higher volumes)
+  const omnichannelAxis = useMemo(() => {
+    let maxVal = 0;
+    for (const d of dynamicOmnichannelData) {
+      if (visibleSeries.cafe) maxVal = Math.max(maxVal, toNumber(d.cafe));
+      if (visibleSeries.services) maxVal = Math.max(maxVal, toNumber(d.services));
+      if (!retailSplitMode && visibleSeries.retail) maxVal = Math.max(maxVal, toNumber(d.retail));
+      if (retailSplitMode) {
+        if (visibleSeries.retail_pos) maxVal = Math.max(maxVal, toNumber(d.retail_pos));
+        if (visibleSeries.retail_tiktok) maxVal = Math.max(maxVal, toNumber(d.retail_tiktok));
+        if (visibleSeries.retail_shopee) maxVal = Math.max(maxVal, toNumber(d.retail_shopee));
+      }
+    }
+
+    if (maxVal <= 0) {
+      return {
+        domain: [0, 50000] as [number, number],
+        ticks: [0, 10000, 20000, 30000, 40000, 50000],
+      };
+    }
+
+    let step = 5000;
+    if (!retailSplitMode) {
+      // Sectors View: step by ₱3k when viewing Cafe/Services (< 24k), or ₱5k for higher volumes
+      if (maxVal <= 24000) {
+        step = 3000;
+      } else if (maxVal <= 70000) {
+        step = 5000;
+      } else {
+        step = 10000;
+      }
+    } else {
+      // Distinguish Retail Platforms: step by ₱5k (<= 35k), or ₱10k for higher platform volume
+      if (maxVal <= 35000) {
+        step = 5000;
+      } else if (maxVal <= 120000) {
+        step = 10000;
+      } else {
+        step = 20000;
+      }
+    }
+
+    // Add 5% headroom so the peak curve doesn't clip against the ceiling
+    const upper = Math.ceil((maxVal * 1.05) / step) * step;
+    const ticks: number[] = [];
+    for (let v = 0; v <= upper; v += step) {
+      ticks.push(v);
+    }
+
+    return {
+      domain: [0, upper] as [number, number],
+      ticks,
+    };
+  }, [dynamicOmnichannelData, visibleSeries, retailSplitMode]);
+
   const CustomOmnichannelTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null;
     const data = payload[0]?.payload;
@@ -739,7 +826,11 @@ export function Home() {
     return (
       <div className="bg-white/95 backdrop-blur-md border border-[#FFD9EC] rounded-xl p-3 shadow-xl text-xs space-y-2 min-w-[200px]">
         <div className="font-bold text-[#223047] border-b border-[#FFD9EC] pb-1 flex items-center justify-between">
-          <span>{label}</span>
+          <span>
+            {typeof label === "string" && label.includes("-") && label.split("-").length === 3
+              ? new Date(`${label}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+              : label}
+          </span>
           <span className="text-[10px] text-[#223047]/60 font-normal">{retailSplitMode ? "Split View" : "Sectors"}</span>
         </div>
         <div className="space-y-1.5">
@@ -1043,7 +1134,7 @@ export function Home() {
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
                   Total Revenue
-                  <InfoTooltip label="Total money earned from uploaded transactions in the selected period." />
+                  <InfoTooltip label="Total money earned from uploaded transactions in the selected period. In the 1-year view, growth >100% (+326.5%) reflects business expansion: prior period was single-store POS only (~₱4.33M), whereas current period includes nationwide Shopee (₱12.4M) and TikTok Shop (₱1.48M) online channels." />
                 </span>
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
@@ -1062,7 +1153,7 @@ export function Home() {
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
                   Orders
-                  <InfoTooltip label="Number of completed transactions or receipts counted by WOOF for the selected period." />
+                  <InfoTooltip label="Total completed orders across all channels. Growth (+283.4%) reflects the jump from 8,403 physical store transactions to 32,275 omnichannel orders after opening digital marketplaces." />
                 </span>
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
@@ -1173,7 +1264,10 @@ export function Home() {
               <Calendar className="w-3.5 h-3.5 mr-1" />
               <span>
                 {homeActiveFilter.startsWith("custom:")
-                  ? `Custom (${homeActiveFilter.split(":")[1]} – ${homeActiveFilter.split(":")[2]})`
+                  ? (() => {
+                      const [, s, e] = homeActiveFilter.split(":");
+                      return s === e ? `Custom (${s})` : `Custom (${s} – ${e})`;
+                    })()
                   : "Custom"}
               </span>
             </Button>
@@ -1210,7 +1304,9 @@ export function Home() {
             </div>
           </div>
           <span className="text-xs text-[#223047]/50 italic">
-            {!retailSplitMode
+            {homeActiveFilter.startsWith("custom:") && homeActiveFilter.split(":")[1] === homeActiveFilter.split(":")[2]
+              ? `Showing intra-day hourly breakdown for ${homeActiveFilter.split(":")[1]}`
+              : !retailSplitMode
               ? "Showing aggregated Cafe, Services, and Retail"
               : "Splitting Retail into In-Store POS, Shopee, and TikTok Shop"}
           </span>
@@ -1306,6 +1402,9 @@ export function Home() {
                 }}
               />
               <YAxis
+                domain={omnichannelAxis.domain}
+                ticks={omnichannelAxis.ticks}
+                interval={0}
                 stroke="#223047"
                 style={{ fontSize: "12px" }}
                 width={65}
@@ -1313,7 +1412,10 @@ export function Home() {
                   const num = Number(value);
                   if (!Number.isFinite(num) || num === 0) return "₱0";
                   if (num >= 1000000) return `₱${(num / 1000000).toFixed(num % 1000000 === 0 ? 0 : 1)}M`;
-                  if (num >= 1000) return `₱${Math.round(num / 1000)}k`;
+                  if (num >= 1000) {
+                    const inK = num / 1000;
+                    return `₱${inK % 1 === 0 ? inK : inK.toFixed(1)}k`;
+                  }
                   return `₱${num}`;
                 }}
               />
@@ -1684,7 +1786,10 @@ export function Home() {
                 <Calendar className="w-3.5 h-3.5 mr-1" />
                 <span>
                   {homeActiveFilter.startsWith("custom:")
-                    ? `Custom (${homeActiveFilter.split(":")[1]} – ${homeActiveFilter.split(":")[2]})`
+                    ? (() => {
+                        const [, s, e] = homeActiveFilter.split(":");
+                        return s === e ? `Custom (${s})` : `Custom (${s} – ${e})`;
+                      })()
                     : "Custom"}
                 </span>
               </Button>

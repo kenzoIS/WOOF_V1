@@ -390,9 +390,11 @@ def run(payload):
     prediction["yhat_lower"] = target_transformer.inverse(prediction["yhat_lower"].to_numpy())
     prediction["yhat_upper"] = target_transformer.inverse(prediction["yhat_upper"].to_numpy())
 
-    # Ensure strictly positive, realistic operational forecasts without zero-dips
-    for col in ["yhat", "yhat_lower", "yhat_upper"]:
-        prediction[col] = prediction[col].clip(lower=1.0)
+    # Ensure strictly positive, realistic operational forecasts without runaway trend explosion
+    historical_ceiling = float(np.percentile(demand_target, 99.5) * 1.25)
+    for col in ["yhat", "yhat_lower"]:
+        prediction[col] = prediction[col].clip(lower=1.0, upper=historical_ceiling)
+    prediction["yhat_upper"] = prediction["yhat_upper"].clip(lower=1.0, upper=historical_ceiling * 1.15)
 
     if use_exog and active_exog_cols:
         hist_frame = frame[["ds", *active_exog_cols]].copy()

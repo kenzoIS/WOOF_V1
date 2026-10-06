@@ -75,8 +75,20 @@ const formatMetadataCalendar = (
   startKey: string,
   endKey: string,
 ) => {
-  const start = metadata?.[startKey];
-  const end = metadata?.[endKey];
+  const splits = (metadata as any)?.splitDates;
+  let start = metadata?.[startKey];
+  let end = metadata?.[endKey];
+
+  if (!start || !end) {
+    if (startKey.includes("train")) {
+      start = start || splits?.trainStart;
+      end = end || splits?.trainEnd;
+    } else if (startKey.includes("test")) {
+      start = start || splits?.testStart || splits?.validationStart;
+      end = end || splits?.testEnd;
+    }
+  }
+
   return typeof start === "string" && typeof end === "string" && start && end
     ? `${start} to ${end}`
     : "-";

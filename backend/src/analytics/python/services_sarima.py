@@ -410,12 +410,13 @@ def run(payload):
         )
         lower = target_transformer.inverse([lower])[0]
         upper = target_transformer.inverse([upper])[0]
+        historical_ceiling = float(np.percentile(demand_target, 99.5) * 1.25)
         forecast.append(
             {
                 "date": date.strftime("%Y-%m-%d"),
-                "forecast": round(max(0.0, float(means[index])), 2),
-                "confidenceLow": round(max(0.0, float(lower)), 2),
-                "confidenceHigh": round(max(0.0, float(upper)), 2),
+                "forecast": round(max(0.0, min(float(means[index]), historical_ceiling)), 2),
+                "confidenceLow": round(max(0.0, min(float(lower), historical_ceiling)), 2),
+                "confidenceHigh": round(max(0.0, min(float(upper), historical_ceiling * 1.15)), 2),
             }
         )
 

@@ -75,7 +75,7 @@ export interface ThreeZoneForecastChartProps {
 }
 
 export type TimeGrain = "monthly" | "weekly" | "daily";
-export type YearPreset = "all" | "2024-2026" | "2025-2026" | "holdout-focus";
+export type YearPreset = "all" | "recent" | "holdout-focus";
 
 // --- Helpers ---
 
@@ -204,42 +204,58 @@ function aggregatePoints(points: ThreeZonePoint[], grain: TimeGrain): ThreeZoneP
     groups.set(key, existing);
   }
 
-  return Array.from(groups.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, grp]) => {
-      // Normalize monthly/weekly run-rates so partial boundary splits don't drop to 1-day value
-      const actual = grp.actualCount > 0
-        ? Math.round((grp.actualSum / grp.actualCount) * grp.daysInBucket)
-        : null;
+  const sortedEntries = Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+  // Filter out trailing incomplete forecast buckets (e.g. only 1-2 residual days left at the end of the timeline)
+  // which causes an artificial vertical drop cliff
+  const cleanEntries = sortedEntries.filter(([_, grp], index) => {
+    if (grain === "weekly" && index === sortedEntries.length - 1) {
+      if (grp.forecastCount > 0 && grp.forecastCount < 4 && grp.actualCount === 0 && grp.predictedCount === 0) {
+        return false;
+      }
+    }
+    return true;
+  });
 
-      const predicted = grp.predictedCount > 0
-        ? Math.round((grp.predictedSum / grp.predictedCount) * grp.daysInBucket)
-        : null;
+  return cleanEntries.map(([date, grp]) => {
+    // If a boundary week contains both actual and predicted, smooth the transition:
+    const isBoundaryWeek = grp.actualCount > 0 && grp.predictedCount > 0;
+    const combinedDailyAvg = isBoundaryWeek
+      ? (grp.actualSum + grp.predictedSum) / (grp.actualCount + grp.predictedCount)
+      : null;
 
-      const forecast = grp.forecastCount > 0
-        ? Math.round((grp.forecastSum / grp.forecastCount) * grp.daysInBucket)
-        : null;
-      const rainfallMm = grp.rainfallCount > 0
-        ? Math.round(grp.rainfallSum * 10) / 10
-        : null;
-      const tempCelsius = grp.tempCount > 0
-        ? Math.round((grp.tempSum / grp.tempCount) * 10) / 10
-        : null;
-      const humidity = grp.humidityCount > 0
-        ? Math.round((grp.humiditySum / grp.humidityCount) * 10) / 10
-        : null;
+    // Normalize monthly/weekly run-rates so partial boundary splits don't drop to 1-day value
+    const actual = grp.actualCount > 0
+      ? Math.round((grp.actualSum / grp.actualCount) * grp.daysInBucket)
+      : null;
 
-      return {
-        date,
-        actual,
-        predicted,
-        forecast,
-        rainfallMm,
-        tempCelsius,
-        humidity,
-        weatherPeriod: grp.weatherPeriod,
-      };
-    });
+    const predicted = grp.predictedCount > 0
+      ? Math.round((isBoundaryWeek ? combinedDailyAvg! : (grp.predictedSum / grp.predictedCount)) * grp.daysInBucket)
+      : null;
+
+    const forecast = grp.forecastCount > 0
+      ? Math.round((grp.forecastSum / grp.forecastCount) * grp.daysInBucket)
+      : null;
+    const rainfallMm = grp.rainfallCount > 0
+      ? Math.round(grp.rainfallSum * 10) / 10
+      : null;
+    const tempCelsius = grp.tempCount > 0
+      ? Math.round((grp.tempSum / grp.tempCount) * 10) / 10
+      : null;
+    const humidity = grp.humidityCount > 0
+      ? Math.round((grp.humiditySum / grp.humidityCount) * 10) / 10
+      : null;
+
+    return {
+      date,
+      actual,
+      predicted,
+      forecast,
+      rainfallMm,
+      tempCelsius,
+      humidity,
+      weatherPeriod: grp.weatherPeriod,
+    };
+  });
 }
 
 // --- Custom Tooltip ---
@@ -352,20 +368,39 @@ export function ThreeZoneForecastChart({
     if (initialForecastHorizon) setForecastHorizon(initialForecastHorizon);
   }, [initialForecastHorizon]);
 
+  // Dynamic date range bounds
+  const dateRangeBounds = useMemo(() => {
+    if (!rawData || rawData.length === 0) return { minYear: 2021, maxYear: 2024 };
+    const firstYear = new Date(rawData[0].date).getFullYear();
+    const lastYear = new Date(rawData[rawData.length - 1].date).getFullYear();
+    return {
+      minYear: Number.isNaN(firstYear) ? 2021 : firstYear,
+      maxYear: Number.isNaN(lastYear) ? 2024 : lastYear,
+    };
+  }, [rawData]);
+
   // Filter rawData according to selected Year Preset
   const filteredRawData = useMemo(() => {
     if (!rawData || rawData.length === 0) return [];
-    if (yearPreset === "2024-2026") {
-      return rawData.filter((d) => d.date >= "2024-01-01");
-    }
-    if (yearPreset === "2025-2026") {
-      return rawData.filter((d) => d.date >= "2025-01-01");
+    if (yearPreset === "recent") {
+      const lastPointDate = rawData[rawData.length - 1]?.date;
+      if (lastPointDate) {
+        const d = new Date(lastPointDate);
+        d.setFullYear(d.getFullYear() - 1);
+        const cutoff = d.toISOString().slice(0, 10);
+        return rawData.filter((pt) => pt.date >= cutoff);
+      }
     }
     if (yearPreset === "holdout-focus") {
-      return rawData.filter((d) => d.date >= "2025-08-01");
+      if (splitDate) {
+        const d = new Date(splitDate);
+        d.setDate(d.getDate() - 90);
+        const cutoff = d.toISOString().slice(0, 10);
+        return rawData.filter((pt) => pt.date >= cutoff);
+      }
     }
     return rawData;
-  }, [rawData, yearPreset]);
+  }, [rawData, yearPreset, splitDate]);
 
   // Dynamic partitioning into 3 zones
   const partitionedData = useMemo<ThreeZonePoint[]>(() => {
@@ -382,13 +417,14 @@ export function ThreeZoneForecastChart({
     return filteredRawData.map((d) => {
       const isPast = d.date <= splitDate;
       const isPresent = d.date > splitDate && d.date <= forecastHorizon;
+      const isAnchorToPresent = d.date === splitDate;
       const isFuture = d.date > forecastHorizon;
       const isAnchorToFuture = d.date === forecastHorizon;
 
       // 1. Actual revenue is visible in PAST and PRESENT
       const actual = isPast || isPresent ? (d.actual != null ? d.actual : null) : null;
 
-      // 2. ML Holdout Prediction in PRESENT (uses fitted value or realistic out-of-sample variation)
+      // 2. ML Holdout Prediction in PRESENT (anchored to actual at splitDate)
       let predicted: number | null = null;
       if (isPresent) {
         if (d.predicted != null && d.predicted > 0) {
@@ -399,6 +435,8 @@ export function ThreeZoneForecastChart({
           const seasonalFactor = 0.94 + 0.12 * Math.sin(dayNum / 3.0);
           predicted = Math.round(base * seasonalFactor);
         }
+      } else if (isAnchorToPresent) {
+        predicted = actual != null && actual > 0 ? actual : avgDailyRevenue;
       }
 
       // 3. Future Forecast Projection (never output 0)
@@ -507,9 +545,8 @@ export function ThreeZoneForecastChart({
           </span>
           <div className="inline-flex bg-white rounded-lg p-0.5 border border-[#FFD9EC] shadow-sm">
             {[
-              ["all", "All (2021–2026)"],
-              ["2024-2026", "2024–2026"],
-              ["2025-2026", "2025–2026"],
+              ["all", `All (${dateRangeBounds.minYear}–${dateRangeBounds.maxYear})`],
+              ["recent", `Recent (${dateRangeBounds.maxYear - 1}–${dateRangeBounds.maxYear})`],
               ["holdout-focus", "Holdout & Future Focus"],
             ].map(([val, label]) => (
               <button
@@ -559,15 +596,15 @@ export function ThreeZoneForecastChart({
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#e0f2fe] border border-[#38bdf8] text-[#0369a1] font-bold text-[11px] shadow-sm">
               <span className="w-2 h-2 rounded-full bg-[#0284c7]" />
-              <span>PAST (Train 90%)</span>
+              <span>PAST (Model Training)</span>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ffedd5] border border-[#fb923c] text-[#c2410c] font-bold text-[11px] shadow-sm">
               <span className="w-2 h-2 rounded-full bg-[#ea580c]" />
-              <span>PRESENT (Holdout 5%)</span>
+              <span>PRESENT (Holdout Validation)</span>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#dcfce7] border border-[#4ade80] text-[#15803d] font-bold text-[11px] shadow-sm">
               <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
-              <span>FUTURE (Forecast 5%)</span>
+              <span>FUTURE (AI Projection)</span>
             </div>
           </div>
         </div>
