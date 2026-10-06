@@ -801,9 +801,7 @@ export class AnalyticsService {
         .rpc('get_dashboard_top_items', { p_sector_filter: rpcSector })
         .then(({ data }) => data || []),
       // Daily revenue over time
-      this.supabaseService.client
-        .rpc('get_dashboard_daily_revenue', { p_sector_filter: rpcSector })
-        .then(({ data }) => data || []),
+      this.fetchAllPagedRpc('get_dashboard_daily_revenue', { p_sector_filter: rpcSector }),
       // Channel breakdown with full omnichannel economics (pull from Supabase with matched dates for Retail)
       normalizedSector === 'Retail'
         ? this.getRetailChannelBreakdownFromSupabase().then((res) => {
@@ -7695,11 +7693,32 @@ export class AnalyticsService {
         : 'python3';
   }
 
+  private async fetchAllPagedRpc<T = any>(
+    rpcName: string,
+    params: Record<string, any>,
+    pageSize = 1000,
+  ): Promise<T[]> {
+    const results: T[] = [];
+    let offset = 0;
+    while (true) {
+      const { data, error } = await this.supabaseService.client
+        .rpc(rpcName, params)
+        .range(offset, offset + pageSize - 1);
+      if (error || !data || data.length === 0) {
+        break;
+      }
+      results.push(...data);
+      if (data.length < pageSize) {
+        break;
+      }
+      offset += pageSize;
+    }
+    return results;
+  }
+
   private async getPreprocessedDailyData(module: ForecastModule): Promise<any[]> {
     const rpcSector = module === 'Services' ? 'Service' : module;
-    const { data } = await this.supabaseService.client
-      .rpc('get_forecast_daily_data', { p_sector_filter: rpcSector });
-    return data || [];
+    return this.fetchAllPagedRpc('get_forecast_daily_data', { p_sector_filter: rpcSector });
   }
 
   private buildForecastTransactionMatch(
@@ -10420,9 +10439,10 @@ Active Recommendations: ${suggestions.length} actions pending.`,
   private async getLegacyRetailForecast(
     overrides?: ForecastOverrides,
   ): Promise<any> {
-    const dailyData = await this.supabaseService.client
-      .rpc('get_dashboard_daily_revenue', { p_sector_filter: 'retail' })
-      .then(({ data }) => data || []);
+    const dailyData = await this.fetchAllPagedRpc(
+      'get_dashboard_daily_revenue',
+      { p_sector_filter: 'retail' },
+    );
       
     const inputData = dailyData.map((point: any) => ({
       date: point._id,

@@ -370,12 +370,12 @@ export function ThreeZoneForecastChart({
 
   // Dynamic date range bounds
   const dateRangeBounds = useMemo(() => {
-    if (!rawData || rawData.length === 0) return { minYear: 2021, maxYear: 2024 };
+    if (!rawData || rawData.length === 0) return { minYear: 2021, maxYear: 2026 };
     const firstYear = new Date(rawData[0].date).getFullYear();
     const lastYear = new Date(rawData[rawData.length - 1].date).getFullYear();
     return {
       minYear: Number.isNaN(firstYear) ? 2021 : firstYear,
-      maxYear: Number.isNaN(lastYear) ? 2024 : lastYear,
+      maxYear: Number.isNaN(lastYear) ? 2026 : lastYear,
     };
   }, [rawData]);
 

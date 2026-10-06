@@ -396,6 +396,7 @@ def run(payload):
     last_date = pd.to_datetime(frame["date"].iloc[-1])
 
     forecast = []
+    historical_ceiling = float(np.percentile(actual, 99.5) * 1.25)
     for index in range(forecast_days):
         date = last_date + pd.Timedelta(days=index + 1)
         lower = (
@@ -410,7 +411,6 @@ def run(payload):
         )
         lower = target_transformer.inverse([lower])[0]
         upper = target_transformer.inverse([upper])[0]
-        historical_ceiling = float(np.percentile(demand_target, 99.5) * 1.25)
         forecast.append(
             {
                 "date": date.strftime("%Y-%m-%d"),

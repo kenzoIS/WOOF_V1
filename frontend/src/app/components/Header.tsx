@@ -466,8 +466,8 @@ export function Header({ onMenuClick }: HeaderProps) {
           </div>
         </div>
 
-        {/* Center: Global Date Range (Hidden on Home page as Home uses dedicated per-graph filtering) */}
-        {router.pathname !== "/" && (
+        {/* Center: Global Date Range (Hidden on Home and Cafe pages as they use dedicated per-graph filtering) */}
+        {router.pathname !== "/" && router.pathname !== "/cafe" && (
           <div className="hidden md:flex flex-col items-center relative flex-shrink-0">
             <div className="flex items-center gap-2 flex-shrink-0">
               <Calendar className="w-4 h-4 text-[#223047] opacity-50" />

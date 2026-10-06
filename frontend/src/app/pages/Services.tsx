@@ -235,9 +235,7 @@ export function Services() {
   useEffect(() => {
     setChartGranularity(getDashboardChartView());
   }, []);
-  const [showPerformanceDetails, setShowPerformanceDetails] = useState(false);
-  const [showAnalysisDetails, setShowAnalysisDetails] = useState(false);
-  const [showSimulatorDetails, setShowSimulatorDetails] = useState(false);
+  const [showDiagnosticsDetails, setShowDiagnosticsDetails] = useState(false);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
   const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
 
@@ -1155,40 +1153,49 @@ export function Services() {
         )}
 
         {/* Model Info & Insights & Simulator */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
-          {/* CARD 1: Active Model Performance */}
-          <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all">
-            <div
-              onClick={() => setShowPerformanceDetails((prev) => !prev)}
-              className="flex items-center justify-between cursor-pointer select-none"
-            >
-              <div>
-                <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
-                <span className="text-[11px] text-[#06B6D4] font-semibold capitalize">
-                  {chartGranularity} Horizon Evaluation
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowInfoModal(true);
-                  }}
-                  className="text-[11px] font-semibold px-2 py-0.5 rounded border border-[#FFD9EC] bg-white text-[#06B6D4] hover:bg-[#FFF2FA] transition-colors"
-                >
-                  Info
-                </button>
-                <button
-                  type="button"
-                  className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
-                >
-                  {showPerformanceDetails ? "Hide" : "Show"}
-                </button>
-              </div>
+        <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm md:text-base font-bold text-[#223047]">Model Diagnostics & Scenario Testing</h3>
+              <p className="text-xs text-[#223047]/60">Evaluate model metrics, configure thesis/production modes, and simulate sales scenarios.</p>
             </div>
+            <button
+              type="button"
+              onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] shadow-sm transition-colors flex items-center gap-1.5"
+            >
+              <span>{showDiagnosticsDetails ? "Hide Details" : "Show Details"}</span>
+            </button>
+          </div>
 
-            {showPerformanceDetails && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+            {/* CARD 1: Active Model Performance */}
+            <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all">
+              <div
+                onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
+                className="flex items-center justify-between cursor-pointer select-none"
+              >
+                <div>
+                  <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+                  <span className="text-[11px] text-[#06B6D4] font-semibold capitalize">
+                    {chartGranularity} Horizon Evaluation
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowInfoModal(true);
+                    }}
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded border border-[#FFD9EC] bg-white text-[#06B6D4] hover:bg-[#FFF2FA] transition-colors"
+                  >
+                    Info
+                  </button>
+                </div>
+              </div>
+
+              {showDiagnosticsDetails && (
               <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200">
                 <div className="grid grid-cols-2 gap-3 md:gap-4">
                   <div>
@@ -1253,7 +1260,7 @@ export function Services() {
           {/* CARD 2: WOOF Analysis */}
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all flex flex-col justify-between">
             <div
-              onClick={() => setShowAnalysisDetails((prev) => !prev)}
+              onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
               className="flex items-center justify-between cursor-pointer select-none"
             >
               <div>
@@ -1262,15 +1269,9 @@ export function Services() {
                   Mode: {forecastMode.replace("-", " ")}
                 </span>
               </div>
-              <button
-                type="button"
-                className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
-              >
-                {showAnalysisDetails ? "Hide" : "Show"}
-              </button>
             </div>
 
-            {showAnalysisDetails && (
+            {showDiagnosticsDetails && (
               <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200 flex-1 flex flex-col justify-between">
                 <div className="space-y-3">
                   <div>
@@ -1307,7 +1308,7 @@ export function Services() {
           {/* CARD 3: Sales Simulator (What-If?) */}
           <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all flex flex-col justify-between">
             <div
-              onClick={() => setShowSimulatorDetails((prev) => !prev)}
+              onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
               className="flex items-center justify-between cursor-pointer select-none"
             >
               <div>
@@ -1316,15 +1317,9 @@ export function Services() {
                   Scenario Testing
                 </span>
               </div>
-              <button
-                type="button"
-                className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
-              >
-                {showSimulatorDetails ? "Hide" : "Show"}
-              </button>
             </div>
 
-            {showSimulatorDetails && (
+            {showDiagnosticsDetails && (
               <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200 flex-1 flex flex-col justify-between">
                 <div>
                   <p className="text-xs text-[#223047] opacity-60 mb-2">
@@ -1432,6 +1427,7 @@ export function Services() {
               </div>
             )}
           </div>
+        </div>
         </div>
       </div>
 

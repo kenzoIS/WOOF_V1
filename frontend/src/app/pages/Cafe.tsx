@@ -328,9 +328,12 @@ export function Cafe() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [showAcademicView, setShowAcademicView] = useState(false);
   const [chartGranularity, setChartGranularity] = useState<TimeGrain>("monthly");
-  const [showPerformanceDetails, setShowPerformanceDetails] = useState(false);
-  const [showAnalysisDetails, setShowAnalysisDetails] = useState(false);
-  const [showSimulatorDetails, setShowSimulatorDetails] = useState(false);
+  const [showDiagnosticsDetails, setShowDiagnosticsDetails] = useState(false);
+  const [coAttachPeriod, setCoAttachPeriod] = useState<"7d" | "30d" | "90d" | "12m" | "all-time" | "custom">("30d");
+  const [customCoAttachStart, setCustomCoAttachStart] = useState<string>("");
+  const [customCoAttachEnd, setCustomCoAttachEnd] = useState<string>("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedSegmentKey, setSelectedSegmentKey] = useState<string | null>(null);
   useEffect(() => {
     setChartGranularity(getDashboardChartView());
   }, []);
@@ -408,11 +411,25 @@ export function Cafe() {
     }
   }, [quietPeriod, pastHappyHours]);
 
-  // Dynamically load Co-Attachment basket data filtered by globalDateRange
+  // Dynamically load Co-Attachment basket data filtered by dedicated coAttachPeriod
   useEffect(() => {
     const bounds = getItemHistoryBounds(forecastRun);
     const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
-    const range = parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
+
+    let range: { start: string; end: string };
+    if (coAttachPeriod === "custom" && customCoAttachStart && customCoAttachEnd) {
+      range = { start: customCoAttachStart, end: customCoAttachEnd };
+    } else {
+      const rangeMap: Record<string, string> = {
+        "7d": "last-7-days",
+        "30d": "last-30-days",
+        "90d": "last-90-days",
+        "12m": "last-12-months",
+        "all-time": "all-time",
+      };
+      const mapped = rangeMap[coAttachPeriod] || "last-30-days";
+      range = parseGlobalRange(mapped, latestHistoryDate, bounds);
+    }
 
     setIsCoAttachmentLoading(true);
     getCafeCoAttachment(range.start, range.end)
@@ -423,7 +440,7 @@ export function Cafe() {
       .finally(() => {
         setIsCoAttachmentLoading(false);
       });
-  }, [globalDateRange, forecastRun, realtimeRefresh]);
+  }, [coAttachPeriod, customCoAttachStart, customCoAttachEnd, forecastRun, realtimeRefresh]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
@@ -821,10 +838,152 @@ export function Cafe() {
     };
   }, [forecastRun, globalDateRange]);
 
-  const cafeRevenue = formatCurrency(aggregatedKpis.totalRevenue);
-  const totalOrders = aggregatedKpis.totalOrders || 0;
-  const avgCheck = formatCurrency(aggregatedKpis.avgOrderValue);
   const activeItems = menuItems.length || forecastRun?.topItems?.length || 0;
+
+  const activeKpis = useMemo(() => {
+    // 1. If a Dining Segment is selected (Dual-Diner, Solo Human, Solo Pet)
+    if (selectedSegmentKey && coAttachmentData?.segments?.length) {
+      const seg = coAttachmentData.segments.find(
+        (s: any) =>
+          (s.key && s.key === selectedSegmentKey) ||
+          (selectedSegmentKey === "dual" && s.name.toLowerCase().includes("dual")) ||
+          (selectedSegmentKey === "solo_human" && s.name.toLowerCase().includes("human")) ||
+          (selectedSegmentKey === "solo_pet" && s.name.toLowerCase().includes("pet")),
+      );
+      if (seg) {
+        const segRev = toNumber(seg.revenue);
+        const segBaskets = toNumber(seg.baskets);
+        const segAov = toNumber(seg.aov) || (segBaskets > 0 ? segRev / segBaskets : 0);
+        const dualLift =
+          selectedSegmentKey === "dual" && coAttachmentData.coAttachmentRate
+            ? `+${coAttachmentData.coAttachmentRate}% Co-Attach Rate`
+            : `${Number(seg.share || 0).toFixed(1)}% Share of Sales`;
+
+        return {
+          totalRevenue: segRev,
+          totalOrders: segBaskets,
+          avgOrderValue: segAov,
+          activeItemsCount: activeItems,
+          revenueTitle: `${seg.name} Revenue`,
+          ordersTitle: `${seg.name} Tickets`,
+          aovTitle: `${seg.name} AOV`,
+          itemsTitle: "Basket Profile",
+          revenueSubtitle: `${Number(seg.share || 0).toFixed(1)}% of Cafe Sales`,
+          ordersSubtitle: `${segBaskets.toLocaleString()} customer baskets`,
+          aovSubtitle: dualLift,
+          itemsSubtitle: "Selected Segment",
+          filterName: seg.name,
+          filterType: "segment" as const,
+          growth: { text: `${Number(seg.share || 0).toFixed(1)}% Share`, className: "text-xs text-[#F53799] font-semibold hidden md:block" },
+        };
+      }
+    }
+
+    // 2. If a Category is selected (Coffee, Rice meals, Pasta/snacks, Pet bakery, Non-caffeine)
+    if (selectedCategory) {
+      const cat = cafeCategoryRevenueData.find(
+        (c: any) => c.category?.toLowerCase() === selectedCategory.toLowerCase(),
+      );
+      const catRev = cat ? toNumber(cat.revenue) : 0;
+      const catOrders = cat ? toNumber(cat.orders || cat.quantity) : 0;
+      const catAov = catOrders > 0 ? Math.round(catRev / catOrders) : 0;
+      const catItems = menuItems.filter(
+        (m: any) => (m.category || "").toLowerCase() === selectedCategory.toLowerCase(),
+      ).length;
+
+      return {
+        totalRevenue: catRev,
+        totalOrders: catOrders,
+        avgOrderValue: catAov,
+        activeItemsCount: catItems || (cat ? 1 : 0),
+        revenueTitle: `${selectedCategory} Revenue`,
+        ordersTitle: `${selectedCategory} Volume`,
+        aovTitle: `${selectedCategory} Avg Spend`,
+        itemsTitle: `${selectedCategory} Items`,
+        revenueSubtitle: cat ? `${Number(cat.share || 0).toFixed(1)}% of Cafe Sales` : "Filtered Category",
+        ordersSubtitle: `${catOrders.toLocaleString()} units / orders`,
+        aovSubtitle: `Avg ₱${catAov.toLocaleString()} per unit`,
+        itemsSubtitle: `${catItems} items in catalog`,
+        filterName: selectedCategory,
+        filterType: "category" as const,
+        growth: { text: cat ? `${Number(cat.share || 0).toFixed(1)}% Share` : "", className: "text-xs text-[#F53799] font-semibold hidden md:block" },
+      };
+    }
+
+    // 3. Otherwise, use period-aggregated Cafe KPIs
+    const bounds = getItemHistoryBounds(forecastRun);
+    const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
+    let range: { start: string; end: string; isCustom: boolean };
+    if (coAttachPeriod === "custom" && customCoAttachStart && customCoAttachEnd) {
+      range = { start: customCoAttachStart, end: customCoAttachEnd, isCustom: true };
+    } else {
+      const rangeMap: Record<string, string> = {
+        "7d": "last-7-days",
+        "30d": "last-30-days",
+        "90d": "last-90-days",
+        "12m": "last-12-months",
+        "all-time": "all-time",
+      };
+      const mapped = rangeMap[coAttachPeriod] || "last-30-days";
+      range = parseGlobalRange(mapped, latestHistoryDate, bounds);
+    }
+
+    const sliced = filterByDateRange(forecastRun?.historical || [], range);
+    const unitPrice = getCafeForecastUnitPrice(forecastRun);
+    const periodRevenue = sliced.reduce((sum, d) => sum + getHistoricalRevenue(d, unitPrice), 0);
+    const fallbackAvgOrderValue = toNumber(forecastRun?.kpis?.avgOrderValue, 150) || 150;
+    const periodOrders = sliced.reduce((sum, d) => sum + (toNumber(d.orders) || Math.round(getHistoricalRevenue(d, unitPrice) / fallbackAvgOrderValue)), 0);
+    const periodAov = periodOrders > 0 ? Math.round(periodRevenue / periodOrders) : fallbackAvgOrderValue;
+
+    const dayCount = countDays(range.start, range.end);
+    const previousEnd = addDays(range.start, -1);
+    const previousStart = addDays(previousEnd, -(dayCount - 1));
+    const prevRange = { start: previousStart, end: previousEnd, isCustom: false };
+    const prevSliced = filterByDateRange(forecastRun?.historical || [], prevRange);
+    const prevRevenue = prevSliced.reduce((sum, d) => sum + getHistoricalRevenue(d, unitPrice), 0);
+    const prevOrders = prevSliced.reduce((sum, d) => sum + (toNumber(d.orders) || Math.round(getHistoricalRevenue(d, unitPrice) / fallbackAvgOrderValue)), 0);
+    const prevAov = prevOrders > 0 ? Math.round(prevRevenue / prevOrders) : 0;
+
+    const revGrowth = formatGrowth(periodRevenue, prevRevenue);
+    const ordGrowth = formatGrowth(periodOrders, prevOrders);
+    const aovGrowth = formatGrowth(periodAov, prevAov);
+
+    return {
+      totalRevenue: periodRevenue || aggregatedKpis.totalRevenue,
+      totalOrders: periodOrders || aggregatedKpis.totalOrders,
+      avgOrderValue: periodAov || aggregatedKpis.avgOrderValue,
+      activeItemsCount: activeItems,
+      revenueTitle: "Historical Cafe Revenue",
+      ordersTitle: "Total Orders",
+      aovTitle: "Avg Check Size",
+      itemsTitle: "Active Menu Items",
+      revenueSubtitle: revGrowth.text,
+      ordersSubtitle: ordGrowth.text,
+      aovSubtitle: aovGrowth.text,
+      itemsSubtitle: "All Active",
+      filterName: null,
+      filterType: null,
+      growth: revGrowth,
+      ordersGrowth: ordGrowth,
+      checkGrowth: aovGrowth,
+    };
+  }, [
+    selectedSegmentKey,
+    selectedCategory,
+    coAttachmentData,
+    cafeCategoryRevenueData,
+    menuItems,
+    forecastRun,
+    coAttachPeriod,
+    customCoAttachStart,
+    customCoAttachEnd,
+    aggregatedKpis,
+    activeItems,
+  ]);
+
+  const cafeRevenue = formatCurrency(activeKpis.totalRevenue);
+  const totalOrders = activeKpis.totalOrders || 0;
+  const avgCheck = formatCurrency(activeKpis.avgOrderValue);
 
   // Build forecast chart data from API based on globalDateRange
   const forecastData = useMemo(() => {
@@ -1315,16 +1474,52 @@ export function Cafe() {
 
       {/* KPI ROW */}
       {/* KPI CARDS */}
-      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3">
+        {/* Interactive Filter Status Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 border-b border-[#FFD9EC]/60">
+          <div className="flex items-center gap-2 text-xs text-[#223047]/70 font-medium">
+            <span>Cafe Timeline: <strong className="text-[#F53799] uppercase">{coAttachPeriod === "all-time" ? "All-Time" : coAttachPeriod === "custom" ? "Custom Range" : `Last ${coAttachPeriod.toUpperCase()}`}</strong></span>
+            {activeKpis.filterName && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#FFF2FA] border border-[#FFD9EC] text-[#F53799] font-bold">
+                <span>Filtered: {activeKpis.filterName}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedCategory(null);
+                    setSelectedSegmentKey(null);
+                  }}
+                  className="hover:text-red-500 font-bold ml-1"
+                  title="Clear filter"
+                >
+                  ×
+                </button>
+              </span>
+            )}
+          </div>
+          {activeKpis.filterName && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCategory(null);
+                setSelectedSegmentKey(null);
+              }}
+              className="text-xs text-[#F53799] hover:underline font-semibold"
+            >
+              Reset to All Cafe Data
+            </button>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Cafe Revenue */}
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
             onClick={() => setSelectedKpi({
-              title: "Historical Cafe Revenue",
-              current: aggregatedKpis.totalRevenue,
+              title: activeKpis.revenueTitle,
+              current: activeKpis.totalRevenue,
               previous: aggregatedKpis.prevRevenue,
-              currentLabel: "Current Period",
+              currentLabel: "Selected",
               previousLabel: "Previous Period",
               rangeStart: aggregatedKpis.rangeStart || "",
               rangeEnd: aggregatedKpis.rangeEnd || "",
@@ -1332,8 +1527,8 @@ export function Cafe() {
               prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
               formatter: formatCurrency,
               icon: <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />,
-              growth: aggregatedKpis.revenueGrowth,
-              description: "Total Cafe revenue from uploaded transaction history. Compared against the equivalent prior period of the same length.",
+              growth: activeKpis.growth,
+              description: "Revenue metrics for the active Cafe timeline and selected segment or category.",
             })}
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
@@ -1341,11 +1536,11 @@ export function Cafe() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
-                <span>Historical Cafe Revenue</span>
-                <InfoTooltip label="Total Cafe revenue from uploaded transaction history for the selected period." />
+                <span>{activeKpis.revenueTitle}</span>
+                <InfoTooltip label="Revenue for the selected Cafe timeline and active filter." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{cafeRevenue}</div>
-              <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
+              <div className={activeKpis.growth.className}>{activeKpis.revenueSubtitle}</div>
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
@@ -1354,10 +1549,10 @@ export function Cafe() {
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
             onClick={() => setSelectedKpi({
-              title: "Total Orders",
-              current: aggregatedKpis.totalOrders,
+              title: activeKpis.ordersTitle,
+              current: activeKpis.totalOrders,
               previous: aggregatedKpis.prevOrders,
-              currentLabel: "Current Period",
+              currentLabel: "Selected",
               previousLabel: "Previous Period",
               rangeStart: aggregatedKpis.rangeStart || "",
               rangeEnd: aggregatedKpis.rangeEnd || "",
@@ -1365,8 +1560,8 @@ export function Cafe() {
               prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
               formatter: (v) => v.toLocaleString(),
               icon: <Coffee className="w-4 h-4 md:w-5 md:h-5 text-white" />,
-              growth: aggregatedKpis.ordersGrowth,
-              description: "Number of Cafe transactions counted in the selected period. Compared against the equivalent prior period.",
+              growth: activeKpis.ordersGrowth || { text: "", className: "" },
+              description: "Transaction or item volume counted in the selected Cafe period or category.",
             })}
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
@@ -1374,11 +1569,11 @@ export function Cafe() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
-                <span>Total Orders</span>
-                <InfoTooltip label="Number of Cafe transactions counted in the selected period." />
+                <span>{activeKpis.ordersTitle}</span>
+                <InfoTooltip label="Transactions or units for the selected timeline and filter." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{totalOrders.toLocaleString()}</div>
-              <div className={aggregatedKpis.ordersGrowth.className}>{aggregatedKpis.ordersGrowth.text}</div>
+              <div className="text-xs text-gray-500 font-medium hidden md:block">{activeKpis.ordersSubtitle}</div>
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
@@ -1387,10 +1582,10 @@ export function Cafe() {
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
             onClick={() => setSelectedKpi({
-              title: "Avg Check Size",
-              current: aggregatedKpis.avgOrderValue,
+              title: activeKpis.aovTitle,
+              current: activeKpis.avgOrderValue,
               previous: aggregatedKpis.prevAvgOrderValue,
-              currentLabel: "Current Period",
+              currentLabel: "Selected",
               previousLabel: "Previous Period",
               rangeStart: aggregatedKpis.rangeStart || "",
               rangeEnd: aggregatedKpis.rangeEnd || "",
@@ -1398,8 +1593,8 @@ export function Cafe() {
               prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
               formatter: formatCurrency,
               icon: <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />,
-              growth: aggregatedKpis.checkGrowth,
-              description: "Average Cafe spend per order (revenue ÷ orders). Compared against the equivalent prior period.",
+              growth: activeKpis.checkGrowth || { text: "", className: "" },
+              description: "Average Cafe spend per order or unit.",
             })}
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
@@ -1407,23 +1602,23 @@ export function Cafe() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
-                <span>Avg Check Size</span>
-                <InfoTooltip label="Average Cafe spend per order. It is computed as revenue divided by orders." />
+                <span>{activeKpis.aovTitle}</span>
+                <InfoTooltip label="Average Cafe spend per order or unit." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{avgCheck}</div>
-              <div className={aggregatedKpis.checkGrowth.className}>{aggregatedKpis.checkGrowth.text}</div>
+              <div className="text-xs text-gray-500 font-medium hidden md:block">{activeKpis.aovSubtitle}</div>
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
-          {/* Active Menu Items — no prev comparison, just info modal */}
+          {/* Active Menu Items */}
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
             onClick={() => setSelectedKpi({
-              title: "Active Menu Items",
-              current: activeItems,
+              title: activeKpis.itemsTitle,
+              current: activeKpis.activeItemsCount,
               previous: 0,
-              currentLabel: "Items in Data",
+              currentLabel: "Items in Catalog",
               previousLabel: "—",
               rangeStart: aggregatedKpis.rangeStart || "",
               rangeEnd: aggregatedKpis.rangeEnd || "",
@@ -1432,7 +1627,7 @@ export function Cafe() {
               formatter: (v) => v.toLocaleString(),
               icon: <LucidePieChart className="w-4 h-4 md:w-5 md:h-5 text-white" />,
               growth: { text: "", className: "" },
-              description: "Distinct menu items currently represented in the uploaded Cafe transaction data. This is a catalog count, not a period comparison.",
+              description: "Menu item or basket profile count in Cafe data.",
             })}
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
@@ -1440,12 +1635,12 @@ export function Cafe() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
-                <span>Active Menu Items</span>
-                <InfoTooltip label="Menu items currently represented in the uploaded Cafe transaction data." />
+                <span>{activeKpis.itemsTitle}</span>
+                <InfoTooltip label="Active item count or basket profile focus." />
               </div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">{activeItems}</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">{activeKpis.activeItemsCount}</div>
               <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs mt-1 hidden md:inline-flex">
-                All Active
+                {activeKpis.itemsSubtitle}
               </Badge>
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
@@ -1571,40 +1766,49 @@ export function Cafe() {
             )}
 
             {/* Model Info, Recommendation, and Exogenous Info */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-[#FFD9EC]">
-              {/* CARD 1: Active Model Performance */}
-              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all">
-                <div
-                  onClick={() => setShowPerformanceDetails((prev) => !prev)}
-                  className="flex items-center justify-between cursor-pointer select-none"
-                >
-                  <div>
-                    <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
-                    <span className="text-[11px] text-[#F53799] font-semibold capitalize">
-                      {chartGranularity} Horizon Evaluation
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowInfoModal(true);
-                      }}
-                      className="text-[11px] font-semibold px-2 py-0.5 rounded border border-[#FFD9EC] bg-white text-[#F53799] hover:bg-[#FFF2FA] transition-colors"
-                    >
-                      Info
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
-                    >
-                      {showPerformanceDetails ? "Hide" : "Show"}
-                    </button>
-                  </div>
+            <div className="pt-4 md:pt-6 border-t border-[#FFD9EC]">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm md:text-base font-bold text-[#223047]">Model Diagnostics & Scenario Testing</h3>
+                  <p className="text-xs text-[#223047]/60">Evaluate model metrics, configure thesis/production modes, and simulate sales scenarios.</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  <span>{showDiagnosticsDetails ? "Hide Details" : "Show Details"}</span>
+                </button>
+              </div>
 
-                {showPerformanceDetails && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+                {/* CARD 1: Active Model Performance */}
+                <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all">
+                  <div
+                    onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
+                    className="flex items-center justify-between cursor-pointer select-none"
+                  >
+                    <div>
+                      <h3 className="text-sm md:text-base font-bold text-[#223047]">Active Model Performance</h3>
+                      <span className="text-[11px] text-[#F53799] font-semibold capitalize">
+                        {chartGranularity} Horizon Evaluation
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowInfoModal(true);
+                        }}
+                        className="text-[11px] font-semibold px-2 py-0.5 rounded border border-[#FFD9EC] bg-white text-[#F53799] hover:bg-[#FFF2FA] transition-colors"
+                      >
+                        Info
+                      </button>
+                    </div>
+                  </div>
+
+                  {showDiagnosticsDetails && (
                   <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200">
                     <div className="grid grid-cols-2 gap-3 md:gap-4">
                       <div>
@@ -1669,7 +1873,7 @@ export function Cafe() {
               {/* CARD 2: WOOF Analysis */}
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all flex flex-col justify-between">
                 <div
-                  onClick={() => setShowAnalysisDetails((prev) => !prev)}
+                  onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
                   className="flex items-center justify-between cursor-pointer select-none"
                 >
                   <div>
@@ -1678,15 +1882,9 @@ export function Cafe() {
                       Mode: {forecastMode.replace("-", " ")}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
-                  >
-                    {showAnalysisDetails ? "Hide" : "Show"}
-                  </button>
                 </div>
 
-                {showAnalysisDetails && (
+                {showDiagnosticsDetails && (
                   <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200 flex-1 flex flex-col justify-between">
                     <div className="space-y-3">
                       <div>
@@ -1723,7 +1921,7 @@ export function Cafe() {
               {/* CARD 3: Sales Simulator (What-If?) */}
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl md:rounded-2xl p-4 md:p-6 transition-all flex flex-col justify-between">
                 <div
-                  onClick={() => setShowSimulatorDetails((prev) => !prev)}
+                  onClick={() => setShowDiagnosticsDetails((prev) => !prev)}
                   className="flex items-center justify-between cursor-pointer select-none"
                 >
                   <div>
@@ -1732,15 +1930,9 @@ export function Cafe() {
                       Scenario Testing
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="text-xs font-semibold px-2.5 py-1 rounded-md border border-[#FFD9EC] bg-white text-[#223047] hover:bg-[#FFF2FA] transition-colors"
-                  >
-                    {showSimulatorDetails ? "Hide" : "Show"}
-                  </button>
                 </div>
 
-                {showSimulatorDetails && (
+                {showDiagnosticsDetails && (
                   <div className="pt-3 border-t border-[#FFD9EC] mt-3 space-y-3 animate-in fade-in duration-200 flex-1 flex flex-col justify-between">
                     <div>
                       <p className="text-xs text-[#223047] opacity-60 mb-2">
@@ -1847,20 +2039,108 @@ export function Cafe() {
                 )}
               </div>
             </div>
+            </div>
         </>
       </div>
+
+      {/* ══ INTERACTIVE FILTER BAR FOR CO-ATTACHMENT & CATEGORY REVENUE ══ */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm md:text-base font-bold text-[#223047]">
+              Interactive Cafe & Basket Intelligence
+            </h2>
+            <Badge className="bg-[#FFF2FA] border border-[#FFD9EC] text-[#F53799] text-[10px] font-semibold">
+              Live Interactive Filters
+            </Badge>
+          </div>
+          <p className="text-xs text-[#223047]/60 mt-0.5">
+            Filter historical dining baskets and category contribution below. The top KPI cards synchronize automatically.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 bg-[#FFF7FB] border border-[#FFD9EC] p-1 rounded-xl">
+          {(
+            [
+              ["7d", "Last 7D"],
+              ["30d", "Last 30D"],
+              ["90d", "Last 90D"],
+              ["12m", "Last 12M"],
+              ["all-time", "All-Time"],
+              ["custom", "Custom"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                setCoAttachPeriod(key);
+                if (key !== "custom") {
+                  setCustomCoAttachStart("");
+                  setCustomCoAttachEnd("");
+                }
+              }}
+              className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                coAttachPeriod === key
+                  ? "bg-[#F53799] text-white shadow-xs"
+                  : "text-[#223047]/70 hover:text-[#223047] hover:bg-[#FFF2FA]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {coAttachPeriod === "custom" && (
+        <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 flex flex-wrap items-center gap-3 text-xs text-[#223047]">
+          <span className="font-semibold text-xs">Custom Date Range:</span>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] opacity-70">Start:</label>
+            <input
+              type="date"
+              value={customCoAttachStart}
+              onChange={(e) => setCustomCoAttachStart(e.target.value)}
+              className="px-2 py-1 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] opacity-70">End:</label>
+            <input
+              type="date"
+              value={customCoAttachEnd}
+              onChange={(e) => setCustomCoAttachEnd(e.target.value)}
+              className="px-2 py-1 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+            />
+          </div>
+        </div>
+      )}
 
       {/* ══ 2-COLUMN SIDE-BY-SIDE: CO-ATTACHMENT INDEX + CATEGORY REVENUE CONTRIBUTION ══ */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
         {/* 1. DUAL-DINER CO-ATTACHMENT INDEX (5 cols) */}
         <div className="lg:col-span-5 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 flex flex-col justify-between space-y-4">
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg md:text-xl font-bold text-[#223047]">
-                Human vs. Pet Co-Attachment
-              </h2>
-              <InfoTooltip label="Basket composition: Dual-Diner vs Solo Human vs Solo Pet dining. Cross-Species Basket Analysis measures how frequently pet parents purchase food for both themselves and their pets in a single ticket, and tracks AOV lift." />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg md:text-xl font-bold text-[#223047]">
+                  Human vs. Pet Co-Attachment
+                </h2>
+                <InfoTooltip label="Basket composition: Dual-Diner vs Solo Human vs Solo Pet dining. Cross-Species Basket Analysis measures how frequently pet parents purchase food for both themselves and their pets in a single ticket, and tracks AOV lift." />
+              </div>
+              {selectedSegmentKey && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedSegmentKey(null)}
+                  className="text-xs text-[#F53799] hover:underline font-semibold"
+                >
+                  Clear Selection
+                </button>
+              )}
             </div>
+            <p className="text-xs text-[#223047]/60 mt-1">
+              Click a segment to isolate basket KPIs above.
+            </p>
           </div>
 
           {/* DONUT CHART + LEFT TOOLTIP PANEL */}
@@ -1911,8 +2191,8 @@ export function Cafe() {
                 </div>
               ) : (
                 <div className="text-[10px] text-[#223047]/30 text-center italic leading-snug px-1">
-                  Hover a slice
-                  <br />to see details
+                  Click a slice
+                  <br />to filter KPIs
                 </div>
               )}
             </div>
@@ -1933,20 +2213,38 @@ export function Cafe() {
                   paddingAngle={3}
                   onMouseEnter={(_, index) => setHoveredDonutIndex(index)}
                   onMouseLeave={() => setHoveredDonutIndex(null)}
+                  onClick={(entry) => {
+                    const key =
+                      entry.key ||
+                      (entry.name.toLowerCase().includes("dual") ? "dual" :
+                       entry.name.toLowerCase().includes("human") ? "solo_human" : "solo_pet");
+                    setSelectedSegmentKey((prev) => (prev === key ? null : key));
+                  }}
                 >
-                  {donutSegments.map((entry: any, index: number) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.color}
-                      className="cursor-pointer transition-all duration-200"
-                      opacity={hoveredDonutIndex === null || hoveredDonutIndex === index ? 1 : 0.45}
-                    />
-                  ))}
+                  {donutSegments.map((entry: any, index: number) => {
+                    const segKey =
+                      entry.key ||
+                      (entry.name.toLowerCase().includes("dual") ? "dual" :
+                       entry.name.toLowerCase().includes("human") ? "solo_human" : "solo_pet");
+                    const isSelected = selectedSegmentKey === segKey;
+                    return (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.color}
+                        className="cursor-pointer transition-all duration-200"
+                        opacity={
+                          selectedSegmentKey
+                            ? isSelected ? 1 : 0.35
+                            : hoveredDonutIndex === null || hoveredDonutIndex === index ? 1 : 0.45
+                        }
+                      />
+                    );
+                  })}
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
 
-            {/* Center Label – reactive to hover */}
+            {/* Center Label – reactive to hover or selection */}
             <div
               className="absolute top-0 bottom-0 flex flex-col items-center justify-center pointer-events-none transition-all duration-200"
               style={{ left: "68%", transform: "translateX(-50%)" }}
@@ -1985,29 +2283,42 @@ export function Cafe() {
 
           {/* SEGMENT ROWS & AOV COMPARISON */}
           <div className="space-y-2 pt-2 border-t border-[#FFD9EC]">
-            {donutSegments.map((seg: any, index: number) => (
-              <div
-                key={seg.name}
-                className={`flex items-center justify-between p-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
-                  hoveredDonutIndex === index
-                    ? "bg-[#FFF0F8] border border-[#F53799] shadow-sm scale-[1.01]"
-                    : "bg-[#FFF7FB] border border-[#FFD9EC] hover:bg-[#FFF2FA]"
-                }`}
-                onMouseEnter={() => setHoveredDonutIndex(index)}
-                onMouseLeave={() => setHoveredDonutIndex(null)}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: seg.color }} />
-                  <span className="font-semibold text-[#223047] truncate">{seg.name}</span>
+            {donutSegments.map((seg: any, index: number) => {
+              const segKey =
+                seg.key ||
+                (seg.name.toLowerCase().includes("dual") ? "dual" :
+                 seg.name.toLowerCase().includes("human") ? "solo_human" : "solo_pet");
+              const isSelected = selectedSegmentKey === segKey;
+              return (
+                <div
+                  key={seg.name}
+                  onClick={() => setSelectedSegmentKey((prev) => (prev === segKey ? null : segKey))}
+                  className={`flex items-center justify-between p-2.5 rounded-xl text-xs transition-all duration-200 cursor-pointer ${
+                    isSelected
+                      ? "bg-[#FFF0F8] border-2 border-[#F53799] shadow-sm scale-[1.01]"
+                      : hoveredDonutIndex === index
+                        ? "bg-[#FFF0F8] border border-[#F53799] shadow-sm scale-[1.01]"
+                        : "bg-[#FFF7FB] border border-[#FFD9EC] hover:bg-[#FFF2FA]"
+                  }`}
+                  onMouseEnter={() => setHoveredDonutIndex(index)}
+                  onMouseLeave={() => setHoveredDonutIndex(null)}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: seg.color }} />
+                    <span className="font-semibold text-[#223047] truncate">{seg.name}</span>
+                    {isSelected && (
+                      <span className="text-[10px] bg-[#F53799] text-white px-1.5 py-0.2 rounded font-bold">Active</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2.5 flex-shrink-0">
+                    <span className="font-extrabold text-[#223047]">{Number(seg.share || 0).toFixed(1)}%</span>
+                    <span className="text-[11px] font-bold text-[#223047] bg-white px-2 py-0.5 rounded-md border border-[#FFD9EC] shadow-xs">
+                      ₱{Number(seg.aov || 0).toLocaleString()} AOV
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2.5 flex-shrink-0">
-                  <span className="font-extrabold text-[#223047]">{Number(seg.share || 0).toFixed(1)}%</span>
-                  <span className="text-[11px] font-bold text-[#223047] bg-white px-2 py-0.5 rounded-md border border-[#FFD9EC] shadow-xs">
-                    ₱{Number(seg.aov || 0).toLocaleString()} AOV
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -2019,11 +2330,42 @@ export function Cafe() {
                 <h2 className="text-lg md:text-xl font-bold text-[#223047]">
                   Category Revenue Contribution
                 </h2>
-                <InfoTooltip label="Total cafe sales ranked by food, beverage, and pet bakery category. Category Management aggregates Cafe sales across beverage, food, and pet bakery categories to evaluate high-level product line performance." />
+                <InfoTooltip label="Total cafe sales ranked by food, beverage, and pet bakery category. Click any category to filter top KPIs." />
               </div>
-              <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-2 py-0.5 text-[11px]">
-                {cafeCategoryRevenueData.length} Categories
-              </Badge>
+              <div className="flex items-center gap-2">
+                {selectedCategory && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory(null)}
+                    className="text-xs text-[#F53799] hover:underline font-semibold"
+                  >
+                    Clear Filter
+                  </button>
+                )}
+                <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] px-2 py-0.5 text-[11px]">
+                  {cafeCategoryRevenueData.length} Categories
+                </Badge>
+              </div>
+            </div>
+            {/* Quick Category Filter Chips */}
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              {cafeCategoryRevenueData.map((cat: any) => {
+                const isSelected = selectedCategory?.toLowerCase() === cat.category?.toLowerCase();
+                return (
+                  <button
+                    key={cat.category}
+                    type="button"
+                    onClick={() => setSelectedCategory((prev) => (prev?.toLowerCase() === cat.category?.toLowerCase() ? null : cat.category))}
+                    className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold transition-all ${
+                      isSelected
+                        ? "bg-[#F53799] text-white shadow-xs"
+                        : "bg-[#FFF7FB] border border-[#FFD9EC] text-[#223047]/80 hover:bg-[#FFF2FA]"
+                    }`}
+                  >
+                    {cat.category} {isSelected ? "✓" : ""}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -2072,7 +2414,23 @@ export function Cafe() {
                     radius={[0, 6, 6, 0]}
                     minPointSize={6}
                     animationDuration={800}
-                  />
+                    onClick={(entry: any) => {
+                      if (entry?.category) {
+                        setSelectedCategory((prev) => (prev?.toLowerCase() === entry.category.toLowerCase() ? null : entry.category));
+                      }
+                    }}
+                    className="cursor-pointer"
+                  >
+                    {cafeCategoryRevenueData.map((entry: any, index: number) => {
+                      const isSelected = selectedCategory?.toLowerCase() === entry.category?.toLowerCase();
+                      return (
+                        <Cell
+                          key={`cat-cell-${index}`}
+                          fill={selectedCategory ? (isSelected ? "#F53799" : "#F5379955") : "#F53799"}
+                        />
+                      );
+                    })}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>

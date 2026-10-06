@@ -1,4 +1,4 @@
-export const HISTORY_START_DATE = "2021-03-01";
+export const HISTORY_START_DATE = "2021-02-28";
 export const INGESTED_HISTORY_END_DATE = "2026-05-31";
 
 export type DateRange = {
@@ -53,6 +53,15 @@ export function parseGlobalRange(
     const start = customRange?.start || bounds.min || HISTORY_START_DATE;
     const end = clampHistoryDate(customRange?.end || start, bounds);
     return { start, end: end >= start ? end : start, isCustom: true };
+  }
+
+  if (value === "all-time") {
+    const start = bounds.min || HISTORY_START_DATE;
+    return {
+      start,
+      end: latest,
+      isCustom: false,
+    };
   }
 
   const end = latest;
