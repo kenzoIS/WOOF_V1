@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { AwsService } from '../aws/aws.service';
 import { SupabaseService } from '../common/supabase/supabase.service';
@@ -20,13 +20,19 @@ type Route = {
 };
 
 @Injectable()
-export class RecalibrationService {
+export class RecalibrationService implements OnModuleInit {
   private readonly logger = new Logger(RecalibrationService.name);
 
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly awsService: AwsService,
   ) {}
+
+  onModuleInit(): void {
+    // Run asynchronously so a temporary database/schema outage never blocks
+    // the Nest application from starting.
+    void this.recoverMissingEvents();
+  }
 
   /**
    * Persists the learning signal before attempting any model work.  A model
@@ -90,6 +96,7 @@ export class RecalibrationService {
   @Cron('*/5 * * * *')
   async processPendingEvents(): Promise<void> {
     try {
+      await this.recoverMissingEvents();
       const { data, error } = await this.supabaseService.client
         .from('prescription_recalibration_events')
         .select('*')
@@ -104,6 +111,101 @@ export class RecalibrationService {
     } catch (error) {
       this.logger.warn(`Could not process recalibration queue: ${this.message(error)}`);
     }
+  }
+
+  /**
+   * Recovers feedback completed while the recalibration table or worker was
+   * unavailable. The feedback_id unique constraint and existing-event lookup
+   * make this safe to run repeatedly on startup and on the scheduled cycle.
+   */
+  async recoverMissingEvents(): Promise<{ scanned: number; recovered: number }> {
+    const pageSize = 200;
+    let offset = 0;
+    let scanned = 0;
+    let recovered = 0;
+
+    while (true) {
+      const { data: feedbackRows, error: feedbackError } = await this.supabaseService.client
+        .from('recommendation_feedback')
+        .select('id, promotion_id, type, feedback, feedback_notes, metadata, updated_at')
+        .eq('status', 'completed')
+        .not('feedback', 'is', null)
+        .order('updated_at', { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      if (feedbackError) throw feedbackError;
+
+      const completedRows = (feedbackRows || []).filter(
+        (row: any) => row.feedback === 'helpful' || row.feedback === 'not-helpful',
+      );
+      scanned += completedRows.length;
+      if (completedRows.length > 0) {
+        // Legacy rows may have been completed before category/source metadata
+        // was persisted. Their promotion_id references active_prescriptions.
+        const legacyActiveIds = completedRows
+          .filter((row: any) => !row.metadata?.category && row.promotion_id)
+          .map((row: any) => row.promotion_id);
+        const activeById = new Map<string, any>();
+        if (legacyActiveIds.length > 0) {
+          const { data: activeRows, error: activeError } = await this.supabaseService.client
+            .from('active_prescriptions')
+            .select('id, category, source_type, source_id')
+            .in('id', legacyActiveIds);
+          if (activeError && !this.isMissingTable(activeError)) throw activeError;
+          for (const active of activeRows || []) activeById.set(active.id, active);
+        }
+        const feedbackIds = completedRows.map((row: any) => row.id);
+        const { data: events, error: eventsError } = await this.supabaseService.client
+          .from('prescription_recalibration_events')
+          .select('feedback_id')
+          .in('feedback_id', feedbackIds);
+        if (eventsError) throw eventsError;
+
+        const recorded = new Set((events || []).map((event: any) => event.feedback_id));
+        for (const row of completedRows) {
+          if (recorded.has(row.id)) continue;
+          const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+          const active = activeById.get(row.promotion_id);
+          const category = metadata.category || active?.category || row.type;
+          const sourceType = metadata.sourceType || active?.source_type || 'recommendation_feedback';
+          const sourceId = metadata.sourceId || active?.source_id || row.promotion_id || row.id;
+          if (active && !metadata.category) {
+            const recoveredMetadata = {
+              ...metadata,
+              category,
+              sourceType,
+              sourceId,
+              activePrescriptionId: active.id,
+              routingRecoveredAt: new Date().toISOString(),
+            };
+            const { error: metadataError } = await this.supabaseService.client
+              .from('recommendation_feedback')
+              .update({ metadata: recoveredMetadata, updated_at: new Date().toISOString() })
+              .eq('id', row.id);
+            if (metadataError) throw metadataError;
+          }
+          await this.enqueueCompletedFeedback({
+            feedbackId: row.id,
+            category,
+            sourceType,
+            sourceId,
+            feedback: row.feedback,
+            notes: row.feedback_notes || null,
+            metadata: {
+              ...metadata,
+              recoveredFromCompletedFeedback: true,
+              recoveredAt: new Date().toISOString(),
+            },
+          });
+          recovered += 1;
+        }
+      }
+      if ((feedbackRows || []).length < pageSize) break;
+      offset += pageSize;
+    }
+    if (recovered > 0) {
+      this.logger.log(`Recovered ${recovered} missing recalibration event(s).`);
+    }
+    return { scanned, recovered };
   }
 
   async listEvents(status?: string): Promise<any[]> {

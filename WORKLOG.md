@@ -2,6 +2,27 @@
 
 This file records requested revisions, implementation details, verification, and follow-up notes for both the frontend and backend.
 
+## 2026-10-07 - Category-Safe Feedback Recovery
+
+### Requested
+- Ensure recovered feedback routes to its original feature/model rather than inferring a category from legacy UI display types.
+
+### Backend Changes
+- Completed feedback now persists original category, source type, source ID, and linked active-prescription ID in metadata.
+- Recovery resolves legacy rows without routing metadata from their linked `active_prescriptions` record, persists the recovered route, and then creates the event.
+- Staffing recovery therefore routes to the staffing/traffic optimizer rather than falling back to the forecast display type.
+
+## 2026-10-07 - Recalibration Queue Recovery
+
+### Requested
+- Recover completed Helpful/Not Helpful feedback that was saved while the recalibration queue table or worker was unavailable.
+
+### Backend Changes
+- Added an idempotent recovery scan for completed `recommendation_feedback` rows without a linked recalibration event.
+- Recovery runs once after backend startup and before each five-minute pending-event cycle.
+- Added `POST /api/analytics/feedback/recalibration-events/recover` for an immediate manual recovery run.
+- Existing events, including `processed` and `failed` rows, are never duplicated or overwritten.
+
 ## 2026-10-06 - Draft-First Prescription Lifecycle Alignment
 
 ### Requested

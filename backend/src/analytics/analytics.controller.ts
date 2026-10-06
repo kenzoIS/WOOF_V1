@@ -605,4 +605,9 @@ export class AnalyticsController {
   async getRecalibrationEvents(@Query('status') status?: string) {
     return this.analyticsService.getRecalibrationEvents(status);
   }
+
+  @Post('feedback/recalibration-events/recover')
+  async recoverRecalibrationEvents() {
+    return this.analyticsService.recoverRecalibrationEvents();
+  }
 }

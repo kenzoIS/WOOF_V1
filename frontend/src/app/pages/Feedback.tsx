@@ -473,14 +473,14 @@ export function Feedback() {
         <div
           className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Total Active Prescriptions",
+            title: "Total Active Recommendations",
             current: activeCount,
             formatter: (v) => `${v} Active`,
             icon: <MessageSquareHeart className="w-5 h-5 text-[#F53799]" />,
             description: "Active prescriptions currently implemented and still awaiting end-of-cycle feedback.",
             extraStats: [
               { label: "Total Active", value: `${activeCount} active` },
-              { label: "Completed Promotions", value: `${completedCount} completed` },
+              { label: "Completed Recommendations", value: `${completedCount} completed` },
             ],
           })}
         >
@@ -503,7 +503,7 @@ export function Feedback() {
         <div
           className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
           onClick={() => setSelectedKpi({
-            title: "Total Completed Promotions",
+            title: "Total Completed Recommendations",
             current: completedCount,
             formatter: (v) => `${v} Completed`,
             icon: <ThumbsUp className="w-5 h-5 text-[#06B6D4]" />,
@@ -541,7 +541,7 @@ export function Feedback() {
             extraStats: [
               { label: "Helpful Signals", value: `${helpfulCount} helpful` },
               { label: "Not Helpful Signals", value: `${notHelpfulCount} not helpful` },
-              { label: "Completed Promotions", value: `${completedCount} completed` },
+              { label: "Completed Recommendations", value: `${completedCount} completed` },
             ],
           })}
         >
@@ -571,7 +571,7 @@ export function Feedback() {
             description: "Completed promotions marked Helpful compared with total completed promotions.",
             extraStats: [
               { label: "Helpful Completed", value: `${completedHelpfulCount} helpful` },
-              { label: "Completed Promotions", value: `${completedCount} completed` },
+              { label: "Completed Recommendations", value: `${completedCount} completed` },
               { label: "Not Helpful Completed", value: `${completedNotHelpfulCount} not helpful` },
             ],
           })}
@@ -615,7 +615,7 @@ export function Feedback() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-                Active Prescription
+                Active Recommendations
               </h2>
               <InfoTooltip label="Accepted or deployed prescriptions awaiting end-of-cycle feedback." />
             </div>
@@ -677,7 +677,7 @@ export function Feedback() {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Completed Promotions
+              Completed Recommendations
             </h2>
             <InfoTooltip label="Review performance and provide feedback to improve future recommendations." />
           </div>

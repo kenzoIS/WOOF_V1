@@ -10837,6 +10837,8 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       id: `prescription-${row.id}`,
       sourceId: String(row.id),
       sourceType: 'active_prescription',
+      originalSourceType: row.source_type || null,
+      originalSourceId: row.source_id || null,
       category,
       type: this.feedbackTypeForPrescriptionCategory(category),
       title: row.title || 'WOOF Prescription',
@@ -11016,9 +11018,15 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       deployedDate: now,
     };
 
+    const originalSourceType =
+      target.originalSourceType || target.metadata?.sourceType || target.sourceType || 'recommendation_feedback';
+    const originalSourceId =
+      target.originalSourceId || target.metadata?.sourceId || target.sourceId || target.id;
     const metadata = {
-      sourceType: target.sourceType || 'recommendation_feedback',
-      sourceId: target.sourceId || target.id,
+      category: target.category || target.metadata?.category || target.type || 'general',
+      sourceType: originalSourceType,
+      sourceId: originalSourceId,
+      activePrescriptionId: target.sourceType === 'active_prescription' ? target.sourceId : null,
       endedAt: now,
       sourceResult: null,
     };
@@ -11078,8 +11086,8 @@ Active Recommendations: ${suggestions.length} actions pending.`,
         recalibration = await this.recalibrationService.enqueueCompletedFeedback({
           feedbackId: row.id,
           category: target.category || target.type,
-          sourceType: target.sourceType,
-          sourceId: target.sourceId || target.id,
+          sourceType: originalSourceType,
+          sourceId: originalSourceId,
           feedback: payload.feedback,
           notes: payload.feedback_notes,
           metadata: {
@@ -11140,6 +11148,7 @@ Active Recommendations: ${suggestions.length} actions pending.`,
         const payload = this.buildCompletedFeedbackHistoryPayload(promo, now, {
           metadata: {
             ...(promo.metadata || {}),
+            category: promo.category || promo.metadata?.category || promo.type || 'general',
             sourceType: promo.sourceType,
             sourceId: promo.sourceId || promo.id,
             backfilledFromSource: true,
@@ -11183,6 +11192,8 @@ Active Recommendations: ${suggestions.length} actions pending.`,
       deployed_at: this.parseFeedbackDate(promotion.deployedDate) || now,
       updated_at: now,
       metadata: {
+        category:
+          promotion.category || promotion.metadata?.category || promotion.type || 'general',
         sourceType: promotion.sourceType || 'recommendation_feedback',
         sourceId: promotion.sourceId || promotion.id,
       },
@@ -11373,6 +11384,11 @@ Active Recommendations: ${suggestions.length} actions pending.`,
   async getRecalibrationEvents(status?: string): Promise<any[]> {
     if (!this.recalibrationService) return [];
     return this.recalibrationService.listEvents(status);
+  }
+
+  async recoverRecalibrationEvents(): Promise<{ scanned: number; recovered: number }> {
+    if (!this.recalibrationService) return { scanned: 0, recovered: 0 };
+    return this.recalibrationService.recoverMissingEvents();
   }
 
   async getFeedbackSummary(): Promise<any> {
