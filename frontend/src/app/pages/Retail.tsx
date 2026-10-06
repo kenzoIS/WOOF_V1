@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import useSWR from "swr";
 import { useRouter } from "next/router";
 import { DollarSign, TrendingUp, Package, AlertCircle, Target, ArrowRight, Percent, Store, ShoppingBag, TrendingDown, ShieldCheck, Scale, ChevronRight, ChevronDown } from "lucide-react";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
@@ -214,11 +215,9 @@ export function Retail() {
   }, [globalDateRange]);
 
   // API data
-  const [dashboardData, setDashboardData] = useState<any>(null);
-  const [channelForecast, setChannelForecast] = useState<any>(null);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
 
-  // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
+  // Auto-refresh on Realtime Socket.io events
   useEffect(() => {
     const handleRealtime = (event: Event) => {
       const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
@@ -239,10 +238,8 @@ export function Retail() {
     };
   }, []);
 
-  useEffect(() => {
-    getDashboard("retail").then(setDashboardData).catch(() => {});
-    getRetailForecastByChannel().then(setChannelForecast).catch(() => {});
-  }, [realtimeRefresh]);
+  const { data: dashboardData } = useSWR(['dashboard', 'retail', realtimeRefresh], () => getDashboard("retail"));
+  const { data: channelForecast } = useSWR(['forecast', 'retail', realtimeRefresh], () => getRetailForecastByChannel());
 
   const forecastData = useMemo(() => {
     const phys = channelForecast?.physical?.historical || [];

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import useSWR from "swr";
 import { useRouter } from "next/router";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -97,23 +98,32 @@ export function SmartReports() {
     }
   };
 
-  const fetchReports = async (selectLatest = false) => {
-    try {
-      const data = await getSmartReports();
-      setReports(data);
-      if (selectLatest && data.length > 0) {
-        setSelectedReport(data[0]);
-      }
-    } catch (err: any) {
-      toast.error("Failed to load reports log", { description: err.message });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const { data: initialReports, error: reportsError, mutate: mutateReports } = useSWR(
+    "smartReports",
+    () => getSmartReports()
+  );
 
   useEffect(() => {
-    fetchReports(true);
-  }, []);
+    if (initialReports) {
+      setReports(initialReports);
+      if (!selectedReport && initialReports.length > 0) {
+        setSelectedReport(initialReports[0]);
+      }
+      setIsLoading(false);
+    }
+  }, [initialReports]);
+
+  useEffect(() => {
+    if (reportsError) {
+      toast.error("Failed to load reports log", { description: reportsError.message });
+      setIsLoading(false);
+    }
+  }, [reportsError]);
+
+  const fetchReports = async (selectLatest = false) => {
+    setIsLoading(true);
+    await mutateReports();
+  };
 
   useEffect(() => {
     if (selectedReport) {

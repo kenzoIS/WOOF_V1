@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import useSWR from "swr";
 import { TrendingUp, Users, DollarSign, ChevronRight } from "lucide-react";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import {
@@ -16,16 +17,9 @@ import { WoofInsight } from "../components/WoofInsight";
 import { InfoTooltip } from "../components/InfoTooltip";
 
 export function ExecutiveOverview() {
-  const [cafeData, setCafeData] = useState<any>(null);
-  const [servicesData, setServicesData] = useState<any>(null);
-  const [retailData, setRetailData] = useState<any>(null);
-  const [cafeForecast, setCafeForecast] = useState<any>(null);
-  const [servicesForecast, setServicesForecast] = useState<any>(null);
-  const [retailForecast, setRetailForecast] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
 
-  // Auto-refresh on Realtime Socket.io events (CSV upload, Webhook transaction, ETL complete)
+  // Auto-refresh on Realtime Socket.io events
   useEffect(() => {
     const handleRealtime = (event: Event) => {
       const customEvent = event as CustomEvent<{ type?: string; title?: string }>;
@@ -46,20 +40,15 @@ export function ExecutiveOverview() {
     };
   }, []);
 
-  useEffect(() => {
-    Promise.allSettled([
-      getDashboard("cafe").then(setCafeData).catch(() => {}),
-      getDashboard("services").then(setServicesData).catch(() => {}),
-      getDashboard("retail").then(setRetailData).catch(() => {}),
-      getForecast("cafe", { compact: "true" })
-        .then(setCafeForecast)
-        .catch(() => {}),
-      getForecast("services", { compact: "true" })
-        .then(setServicesForecast)
-        .catch(() => {}),
-      getRetailForecastByChannel().then(setRetailForecast).catch(() => {}),
-    ]).finally(() => setLoading(false));
-  }, [realtimeRefresh]);
+  const { data: cafeData, isLoading: cafeDataLoading } = useSWR(['dashboard', 'cafe', realtimeRefresh], () => getDashboard("cafe"));
+  const { data: servicesData, isLoading: servicesDataLoading } = useSWR(['dashboard', 'services', realtimeRefresh], () => getDashboard("services"));
+  const { data: retailData, isLoading: retailDataLoading } = useSWR(['dashboard', 'retail', realtimeRefresh], () => getDashboard("retail"));
+  
+  const { data: cafeForecast, isLoading: cafeForecastLoading } = useSWR(['forecast', 'cafe', realtimeRefresh], () => getForecast("cafe", { compact: "true" }));
+  const { data: servicesForecast, isLoading: servicesForecastLoading } = useSWR(['forecast', 'services', realtimeRefresh], () => getForecast("services", { compact: "true" }));
+  const { data: retailForecast, isLoading: retailForecastLoading } = useSWR(['forecast', 'retail', realtimeRefresh], () => getRetailForecastByChannel());
+
+  const loading = (cafeDataLoading && !cafeData) || (servicesDataLoading && !servicesData) || (retailDataLoading && !retailData) || (cafeForecastLoading && !cafeForecast) || (servicesForecastLoading && !servicesForecast) || (retailForecastLoading && !retailForecast);
 
   // Sum KPIs across all sectors
   const totalRevenue = useMemo(

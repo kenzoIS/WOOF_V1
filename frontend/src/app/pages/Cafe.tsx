@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import useSWR from "swr";
 import * as React from "react";
 import { useRouter } from "next/router";
 import { Coffee, DollarSign, TrendingUp, Download, Info, ChevronDown, ChevronUp, ChevronRight, BarChart2, ArrowRight, CloudRain, Sun, Thermometer, Droplets, PieChart as LucidePieChart, ThumbsUp, ThumbsDown, Sparkles, RefreshCw, CheckCircle2, Clock, X, ExternalLink, Tag, ShoppingCart, TrendingDown } from "lucide-react";
@@ -596,14 +597,23 @@ export function Cafe() {
   };
 
   // API data state
+  const { data: initialForecastRun, error: initialForecastError } = useSWR(
+    ["forecast", "cafe", buildCafeForecastParams(), realtimeRefresh],
+    ([, , params]) => getForecast("cafe", params as Record<string, string>)
+  );
+
   useEffect(() => {
-    getForecast("cafe", buildCafeForecastParams())
-      .then(setForecastRun)
-      .catch((error) => {
-        console.error("Cafe forecast failed to load", error);
-        toast.error(error instanceof Error ? error.message : "Cafe forecast failed to load");
-      });
-  }, [buildCafeForecastParams, realtimeRefresh]);
+    if (initialForecastRun) {
+      setForecastRun(initialForecastRun);
+    }
+  }, [initialForecastRun]);
+
+  useEffect(() => {
+    if (initialForecastError) {
+      console.error("Cafe forecast failed to load", initialForecastError);
+      toast.error(initialForecastError instanceof Error ? initialForecastError.message : "Cafe forecast failed to load");
+    }
+  }, [initialForecastError]);
 
   useEffect(() => {
     const metadata = forecastRun?.modelMetadata || {};

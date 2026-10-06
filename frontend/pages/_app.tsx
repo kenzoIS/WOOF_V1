@@ -41,25 +41,9 @@ export default function App({ Component, pageProps }: AppProps) {
       router.replace("/");
     }
 
-    // Pre-compile all sector routes in the background once authenticated
-    if (auth && router.pathname !== "/login") {
-      const routesToPrefetch = [
-        "/",
-        "/cafe",
-        "/services",
-        "/retail",
-        "/ai-simulation",
-        "/smart-reports",
-        "/feedback",
-        "/settings",
-      ];
-      routesToPrefetch.forEach((route, i) => {
-        setTimeout(() => {
-          router.prefetch(route);
-          fetch(route, { priority: "low" as RequestPriority }).catch(() => {});
-        }, i * 300);
-      });
-    }
+    // The aggressive background prefetching loop was removed to prevent 
+    // the development server from choking on concurrent compilations.
+    // Next.js Link components handle prefetching natively.
   }, [router.pathname]);
 
   if (!checkedAuth) {

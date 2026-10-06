@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import useSWR from "swr";
 import { Activity, CalendarDays, CloudRain, Package, Tag, Store, Layers3, BarChart3, RefreshCw, Search, ChevronLeft, ChevronRight, X, ArrowUpDown } from "lucide-react";
 import { getRootCauseAnalysis } from "../lib/api";
 import { Button } from "../components/ui/button";
@@ -67,12 +68,25 @@ export function RootCauseExplorer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const { data: initialData, error: fetchError } = useSWR(
+    ["rootCause", period, sector, refresh, appliedRange],
+    () => getRootCauseAnalysis(period, sector, refresh > 0, period === "custom" ? appliedRange.start : undefined, period === "custom" ? appliedRange.end : undefined)
+  );
+
   useEffect(() => {
-    let active = true;
-    setLoading(true); setError("");
-    getRootCauseAnalysis(period, sector, refresh > 0, period === "custom" ? appliedRange.start : undefined, period === "custom" ? appliedRange.end : undefined).then((response) => { if (active) setData(response); }).catch((reason) => { if (active) setError(reason?.message || "Could not load Root Cause Explorer data."); }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [period, sector, refresh, appliedRange]);
+    if (initialData) {
+      setData(initialData);
+      setLoading(false);
+      setError("");
+    }
+  }, [initialData]);
+
+  useEffect(() => {
+    if (fetchError) {
+      setError(fetchError?.message || "Could not load Root Cause Explorer data.");
+      setLoading(false);
+    }
+  }, [fetchError]);
 
   const chartData = useMemo(() => {
     const rows = data?.daily || [];

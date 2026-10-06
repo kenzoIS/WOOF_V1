@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import useSWR from "swr";
 import * as React from "react";
 import { useRouter } from "next/router";
 import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight, ChevronRight } from "lucide-react";
@@ -260,7 +261,7 @@ export function Services() {
     };
   }, []);
 
-  useEffect(() => {
+  const buildServicesForecastParams = useCallback(() => {
     let targetDays = 30;
     if (viewMode === "next90days") targetDays = 90;
     else if (viewMode === "next30days") targetDays = 30;
@@ -296,12 +297,27 @@ export function Services() {
       params.forecastMode = forecastMode;
       if (forecastMode === "latest-holdout") params.holdoutDays = "61";
     }
+    
+    return params;
+  }, [viewMode, customForecastStart, customForecastEnd, forecastMode, weatherScenario, tempOverride, rainChanceOverride, humidityOverride, holidayScenario]);
 
-    getForecast("services", params).then(setForecastRun).catch((err) => {
-      console.error("Forecast fetch failed:", err);
-      toast.error(err.message || "Failed to fetch Services forecast. Please try again.");
-    });
-  }, [viewMode, customForecastStart, customForecastEnd, forecastMode, realtimeRefresh]);
+  const { data: initialForecastRun, error: initialForecastError } = useSWR(
+    ["forecast", "services", buildServicesForecastParams(), realtimeRefresh],
+    ([, , params]) => getForecast("services", params as Record<string, string>)
+  );
+
+  useEffect(() => {
+    if (initialForecastRun) {
+      setForecastRun(initialForecastRun);
+    }
+  }, [initialForecastRun]);
+
+  useEffect(() => {
+    if (initialForecastError) {
+      console.error("Forecast fetch failed:", initialForecastError);
+      toast.error(initialForecastError instanceof Error ? initialForecastError.message : "Failed to fetch Services forecast. Please try again.");
+    }
+  }, [initialForecastError]);
 
   useEffect(() => {
     const customRange = parseCustomRange(globalDateRange);
