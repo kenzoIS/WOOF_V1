@@ -128,6 +128,134 @@ const formatGrowth = (current: number, previous: number) => {
   };
 };
 
+function inferRetailCategory(category?: string | null, name?: string | null): string {
+  const cleanCat = (category || "").trim();
+  const lowerCat = cleanCat.toLowerCase();
+  const lowerName = (name || "").toLowerCase();
+
+  // If already a valid specific category other than generic uncategorized/general
+  if (
+    cleanCat &&
+    lowerCat !== "uncategorized" &&
+    lowerCat !== "general retail" &&
+    lowerCat !== "unknown" &&
+    lowerCat !== "other" &&
+    lowerCat !== "general" &&
+    lowerCat !== "retail"
+  ) {
+    if (lowerCat.includes("pet supplies") || lowerCat.includes("supplies")) {
+      if (
+        lowerName.includes("cat food") ||
+        lowerName.includes("wet cat") ||
+        lowerName.includes("dry cat") ||
+        lowerName.includes("zoi") ||
+        lowerName.includes("instinctive")
+      ) {
+        return "Cat Food & Treats";
+      }
+      if (
+        lowerName.includes("dog food") ||
+        lowerName.includes("nutri chunks") ||
+        lowerName.includes("kibble")
+      ) {
+        return "Dog Food & Treats";
+      }
+      return "Pet Supplies & Accessories";
+    }
+    return cleanCat;
+  }
+
+  // Medication & Parasiticides / Dewormers
+  if (
+    lowerName.includes("worm") ||
+    lowerName.includes("dewormer") ||
+    lowerName.includes("nematocide") ||
+    lowerName.includes("parasite")
+  ) {
+    return "Medication & Parasiticides";
+  }
+
+  // Ear & Eye Care
+  if (
+    lowerName.includes("ear drop") ||
+    lowerName.includes("ear cleaner") ||
+    lowerName.includes("eye rinse") ||
+    lowerName.includes("eye drop") ||
+    /\bear\b/.test(lowerName) ||
+    /\beye\b/.test(lowerName)
+  ) {
+    return "Ear & Eye Care";
+  }
+
+  // Cat Food & Treats
+  if (
+    lowerName.includes("cat food") ||
+    lowerName.includes("cat dry") ||
+    lowerName.includes("wet cat") ||
+    lowerName.includes("zoi") ||
+    lowerName.includes("instinctive")
+  ) {
+    return "Cat Food & Treats";
+  }
+
+  // Dog Food & Treats
+  if (
+    lowerName.includes("dog food") ||
+    lowerName.includes("nutri chunks") ||
+    lowerName.includes("kibble") ||
+    lowerName.includes("canine food")
+  ) {
+    return "Dog Food & Treats";
+  }
+
+  // Grooming & Bath
+  if (
+    lowerName.includes("shampoo") ||
+    lowerName.includes("bath") ||
+    lowerName.includes("conditioner") ||
+    lowerName.includes("grooming") ||
+    lowerName.includes("hypoallergenic")
+  ) {
+    return "Grooming & Bath";
+  }
+
+  // Training & Behavior Aids
+  if (
+    lowerName.includes("anti-coprophagic") ||
+    lowerName.includes("behavior") ||
+    lowerName.includes("training")
+  ) {
+    return "Training & Behavior Aids";
+  }
+
+  // Vitamins, Supplements & Pet Wellness
+  if (
+    lowerName.includes("chewable") ||
+    lowerName.includes("chewables") ||
+    lowerName.includes("yeast") ||
+    lowerName.includes("multivitamin") ||
+    lowerName.includes("calcium") ||
+    lowerName.includes("glucosamine") ||
+    lowerName.includes("arthropet") ||
+    lowerName.includes("allergy") ||
+    lowerName.includes("heart") ||
+    lowerName.includes("liver") ||
+    lowerName.includes("vision") ||
+    lowerName.includes("uri-aid") ||
+    lowerName.includes("supplement") ||
+    lowerName.includes("vitamin") ||
+    lowerName.includes("paw gel")
+  ) {
+    return "Vitamins & Supplements";
+  }
+
+  if (lowerName.includes("toy")) return "Toys & Enrichment";
+  if (lowerName.includes("collar") || lowerName.includes("leash") || lowerName.includes("harness")) return "Collars & Leashes";
+  if (lowerName.includes("litter")) return "Litter & Hygiene";
+
+  return "Pet Wellness & Care";
+}
+
 export function Retail() {
   const router = useRouter();
   const [filterVelocity, setFilterVelocity] = useState("all");
@@ -149,13 +277,33 @@ export function Retail() {
   const [reorderAttempts, setReorderAttempts] = useState(0);
   const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
-  const [channelRangeMode, setChannelRangeMode] = useState("last30days");
+  const [retailActiveFilter, setRetailActiveFilter] = useState("matched");
+  const [showCustomFilter, setShowCustomFilter] = useState(false);
+  const [customMode, setCustomMode] = useState<"single" | "range">("single");
+  const [customSingleDate, setCustomSingleDate] = useState("2026-05-01");
+  const [customStartDate, setCustomStartDate] = useState("2025-05-02");
+  const [customEndDate, setCustomEndDate] = useState("2026-05-02");
   const [channelMetricView, setChannelMetricView] = useState<"revenue" | "profit">("revenue");
-  const [customChannelStart, setCustomChannelStart] = useState("2026-05-01");
-  const [customChannelEnd, setCustomChannelEnd] = useState(INGESTED_HISTORY_END_DATE);
   const [expandedFeeChannels, setExpandedFeeChannels] = useState<Record<string, boolean>>({});
   const toggleFeeDropdown = (channel: string) => {
     setExpandedFeeChannels((prev) => ({ ...prev, [channel]: !prev[channel] }));
+  };
+
+  const handleApplyFilter = (key: string) => {
+    setRetailActiveFilter(key);
+    setShowCustomFilter(false);
+  };
+
+  const handleApplyCustomFilter = () => {
+    if (customMode === "single") {
+      if (!customSingleDate) return;
+      setRetailActiveFilter(`custom:${customSingleDate}:${customSingleDate}`);
+    } else {
+      if (!customStartDate || !customEndDate) return;
+      const safeEnd = customEndDate >= customStartDate ? customEndDate : customStartDate;
+      setRetailActiveFilter(`custom:${customStartDate}:${safeEnd}`);
+    }
+    setShowCustomFilter(false);
   };
 
   useEffect(() => {
@@ -194,26 +342,6 @@ export function Retail() {
     handleScrollToTarget();
   }, [router.asPath, router.query]);
 
-  useEffect(() => {
-    const customRange = parseCustomRange(globalDateRange);
-    if (customRange) {
-      setChannelRangeMode("custom");
-      setCustomChannelStart(customRange.start);
-      setCustomChannelEnd(
-        customRange.end > INGESTED_HISTORY_END_DATE
-          ? INGESTED_HISTORY_END_DATE
-          : customRange.end,
-      );
-      return;
-    }
-
-    if (globalDateRange === "last-30-days" || globalDateRange === "last-90-days" || globalDateRange === "last-12-months") {
-      setChannelRangeMode("last30days");
-    } else if (globalDateRange === "last-7-days" || globalDateRange === "today" || globalDateRange === "yesterday") {
-      setChannelRangeMode("last7days");
-    }
-  }, [globalDateRange]);
-
   // API data
   const [realtimeRefresh, setRealtimeRefresh] = useState(0);
 
@@ -241,15 +369,60 @@ export function Retail() {
   const { data: dashboardData } = useSWR(['dashboard', 'retail', realtimeRefresh], () => getDashboard("retail"));
   const { data: channelForecast } = useSWR(['forecast', 'retail', realtimeRefresh], () => getRetailForecastByChannel());
 
+  const activeRange = useMemo(() => {
+    const latestAnchor = channelForecast?.latestDigitalDate || "2026-05-02";
+    if (retailActiveFilter === "all") {
+      return {
+        start: HISTORY_START_DATE,
+        end: INGESTED_HISTORY_END_DATE,
+        isCustom: false,
+      };
+    }
+    if (retailActiveFilter === "last-90-days") {
+      return {
+        start: addDays(latestAnchor, -89),
+        end: latestAnchor,
+        isCustom: false,
+      };
+    }
+    if (retailActiveFilter === "last-30-days") {
+      return {
+        start: addDays(latestAnchor, -29),
+        end: latestAnchor,
+        isCustom: false,
+      };
+    }
+    if (retailActiveFilter.startsWith("custom:")) {
+      const parts = retailActiveFilter.split(":");
+      const start = parts[1] || HISTORY_START_DATE;
+      const end = parts[2] || start;
+      return {
+        start,
+        end: end >= start ? end : start,
+        isCustom: true,
+      };
+    }
+    // Default: "matched" -> 1 Year (2025-05-02 to 2026-05-02)
+    return {
+      start: addDays(latestAnchor, -365),
+      end: latestAnchor,
+      isCustom: false,
+    };
+  }, [retailActiveFilter, channelForecast?.latestDigitalDate]);
+
   const forecastData = useMemo(() => {
     const phys = channelForecast?.physical?.historical || [];
-    const online = channelForecast?.online?.historical || [];
     const tiktok = channelForecast?.tiktok?.historical || [];
     const shopee = channelForecast?.shopee?.historical || [];
     const pethub = channelForecast?.pethub?.historical || [];
-    if (phys.length === 0 && online.length === 0 && tiktok.length === 0) return [];
+    if (phys.length === 0 && tiktok.length === 0 && shopee.length === 0) return [];
 
-    // Merge all series by date into a single array
+    // Filter each series by activeRange [start, end]
+    const physFiltered = phys.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
+    const tiktokFiltered = tiktok.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
+    const shopeeFiltered = shopee.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
+    const pethubFiltered = pethub.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
+
     const dateMap: Record<
       string,
       {
@@ -266,9 +439,9 @@ export function Retail() {
       }
     > = {};
 
-    phys.forEach((d: any) => {
-      if (!dateMap[d.date]) {
-        dateMap[d.date] = {
+    const getEntry = (date: string) => {
+      if (!dateMap[date]) {
+        dateMap[date] = {
           physical: null,
           online: null,
           tiktok: null,
@@ -281,144 +454,77 @@ export function Retail() {
           pethubProfit: null,
         };
       }
-      dateMap[d.date].physical = d.revenue;
-      dateMap[d.date].physicalProfit =
-        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.282);
+      return dateMap[date];
+    };
+
+    physFiltered.forEach((d: any) => {
+      const entry = getEntry(d.date);
+      entry.physical = Number(d.revenue) || 0;
+      entry.physicalProfit = d.netProfit != null ? Number(d.netProfit) : Math.round(Number(d.revenue || 0) * 0.292);
     });
 
-    online.forEach((d: any) => {
-      if (!dateMap[d.date]) {
-        dateMap[d.date] = {
-          physical: null,
-          online: null,
-          tiktok: null,
-          shopee: null,
-          pethub: null,
-          physicalProfit: null,
-          onlineProfit: null,
-          tiktokProfit: null,
-          shopeeProfit: null,
-          pethubProfit: null,
-        };
-      }
-      dateMap[d.date].online = d.revenue;
-      dateMap[d.date].onlineProfit =
-        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.192);
+    tiktokFiltered.forEach((d: any) => {
+      const entry = getEntry(d.date);
+      entry.tiktok = Number(d.revenue) || 0;
+      entry.tiktokProfit = d.netProfit != null ? Number(d.netProfit) : Math.round(Number(d.revenue || 0) * 0.215);
     });
 
-    tiktok.forEach((d: any) => {
-      if (!dateMap[d.date]) {
-        dateMap[d.date] = {
-          physical: null,
-          online: null,
-          tiktok: null,
-          shopee: null,
-          pethub: null,
-          physicalProfit: null,
-          onlineProfit: null,
-          tiktokProfit: null,
-          shopeeProfit: null,
-          pethubProfit: null,
-        };
-      }
-      dateMap[d.date].tiktok = d.revenue;
-      dateMap[d.date].tiktokProfit =
-        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.192);
+    shopeeFiltered.forEach((d: any) => {
+      const entry = getEntry(d.date);
+      entry.shopee = Number(d.revenue) || 0;
+      entry.shopeeProfit = d.netProfit != null ? Number(d.netProfit) : Math.round(Number(d.revenue || 0) * 0.195);
     });
 
-    shopee.forEach((d: any) => {
-      if (!dateMap[d.date]) {
-        dateMap[d.date] = {
-          physical: null,
-          online: null,
-          tiktok: null,
-          shopee: null,
-          pethub: null,
-          physicalProfit: null,
-          onlineProfit: null,
-          tiktokProfit: null,
-          shopeeProfit: null,
-          pethubProfit: null,
-        };
-      }
-      dateMap[d.date].shopee = d.revenue;
-      dateMap[d.date].shopeeProfit =
-        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.197);
+    pethubFiltered.forEach((d: any) => {
+      const entry = getEntry(d.date);
+      entry.pethub = Number(d.revenue) || 0;
+      entry.pethubProfit = d.netProfit != null ? Number(d.netProfit) : Math.round(Number(d.revenue || 0) * 0.395);
     });
 
-    pethub.forEach((d: any) => {
-      if (!dateMap[d.date]) {
-        dateMap[d.date] = {
-          physical: null,
-          online: null,
-          tiktok: null,
-          shopee: null,
-          pethub: null,
-          physicalProfit: null,
-          onlineProfit: null,
-          tiktokProfit: null,
-          shopeeProfit: null,
-          pethubProfit: null,
-        };
-      }
-      dateMap[d.date].pethub = d.revenue;
-      dateMap[d.date].pethubProfit =
-        d.netProfit != null ? d.netProfit : Math.round(d.revenue * 0.95);
-    });
+    // If single day was selected and dateMap is empty, insert empty point for that day so chart displays
+    if (activeRange.isCustom && activeRange.start === activeRange.end && !dateMap[activeRange.start]) {
+      dateMap[activeRange.start] = {
+        physical: 0,
+        online: 0,
+        tiktok: 0,
+        shopee: 0,
+        pethub: 0,
+        physicalProfit: 0,
+        onlineProfit: 0,
+        tiktokProfit: 0,
+        shopeeProfit: 0,
+        pethubProfit: 0,
+      };
+    }
 
     const sorted = Object.entries(dateMap)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, vals]) => ({
-        day: date,
-        physical:
-          (channelMetricView === "profit" ? vals.physicalProfit : vals.physical) ?? 0,
-        online:
-          (channelMetricView === "profit" ? vals.onlineProfit : vals.online) ?? 0,
-        tiktok:
-          (channelMetricView === "profit" ? vals.tiktokProfit : vals.tiktok) ?? 0,
-        shopee:
-          (channelMetricView === "profit" ? vals.shopeeProfit : vals.shopee) ?? 0,
-        pethub:
-          (channelMetricView === "profit" ? vals.pethubProfit : vals.pethub) ?? 0,
-        physicalRevenue: vals.physical ?? 0,
-        onlineRevenue: vals.online ?? 0,
-        tiktokRevenue: vals.tiktok ?? 0,
-        shopeeRevenue: vals.shopee ?? 0,
-        pethubRevenue: vals.pethub ?? 0,
-        physicalProfit: vals.physicalProfit ?? 0,
-        onlineProfit: vals.onlineProfit ?? 0,
-        tiktokProfit: vals.tiktokProfit ?? 0,
-        shopeeProfit: vals.shopeeProfit ?? 0,
-        pethubProfit: vals.pethubProfit ?? 0,
-      }));
+      .map(([date, vals]) => {
+        const physVal = channelMetricView === "profit" ? vals.physicalProfit : vals.physical;
+        const tiktokVal = channelMetricView === "profit" ? vals.tiktokProfit : vals.tiktok;
+        const shopeeVal = channelMetricView === "profit" ? vals.shopeeProfit : vals.shopee;
+        const pethubVal = channelMetricView === "profit" ? vals.pethubProfit : vals.pethub;
 
-    if (channelRangeMode === "custom") {
-      return filterByDateRange(
-        sorted,
-        {
-          start: customChannelStart,
-          end:
-            customChannelEnd >= customChannelStart
-              ? customChannelEnd
-              : customChannelStart,
-          isCustom: true,
-        },
-      );
-    }
+        return {
+          day: date,
+          physical: physVal ?? 0,
+          tiktok: tiktokVal ?? 0,
+          shopee: shopeeVal ?? 0,
+          pethub: pethubVal ?? 0,
+          online: ((tiktokVal ?? 0) + (shopeeVal ?? 0) + (pethubVal ?? 0)),
+          physicalRevenue: vals.physical ?? 0,
+          tiktokRevenue: vals.tiktok ?? 0,
+          shopeeRevenue: vals.shopee ?? 0,
+          pethubRevenue: vals.pethub ?? 0,
+          physicalProfit: vals.physicalProfit ?? 0,
+          tiktokProfit: vals.tiktokProfit ?? 0,
+          shopeeProfit: vals.shopeeProfit ?? 0,
+          pethubProfit: vals.pethubProfit ?? 0,
+        };
+      });
 
-    const sliceCount =
-      channelRangeMode === "last7days"
-        ? 7
-        : channelRangeMode === "last14days"
-          ? 14
-          : 30;
-
-    // Anchor preset windows to latest digital date so both channels are active
-    const latestAnchor = channelForecast?.latestDigitalDate || "2026-05-02";
-    const matchedSorted = sorted.filter((d) => d.day <= latestAnchor);
-
-    return (matchedSorted.length > 0 ? matchedSorted : sorted).slice(-sliceCount);
-  }, [channelForecast, channelRangeMode, customChannelStart, customChannelEnd, channelMetricView]);
+    return sorted;
+  }, [channelForecast, activeRange, channelMetricView]);
 
   const kpis = dashboardData?.kpis || {};
   const aggregatedKpis = useMemo(() => {
@@ -428,10 +534,7 @@ export function Retail() {
         revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
       };
     }
-    const latestHistoryDate =
-      channelForecast.physical.historical[channelForecast.physical.historical.length - 1]?.date ||
-      INGESTED_HISTORY_END_DATE;
-    const range = parseGlobalRange(globalDateRange, latestHistoryDate);
+    const range = activeRange;
     const physSliced = filterByDateRange(channelForecast.physical.historical, range);
     const onlineSliced = filterByDateRange(channelForecast.online?.historical || [], range);
     const physRevenue = physSliced.reduce((sum: number, d: any) => sum + d.revenue, 0);
@@ -452,7 +555,7 @@ export function Retail() {
       totalRevenue,
       revenueGrowth: formatGrowth(totalRevenue, previousRevenue),
     };
-  }, [channelForecast, globalDateRange, kpis]);
+  }, [channelForecast, activeRange, kpis]);
 
   const retailRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
   const activeSKUs = dashboardData?.topItems?.length || 0;
@@ -509,41 +612,112 @@ export function Retail() {
 
   // NOVA Retail Profit Paradox Analytics (Chapter 1L)
   const channelEconomics = useMemo(() => {
-    const raw: any[] = dashboardData?.channelBreakdown || [];
+    const rawBreakdown: any[] = dashboardData?.channelBreakdown || [];
 
-    const channels = raw.map((c: any) => {
-      const chName = String(c.channel || c._id || "Unknown");
+    const hasForecastHistory = Boolean(
+      channelForecast?.physical?.historical?.length ||
+      channelForecast?.shopee?.historical?.length ||
+      channelForecast?.tiktok?.historical?.length
+    );
+
+    const getChannelStats = (chName: string) => {
+      let series: any[] = [];
+      let defaultCommRate = 0;
+      let defaultCogsRatio = 0.708;
+      let isPOS = false;
+      let color = "#06B6D4";
+
+      if (chName === "POS") {
+        series = channelForecast?.physical?.historical || [];
+        defaultCogsRatio = 0.708;
+        isPOS = true;
+        color = "#F53799";
+      } else if (chName.includes("Shopee")) {
+        series = channelForecast?.shopee?.historical || [];
+        defaultCommRate = 19.92;
+        defaultCogsRatio = 0.605;
+        color = "#FBBF24";
+      } else if (chName.includes("TikTok")) {
+        series = channelForecast?.tiktok?.historical || [];
+        defaultCommRate = 18.0;
+        defaultCogsRatio = 0.605;
+        color = "#8B5CF6";
+      } else if (chName.includes("PetHub")) {
+        series = channelForecast?.pethub?.historical || [];
+        defaultCogsRatio = 0.605;
+        color = "#06B6D4";
+      }
+
+      if (hasForecastHistory) {
+        const filtered = series.filter(
+          (d: any) => d.date >= activeRange.start && d.date <= activeRange.end
+        );
+        const rev = filtered.reduce((sum: number, d: any) => sum + Number(d.revenue || 0), 0);
+        const orders = filtered.reduce((sum: number, d: any) => sum + Number(d.orders || 0), 0);
+        const commFee = isPOS || chName.includes("PetHub")
+          ? 0
+          : filtered.reduce(
+              (sum: number, d: any) =>
+                sum + (d.commissionFee != null ? Number(d.commissionFee) : Number(d.revenue || 0) * (defaultCommRate / 100)),
+              0
+            );
+        const costOfGoods = filtered.reduce(
+          (sum: number, d: any) =>
+            sum + (d.costOfGoods != null ? Number(d.costOfGoods) : Number(d.revenue || 0) * defaultCogsRatio),
+          0
+        );
+        const grossProfit = Math.round((rev - costOfGoods) * 100) / 100;
+        const profit = Math.max(0, Math.round((grossProfit - commFee) * 100) / 100);
+        const grossSales = chName.includes("TikTok") ? Math.round(rev * 1.023 * 100) / 100 : rev;
+        const discount = chName.includes("TikTok") ? Math.round(rev * 0.023 * 100) / 100 : 0;
+        const commRate = rev > 0 && commFee > 0 ? (commFee / rev) * 100 : defaultCommRate;
+
+        const feeBreakdown = {
+          commission: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.1005 : 0.088) * 100) / 100 : 0,
+          serviceFee: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.0723 : 0.065) * 100) / 100 : 0,
+          transactionFee: commFee > 0 ? Math.round(rev * 0.0224 * 100) / 100 : 0,
+          wht: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.0040 : 0.0045) * 100) / 100 : 0,
+        };
+
+        const grossMargin = rev > 0 ? (grossProfit / rev) * 100 : 0;
+        const netMargin = rev > 0 ? (profit / rev) * 100 : 0;
+        const cogsPct = rev > 0 ? (costOfGoods / rev) * 100 : 0;
+        const aov = orders > 0 ? rev / orders : 0;
+        const ppo = orders > 0 ? profit / orders : 0;
+
+        return {
+          channel: chName,
+          revenue: Math.round(rev * 100) / 100,
+          revenueShare: 0,
+          profit,
+          profitShare: 0,
+          grossProfit,
+          grossSales,
+          discount,
+          commFee: Math.round(commFee * 100) / 100,
+          commRate: Number(commRate.toFixed(1)),
+          feeBreakdown,
+          costOfGoods: Math.round(costOfGoods * 100) / 100,
+          cogsPct: Number(cogsPct.toFixed(1)),
+          orders,
+          orderShare: 0,
+          grossMargin: Number(grossMargin.toFixed(1)),
+          netMargin: Number(netMargin.toFixed(1)),
+          aov: Math.round(aov),
+          ppo: Math.round(ppo),
+          color,
+          isPOS,
+        };
+      }
+
+      // Fallback to static breakdown if forecast history isn't loaded
+      const c = rawBreakdown.find((item: any) => (item.channel || item._id) === chName) || {};
       const rev = Number(c.revenue) || 0;
-      const isPOS = chName === "POS";
-      const isOnlineMarketplace = chName.includes("Shopee") || chName.includes("TikTok");
-      // Use actual per-order rate from backend: Shopee 19%–21% (~19.92%), TikTok Shop 17%–19% (~18.00%), POS/PetHub direct (0%)
-      const defaultCommRate = chName.includes("Shopee") ? 19.92 : chName.includes("TikTok") ? 18.0 : 0.0;
-      const commRate = c.commissionRate != null && Number(c.commissionRate) > 0 ? Number(c.commissionRate) : defaultCommRate;
-      const commFee = Number(c.commissionFee) || (commRate > 0 ? Math.round(rev * (commRate / 100) * 100) / 100 : 0);
-      const feeBreakdown = c.feeBreakdown || {
-        commission: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.1005 : 0.088) * 100) / 100 : 0,
-        serviceFee: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.0723 : 0.065) * 100) / 100 : 0,
-        transactionFee: commFee > 0 ? Math.round(rev * 0.0224 * 100) / 100 : 0,
-        wht: commFee > 0 ? Math.round(rev * (chName.includes("Shopee") ? 0.0040 : 0.0045) * 100) / 100 : 0,
-      };
-      
-      // Data-backed Retail Pet Supplies Merchandise Cost:
-      // In physical store POS, recorded weighted average COGS is 70.8% (HappyTailsPOS.csv).
-      // In online marketplaces (Shopee & TikTok Shop), selling prices have an empirical +17%-19% markup over POS (e.g. ₱159 online vs ₱135 in POS), yielding an effective COGS of 60.5%.
-      const defaultCogsRatio = isOnlineMarketplace ? 0.605 : 0.708;
-      const costOfGoods = Number(c.costOfGoods) > 0 ? Number(c.costOfGoods) : Math.round(rev * defaultCogsRatio * 100) / 100;
+      const commFee = Number(c.commissionFee) || 0;
+      const costOfGoods = Number(c.costOfGoods) || Math.round(rev * defaultCogsRatio * 100) / 100;
       const grossProfit = Math.round((rev - costOfGoods) * 100) / 100;
       const profit = Math.max(0, Math.round((grossProfit - commFee) * 100) / 100);
-      const grossSales = Number(c.grossSales) || (chName.includes("TikTok") ? Math.round(rev * 1.023) : rev);
-      const discount = Number(c.discount) || 0;
       const orders = Number(c.orderCount ?? c.count) || 0;
-      const grossMargin = rev > 0 ? (grossProfit / rev) * 100 : 0;
-      const netMargin = rev > 0 ? (profit / rev) * 100 : 0;
-      const cogsPct = rev > 0 ? (costOfGoods / rev) * 100 : 0;
-      const aov = Number(c.avgOrderValue) || (orders > 0 ? rev / orders : 0);
-      const ppo = Number(c.profitPerOrder) || (orders > 0 ? profit / orders : 0);
-
-      const color = isPOS ? "#F53799" : chName.includes("TikTok") ? "#8B5CF6" : chName.includes("Shopee") ? "#FBBF24" : "#06B6D4";
 
       return {
         channel: chName,
@@ -552,23 +726,31 @@ export function Retail() {
         profit,
         profitShare: 0,
         grossProfit,
-        grossSales,
-        discount,
+        grossSales: Number(c.grossSales) || rev,
+        discount: Number(c.discount) || 0,
         commFee,
-        commRate,
-        feeBreakdown,
+        commRate: Number(c.commissionRate) || defaultCommRate,
+        feeBreakdown: c.feeBreakdown || {
+          commission: commFee > 0 ? Math.round(rev * 0.10 * 100) / 100 : 0,
+          serviceFee: commFee > 0 ? Math.round(rev * 0.07 * 100) / 100 : 0,
+          transactionFee: commFee > 0 ? Math.round(rev * 0.0224 * 100) / 100 : 0,
+          wht: commFee > 0 ? Math.round(rev * 0.004 * 100) / 100 : 0,
+        },
         costOfGoods,
-        cogsPct: Number(cogsPct.toFixed(1)),
+        cogsPct: rev > 0 ? Number(((costOfGoods / rev) * 100).toFixed(1)) : 0,
         orders,
         orderShare: 0,
-        grossMargin: Number(grossMargin.toFixed(1)),
-        netMargin: Number(netMargin.toFixed(1)),
-        aov: Math.round(aov),
-        ppo: Math.round(ppo),
+        grossMargin: rev > 0 ? Number(((grossProfit / rev) * 100).toFixed(1)) : 0,
+        netMargin: rev > 0 ? Number(((profit / rev) * 100).toFixed(1)) : 0,
+        aov: orders > 0 ? Math.round(rev / orders) : 0,
+        ppo: orders > 0 ? Math.round(profit / orders) : 0,
         color,
         isPOS,
       };
-    });
+    };
+
+    const channelNames = ["POS", "Shopee", "TikTok Shop", "PetHub"];
+    const channels = channelNames.map(getChannelStats);
 
     const totalRevenue = channels.reduce((sum, c) => sum + c.revenue, 0);
     const totalProfit = channels.reduce((sum, c) => sum + c.profit, 0);
@@ -591,19 +773,19 @@ export function Retail() {
     const onlineDiscountTotal = onlineChannels.reduce((sum, c) => sum + c.discount, 0);
 
     return {
-      totalRevenue,
-      totalProfit,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      totalProfit: Math.round(totalProfit * 100) / 100,
       totalOrders,
-      totalCommission,
-      totalCostOfGoods,
-      totalDiscounts,
+      totalCommission: Math.round(totalCommission * 100) / 100,
+      totalCostOfGoods: Math.round(totalCostOfGoods * 100) / 100,
+      totalDiscounts: Math.round(totalDiscounts * 100) / 100,
       onlineRevShare: Number(onlineRevShare.toFixed(1)),
       onlineOrderShare: Number(onlineOrderShare.toFixed(1)),
       onlineCommissionTotal,
       onlineDiscountTotal,
       channels,
     };
-  }, [dashboardData]);
+  }, [channelForecast, dashboardData, activeRange]);
 
   // Dynamic Omnichannel Profitability Insight for WOOF Insight Banner
   const omnichannelInsightText = useMemo(() => {
@@ -638,38 +820,52 @@ export function Retail() {
 
   // Chart 1: Donut Chart Data for Channel Revenue Mix
   const channelMixData = useMemo(() => {
-    const raw = dashboardData?.channelBreakdown || [];
     const channels = [
       { key: "POS", label: "POS", color: "#D42A7D" },
       { key: "Shopee", label: "Shopee", color: "#F59E0B" },
       { key: "TikTok Shop", label: "TikTok Shop", color: "#8B5CF6" },
       { key: "PetHub", label: "PetHub", color: "#06B6D4" },
     ];
-    const totalRev = raw.reduce((sum: number, c: any) => sum + (Number(c.revenue) || 0), 0);
+    const totalRev = channelEconomics.totalRevenue;
     return channels.map((ch) => {
-      const match = raw.find((c: any) => c.channel === ch.key || c.channel === ch.label);
+      const match = channelEconomics.channels.find(
+        (c: any) => c.channel === ch.key || c.channel === ch.label,
+      );
       const rev = Number(match?.revenue || 0);
       return {
         name: ch.label,
         value: Math.round(rev),
         share: totalRev > 0 ? Number(((rev / totalRev) * 100).toFixed(1)) : 0,
-        count: Number(match?.count || 0),
+        count: Number(match?.orders || 0),
         color: ch.color,
       };
     });
-  }, [dashboardData]);
+  }, [channelEconomics]);
 
   // Chart 2: Category Revenue Contribution Data (Horizontal Bar Chart)
   const categoryRevenueData = useMemo(() => {
     const items: any[] = dashboardData?.topItems || [];
+    if (items.length === 0) return [];
+
+    // Scale category revenue to match filtered retail revenue
+    const allTimeRetailRev = (dashboardData?.channelBreakdown || []).reduce(
+      (sum: number, c: any) => sum + (Number(c.revenue) || 0),
+      0,
+    );
+    const filteredRetailRev = channelEconomics.totalRevenue;
+    const scale = allTimeRetailRev > 0 ? filteredRetailRev / allTimeRetailRev : 1;
+
     const map = new Map<string, { category: string; revenue: number; quantity: number }>();
     items.forEach((item: any) => {
-      const cat = item.category || "General Retail";
+      const cat = inferRetailCategory(item.category, item.name);
       const existing = map.get(cat) || { category: cat, revenue: 0, quantity: 0 };
-      existing.revenue += Number(item.revenue || 0);
-      existing.quantity += Number(item.quantity || item.orderCount || 0);
+      const rawRev = Number(item.revenue || 0);
+      const rawQty = Number(item.quantity || item.orderCount || 0);
+      existing.revenue += rawRev * scale;
+      existing.quantity += Math.round(rawQty * scale);
       map.set(cat, existing);
     });
+
     const totalRev = Array.from(map.values()).reduce((sum, c) => sum + c.revenue, 0);
     return Array.from(map.values())
       .map((c) => ({
@@ -678,8 +874,9 @@ export function Retail() {
         quantity: c.quantity,
         share: totalRev > 0 ? Number(((c.revenue / totalRev) * 100).toFixed(1)) : 0,
       }))
+      .filter((c) => c.revenue > 0 || filteredRetailRev === 0)
       .sort((a, b) => b.revenue - a.revenue);
-  }, [dashboardData]);
+  }, [dashboardData, channelEconomics.totalRevenue]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -837,12 +1034,12 @@ export function Retail() {
 
       {/* RETAIL REVENUE BY CHANNEL */}
       <div id="retail-revenue-by-channel" className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 scroll-mt-24">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               <span className="inline-flex items-center gap-2">
                 Retail Revenue by Channel
-                <InfoTooltip label="Daily retail performance across Physical (POS), TikTok Shop, Shopee, and PetHub. Fairly aligned to active marketplace dates. A channel is where the sale came from, such as POS, Shopee, TikTok, or PetHub." />
+                <InfoTooltip label="Daily retail performance across Physical (POS), TikTok Shop, Shopee, and PetHub. Fairly aligned to active marketplace dates. When you click any filter button here, Omnichannel Economics, Channel Mix, and Category Revenue recalculate for this period." />
               </span>
             </h2>
           </div>
@@ -875,50 +1072,142 @@ export function Retail() {
 
             <div className="h-5 w-[1px] bg-[#FFD9EC] hidden sm:block" />
 
-            {[
-              ["last30days", "Last 30 Days"],
-              ["last14days", "Last 14 Days"],
-              ["last7days", "Last 7 Days"],
-              ["custom", "Custom"],
-            ].map(([value, label]) => (
+            {/* Filter buttons - NO ICONS */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { key: "matched", label: "Matched 1-Year (2025-2026)" },
+                { key: "all", label: "All-Time" },
+                { key: "last-90-days", label: "Last 90 Days" },
+                { key: "last-30-days", label: "Last 30 Days" },
+              ].map((item) => (
+                <Button
+                  key={item.key}
+                  size="sm"
+                  variant={retailActiveFilter === item.key ? "default" : "outline"}
+                  onClick={() => handleApplyFilter(item.key)}
+                  className={`text-xs transition-all ${
+                    retailActiveFilter === item.key
+                      ? "bg-[#D42A7D] hover:bg-[#B01E64] text-white shadow-xs font-semibold"
+                      : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+                  }`}
+                >
+                  {item.label}
+                </Button>
+              ))}
+
               <Button
-                key={value}
                 size="sm"
-                variant={channelRangeMode === value ? "default" : "outline"}
-                onClick={() => setChannelRangeMode(value)}
-                className={
-                  channelRangeMode === value
-                    ? "bg-[#D42A7D] hover:bg-[#F53799] text-xs"
-                    : "border-[#FFD9EC] hover:bg-[#FFF2FA] text-xs"
-                }
+                variant={retailActiveFilter.startsWith("custom:") || showCustomFilter ? "default" : "outline"}
+                onClick={() => setShowCustomFilter((prev) => !prev)}
+                className={`text-xs transition-all ${
+                  retailActiveFilter.startsWith("custom:") || showCustomFilter
+                    ? "bg-[#D42A7D] hover:bg-[#B01E64] text-white shadow-xs font-semibold"
+                    : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+                }`}
               >
-                {label}
+                <span>
+                  {retailActiveFilter.startsWith("custom:")
+                    ? (() => {
+                        const [, s, e] = retailActiveFilter.split(":");
+                        return s === e ? `Custom (${s})` : `Custom (${s} – ${e})`;
+                      })()
+                    : "Custom"}
+                </span>
               </Button>
-            ))}
+            </div>
           </div>
         </div>
 
-        {channelRangeMode === "custom" && (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3">
-            <input
-              type="date"
-              min={HISTORY_START_DATE}
-              max={INGESTED_HISTORY_END_DATE}
-              value={customChannelStart}
-              onChange={(event) => setCustomChannelStart(event.target.value)}
-              className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#D42A7D]"
-            />
-            <input
-              type="date"
-              min={customChannelStart}
-              max={INGESTED_HISTORY_END_DATE}
-              value={customChannelEnd}
-              onChange={(event) => setCustomChannelEnd(event.target.value)}
-              className="h-9 rounded-md border border-[#FFD9EC] px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#D42A7D]"
-            />
-            <span className="text-xs text-[#223047] opacity-60">
-              Retail is descriptive, so custom dates are limited to Mar 2021 through May 2026.
-            </span>
+        {showCustomFilter && (
+          <div className="flex flex-wrap items-center gap-2.5 bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-2.5 text-xs">
+            <span className="font-bold text-[#D42A7D]">Select Custom Range:</span>
+
+            {/* Mode selection without icons */}
+            <div className="flex items-center rounded-lg border border-[#FFD9EC] p-0.5 bg-white">
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomMode("single");
+                  if (customStartDate) setCustomSingleDate(customStartDate);
+                }}
+                className={`px-2 py-0.5 text-xs font-semibold rounded transition-all ${
+                  customMode === "single"
+                    ? "bg-[#D42A7D] text-white"
+                    : "text-[#223047] opacity-70 hover:opacity-100"
+                }`}
+              >
+                Single Day
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomMode("range")}
+                className={`px-2 py-0.5 text-xs font-semibold rounded transition-all ${
+                  customMode === "range"
+                    ? "bg-[#D42A7D] text-white"
+                    : "text-[#223047] opacity-70 hover:opacity-100"
+                }`}
+              >
+                Date Range
+              </button>
+            </div>
+
+            {customMode === "single" ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  min={HISTORY_START_DATE}
+                  max={INGESTED_HISTORY_END_DATE}
+                  value={customSingleDate}
+                  onChange={(e) => {
+                    setCustomSingleDate(e.target.value);
+                    setCustomStartDate(e.target.value);
+                    setCustomEndDate(e.target.value);
+                  }}
+                  className="h-8 rounded-lg border border-[#FFD9EC] bg-white px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#D42A7D]"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  min={HISTORY_START_DATE}
+                  max={INGESTED_HISTORY_END_DATE}
+                  value={customStartDate}
+                  onChange={(e) => {
+                    const newStart = e.target.value;
+                    setCustomStartDate(newStart);
+                    if (customEndDate < newStart) {
+                      setCustomEndDate(newStart);
+                    }
+                  }}
+                  className="h-8 rounded-lg border border-[#FFD9EC] bg-white px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#D42A7D]"
+                />
+                <span className="text-[#223047]/60 font-semibold">to</span>
+                <input
+                  type="date"
+                  min={customStartDate || HISTORY_START_DATE}
+                  max={INGESTED_HISTORY_END_DATE}
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="h-8 rounded-lg border border-[#FFD9EC] bg-white px-2 text-xs text-[#223047] focus:outline-none focus:ring-2 focus:ring-[#D42A7D]"
+                />
+              </div>
+            )}
+
+            <Button
+              size="sm"
+              onClick={handleApplyCustomFilter}
+              className="h-8 bg-[#D42A7D] hover:bg-[#B01E64] text-white text-xs font-semibold px-3 shadow-xs"
+            >
+              Apply Filter
+            </Button>
+            <button
+              type="button"
+              onClick={() => setShowCustomFilter(false)}
+              className="text-xs text-[#223047]/60 hover:text-[#223047] ml-1 px-2 py-1 rounded hover:bg-[#FFE5F4]"
+            >
+              Cancel
+            </button>
           </div>
         )}
 
@@ -956,7 +1245,7 @@ export function Retail() {
               dataKey="physical"
               stroke="#D42A7D"
               strokeWidth={2.5}
-              dot={false}
+              dot={forecastData.length === 1 ? { r: 5 } : false}
               animationDuration={800}
               name="Physical (POS)"
               connectNulls
@@ -967,7 +1256,7 @@ export function Retail() {
               dataKey="tiktok"
               stroke="#8B5CF6"
               strokeWidth={2.5}
-              dot={false}
+              dot={forecastData.length === 1 ? { r: 5 } : false}
               animationDuration={800}
               name="TikTok Shop"
               connectNulls
@@ -978,7 +1267,7 @@ export function Retail() {
               dataKey="shopee"
               stroke="#F59E0B"
               strokeWidth={2.5}
-              dot={false}
+              dot={forecastData.length === 1 ? { r: 5 } : false}
               animationDuration={800}
               name="Shopee"
               connectNulls
@@ -989,7 +1278,7 @@ export function Retail() {
               dataKey="pethub"
               stroke="#06B6D4"
               strokeWidth={2}
-              dot={false}
+              dot={forecastData.length === 1 ? { r: 5 } : false}
               animationDuration={800}
               name="PetHub"
               connectNulls
@@ -1425,7 +1714,7 @@ export function Retail() {
                     type="category"
                     dataKey="category"
                     stroke="#223047"
-                    width={135}
+                    width={155}
                     style={{ fontSize: "10px", fontWeight: 600 }}
                   />
                   <Tooltip
