@@ -178,6 +178,9 @@ export class AnalyticsService {
   private cachedChannelBalance: { data: any[]; timestamp: number } | null = null;
   private cachedQuietPeriod: any = null;
   private cachedQuietPeriodDate: string = '';
+  private cachedRootCauseProductDim: Map<string, { name: string; category: string; sku?: string }> | null = null;
+  private cachedRootCauseServiceDim: Map<string, { name: string; category: string }> | null = null;
+  private cachedRootCauseDimExpiry: number = 0;
 
   constructor(
     @Optional()
@@ -673,6 +676,24 @@ export class AnalyticsService {
     customStart?: string,
     customEnd?: string,
   ): Promise<any> {
+    if (this.supabaseService?.client) {
+      try {
+        const supabaseResult = await this.getRootCauseAnalysisFromSupabase(
+          period,
+          sector,
+          customStart,
+          customEnd,
+        );
+        if (supabaseResult) {
+          return supabaseResult;
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Supabase getRootCauseAnalysis failed, falling back to MongoDB: ${err?.message || err}`,
+        );
+      }
+    }
+
     const todayKey = this.formatDateInTimeZone(new Date(), 'Asia/Manila');
     const today = new Date(`${todayKey}T00:00:00.000+08:00`);
     let currentStart = new Date(today);
@@ -781,6 +802,434 @@ export class AnalyticsService {
       discounts: { available: current.grossSales > 0 || current.discounts > 0, grossSales: current.grossSales, discounts: current.discounts, netSales: current.revenue, rate: current.grossSales ? current.discounts / current.grossSales * 100 : null },
       weather: { available: weatherRows.length > 0, source: 'Observed non-synthetic weather cache', rainyDays: rainy.length, dryDays: dry.length, rainyAverageRevenue: average(rainy), dryAverageRevenue: average(dry), rows: weatherRows, footfallAvailable: false, caveat: 'Observed association only; this comparison does not establish that weather caused a revenue change.' },
       dataStatus: { currentTransactionRows: current.rows, previousTransactionRows: previous.rows, weatherRows: weatherRows.length, inventoryData: false, campaignExposureData: false },
+    };
+  }
+
+  private async getRootCauseDimensionsFromSupabase(): Promise<{
+    prodMap: Map<string, { name: string; category: string; sku?: string }>;
+    servMap: Map<string, { name: string; category: string }>;
+  }> {
+    if (
+      this.cachedRootCauseProductDim &&
+      this.cachedRootCauseServiceDim &&
+      this.cachedRootCauseDimExpiry > Date.now()
+    ) {
+      return {
+        prodMap: this.cachedRootCauseProductDim,
+        servMap: this.cachedRootCauseServiceDim,
+      };
+    }
+
+    const [{ data: prods }, { data: servs }] = await Promise.all([
+      this.supabaseService.client
+        .from('product_dim')
+        .select('product_id, product_name, category, sku'),
+      this.supabaseService.client
+        .from('service_dim')
+        .select('service_id, service_name, service_type'),
+    ]);
+
+    const prodMap = new Map<string, { name: string; category: string; sku?: string }>();
+    (prods || []).forEach((p: any) => {
+      if (!prodMap.has(p.product_id)) {
+        prodMap.set(p.product_id, {
+          name: p.product_name || 'Unnamed Product',
+          category: p.category || 'Retail Items',
+          sku: p.sku || undefined,
+        });
+      }
+    });
+
+    const servMap = new Map<string, { name: string; category: string }>();
+    (servs || []).forEach((s: any) => {
+      servMap.set(s.service_id, {
+        name: s.service_name || 'Unnamed Service',
+        category: s.service_type || 'Services',
+      });
+    });
+
+    this.cachedRootCauseProductDim = prodMap;
+    this.cachedRootCauseServiceDim = servMap;
+    this.cachedRootCauseDimExpiry = Date.now() + 10 * 60 * 1000;
+
+    return { prodMap, servMap };
+  }
+
+  private async getRootCauseAnalysisFromSupabase(
+    period = '30d',
+    sector = 'all',
+    customStart?: string,
+    customEnd?: string,
+  ): Promise<any | null> {
+    const { data: latestRows, error: latestErr } = await this.supabaseService.client
+      .from('fact_cross_channel_transactions')
+      .select('transaction_timestamp')
+      .order('transaction_timestamp', { ascending: false })
+      .limit(1);
+
+    if (latestErr || !latestRows?.length) {
+      return null;
+    }
+
+    const latestDate = new Date(latestRows[0].transaction_timestamp);
+    if (!latestDate || Number.isNaN(latestDate.getTime())) {
+      return null;
+    }
+
+    let currentStart: Date;
+    let currentEnd: Date;
+    let previousStart: Date;
+    let previousEnd: Date;
+
+    if (period === 'custom' && customStart && customEnd) {
+      currentStart = new Date(`${customStart}T00:00:00.000+08:00`);
+      currentEnd = new Date(`${customEnd}T23:59:59.999+08:00`);
+      const duration = currentEnd.getTime() - currentStart.getTime();
+      previousEnd = new Date(currentStart);
+      previousStart = new Date(currentStart.getTime() - duration);
+    } else if (period === 'ytd') {
+      const year = latestDate.getUTCFullYear();
+      currentStart = new Date(`${year}-01-01T00:00:00.000+08:00`);
+      currentEnd = new Date(latestDate);
+      const duration = currentEnd.getTime() - currentStart.getTime();
+      previousStart = new Date(`${year - 1}-01-01T00:00:00.000+08:00`);
+      previousEnd = new Date(previousStart.getTime() + duration);
+    } else if (period === '90d') {
+      currentEnd = new Date(latestDate);
+      currentStart = new Date(latestDate);
+      currentStart.setUTCDate(currentStart.getUTCDate() - 89);
+      previousEnd = new Date(currentStart);
+      previousStart = new Date(currentStart);
+      previousStart.setUTCDate(previousStart.getUTCDate() - 90);
+    } else {
+      currentEnd = new Date(latestDate);
+      currentStart = new Date(latestDate);
+      currentStart.setUTCDate(currentStart.getUTCDate() - 29);
+      previousEnd = new Date(currentStart);
+      previousStart = new Date(currentStart);
+      previousStart.setUTCDate(previousStart.getUTCDate() - 30);
+    }
+
+    const { prodMap, servMap } = await this.getRootCauseDimensionsFromSupabase();
+
+    const normalizedSector = sector?.toLowerCase() || 'all';
+    const segmentFilter =
+      normalizedSector === 'cafe'
+        ? 'SEG_CAFE'
+        : normalizedSector === 'services'
+        ? 'SEG_SERVICE'
+        : normalizedSector === 'retail'
+        ? 'SEG_RETAIL'
+        : null;
+
+    const channelMap: Record<string, string> = {
+      CH_POS: 'POS',
+      CH_SHOPEE: 'Shopee',
+      CH_TIKTOK: 'TikTok Shop',
+      CH_PETHUB: 'PetHub',
+    };
+
+    const segmentMap: Record<string, string> = {
+      SEG_CAFE: 'Cafe',
+      SEG_SERVICE: 'Services',
+      SEG_RETAIL: 'Retail',
+    };
+
+    const fetchRows = async (start: Date, end: Date) => {
+      const pageSize = 1000;
+      let from = 0;
+      const all: any[] = [];
+      while (all.length < 50000) {
+        let query = this.supabaseService.client
+          .from('fact_cross_channel_transactions')
+          .select(
+            'transaction_id, net_sales, gross_sales, discount_amount, quantity_sold, channel_id, segment_id, product_id, service_id, transaction_timestamp',
+          )
+          .gte('transaction_timestamp', start.toISOString())
+          .lte('transaction_timestamp', end.toISOString())
+          .range(from, from + pageSize - 1);
+
+        if (segmentFilter) {
+          query = query.eq('segment_id', segmentFilter);
+        }
+
+        const { data, error } = await query;
+        if (error || !data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return all;
+    };
+
+    const [currentRows, previousRows] = await Promise.all([
+      fetchRows(currentStart, currentEnd),
+      fetchRows(previousStart, previousEnd),
+    ]);
+
+    if (currentRows.length === 0 && previousRows.length === 0) {
+      return null;
+    }
+
+    const aggregate = (rows: any[]) => {
+      let revenue = 0;
+      let grossSales = 0;
+      let discounts = 0;
+      let quantity = 0;
+      const orderIds = new Set<string>();
+      const channels = new Map<string, { revenue: number; quantity: number }>();
+      const categories = new Map<string, { revenue: number; quantity: number }>();
+      const products = new Map<string, { revenue: number; quantity: number }>();
+      const daily = new Map<string, number>();
+      const heatmap = new Map<string, { weekday: number; hour: number; revenue: number; orders: Set<string> }>();
+
+      for (const r of rows) {
+        const net = Number(r.net_sales) || 0;
+        const gross = Number(r.gross_sales) || net;
+        const disc = Number(r.discount_amount) || 0;
+        const qty = Number(r.quantity_sold) || 1;
+        const tId = r.transaction_id;
+        const ch = channelMap[r.channel_id] || r.channel_id || 'Other';
+
+        const itemInfo = r.product_id
+          ? prodMap.get(r.product_id)
+          : r.service_id
+          ? servMap.get(r.service_id)
+          : null;
+        const prodName = itemInfo?.name || r.product_id || r.service_id || 'Unknown Item';
+        const catName =
+          itemInfo?.category ||
+          (segmentMap[r.segment_id] ? `${segmentMap[r.segment_id]} General` : 'Uncategorized');
+
+        const tDate = new Date(r.transaction_timestamp);
+        const manilaDate = new Date(tDate.getTime() + 8 * 3600 * 1000);
+        const dateKey = manilaDate.toISOString().slice(0, 10);
+        const hour = manilaDate.getUTCHours();
+        const dayOfWeek = manilaDate.getUTCDay() + 1;
+
+        revenue += net;
+        grossSales += gross;
+        discounts += disc;
+        quantity += qty;
+        if (tId) orderIds.add(tId);
+
+        if (!channels.has(ch)) channels.set(ch, { revenue: 0, quantity: 0 });
+        const chObj = channels.get(ch)!;
+        chObj.revenue += net;
+        chObj.quantity += qty;
+
+        if (!categories.has(catName)) categories.set(catName, { revenue: 0, quantity: 0 });
+        const catObj = categories.get(catName)!;
+        catObj.revenue += net;
+        catObj.quantity += qty;
+
+        if (!products.has(prodName)) products.set(prodName, { revenue: 0, quantity: 0 });
+        const prObj = products.get(prodName)!;
+        prObj.revenue += net;
+        prObj.quantity += qty;
+
+        if (!daily.has(dateKey)) daily.set(dateKey, 0);
+        daily.set(dateKey, daily.get(dateKey)! + net);
+
+        const hmKey = `${dayOfWeek}_${hour}`;
+        if (!heatmap.has(hmKey)) {
+          heatmap.set(hmKey, { weekday: dayOfWeek, hour, revenue: 0, orders: new Set() });
+        }
+        const hmObj = heatmap.get(hmKey)!;
+        hmObj.revenue += net;
+        if (tId) hmObj.orders.add(tId);
+      }
+
+      return {
+        revenue: Math.round(revenue * 100) / 100,
+        grossSales: Math.round(grossSales * 100) / 100,
+        discounts: Math.round(discounts * 100) / 100,
+        quantity,
+        orders: orderIds.size,
+        rows: rows.length,
+        channels,
+        categories,
+        products,
+        daily,
+        heatmap,
+      };
+    };
+
+    const cur = aggregate(currentRows);
+    const prev = aggregate(previousRows);
+
+    const compareDimensions = (
+      curMap: Map<string, { revenue: number; quantity: number }>,
+      prevMap: Map<string, { revenue: number; quantity: number }>,
+    ) => {
+      const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
+      const list: any[] = [];
+      for (const key of allKeys) {
+        const c = curMap.get(key) || { revenue: 0, quantity: 0 };
+        const p = prevMap.get(key) || { revenue: 0, quantity: 0 };
+        const current = Math.round(c.revenue * 100) / 100;
+        const previous = Math.round(p.revenue * 100) / 100;
+        const variance = Math.round((current - previous) * 100) / 100;
+        const rawPct = previous
+          ? ((current - previous) / Math.abs(previous)) * 100
+          : current > 0
+          ? 100
+          : 0;
+        const pctChange = Math.max(-100, Math.min(100, Math.round(rawPct * 10) / 10));
+        const quantityVariance = c.quantity - p.quantity;
+        list.push({
+          name: key,
+          current,
+          previous,
+          variance,
+          pctChange,
+          quantityVariance,
+        });
+      }
+      return list.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+    };
+
+    const channels = compareDimensions(cur.channels, prev.channels);
+    const categories = compareDimensions(cur.categories, prev.categories);
+    const products = compareDimensions(cur.products, prev.products);
+
+    const curStartKey = this.formatDateInTimeZone(currentStart, 'Asia/Manila');
+    const curEndKey = this.formatDateInTimeZone(currentEnd, 'Asia/Manila');
+    const prevStartKey = this.formatDateInTimeZone(previousStart, 'Asia/Manila');
+    const prevEndKey = this.formatDateInTimeZone(previousEnd, 'Asia/Manila');
+
+    const dateOffset = (dStr: string, startStr: string) => {
+      return Math.round(
+        (Date.parse(`${dStr}T00:00:00Z`) - Date.parse(`${startStr}T00:00:00Z`)) /
+          (24 * 60 * 60 * 1000),
+      );
+    };
+
+    const dailyList: any[] = [];
+    for (const [date, rev] of cur.daily.entries()) {
+      dailyList.push({
+        period: 'current',
+        date,
+        dayOffset: dateOffset(date, curStartKey),
+        revenue: Math.round(rev * 100) / 100,
+      });
+    }
+    for (const [date, rev] of prev.daily.entries()) {
+      dailyList.push({
+        period: 'previous',
+        date,
+        dayOffset: dateOffset(date, prevStartKey),
+        revenue: Math.round(rev * 100) / 100,
+      });
+    }
+    dailyList.sort((a, b) => a.date.localeCompare(b.date));
+
+    const heatmapList = Array.from(cur.heatmap.values()).map((h) => ({
+      weekday: h.weekday,
+      hour: h.hour,
+      revenue: Math.round(h.revenue * 100) / 100,
+      orders: h.orders.size,
+    }));
+
+    const variance = Math.round((cur.revenue - prev.revenue) * 100) / 100;
+    const rawTotPct = prev.revenue
+      ? ((cur.revenue - prev.revenue) / Math.abs(prev.revenue)) * 100
+      : cur.revenue > 0
+      ? 100
+      : 0;
+    const pctChange = Math.max(-100, Math.min(100, Math.round(rawTotPct * 10) / 10));
+
+    let weatherRows: any[] = [];
+    let rainy: any[] = [];
+    let dry: any[] = [];
+    try {
+      const weatherRecords = await this.exogenousDataService.getCachedRealWeatherHistory(prevStartKey, curEndKey);
+      const currentDailyMap = cur.daily;
+      weatherRows = weatherRecords
+        .filter((row) => row.date >= curStartKey && row.date <= curEndKey && currentDailyMap.has(row.date))
+        .map((row) => ({
+          date: row.date,
+          rainfallMm: row.rainfallMm,
+          tempCelsius: row.tempCelsius,
+          revenue: Math.round((currentDailyMap.get(row.date) || 0) * 100) / 100,
+        }));
+      rainy = weatherRows.filter((row) => row.rainfallMm >= 1);
+      dry = weatherRows.filter((row) => row.rainfallMm < 1);
+    } catch {
+      // ignore weather cache issues
+    }
+    const avgRev = (rows: any[]) =>
+      rows.length ? Math.round((rows.reduce((sum, r) => sum + r.revenue, 0) / rows.length) * 100) / 100 : null;
+
+    return {
+      period,
+      sector: normalizedSector,
+      source: 'Supabase',
+      window: {
+        currentStart: curStartKey,
+        currentEnd: curEndKey,
+        previousStart: prevStartKey,
+        previousEnd: prevEndKey,
+        timezone: 'Asia/Manila',
+      },
+      totals: {
+        current: {
+          revenue: cur.revenue,
+          grossSales: cur.grossSales,
+          discounts: cur.discounts,
+          quantity: cur.quantity,
+          orders: cur.orders,
+          rows: cur.rows,
+        },
+        previous: {
+          revenue: prev.revenue,
+          grossSales: prev.grossSales,
+          discounts: prev.discounts,
+          quantity: prev.quantity,
+          orders: prev.orders,
+          rows: prev.rows,
+        },
+        variance,
+        pctChange,
+        discountRate: cur.grossSales ? Math.round((cur.discounts / cur.grossSales) * 1000) / 10 : 0,
+      },
+      discounts: {
+        grossSales: cur.grossSales,
+        discounts: cur.discounts,
+        netSales: cur.revenue,
+        rate: cur.grossSales ? Math.round((cur.discounts / cur.grossSales) * 1000) / 10 : 0,
+      },
+      daily: dailyList,
+      channels,
+      categories,
+      products,
+      heatmap: heatmapList,
+      stockouts: {
+        available: false,
+        reason: 'Walang inventory o stockout records na naka-store para patunayan ang stockout at lost sales.',
+      },
+      promotions: {
+        available: false,
+        reason: 'Walang campaign exposure/control data para makuwenta ang promotion lift.',
+      },
+      weather: {
+        available: weatherRows.length > 0,
+        source: 'Observed non-synthetic weather cache',
+        rainyDays: rainy.length,
+        dryDays: dry.length,
+        rainyAverageRevenue: avgRev(rainy),
+        dryAverageRevenue: avgRev(dry),
+        rows: weatherRows,
+        footfallAvailable: false,
+        caveat: 'Observed association only; this comparison does not establish that weather caused a revenue change.',
+      },
+      dataStatus: {
+        currentTransactionRows: cur.rows,
+        previousTransactionRows: prev.rows,
+        weatherRows: weatherRows.length,
+        inventoryData: false,
+        campaignExposureData: false,
+      },
     };
   }
 

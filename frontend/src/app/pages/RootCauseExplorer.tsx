@@ -34,6 +34,12 @@ function ComparisonTable({ rows, firstLabel }: { rows: any[]; firstLabel: string
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<any>(null);
   const pageSize = 8;
+
+  useEffect(() => {
+    setPage(0);
+    setSelected(null);
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const matched = (rows || []).filter((row) => String(row.name).toLowerCase().includes(query.trim().toLowerCase()));
     return [...matched].sort((a, b) => {
@@ -69,29 +75,28 @@ export function RootCauseExplorer() {
   const [chartMode, setChartMode] = useState<ChartMode>("daily");
   const [selectedDay, setSelectedDay] = useState<any>(null);
   const [selectedHeatCell, setSelectedHeatCell] = useState<any>(null);
-  const [data, setData] = useState<Analysis | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
-  const { data: initialData, error: fetchError } = useSWR(
+  const { data: initialData, error: fetchError, isLoading, isValidating } = useSWR(
     ["rootCause", period, sector, refresh, appliedRange],
     () => getRootCauseAnalysis(period, sector, refresh > 0, period === "custom" ? appliedRange.start : undefined, period === "custom" ? appliedRange.end : undefined)
   );
 
-  useEffect(() => {
-    if (initialData) {
-      setData(initialData);
-      setLoading(false);
-      setError("");
-    }
-  }, [initialData]);
+  const isFetching = Boolean(isLoading || isValidating);
+  const data = initialData ?? null;
+  const error = fetchError ? (fetchError?.message || "Could not load Root Cause Explorer data.") : "";
 
   useEffect(() => {
-    if (fetchError) {
-      setError(fetchError?.message || "Could not load Root Cause Explorer data.");
-      setLoading(false);
+    setSelectedDay(null);
+    setSelectedHeatCell(null);
+  }, [period, sector]);
+
+  useEffect(() => {
+    if (initialData?.window?.currentStart && initialData?.window?.currentEnd && period !== "custom") {
+      setDateStart(initialData.window.currentStart);
+      setDateEnd(initialData.window.currentEnd);
+      setAppliedRange({ start: initialData.window.currentStart, end: initialData.window.currentEnd });
     }
-  }, [fetchError]);
+  }, [initialData?.window?.currentStart, initialData?.window?.currentEnd, period]);
 
   const chartData = useMemo(() => {
     const rows = data?.daily || [];
@@ -130,13 +135,13 @@ export function RootCauseExplorer() {
   const selectedHeat = selectedHeatCell && heatmap.find((cell: any) => Number(cell.weekday) === selectedHeatCell.weekday && Number(cell.hour) === selectedHeatCell.hour);
 
   return <main className="mx-auto max-w-7xl space-y-5 px-4 py-6 md:px-8">
-    <header className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div className="mb-1 flex items-center gap-2 text-sm font-semibold text-cyan-700"><Activity size={16} /> Transaction-based analysis</div><h1 className="text-3xl font-bold text-slate-900">Root Cause Explorer</h1><p className="mt-1 max-w-3xl text-sm text-slate-500">Shows observed changes in recorded sales. These comparisons describe what changed; they do not claim that a factor caused the change.</p></div><Button variant="outline" onClick={() => setRefresh((n) => n + 1)} disabled={loading} className="gap-2"><RefreshCw size={15} className={loading ? "animate-spin" : ""} />Refresh data</Button></header>
+    <header className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div className="mb-1 flex items-center gap-2 text-sm font-semibold text-cyan-700"><Activity size={16} /> Transaction-based analysis</div><h1 className="text-3xl font-bold text-slate-900">Root Cause Explorer</h1><p className="mt-1 max-w-3xl text-sm text-slate-500">Shows observed changes in recorded sales. These comparisons describe what changed; they do not claim that a factor caused the change.</p></div><Button variant="outline" onClick={() => setRefresh((n) => n + 1)} disabled={isFetching} className="gap-2"><RefreshCw size={15} className={isFetching ? "animate-spin" : ""} />Refresh data</Button></header>
     <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-pink-100 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center gap-2"><CalendarDays size={17} className="text-slate-500" />{periods.map((item) => <button type="button" aria-pressed={period === item.id} key={item.id} onClick={() => setPeriod(item.id)} className={`rounded-full px-3 py-1.5 text-sm ${period === item.id ? "bg-cyan-600 text-white" : "bg-slate-100 text-slate-600"}`}>{item.label}</button>)}</div>
-      {period === "custom" && <div className="flex flex-wrap items-center gap-2"><label className="text-xs text-slate-500">From <input aria-label="Start date" type="date" value={dateStart} max={dateEnd || today} onChange={(event) => setDateStart(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700" /></label><label className="text-xs text-slate-500">To <input aria-label="End date" type="date" value={dateEnd} min={dateStart} max={today} onChange={(event) => setDateEnd(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700" /></label><Button size="sm" onClick={handleRangeApply} disabled={loading}>Apply</Button>{rangeError && <span role="alert" className="text-xs text-rose-600">{rangeError}</span>}</div>}
+      {period === "custom" && <div className="flex flex-wrap items-center gap-2"><label className="text-xs text-slate-500">From <input aria-label="Start date" type="date" value={dateStart} max={dateEnd || today} onChange={(event) => setDateStart(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700" /></label><label className="text-xs text-slate-500">To <input aria-label="End date" type="date" value={dateEnd} min={dateStart} max={today} onChange={(event) => setDateEnd(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700" /></label><Button size="sm" onClick={handleRangeApply} disabled={isFetching}>Apply</Button>{rangeError && <span role="alert" className="text-xs text-rose-600">{rangeError}</span>}</div>}
       <div className="ml-auto flex flex-wrap gap-2">{sectors.map((item) => <button type="button" aria-pressed={sector === item.id} key={item.id} onClick={() => setSector(item.id)} className={`rounded-full px-3 py-1.5 text-sm ${sector === item.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{item.label}</button>)}</div>
     </div>
-    {error ? <Empty>{error}</Empty> : loading && !data ? <Empty>Loading transaction records…</Empty> : data ? <>
+    {error ? <Empty>{error}</Empty> : isFetching && !data ? <Empty>Loading transaction records…</Empty> : data ? <>
       <p className="text-xs text-slate-500">Current window: {startEnd}. Previous window is the immediately preceding matched period. Revenue uses recorded net sales.</p>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[["Revenue", money(total?.revenue), `Previous: ${money(prior?.revenue)}`, pct(data.totals?.pctChange)], ["Orders", number(total?.orders), `Previous: ${number(prior?.orders)}`, "Distinct transaction IDs"], ["Units", number(total?.quantity), `Previous: ${number(prior?.quantity)}`, "Recorded quantity"], ["Recorded discounts", money(data.discounts?.discounts), `Gross sales: ${money(data.discounts?.grossSales)}`, data.discounts?.rate == null ? "Rate unavailable" : `${Number(data.discounts.rate).toFixed(1)}% of gross sales`]].map(([label, value, detail, change]) => <div key={label} className="rounded-2xl border border-pink-100 bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold text-slate-900">{value}</p><p className="mt-2 text-xs text-slate-500">{detail}</p><p className="mt-1 text-xs font-semibold text-cyan-700">{change}</p></div>)}
