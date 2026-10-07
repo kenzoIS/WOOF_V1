@@ -109,7 +109,8 @@ def main():
         last_hist_val = y[-1]
         last_proj_val = projected[-1]
         if last_hist_val > 0:
-            growth_rate = ((last_proj_val - last_hist_val) / last_hist_val) * 100.0
+            raw_growth = ((last_proj_val - last_hist_val) / last_hist_val) * 100.0
+            growth_rate = max(-100.0, min(100.0, raw_growth))
         else:
             growth_rate = 0.0
             

@@ -1291,7 +1291,8 @@ export class ChatbotService {
 
   private percentChange(current: number, baseline: number): number | null {
     if (!Number.isFinite(baseline) || baseline === 0) return null;
-    return this.money(((current - baseline) / baseline) * 100);
+    const raw = ((current - baseline) / baseline) * 100;
+    return this.money(Math.max(-100, Math.min(100, raw)));
   }
 
   private getAuditAggregations(intent: DashboardIntent): string[] {

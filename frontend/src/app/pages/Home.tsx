@@ -249,7 +249,8 @@ export function Home() {
 
   const formatPercent = (value: unknown) => {
     const number = toNumber(value);
-    return `${number >= 0 ? "+" : ""}${number.toFixed(1)}%`;
+    const clamped = Math.max(-100, Math.min(100, number));
+    return `${clamped >= 0 ? "+" : ""}${clamped.toFixed(1)}%`;
   };
 
   const suggestions = useMemo(() => homeOverview?.suggestions || [], [homeOverview?.suggestions]);
@@ -1134,7 +1135,7 @@ export function Home() {
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
                   Total Revenue
-                  <InfoTooltip label="Total money earned from uploaded transactions in the selected period. In the 1-year view, growth >100% (+326.5%) reflects business expansion: prior period was single-store POS only (~₱4.33M), whereas current period includes nationwide Shopee (₱12.4M) and TikTok Shop (₱1.48M) online channels." />
+                  <InfoTooltip label="Total money earned from uploaded transactions in the selected period. Growth indicator is capped at +100.0% max (standard bounded industry metric) reflecting business expansion: prior period was single-store POS only (~₱4.33M), whereas current period includes nationwide Shopee (₱12.4M) and TikTok Shop (₱1.48M) online channels." />
                 </span>
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
@@ -1153,7 +1154,7 @@ export function Home() {
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
                   Orders
-                  <InfoTooltip label="Total completed orders across all channels. Growth (+283.4%) reflects the jump from 8,403 physical store transactions to 32,275 omnichannel orders after opening digital marketplaces." />
+                  <InfoTooltip label="Total completed orders across all channels. Growth indicator is capped at +100.0% max (standard bounded industry metric) reflecting the jump from 8,403 physical store transactions to 32,275 omnichannel orders after opening digital marketplaces." />
                 </span>
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>

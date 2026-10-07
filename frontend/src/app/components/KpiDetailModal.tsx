@@ -35,7 +35,20 @@ export function KpiDetailModal({ kpi, onClose }: KpiDetailModalProps) {
   const previousNum = typeof kpi.previous === "number" ? kpi.previous : parseFloat(String(kpi.previous).replace(/[^0-9.-]+/g, "")) || 0;
   const hasPrev = previousNum > 0;
 
-  const growthText = kpi.growth?.text || "";
+  const sanitizeGrowthText = (val: string): string => {
+    const match = val.match(/^([+-]?)(\d+(?:\.\d+)?)(%.*)$/);
+    if (match) {
+      const sign = match[1];
+      const num = parseFloat(match[2]);
+      const rest = match[3];
+      if (num > 100) {
+        return `${sign}100.0${rest}`;
+      }
+    }
+    return val;
+  };
+
+  const growthText = sanitizeGrowthText(kpi.growth?.text || "");
   const isUp = growthText.startsWith("+");
   const isDown = growthText.startsWith("-");
 

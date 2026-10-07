@@ -41,6 +41,7 @@ describe('Traffic Optimizer Context-Aware & Date-Aware Engine', () => {
       { get: jest.fn() } as any,
       mockExogenousDataService as any,
       {} as any,
+      {} as any,
     );
   });
 

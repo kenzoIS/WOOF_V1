@@ -10,7 +10,12 @@ type Sector = "all" | "cafe" | "services" | "retail";
 type Analysis = any;
 type ChartMode = "daily" | "cumulative";
 const money = (value?: number | null) => value == null || !Number.isFinite(Number(value)) ? "—" : `₱${Number(value).toLocaleString("en-PH", { maximumFractionDigits: 0 })}`;
-const pct = (value?: number | null) => value == null || !Number.isFinite(Number(value)) ? "—" : `${Number(value) > 0 ? "+" : ""}${Number(value).toFixed(1)}%`;
+const pct = (value?: number | null) => {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const num = Number(value);
+  const clamped = Math.max(-100, Math.min(100, num));
+  return `${clamped > 0 ? "+" : ""}${clamped.toFixed(1)}%`;
+};
 const number = (value?: number | null) => value == null ? "—" : Number(value).toLocaleString("en-PH", { maximumFractionDigits: 0 });
 const periods: { id: Period; label: string }[] = [{ id: "30d", label: "30 days" }, { id: "90d", label: "90 days" }, { id: "ytd", label: "Year to date" }, { id: "custom", label: "Custom" }];
 const sectors: { id: Sector; label: string }[] = [{ id: "all", label: "All sectors" }, { id: "cafe", label: "Cafe" }, { id: "services", label: "Services" }, { id: "retail", label: "Retail" }];

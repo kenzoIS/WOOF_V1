@@ -18,6 +18,19 @@ interface KPICardProps {
   description?: ReactNode;
 }
 
+const sanitizeTrendValue = (val: string): string => {
+  const match = val.match(/^([+-]?)(\d+(?:\.\d+)?)(%.*)$/);
+  if (match) {
+    const sign = match[1];
+    const num = parseFloat(match[2]);
+    const rest = match[3];
+    if (num > 100) {
+      return `${sign}100.0${rest}`;
+    }
+  }
+  return val;
+};
+
 export function KPICard({
   title,
   value,
@@ -68,7 +81,7 @@ export function KPICard({
             ) : (
               <TrendingDown className="w-3 h-3" />
             )}
-            <span className="text-xs font-semibold">{trend.value}</span>
+            <span className="text-xs font-semibold">{sanitizeTrendValue(trend.value)}</span>
           </Badge>
         )}
 

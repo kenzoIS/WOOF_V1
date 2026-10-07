@@ -109,14 +109,15 @@ const formatGrowth = (current: number, previous: number) => {
     };
   }
   const change = ((current - previous) / previous) * 100;
-  const absChange = Math.abs(change).toFixed(1);
-  if (change > 0) {
+  const clamped = Math.max(-100, Math.min(100, change));
+  const absChange = Math.abs(clamped).toFixed(1);
+  if (clamped > 0) {
     return {
       text: `+${absChange}% ↑`,
       className: "text-xs text-green-600 font-medium hidden md:block",
     };
   }
-  if (change < 0) {
+  if (clamped < 0) {
     return {
       text: `-${absChange}% ↓`,
       className: "text-xs text-rose-600 font-medium hidden md:block",

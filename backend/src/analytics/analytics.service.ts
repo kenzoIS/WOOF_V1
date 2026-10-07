@@ -743,7 +743,7 @@ export class AnalyticsService {
         entry[`${row._id.period}Quantity`] = row.quantity;
         map.set(name, entry);
       }
-      return [...map.values()].map((entry) => ({ ...entry, variance: entry.current - entry.previous, pctChange: entry.previous ? ((entry.current - entry.previous) / Math.abs(entry.previous)) * 100 : null, quantityVariance: entry.currentQuantity - entry.previousQuantity })).sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+      return [...map.values()].map((entry) => ({ ...entry, variance: entry.current - entry.previous, pctChange: entry.previous ? Math.max(-100, Math.min(100, ((entry.current - entry.previous) / Math.abs(entry.previous)) * 100)) : null, quantityVariance: entry.currentQuantity - entry.previousQuantity })).sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
     };
     const dateOffset = (date: string, start: string) => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / (24 * 60 * 60 * 1000));
     const dailyRows = (result?.daily || []).map((row: any) => ({ period: row._id.period, date: row._id.date, dayOffset: dateOffset(row._id.date, row._id.period === 'current' ? currentStartKey : previousStartKey), revenue: Number(row.revenue) || 0 }));
@@ -770,7 +770,7 @@ export class AnalyticsService {
     return {
       period, sector: normalizedSector,
       window: { currentStart: currentStartKey, currentEnd: endKey, previousStart: previousStartKey, previousEnd: previousEndKey, timezone: 'Asia/Manila' },
-      totals: { current, previous, variance: current.revenue - previous.revenue, pctChange: previous.revenue ? ((current.revenue - previous.revenue) / Math.abs(previous.revenue)) * 100 : null, discountRate: current.grossSales ? current.discounts / current.grossSales * 100 : null },
+      totals: { current, previous, variance: current.revenue - previous.revenue, pctChange: previous.revenue ? Math.max(-100, Math.min(100, ((current.revenue - previous.revenue) / Math.abs(previous.revenue)) * 100)) : null, discountRate: current.grossSales ? current.discounts / current.grossSales * 100 : null },
       daily,
       channels: compare(result?.channels || [], (row) => row._id.name || 'Unknown'),
       categories: compare(result?.categories || [], (row) => row._id.name || 'Uncategorized'),
@@ -10358,7 +10358,8 @@ Active Recommendations: ${suggestions.length} actions pending.`,
 
   private percentChange(current: number, previous: number): number {
     if (!previous) return current > 0 ? 100 : 0;
-    return this.round(((current - previous) / previous) * 100);
+    const raw = ((current - previous) / previous) * 100;
+    return this.round(Math.max(-100, Math.min(100, raw)));
   }
 
   private addDays(date: Date, days: number): Date {
