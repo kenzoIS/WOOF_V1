@@ -1082,7 +1082,7 @@ export function Retail() {
       </div>
 
       {/* RETAIL REVENUE BY CHANNEL */}
-      <div id="retail-revenue-by-channel" className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 scroll-mt-24">
+      <div id="retail-revenue-by-channel" className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-7 pb-3 md:pb-4 lg:pb-4 space-y-3 md:space-y-4 scroll-mt-24">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
@@ -1280,7 +1280,7 @@ export function Retail() {
 
                 <button
                   type="button"
-                  onClick={() => setActiveChannelKey("shopee")}
+                  onClick={() => setActiveChannelKey((k) => k === "shopee" ? "all" : "shopee")}
                   className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "shopee"
                       ? "bg-[#F59E0B] text-white shadow-xs"
@@ -1292,7 +1292,7 @@ export function Retail() {
 
                 <button
                   type="button"
-                  onClick={() => setActiveChannelKey("tiktok")}
+                  onClick={() => setActiveChannelKey((k) => k === "tiktok" ? "all" : "tiktok")}
                   className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "tiktok"
                       ? "bg-[#8B5CF6] text-white shadow-xs"
@@ -1304,7 +1304,7 @@ export function Retail() {
 
                 <button
                   type="button"
-                  onClick={() => setActiveChannelKey("physical")}
+                  onClick={() => setActiveChannelKey((k) => k === "physical" ? "all" : "physical")}
                   className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "physical"
                       ? "bg-[#D42A7D] text-white shadow-xs"
@@ -1316,7 +1316,7 @@ export function Retail() {
 
                 <button
                   type="button"
-                  onClick={() => setActiveChannelKey("pethub")}
+                  onClick={() => setActiveChannelKey((k) => k === "pethub" ? "all" : "pethub")}
                   className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "pethub"
                       ? "bg-[#06B6D4] text-white shadow-xs"
@@ -1350,7 +1350,7 @@ export function Retail() {
             )}
 
             <ResponsiveContainer width="100%" height={280} className="md:!h-[360px]">
-              <LineChart data={forecastData}>
+              <LineChart data={forecastData} margin={{ top: 8, right: 12, left: -4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
                 <XAxis
                   dataKey="day"
@@ -1432,57 +1432,6 @@ export function Retail() {
                 )}
               </LineChart>
             </ResponsiveContainer>
-
-            {/* Interactive Legend Items - NO ICONS, NO HARDCODED RANGES */}
-            <div className="flex flex-wrap justify-center gap-2.5 md:gap-4 pt-2">
-              <button
-                type="button"
-                onClick={() => setActiveChannelKey((k) => k === "physical" ? "all" : "physical")}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-                  activeChannelKey === "physical"
-                    ? "border-[#D42A7D] bg-[#D42A7D]/10 text-[#D42A7D] shadow-xs"
-                    : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
-                }`}
-              >
-                Physical (POS)
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveChannelKey((k) => k === "tiktok" ? "all" : "tiktok")}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-                  activeChannelKey === "tiktok"
-                    ? "border-[#8B5CF6] bg-purple-50 text-[#8B5CF6] shadow-xs"
-                    : "border-[#FFD9EC] text-[#223047] hover:bg-purple-50/50"
-                }`}
-              >
-                TikTok Shop
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveChannelKey((k) => k === "shopee" ? "all" : "shopee")}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-                  activeChannelKey === "shopee"
-                    ? "border-[#F59E0B] bg-amber-50 text-[#D97706] shadow-xs"
-                    : "border-[#FFD9EC] text-[#223047] hover:bg-amber-50/50"
-                }`}
-              >
-                Shopee
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveChannelKey((k) => k === "pethub" ? "all" : "pethub")}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-                  activeChannelKey === "pethub"
-                    ? "border-[#06B6D4] bg-cyan-50 text-[#06B6D4] shadow-xs"
-                    : "border-[#FFD9EC] text-[#223047] opacity-60 hover:opacity-100 hover:bg-cyan-50/50"
-                }`}
-              >
-                PetHub
-              </button>
-            </div>
           </>
         ) : (
           /* SPLIT CHANNELS VIEW - NO ICONS, NO HARDCODED RANGES */
