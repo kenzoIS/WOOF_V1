@@ -285,6 +285,8 @@ export function Retail() {
   const [customStartDate, setCustomStartDate] = useState("2025-05-02");
   const [customEndDate, setCustomEndDate] = useState("2026-05-02");
   const [channelMetricView, setChannelMetricView] = useState<"revenue" | "profit">("revenue");
+  const [channelGraphMode, setChannelGraphMode] = useState<"combined" | "split">("combined");
+  const [activeChannelKey, setActiveChannelKey] = useState<"all" | "shopee" | "tiktok" | "physical" | "pethub">("all");
   const [expandedFeeChannels, setExpandedFeeChannels] = useState<Record<string, boolean>>({});
   const toggleFeeDropdown = (channel: string) => {
     setExpandedFeeChannels((prev) => ({ ...prev, [channel]: !prev[channel] }));
@@ -526,6 +528,58 @@ export function Retail() {
 
     return sorted;
   }, [channelForecast, activeRange, channelMetricView]);
+
+  const channelStats = useMemo(() => {
+    let maxShopee = 0;
+    let maxTiktok = 0;
+    let maxPhys = 0;
+    let totalShopee = 0;
+    let totalTiktok = 0;
+    let totalPhys = 0;
+    let totalPethub = 0;
+
+    forecastData.forEach((d: any) => {
+      const s = Number(d.shopee) || 0;
+      const t = Number(d.tiktok) || 0;
+      const p = Number(d.physical) || 0;
+      const ph = Number(d.pethub) || 0;
+
+      if (s > maxShopee) maxShopee = s;
+      if (t > maxTiktok) maxTiktok = t;
+      if (p > maxPhys) maxPhys = p;
+
+      totalShopee += s;
+      totalTiktok += t;
+      totalPhys += p;
+      totalPethub += ph;
+    });
+
+    return {
+      maxShopee,
+      maxTiktok,
+      maxPhys,
+      totalShopee,
+      totalTiktok,
+      totalPhys,
+      totalPethub,
+    };
+  }, [forecastData]);
+
+  const activeYDomain = useMemo(() => {
+    if (activeChannelKey === "physical") {
+      return [0, Math.max(100, Math.ceil(channelStats.maxPhys * 1.15))];
+    }
+    if (activeChannelKey === "tiktok") {
+      return [0, Math.max(1000, Math.ceil(channelStats.maxTiktok * 1.15))];
+    }
+    if (activeChannelKey === "shopee") {
+      return [0, Math.max(5000, Math.ceil(channelStats.maxShopee * 1.1))];
+    }
+    if (activeChannelKey === "pethub") {
+      return [0, 100];
+    }
+    return [0, "auto"];
+  }, [activeChannelKey, channelStats]);
 
   const kpis = dashboardData?.kpis || {};
   const aggregatedKpis = useMemo(() => {
@@ -1045,6 +1099,32 @@ export function Retail() {
             </h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {/* View Mode Toggle: Combined vs Split - NO ICONS */}
+            <div className="flex items-center rounded-lg border border-[#FFD9EC] p-0.5 bg-[#FFF7FB]">
+              <button
+                type="button"
+                onClick={() => setChannelGraphMode("combined")}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                  channelGraphMode === "combined"
+                    ? "bg-[#D42A7D] text-white shadow-sm"
+                    : "text-[#223047] opacity-70 hover:opacity-100"
+                }`}
+              >
+                Combined View
+              </button>
+              <button
+                type="button"
+                onClick={() => setChannelGraphMode("split")}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                  channelGraphMode === "split"
+                    ? "bg-[#D42A7D] text-white shadow-sm"
+                    : "text-[#223047] opacity-70 hover:opacity-100"
+                }`}
+              >
+                Split Channels
+              </button>
+            </div>
+
             {/* Metric Toggle: Revenue vs Profit */}
             <div className="flex items-center rounded-lg border border-[#FFD9EC] p-0.5 bg-[#FFF7FB]">
               <button
@@ -1212,99 +1292,348 @@ export function Retail() {
           </div>
         )}
 
-        <ResponsiveContainer width="100%" height={280} className="md:!h-[360px]">
-          <LineChart data={forecastData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
-            <XAxis
-              dataKey="day"
-              stroke="#223047"
-              tickFormatter={formatChartDate}
-              minTickGap={28}
-              interval="preserveStartEnd"
-              style={{ fontSize: "10px" }}
-            />
-            <YAxis 
-              stroke="#223047" 
-              style={{ fontSize: "10px" }} 
-              tickFormatter={(value) => `₱${Number(value).toLocaleString()}`}
-            />
-            <Tooltip
-              labelFormatter={(label) => formatChartDate(String(label))}
-              formatter={(value: any, name: any) => [
-                value != null ? `₱${Number(value).toLocaleString()}` : "₱0",
-                name,
-              ]}
-              contentStyle={{
-                backgroundColor: "white",
-                border: "1px solid #FFD9EC",
-                borderRadius: "12px",
-              }}
-            />
-            <Line
-              key="line-physical-wide"
-              type="monotone"
-              dataKey="physical"
-              stroke="#D42A7D"
-              strokeWidth={2.5}
-              dot={forecastData.length === 1 ? { r: 5 } : false}
-              animationDuration={800}
-              name="Physical (POS)"
-              connectNulls
-            />
-            <Line
-              key="line-tiktok-wide"
-              type="monotone"
-              dataKey="tiktok"
-              stroke="#8B5CF6"
-              strokeWidth={2.5}
-              dot={forecastData.length === 1 ? { r: 5 } : false}
-              animationDuration={800}
-              name="TikTok Shop"
-              connectNulls
-            />
-            <Line
-              key="line-shopee-wide"
-              type="monotone"
-              dataKey="shopee"
-              stroke="#F59E0B"
-              strokeWidth={2.5}
-              dot={forecastData.length === 1 ? { r: 5 } : false}
-              animationDuration={800}
-              name="Shopee"
-              connectNulls
-            />
-            <Line
-              key="line-pethub-wide"
-              type="monotone"
-              dataKey="pethub"
-              stroke="#06B6D4"
-              strokeWidth={2}
-              dot={forecastData.length === 1 ? { r: 5 } : false}
-              animationDuration={800}
-              name="PetHub"
-              connectNulls
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        {channelGraphMode === "combined" ? (
+          <>
+            {/* Focus Channel Pills - NO ICONS */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pb-1 border-b border-[#FFD9EC]/60">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="font-semibold text-[#223047]/70 mr-1">Focus Channel:</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveChannelKey("all")}
+                  className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                    activeChannelKey === "all"
+                      ? "bg-[#223047] text-white shadow-xs"
+                      : "border border-[#FFD9EC] bg-[#FFF7FB] text-[#223047] hover:bg-[#FFE5F4]"
+                  }`}
+                >
+                  All Channels (₱0 – ₱100k)
+                </button>
 
-        <div className="flex flex-wrap justify-center gap-4 md:gap-6 pt-2">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-[#D42A7D] rounded-full" />
-            <span className="text-xs font-medium text-[#223047]">Physical (POS)</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveChannelKey("shopee")}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                    activeChannelKey === "shopee"
+                      ? "bg-[#F59E0B] text-white shadow-xs"
+                      : "border border-[#F59E0B]/30 bg-amber-50/50 text-[#B45309] hover:bg-amber-100/60"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
+                  Shopee (₱0 – ₱100k)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannelKey("tiktok")}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                    activeChannelKey === "tiktok"
+                      ? "bg-[#8B5CF6] text-white shadow-xs"
+                      : "border border-[#8B5CF6]/30 bg-purple-50/50 text-[#6D28D9] hover:bg-purple-100/60"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
+                  TikTok Shop (₱0 – ₱15k)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannelKey("physical")}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                    activeChannelKey === "physical"
+                      ? "bg-[#D42A7D] text-white shadow-xs"
+                      : "border border-[#D42A7D]/30 bg-pink-50/50 text-[#BE185D] hover:bg-pink-100/60"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-[#D42A7D]" />
+                  Physical POS (₱0 – ₱1k)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannelKey("pethub")}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                    activeChannelKey === "pethub"
+                      ? "bg-[#06B6D4] text-white shadow-xs"
+                      : "border border-[#06B6D4]/30 bg-cyan-50/50 text-[#0E7490] hover:bg-cyan-100/60"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-[#06B6D4]" />
+                  PetHub (Inactive · ₱0)
+                </button>
+              </div>
+
+              {activeChannelKey !== "all" && (
+                <span className="text-[11px] text-[#223047]/70 font-medium">
+                  Y-Axis auto-scaled to {activeChannelKey === "physical" ? "Physical POS (₱0–₱1k)" : activeChannelKey === "tiktok" ? "TikTok Shop (₱0–₱15k)" : activeChannelKey === "shopee" ? "Shopee (₱0–₱100k)" : "PetHub"}
+                </span>
+              )}
+            </div>
+
+            {activeChannelKey === "pethub" && channelStats.totalPethub === 0 && (
+              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-xs text-[#223047] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <p className="font-medium">
+                  <span className="font-bold text-[#D42A7D]">PetHub Channel Notice:</span> ₱0 recorded sales during this timeframe. PetHub is currently designated for direct service appointments and has no online merchandise retail transactions.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveChannelKey("all")}
+                  className="text-xs font-semibold text-[#D42A7D] hover:underline whitespace-nowrap self-start sm:self-auto"
+                >
+                  Show All Channels
+                </button>
+              </div>
+            )}
+
+            <ResponsiveContainer width="100%" height={280} className="md:!h-[360px]">
+              <LineChart data={forecastData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#FFD9EC" vertical={false} />
+                <XAxis
+                  dataKey="day"
+                  stroke="#223047"
+                  tickFormatter={formatChartDate}
+                  minTickGap={28}
+                  interval="preserveStartEnd"
+                  style={{ fontSize: "10px" }}
+                />
+                <YAxis 
+                  stroke="#223047" 
+                  style={{ fontSize: "10px" }} 
+                  domain={activeYDomain as any}
+                  tickFormatter={(value) => `₱${Number(value).toLocaleString()}`}
+                />
+                <Tooltip
+                  labelFormatter={(label) => formatChartDate(String(label))}
+                  formatter={(value: any, name: any) => [
+                    value != null ? `₱${Number(value).toLocaleString()}` : "₱0",
+                    name,
+                  ]}
+                  contentStyle={{
+                    backgroundColor: "white",
+                    border: "1px solid #FFD9EC",
+                    borderRadius: "12px",
+                  }}
+                />
+                {(activeChannelKey === "all" || activeChannelKey === "physical") && (
+                  <Line
+                    key="line-physical-wide"
+                    type="monotone"
+                    dataKey="physical"
+                    stroke="#D42A7D"
+                    strokeWidth={activeChannelKey === "physical" ? 3 : 2.5}
+                    dot={forecastData.length === 1 || activeChannelKey === "physical" ? { r: 3 } : false}
+                    animationDuration={600}
+                    name="Physical (POS)"
+                    connectNulls
+                  />
+                )}
+                {(activeChannelKey === "all" || activeChannelKey === "tiktok") && (
+                  <Line
+                    key="line-tiktok-wide"
+                    type="monotone"
+                    dataKey="tiktok"
+                    stroke="#8B5CF6"
+                    strokeWidth={activeChannelKey === "tiktok" ? 3 : 2.5}
+                    dot={forecastData.length === 1 || activeChannelKey === "tiktok" ? { r: 3 } : false}
+                    animationDuration={600}
+                    name="TikTok Shop"
+                    connectNulls
+                  />
+                )}
+                {(activeChannelKey === "all" || activeChannelKey === "shopee") && (
+                  <Line
+                    key="line-shopee-wide"
+                    type="monotone"
+                    dataKey="shopee"
+                    stroke="#F59E0B"
+                    strokeWidth={activeChannelKey === "shopee" ? 3 : 2.5}
+                    dot={forecastData.length === 1 || activeChannelKey === "shopee" ? { r: 3 } : false}
+                    animationDuration={600}
+                    name="Shopee"
+                    connectNulls
+                  />
+                )}
+                {(activeChannelKey === "all" || activeChannelKey === "pethub") && (
+                  <Line
+                    key="line-pethub-wide"
+                    type="monotone"
+                    dataKey="pethub"
+                    stroke="#06B6D4"
+                    strokeWidth={2}
+                    dot={forecastData.length === 1 ? { r: 4 } : false}
+                    animationDuration={600}
+                    name="PetHub"
+                    connectNulls
+                  />
+                )}
+              </LineChart>
+            </ResponsiveContainer>
+
+            {/* Interactive Legend Items - NO ICONS */}
+            <div className="flex flex-wrap justify-center gap-2.5 md:gap-4 pt-2">
+              <button
+                type="button"
+                onClick={() => setActiveChannelKey((k) => k === "physical" ? "all" : "physical")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                  activeChannelKey === "physical"
+                    ? "border-[#D42A7D] bg-[#D42A7D]/10 text-[#D42A7D] shadow-xs"
+                    : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
+                }`}
+              >
+                <span className="w-2.5 h-2.5 bg-[#D42A7D] rounded-full" />
+                <span>Physical (POS): ₱0–₱1k</span>
+                <span className="text-[10px] opacity-70 font-normal">
+                  {activeChannelKey === "physical" ? "(Isolated)" : "(Click to zoom)"}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveChannelKey((k) => k === "tiktok" ? "all" : "tiktok")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                  activeChannelKey === "tiktok"
+                    ? "border-[#8B5CF6] bg-purple-50 text-[#8B5CF6] shadow-xs"
+                    : "border-[#FFD9EC] text-[#223047] hover:bg-purple-50/50"
+                }`}
+              >
+                <span className="w-2.5 h-2.5 bg-[#8B5CF6] rounded-full" />
+                <span>TikTok Shop: ₱0–₱15k</span>
+                <span className="text-[10px] opacity-70 font-normal">
+                  {activeChannelKey === "tiktok" ? "(Isolated)" : "(Click to zoom)"}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveChannelKey((k) => k === "shopee" ? "all" : "shopee")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                  activeChannelKey === "shopee"
+                    ? "border-[#F59E0B] bg-amber-50 text-[#D97706] shadow-xs"
+                    : "border-[#FFD9EC] text-[#223047] hover:bg-amber-50/50"
+                }`}
+              >
+                <span className="w-2.5 h-2.5 bg-[#F59E0B] rounded-full" />
+                <span>Shopee: ₱0–₱100k</span>
+                <span className="text-[10px] opacity-70 font-normal">
+                  {activeChannelKey === "shopee" ? "(Isolated)" : "(Click to zoom)"}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveChannelKey((k) => k === "pethub" ? "all" : "pethub")}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                  activeChannelKey === "pethub"
+                    ? "border-[#06B6D4] bg-cyan-50 text-[#06B6D4] shadow-xs"
+                    : "border-[#FFD9EC] text-[#223047] opacity-60 hover:opacity-100 hover:bg-cyan-50/50"
+                }`}
+              >
+                <span className="w-2.5 h-2.5 bg-[#06B6D4] rounded-full" />
+                <span>PetHub: Inactive (₱0)</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          /* SPLIT CHANNELS VIEW (SMALL MULTIPLES) - NO ICONS */
+          <div className="space-y-4 pt-1">
+            <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl px-4 py-2 text-xs text-[#223047] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <span>
+                <b>Split Channels View:</b> Each retail channel has its own proportional Y-axis to reveal clear fluctuations without marketplace scale compression.
+              </span>
+              <span className="font-semibold text-[#D42A7D]">Synchronized Timeline</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* SHOPEE PANEL */}
+              <div className="border border-amber-200 bg-amber-50/20 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
+                    <h3 className="font-bold text-xs text-[#223047]">Shopee (Marketplace)</h3>
+                  </div>
+                  <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                    Peak: ~₱{Math.round(channelStats.maxShopee).toLocaleString()}
+                  </span>
+                </div>
+                <ResponsiveContainer width="100%" height={210}>
+                  <LineChart data={forecastData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#FDE68A" vertical={false} />
+                    <XAxis dataKey="day" stroke="#223047" tickFormatter={formatChartDate} minTickGap={32} style={{ fontSize: "9px" }} />
+                    <YAxis stroke="#223047" style={{ fontSize: "9px" }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} domain={[0, Math.max(5000, Math.ceil(channelStats.maxShopee * 1.1))]} />
+                    <Tooltip
+                      labelFormatter={(l) => formatChartDate(String(l))}
+                      formatter={(v: any) => [`₱${Number(v).toLocaleString()}`, "Shopee"]}
+                      contentStyle={{ backgroundColor: "white", border: "1px solid #FCD34D", borderRadius: "10px", fontSize: "11px" }}
+                    />
+                    <Line type="monotone" dataKey="shopee" stroke="#F59E0B" strokeWidth={2.5} dot={false} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* TIKTOK SHOP PANEL */}
+              <div className="border border-purple-200 bg-purple-50/20 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#8B5CF6]" />
+                    <h3 className="font-bold text-xs text-[#223047]">TikTok Shop (Social)</h3>
+                  </div>
+                  <span className="text-[10px] font-semibold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full">
+                    Peak: ~₱{Math.round(channelStats.maxTiktok).toLocaleString()}
+                  </span>
+                </div>
+                <ResponsiveContainer width="100%" height={210}>
+                  <LineChart data={forecastData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E9D5FF" vertical={false} />
+                    <XAxis dataKey="day" stroke="#223047" tickFormatter={formatChartDate} minTickGap={32} style={{ fontSize: "9px" }} />
+                    <YAxis stroke="#223047" style={{ fontSize: "9px" }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} domain={[0, Math.max(1000, Math.ceil(channelStats.maxTiktok * 1.15))]} />
+                    <Tooltip
+                      labelFormatter={(l) => formatChartDate(String(l))}
+                      formatter={(v: any) => [`₱${Number(v).toLocaleString()}`, "TikTok Shop"]}
+                      contentStyle={{ backgroundColor: "white", border: "1px solid #D8B4FE", borderRadius: "10px", fontSize: "11px" }}
+                    />
+                    <Line type="monotone" dataKey="tiktok" stroke="#8B5CF6" strokeWidth={2.5} dot={false} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* PHYSICAL POS PANEL */}
+              <div className="border border-pink-200 bg-pink-50/20 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#D42A7D]" />
+                    <h3 className="font-bold text-xs text-[#223047]">Physical POS (In-Store)</h3>
+                  </div>
+                  <span className="text-[10px] font-semibold text-[#D42A7D] bg-pink-100 px-2 py-0.5 rounded-full">
+                    Peak: ~₱{Math.round(channelStats.maxPhys).toLocaleString()}
+                  </span>
+                </div>
+                <ResponsiveContainer width="100%" height={210}>
+                  <LineChart data={forecastData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#FCE7F3" vertical={false} />
+                    <XAxis dataKey="day" stroke="#223047" tickFormatter={formatChartDate} minTickGap={32} style={{ fontSize: "9px" }} />
+                    <YAxis stroke="#223047" style={{ fontSize: "9px" }} tickFormatter={(v) => `₱${Number(v).toLocaleString()}`} domain={[0, Math.max(100, Math.ceil(channelStats.maxPhys * 1.15))]} />
+                    <Tooltip
+                      labelFormatter={(l) => formatChartDate(String(l))}
+                      formatter={(v: any) => [`₱${Number(v).toLocaleString()}`, "Physical POS"]}
+                      contentStyle={{ backgroundColor: "white", border: "1px solid #FBCFE8", borderRadius: "10px", fontSize: "11px" }}
+                    />
+                    <Line type="monotone" dataKey="physical" stroke="#D42A7D" strokeWidth={2.5} dot={false} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* PETHUB INACTIVE STRIP */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#06B6D4]" />
+                <span className="font-semibold text-slate-700">PetHub Direct Portal:</span>
+                <span>0 online retail transactions recorded during this timeframe (channel is designated for service bookings).</span>
+              </div>
+              <span className="text-slate-400 font-medium">Inactive in Retail</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-[#8B5CF6] rounded-full" />
-            <span className="text-xs font-medium text-[#223047]">TikTok Shop</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-[#F59E0B] rounded-full" />
-            <span className="text-xs font-medium text-[#223047]">Shopee</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 bg-[#06B6D4] rounded-full" />
-            <span className="text-xs font-medium text-[#223047]">PetHub</span>
-          </div>
-        </div>
+        )}
       </div>
       {/* VISUAL RELIEF DIVIDER - AI INSIGHT WITH MASCOT */}
       <div
