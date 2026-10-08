@@ -30,17 +30,15 @@ export class AuditService {
       const { error } = await this.supabaseService.client
         .from('audit_logs')
         .insert({
-          actor: input.actor || 'System',
-          actor_type: input.actorType || 'system',
+          actor: 'Owner',
+          actor_type: input.actorType || 'user',
           action: input.action,
           module: input.module,
           category:
             input.category ||
             (input.module === 'auth' || input.module === 'security'
               ? 'security'
-              : input.actorType === 'user'
-                ? 'workflow'
-                : 'ai_system'),
+              : 'workflow'),
           target: input.target || null,
           status: input.status || 'success',
           state_before: input.stateBefore || null,
@@ -96,7 +94,10 @@ export class AuditService {
 
     const { data, error } = await request;
     if (error) throw error;
-    return data || [];
+    return (data || []).map((row) => ({
+      ...row,
+      actor: 'Owner',
+    }));
   }
 
   async summary() {

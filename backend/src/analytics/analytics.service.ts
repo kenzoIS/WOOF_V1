@@ -3697,7 +3697,7 @@ export class AnalyticsService {
       const stateAfter = `${totalAdjustedTraffic} predicted visits -> Recommended: ${recommendedStaffTotal} staff (${recommendedStaffTotal - scheduledStaffTotal >= 0 ? '+' : ''}${recommendedStaffTotal - scheduledStaffTotal} gap)`;
 
       void this.auditService.record({
-        actor: 'Store Manager',
+        actor: 'Owner',
         actorType: 'user',
         action: actionName,
         module: 'traffic_optimizer',
@@ -5733,8 +5733,8 @@ export class AnalyticsService {
       await this.auditService.record({
         action: `Generated Happy Hour Recommendation (${itemNames})`,
         module: 'happy_hour',
-        actor: 'System',
-        actorType: 'system',
+        actor: 'Owner',
+        actorType: 'user',
         target: qp?.targetDate ? `${new Date(qp.targetDate).toLocaleDateString()} @ ${qp.targetHour}:00` : 'Happy Hour',
         status: 'success',
         category: 'ai_system',

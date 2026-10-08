@@ -704,8 +704,8 @@ export class CsvService {
               uploadId,
             });
             void this.auditService?.record({
-              actor: 'System',
-              actorType: 'system',
+              actor: 'Owner',
+              actorType: 'user',
               action: 'Retrained forecasting system',
               module: 'forecasting',
               category: 'ai_system',

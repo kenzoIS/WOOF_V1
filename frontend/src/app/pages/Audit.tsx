@@ -138,7 +138,7 @@ function AuditDetailModal({ event, onClose }: { event: AuditEvent; onClose: () =
           {/* Meta grid */}
           <div className="grid grid-cols-2 gap-3">
             {[
-              { Icon: User, label: "Actor", value: event.actor },
+              { Icon: User, label: "Actor", value: event.actor || "Owner" },
               { Icon: Target, label: "Target", value: event.target || "System" },
               { Icon: Layers, label: "Module", value: event.module },
               { Icon: Tag, label: "Category", value: event.category },
@@ -208,7 +208,7 @@ export function Audit() {
   useEffect(() => {
     Promise.all([getAuditLogs(), getAuditSummary()])
       .then(([logs, totals]) => {
-        setEvents(logs as AuditEvent[]);
+        setEvents(((logs as AuditEvent[]) || []).map((e) => ({ ...e, actor: "Owner" })));
         setSummary(totals as typeof summary);
       })
       .catch((error) => console.error("Failed to load audit logs", error))
@@ -349,7 +349,7 @@ export function Audit() {
                     <TableCell className="text-xs whitespace-nowrap">
                       {new Date(event.created_at).toLocaleString()}
                     </TableCell>
-                    <TableCell className="font-medium text-xs">{event.actor}</TableCell>
+                    <TableCell className="font-medium text-xs">{event.actor || "Owner"}</TableCell>
                     <TableCell className="text-xs">{event.target || "System"}</TableCell>
                     <TableCell className="text-xs">
                       <div className="font-medium">{event.action}</div>
