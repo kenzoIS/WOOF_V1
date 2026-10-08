@@ -284,7 +284,6 @@ export function Retail() {
   const [customSingleDate, setCustomSingleDate] = useState("2026-05-01");
   const [customStartDate, setCustomStartDate] = useState("2025-05-02");
   const [customEndDate, setCustomEndDate] = useState("2026-05-02");
-  const [channelMetricView, setChannelMetricView] = useState<"revenue" | "profit">("revenue");
   const [channelGraphMode, setChannelGraphMode] = useState<"combined" | "split">("combined");
   const [activeChannelKey, setActiveChannelKey] = useState<"all" | "shopee" | "tiktok" | "physical" | "pethub">("all");
   const [expandedFeeChannels, setExpandedFeeChannels] = useState<Record<string, boolean>>({});
@@ -503,18 +502,13 @@ export function Retail() {
     const sorted = Object.entries(dateMap)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, vals]) => {
-        const physVal = channelMetricView === "profit" ? vals.physicalProfit : vals.physical;
-        const tiktokVal = channelMetricView === "profit" ? vals.tiktokProfit : vals.tiktok;
-        const shopeeVal = channelMetricView === "profit" ? vals.shopeeProfit : vals.shopee;
-        const pethubVal = channelMetricView === "profit" ? vals.pethubProfit : vals.pethub;
-
         return {
           day: date,
-          physical: physVal ?? 0,
-          tiktok: tiktokVal ?? 0,
-          shopee: shopeeVal ?? 0,
-          pethub: pethubVal ?? 0,
-          online: ((tiktokVal ?? 0) + (shopeeVal ?? 0) + (pethubVal ?? 0)),
+          physical: vals.physical ?? 0,
+          tiktok: vals.tiktok ?? 0,
+          shopee: vals.shopee ?? 0,
+          pethub: vals.pethub ?? 0,
+          online: ((vals.tiktok ?? 0) + (vals.shopee ?? 0) + (vals.pethub ?? 0)),
           physicalRevenue: vals.physical ?? 0,
           tiktokRevenue: vals.tiktok ?? 0,
           shopeeRevenue: vals.shopee ?? 0,
@@ -527,7 +521,7 @@ export function Retail() {
       });
 
     return sorted;
-  }, [channelForecast, activeRange, channelMetricView]);
+  }, [channelForecast, activeRange]);
 
   const channelStats = useMemo(() => {
     let maxShopee = 0;
@@ -1125,32 +1119,6 @@ export function Retail() {
               </button>
             </div>
 
-            {/* Metric Toggle: Revenue vs Profit */}
-            <div className="flex items-center rounded-lg border border-[#FFD9EC] p-0.5 bg-[#FFF7FB]">
-              <button
-                type="button"
-                onClick={() => setChannelMetricView("revenue")}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                  channelMetricView === "revenue"
-                    ? "bg-[#D42A7D] text-white shadow-sm"
-                    : "text-[#223047] opacity-70 hover:opacity-100"
-                }`}
-              >
-                Sales Volume (₱)
-              </button>
-              <button
-                type="button"
-                onClick={() => setChannelMetricView("profit")}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                  channelMetricView === "profit"
-                    ? "bg-[#06B6D4] text-white shadow-sm"
-                    : "text-[#223047] opacity-70 hover:opacity-100"
-                }`}
-              >
-                Net Profit (₱)
-              </button>
-            </div>
-
             <div className="h-5 w-[1px] bg-[#FFD9EC] hidden sm:block" />
 
             {/* Filter buttons - NO ICONS */}
@@ -1294,10 +1262,10 @@ export function Retail() {
 
         {channelGraphMode === "combined" ? (
           <>
-            {/* Focus Channel Pills - NO ICONS */}
+            {/* Channel Filter Pills - NO ICONS, NO HARDCODED RANGES */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pb-1 border-b border-[#FFD9EC]/60">
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="font-semibold text-[#223047]/70 mr-1">Focus Channel:</span>
+                <span className="font-semibold text-[#223047]/70 mr-1">Channel:</span>
                 <button
                   type="button"
                   onClick={() => setActiveChannelKey("all")}
@@ -1307,65 +1275,61 @@ export function Retail() {
                       : "border border-[#FFD9EC] bg-[#FFF7FB] text-[#223047] hover:bg-[#FFE5F4]"
                   }`}
                 >
-                  All Channels (₱0 – ₱100k)
+                  All Channels
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setActiveChannelKey("shopee")}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                  className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "shopee"
                       ? "bg-[#F59E0B] text-white shadow-xs"
                       : "border border-[#F59E0B]/30 bg-amber-50/50 text-[#B45309] hover:bg-amber-100/60"
                   }`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
-                  Shopee (₱0 – ₱100k)
+                  Shopee
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setActiveChannelKey("tiktok")}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                  className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "tiktok"
                       ? "bg-[#8B5CF6] text-white shadow-xs"
                       : "border border-[#8B5CF6]/30 bg-purple-50/50 text-[#6D28D9] hover:bg-purple-100/60"
                   }`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-[#8B5CF6]" />
-                  TikTok Shop (₱0 – ₱15k)
+                  TikTok Shop
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setActiveChannelKey("physical")}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                  className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "physical"
                       ? "bg-[#D42A7D] text-white shadow-xs"
                       : "border border-[#D42A7D]/30 bg-pink-50/50 text-[#BE185D] hover:bg-pink-100/60"
                   }`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-[#D42A7D]" />
-                  Physical POS (₱0 – ₱1k)
+                  Physical (POS)
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setActiveChannelKey("pethub")}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
+                  className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                     activeChannelKey === "pethub"
                       ? "bg-[#06B6D4] text-white shadow-xs"
                       : "border border-[#06B6D4]/30 bg-cyan-50/50 text-[#0E7490] hover:bg-cyan-100/60"
                   }`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-[#06B6D4]" />
-                  PetHub (Inactive · ₱0)
+                  PetHub
                 </button>
               </div>
 
               {activeChannelKey !== "all" && (
                 <span className="text-[11px] text-[#223047]/70 font-medium">
-                  Y-Axis auto-scaled to {activeChannelKey === "physical" ? "Physical POS (₱0–₱1k)" : activeChannelKey === "tiktok" ? "TikTok Shop (₱0–₱15k)" : activeChannelKey === "shopee" ? "Shopee (₱0–₱100k)" : "PetHub"}
+                  Showing {activeChannelKey === "physical" ? "Physical (POS)" : activeChannelKey === "tiktok" ? "TikTok Shop" : activeChannelKey === "shopee" ? "Shopee" : "PetHub"} sales
                 </span>
               )}
             </div>
@@ -1373,7 +1337,7 @@ export function Retail() {
             {activeChannelKey === "pethub" && channelStats.totalPethub === 0 && (
               <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-xs text-[#223047] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <p className="font-medium">
-                  <span className="font-bold text-[#D42A7D]">PetHub Channel Notice:</span> ₱0 recorded sales during this timeframe. PetHub is currently designated for direct service appointments and has no online merchandise retail transactions.
+                  <span className="font-bold text-[#D42A7D]">PetHub Channel Notice:</span> No recorded retail sales during this timeframe. PetHub is designated for service bookings.
                 </p>
                 <button
                   type="button"
@@ -1421,7 +1385,7 @@ export function Retail() {
                     dataKey="physical"
                     stroke="#D42A7D"
                     strokeWidth={activeChannelKey === "physical" ? 3 : 2.5}
-                    dot={forecastData.length === 1 || activeChannelKey === "physical" ? { r: 3 } : false}
+                    dot={false}
                     animationDuration={600}
                     name="Physical (POS)"
                     connectNulls
@@ -1434,7 +1398,7 @@ export function Retail() {
                     dataKey="tiktok"
                     stroke="#8B5CF6"
                     strokeWidth={activeChannelKey === "tiktok" ? 3 : 2.5}
-                    dot={forecastData.length === 1 || activeChannelKey === "tiktok" ? { r: 3 } : false}
+                    dot={false}
                     animationDuration={600}
                     name="TikTok Shop"
                     connectNulls
@@ -1447,7 +1411,7 @@ export function Retail() {
                     dataKey="shopee"
                     stroke="#F59E0B"
                     strokeWidth={activeChannelKey === "shopee" ? 3 : 2.5}
-                    dot={forecastData.length === 1 || activeChannelKey === "shopee" ? { r: 3 } : false}
+                    dot={false}
                     animationDuration={600}
                     name="Shopee"
                     connectNulls
@@ -1460,7 +1424,7 @@ export function Retail() {
                     dataKey="pethub"
                     stroke="#06B6D4"
                     strokeWidth={2}
-                    dot={forecastData.length === 1 ? { r: 4 } : false}
+                    dot={false}
                     animationDuration={600}
                     name="PetHub"
                     connectNulls
@@ -1469,72 +1433,59 @@ export function Retail() {
               </LineChart>
             </ResponsiveContainer>
 
-            {/* Interactive Legend Items - NO ICONS */}
+            {/* Interactive Legend Items - NO ICONS, NO HARDCODED RANGES */}
             <div className="flex flex-wrap justify-center gap-2.5 md:gap-4 pt-2">
               <button
                 type="button"
                 onClick={() => setActiveChannelKey((k) => k === "physical" ? "all" : "physical")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                   activeChannelKey === "physical"
                     ? "border-[#D42A7D] bg-[#D42A7D]/10 text-[#D42A7D] shadow-xs"
                     : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
                 }`}
               >
-                <span className="w-2.5 h-2.5 bg-[#D42A7D] rounded-full" />
-                <span>Physical (POS): ₱0–₱1k</span>
-                <span className="text-[10px] opacity-70 font-normal">
-                  {activeChannelKey === "physical" ? "(Isolated)" : "(Click to zoom)"}
-                </span>
+                Physical (POS)
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveChannelKey((k) => k === "tiktok" ? "all" : "tiktok")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                   activeChannelKey === "tiktok"
                     ? "border-[#8B5CF6] bg-purple-50 text-[#8B5CF6] shadow-xs"
                     : "border-[#FFD9EC] text-[#223047] hover:bg-purple-50/50"
                 }`}
               >
-                <span className="w-2.5 h-2.5 bg-[#8B5CF6] rounded-full" />
-                <span>TikTok Shop: ₱0–₱15k</span>
-                <span className="text-[10px] opacity-70 font-normal">
-                  {activeChannelKey === "tiktok" ? "(Isolated)" : "(Click to zoom)"}
-                </span>
+                TikTok Shop
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveChannelKey((k) => k === "shopee" ? "all" : "shopee")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                   activeChannelKey === "shopee"
                     ? "border-[#F59E0B] bg-amber-50 text-[#D97706] shadow-xs"
                     : "border-[#FFD9EC] text-[#223047] hover:bg-amber-50/50"
                 }`}
               >
-                <span className="w-2.5 h-2.5 bg-[#F59E0B] rounded-full" />
-                <span>Shopee: ₱0–₱100k</span>
-                <span className="text-[10px] opacity-70 font-normal">
-                  {activeChannelKey === "shopee" ? "(Isolated)" : "(Click to zoom)"}
-                </span>
+                Shopee
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveChannelKey((k) => k === "pethub" ? "all" : "pethub")}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                   activeChannelKey === "pethub"
                     ? "border-[#06B6D4] bg-cyan-50 text-[#06B6D4] shadow-xs"
                     : "border-[#FFD9EC] text-[#223047] opacity-60 hover:opacity-100 hover:bg-cyan-50/50"
                 }`}
               >
-                <span className="w-2.5 h-2.5 bg-[#06B6D4] rounded-full" />
-                <span>PetHub: Inactive (₱0)</span>
+                PetHub
               </button>
             </div>
           </>
         ) : (
-          /* SPLIT CHANNELS VIEW (SMALL MULTIPLES) - NO ICONS */
+          /* SPLIT CHANNELS VIEW - NO ICONS, NO HARDCODED RANGES */
           <div className="space-y-4 pt-1">
             <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl px-4 py-2 text-xs text-[#223047] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
               <span>
@@ -1547,13 +1498,7 @@ export function Retail() {
               {/* SHOPEE PANEL */}
               <div className="border border-amber-200 bg-amber-50/20 rounded-2xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" />
-                    <h3 className="font-bold text-xs text-[#223047]">Shopee (Marketplace)</h3>
-                  </div>
-                  <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
-                    Peak: ~₱{Math.round(channelStats.maxShopee).toLocaleString()}
-                  </span>
+                  <h3 className="font-bold text-xs text-[#223047]">Shopee (Marketplace)</h3>
                 </div>
                 <ResponsiveContainer width="100%" height={210}>
                   <LineChart data={forecastData}>
@@ -1573,13 +1518,7 @@ export function Retail() {
               {/* TIKTOK SHOP PANEL */}
               <div className="border border-purple-200 bg-purple-50/20 rounded-2xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#8B5CF6]" />
-                    <h3 className="font-bold text-xs text-[#223047]">TikTok Shop (Social)</h3>
-                  </div>
-                  <span className="text-[10px] font-semibold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full">
-                    Peak: ~₱{Math.round(channelStats.maxTiktok).toLocaleString()}
-                  </span>
+                  <h3 className="font-bold text-xs text-[#223047]">TikTok Shop (Social)</h3>
                 </div>
                 <ResponsiveContainer width="100%" height={210}>
                   <LineChart data={forecastData}>
@@ -1599,13 +1538,7 @@ export function Retail() {
               {/* PHYSICAL POS PANEL */}
               <div className="border border-pink-200 bg-pink-50/20 rounded-2xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#D42A7D]" />
-                    <h3 className="font-bold text-xs text-[#223047]">Physical POS (In-Store)</h3>
-                  </div>
-                  <span className="text-[10px] font-semibold text-[#D42A7D] bg-pink-100 px-2 py-0.5 rounded-full">
-                    Peak: ~₱{Math.round(channelStats.maxPhys).toLocaleString()}
-                  </span>
+                  <h3 className="font-bold text-xs text-[#223047]">Physical POS (In-Store)</h3>
                 </div>
                 <ResponsiveContainer width="100%" height={210}>
                   <LineChart data={forecastData}>
@@ -1625,12 +1558,8 @@ export function Retail() {
 
             {/* PETHUB INACTIVE STRIP */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#06B6D4]" />
-                <span className="font-semibold text-slate-700">PetHub Direct Portal:</span>
-                <span>0 online retail transactions recorded during this timeframe (channel is designated for service bookings).</span>
-              </div>
-              <span className="text-slate-400 font-medium">Inactive in Retail</span>
+              <span className="font-semibold text-slate-700">PetHub Direct Portal: Inactive for retail merchandise.</span>
+              <span className="text-slate-400 font-medium">Channel Active for Service Bookings Only</span>
             </div>
           </div>
         )}
