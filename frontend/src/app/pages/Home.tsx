@@ -1312,7 +1312,7 @@ export function Home() {
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047] whitespace-nowrap">
               Omnichannel Revenue Accumulation
             </h2>
-            <InfoTooltip label="Revenue buildup across channels. Omnichannel combines sales from POS, Shopee, and TikTok Shop." />
+            <InfoTooltip label="Revenue buildup across channels. Omnichannel combines sales from POS, Shopee, TikTok Shop, and PetHub." />
           </div>
 
           {/* Recommended Time Range Filters (Identical to Section 5) */}
@@ -1937,7 +1937,7 @@ export function Home() {
 
         {separatedEquilibriumData.length === 0 && (
           <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-4 text-sm text-[#223047] opacity-70">
-            Upload POS, Shopee, or TikTok transactions to compare channel revenue.
+            Upload POS, Shopee, TikTok, or PetHub transactions to compare channel revenue.
           </div>
         )}
         <div 

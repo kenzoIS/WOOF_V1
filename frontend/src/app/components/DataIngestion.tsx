@@ -45,6 +45,7 @@ const CHANNEL_OPTIONS = [
   { value: "POS", label: "POS", description: "Cafe, Services & Retail", color: "#F53799" },
   { value: "Shopee", label: "Shopee", description: "Retail only", color: "#EE4D2D" },
   { value: "TikTok", label: "TikTok", description: "Retail only", color: "#000000" },
+  { value: "PetHub", label: "PetHub", description: "Cafe, Services & Retail", color: "#06B6D4" },
 ];
 
 const toNumber = (value: unknown, fallback = 0) => {
@@ -173,6 +174,7 @@ export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
     Shopee: "#EE4D2D",
     TikTok: "#000000",
     "TikTok Shop": "#000000",
+    PetHub: "#06B6D4",
   };
 
   return (
@@ -190,7 +192,7 @@ export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
         <p className={isDrawer ? "text-xs text-[#223047] opacity-60 mt-1" : "text-xs md:text-sm text-[#223047] opacity-60 mt-1"} style={{ lineHeight: "1.6" }}>
           {isDrawer
             ? "Upload CSV/Excel files and monitor recent staging activity."
-            : "Upload CSV/Excel files from POS, Shopee, or TikTok to power your analytics. Totals below cover all uploaded data."}
+            : "Upload CSV/Excel files from POS, Shopee, TikTok, or PetHub to power your analytics. Totals below cover all uploaded data."}
         </p>
       </div>
 
@@ -295,7 +297,7 @@ export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
           </p>
           <p className="text-xs text-[#223047] opacity-50 mt-1 max-w-[320px] mx-auto">
             Uploading as <span className="font-bold text-[#F53799]">{selectedChannel}</span>
-            {!isDrawer && (selectedChannel === "POS"
+            {!isDrawer && (selectedChannel === "POS" || selectedChannel === "PetHub"
               ? " -> rows split into Cafe, Services & Retail by category"
               : " -> all rows go to Retail")}
           </p>
@@ -333,6 +335,26 @@ export function DataIngestion({ surface = "card" }: DataIngestionProps = {}) {
                   </ul>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Latest Webhook Report */}
+      {lastWebhookEvent && !lastReport && (
+        <div className="p-4 rounded-xl border bg-[#ECFEFF] border-[#A5F3FC]">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-[#06B6D4] flex-shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-bold text-[#164E63]">
+                Ingested PetHub data via Webhook: {lastWebhookEvent.transactionId}
+              </h4>
+              <p className="text-xs mt-1 text-[#155E75]">
+                Successfully staged {lastWebhookEvent.recordCount} records. They will appear in analytics shortly.
+              </p>
+              <div className="text-[10px] mt-1 text-[#164E63] opacity-80">
+                Received at: {new Date(lastWebhookEvent.timestamp).toLocaleTimeString()}
+              </div>
             </div>
           </div>
         </div>

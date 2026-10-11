@@ -850,7 +850,7 @@ export function SmartReports() {
               <h3 className="text-base font-black text-[#223047]">Data Integration Notice</h3>
             </div>
             <p className="text-xs text-[#223047] opacity-80 leading-relaxed">
-              The generated report currently relies solely on POS data. Integration for Shopee and TikTok Shop channels is still pending. Projections and totals will reflect limited channel activity.
+              The generated report currently relies solely on POS data. Integration for PetHub, Shopee, and TikTok Shop channels is still pending. Projections and totals will reflect limited channel activity.
             </p>
             <div className="flex gap-2 pt-2">
               <Button

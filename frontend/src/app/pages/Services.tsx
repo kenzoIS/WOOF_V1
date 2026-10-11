@@ -1467,7 +1467,7 @@ export function Services() {
                         ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
                       : (forecastRun
                           ? `${forecastRun.modelName} was selected using held-out uploaded Services history and generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
-                          : "Upload Services history from POS to generate a validated forecast.")}
+                          : "Upload Services history from POS or PetHub to generate a validated forecast.")}
                   </p>
                 </div>
 
