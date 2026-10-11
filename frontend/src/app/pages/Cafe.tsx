@@ -1901,7 +1901,7 @@ export function Cafe() {
                             ? "Latest holdout mode evaluates against the most recent complete 61-day window, ready for continuous POS/API ingestion."
                           : (forecastRun
                               ? `${forecastRun.modelName} was evaluated on held-out uploaded Cafe history. The active response was generated ${new Date(forecastRun.generatedAt).toLocaleString()}.`
-                              : "Upload Cafe history from POS or PetHub to generate a validated forecast.")}
+                              : "Upload Cafe history from POS to generate a validated forecast.")}
                       </p>
                     </div>
 

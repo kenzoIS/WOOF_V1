@@ -73,7 +73,7 @@ describe('Simulation input integration and access', () => {
     expect(inputs.config.customers).toBe(2);
     expect(inputs.config.services[0].price).toBe(500);
     expect(inputs.warnings.join(' ')).toContain('assumptions');
-    expect(queries[0][0].$match.channel.$in).toEqual(['POS', 'PetHub']);
+    expect(queries[0][0].$match.channel).toBe('POS');
     expect(inputs.config.arrivalWeights.slice(0, 2)).toEqual([10, 20]);
   });
   it('uses forecast arrivals and sector demand shares', async () => {

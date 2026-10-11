@@ -530,7 +530,6 @@ export function Header({ onMenuClick }: HeaderProps) {
               { channel: "POS", label: "POS" },
               { channel: "Shopee", label: "Shopee" },
               { channel: "TikTok Shop", label: "TikTok" },
-              { channel: "PetHub", label: "PetHub" },
             ].map((item) => {
               const indicator = getChannelIndicator(item.channel);
               return (

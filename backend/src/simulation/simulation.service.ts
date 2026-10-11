@@ -46,7 +46,7 @@ export class SimulationService {
       throw new BadRequestException('A simulation date is required.');
     const physical = {
       sector: { $in: ['Services', 'Cafe'] },
-      channel: { $in: ['POS', 'PetHub'] },
+      channel: 'POS',
     };
     const latest = await this.transactions
       .findOne(physical)
@@ -151,7 +151,7 @@ export class SimulationService {
       (_, i) => hours.find((h: any) => h._id === i + 8)?.count || 0,
     );
     const provenance = [
-      `Physical POS and PetHub transactions, ${start} through ${end} (${days} calendar days, including days with no recorded sales).`,
+      `Physical POS transactions, ${start} through ${end} (${days} calendar days, including days with no recorded sales).`,
       `Demand: distinct transaction ID per day and sector. A Cafe + Services basket is modeled as two visits; this is not a unique-person estimate.`,
       `Item mix: historical distinct transactions per item. Prices: net sales / units; each simulated visit purchases one selected service or menu item.`,
     ];
@@ -314,7 +314,7 @@ export class SimulationService {
       {
         $match: {
           sector: { $in: ['Services', 'Cafe'] },
-          channel: { $in: ['POS', 'PetHub'] },
+          channel: 'POS',
           productName: { $in: names },
         },
       },

@@ -285,7 +285,7 @@ export function Retail() {
   const [customStartDate, setCustomStartDate] = useState("2025-05-02");
   const [customEndDate, setCustomEndDate] = useState("2026-05-02");
   const [channelGraphMode, setChannelGraphMode] = useState<"combined" | "split">("combined");
-  const [activeChannelKey, setActiveChannelKey] = useState<"all" | "shopee" | "tiktok" | "physical" | "pethub">("all");
+  const [activeChannelKey, setActiveChannelKey] = useState<"all" | "shopee" | "tiktok" | "physical">("all");
   const [expandedFeeChannels, setExpandedFeeChannels] = useState<Record<string, boolean>>({});
   const toggleFeeDropdown = (channel: string) => {
     setExpandedFeeChannels((prev) => ({ ...prev, [channel]: !prev[channel] }));
@@ -416,14 +416,12 @@ export function Retail() {
     const phys = channelForecast?.physical?.historical || [];
     const tiktok = channelForecast?.tiktok?.historical || [];
     const shopee = channelForecast?.shopee?.historical || [];
-    const pethub = channelForecast?.pethub?.historical || [];
     if (phys.length === 0 && tiktok.length === 0 && shopee.length === 0) return [];
 
     // Filter each series by activeRange [start, end]
     const physFiltered = phys.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
     const tiktokFiltered = tiktok.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
     const shopeeFiltered = shopee.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
-    const pethubFiltered = pethub.filter((d: any) => d.date >= activeRange.start && d.date <= activeRange.end);
 
     const dateMap: Record<
       string,
@@ -432,12 +430,10 @@ export function Retail() {
         online: number | null;
         tiktok: number | null;
         shopee: number | null;
-        pethub: number | null;
         physicalProfit: number | null;
         onlineProfit: number | null;
         tiktokProfit: number | null;
         shopeeProfit: number | null;
-        pethubProfit: number | null;
       }
     > = {};
 
@@ -448,12 +444,10 @@ export function Retail() {
           online: null,
           tiktok: null,
           shopee: null,
-          pethub: null,
           physicalProfit: null,
           onlineProfit: null,
           tiktokProfit: null,
           shopeeProfit: null,
-          pethubProfit: null,
         };
       }
       return dateMap[date];
@@ -477,12 +471,6 @@ export function Retail() {
       entry.shopeeProfit = d.netProfit != null ? Number(d.netProfit) : Math.round(Number(d.revenue || 0) * 0.195);
     });
 
-    pethubFiltered.forEach((d: any) => {
-      const entry = getEntry(d.date);
-      entry.pethub = Number(d.revenue) || 0;
-      entry.pethubProfit = d.netProfit != null ? Number(d.netProfit) : Math.round(Number(d.revenue || 0) * 0.395);
-    });
-
     // If single day was selected and dateMap is empty, insert empty point for that day so chart displays
     if (activeRange.isCustom && activeRange.start === activeRange.end && !dateMap[activeRange.start]) {
       dateMap[activeRange.start] = {
@@ -490,12 +478,10 @@ export function Retail() {
         online: 0,
         tiktok: 0,
         shopee: 0,
-        pethub: 0,
         physicalProfit: 0,
         onlineProfit: 0,
         tiktokProfit: 0,
         shopeeProfit: 0,
-        pethubProfit: 0,
       };
     }
 
@@ -507,16 +493,13 @@ export function Retail() {
           physical: vals.physical ?? 0,
           tiktok: vals.tiktok ?? 0,
           shopee: vals.shopee ?? 0,
-          pethub: vals.pethub ?? 0,
-          online: ((vals.tiktok ?? 0) + (vals.shopee ?? 0) + (vals.pethub ?? 0)),
+          online: ((vals.tiktok ?? 0) + (vals.shopee ?? 0)),
           physicalRevenue: vals.physical ?? 0,
           tiktokRevenue: vals.tiktok ?? 0,
           shopeeRevenue: vals.shopee ?? 0,
-          pethubRevenue: vals.pethub ?? 0,
           physicalProfit: vals.physicalProfit ?? 0,
           tiktokProfit: vals.tiktokProfit ?? 0,
           shopeeProfit: vals.shopeeProfit ?? 0,
-          pethubProfit: vals.pethubProfit ?? 0,
         };
       });
 
@@ -530,13 +513,11 @@ export function Retail() {
     let totalShopee = 0;
     let totalTiktok = 0;
     let totalPhys = 0;
-    let totalPethub = 0;
 
     forecastData.forEach((d: any) => {
       const s = Number(d.shopee) || 0;
       const t = Number(d.tiktok) || 0;
       const p = Number(d.physical) || 0;
-      const ph = Number(d.pethub) || 0;
 
       if (s > maxShopee) maxShopee = s;
       if (t > maxTiktok) maxTiktok = t;
@@ -545,7 +526,6 @@ export function Retail() {
       totalShopee += s;
       totalTiktok += t;
       totalPhys += p;
-      totalPethub += ph;
     });
 
     return {
@@ -555,7 +535,6 @@ export function Retail() {
       totalShopee,
       totalTiktok,
       totalPhys,
-      totalPethub,
     };
   }, [forecastData]);
 
@@ -568,9 +547,6 @@ export function Retail() {
     }
     if (activeChannelKey === "shopee") {
       return [0, Math.max(5000, Math.ceil(channelStats.maxShopee * 1.1))];
-    }
-    if (activeChannelKey === "pethub") {
-      return [0, 100];
     }
     return [0, "auto"];
   }, [activeChannelKey, channelStats]);
@@ -624,7 +600,6 @@ export function Retail() {
     const basePos = getBaseRevenue("POS");
     const baseShopee = getBaseRevenue("Shopee");
     const baseTikTok = getBaseRevenue("TikTok Shop");
-    const basePetHub = getBaseRevenue("PetHub");
 
     if (omnichannelMode === "header" && channelForecast?.physical?.historical) {
       const latestHistoryDate =
@@ -637,10 +612,9 @@ export function Retail() {
       const totalPhys = physSliced.reduce((sum: number, item: any) => sum + Number(item.revenue || 0), 0);
       const totalOnline = onlineSliced.reduce((sum: number, item: any) => sum + Number(item.revenue || 0), 0);
 
-      const totalOnlineBase = baseShopee + baseTikTok + basePetHub;
-      const shopeeRatio = totalOnlineBase ? baseShopee / totalOnlineBase : 0.33;
-      const tiktokRatio = totalOnlineBase ? baseTikTok / totalOnlineBase : 0.33;
-      const pethubRatio = totalOnlineBase ? basePetHub / totalOnlineBase : 0.34;
+      const totalOnlineBase = baseShopee + baseTikTok;
+      const shopeeRatio = totalOnlineBase ? baseShopee / totalOnlineBase : 0.5;
+      const tiktokRatio = totalOnlineBase ? baseTikTok / totalOnlineBase : 0.5;
 
       return [
         {
@@ -648,7 +622,6 @@ export function Retail() {
           pos: Math.round(totalPhys),
           shopee: Math.round(totalOnline * shopeeRatio),
           tiktok: Math.round(totalOnline * tiktokRatio),
-          pethub: Math.round(totalOnline * pethubRatio),
         },
       ];
     }
@@ -659,7 +632,6 @@ export function Retail() {
         pos: basePos,
         shopee: baseShopee,
         tiktok: baseTikTok,
-        pethub: basePetHub,
       },
     ];
   }, [dashboardData, omnichannelMode, channelForecast, globalDateRange]);
@@ -696,10 +668,6 @@ export function Retail() {
         defaultCommRate = 18.0;
         defaultCogsRatio = 0.605;
         color = "#8B5CF6";
-      } else if (chName.includes("PetHub")) {
-        series = channelForecast?.pethub?.historical || [];
-        defaultCogsRatio = 0.605;
-        color = "#06B6D4";
       }
 
       if (hasForecastHistory) {
@@ -708,7 +676,7 @@ export function Retail() {
         );
         const rev = filtered.reduce((sum: number, d: any) => sum + Number(d.revenue || 0), 0);
         const orders = filtered.reduce((sum: number, d: any) => sum + Number(d.orders || 0), 0);
-        const commFee = isPOS || chName.includes("PetHub")
+        const commFee = isPOS
           ? 0
           : filtered.reduce(
               (sum: number, d: any) =>
@@ -803,7 +771,7 @@ export function Retail() {
       };
     };
 
-    const channelNames = ["POS", "Shopee", "TikTok Shop", "PetHub"];
+    const channelNames = ["POS", "Shopee", "TikTok Shop"];
     const channels = channelNames.map(getChannelStats);
 
     const totalRevenue = channels.reduce((sum, c) => sum + c.revenue, 0);
@@ -878,7 +846,6 @@ export function Retail() {
       { key: "POS", label: "POS", color: "#D42A7D" },
       { key: "Shopee", label: "Shopee", color: "#F59E0B" },
       { key: "TikTok Shop", label: "TikTok Shop", color: "#8B5CF6" },
-      { key: "PetHub", label: "PetHub", color: "#06B6D4" },
     ];
     const totalRev = channelEconomics.totalRevenue;
     return channels.map((ch) => {
@@ -1125,7 +1092,7 @@ export function Retail() {
             <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
               <span className="inline-flex items-center gap-2">
                 Retail Revenue by Channel
-                <InfoTooltip label="Daily retail performance across Physical (POS), TikTok Shop, Shopee, and PetHub. Fairly aligned to active marketplace dates. When you click any filter button here, Omnichannel Economics, Channel Mix, and Category Revenue recalculate for this period." />
+                <InfoTooltip label="Daily retail performance across Physical (POS), TikTok Shop, and Shopee. Fairly aligned to active marketplace dates. When you click any filter button here, Omnichannel Economics, Channel Mix, and Category Revenue recalculate for this period." />
               </span>
             </h2>
           </div>
@@ -1351,40 +1318,14 @@ export function Retail() {
                   Physical (POS)
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setActiveChannelKey((k) => k === "pethub" ? "all" : "pethub")}
-                  className={`px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
-                    activeChannelKey === "pethub"
-                      ? "bg-[#06B6D4] text-white shadow-xs"
-                      : "border border-[#06B6D4]/30 bg-cyan-50/50 text-[#0E7490] hover:bg-cyan-100/60"
-                  }`}
-                >
-                  PetHub
-                </button>
               </div>
 
               {activeChannelKey !== "all" && (
                 <span className="text-[11px] text-[#223047]/70 font-medium">
-                  Showing {activeChannelKey === "physical" ? "Physical (POS)" : activeChannelKey === "tiktok" ? "TikTok Shop" : activeChannelKey === "shopee" ? "Shopee" : "PetHub"} sales
+                  Showing {activeChannelKey === "physical" ? "Physical (POS)" : activeChannelKey === "tiktok" ? "TikTok Shop" : "Shopee"} sales
                 </span>
               )}
             </div>
-
-            {activeChannelKey === "pethub" && channelStats.totalPethub === 0 && (
-              <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 text-xs text-[#223047] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <p className="font-medium">
-                  <span className="font-bold text-[#D42A7D]">PetHub Channel Notice:</span> No recorded retail sales during this timeframe. PetHub is designated for service bookings.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setActiveChannelKey("all")}
-                  className="text-xs font-semibold text-[#D42A7D] hover:underline whitespace-nowrap self-start sm:self-auto"
-                >
-                  Show All Channels
-                </button>
-              </div>
-            )}
 
             <ResponsiveContainer width="100%" height={280} className="md:!h-[360px]">
               <LineChart data={forecastData} margin={{ top: 8, right: 12, left: -4, bottom: 0 }}>
@@ -1451,19 +1392,6 @@ export function Retail() {
                     dot={false}
                     animationDuration={600}
                     name="Shopee"
-                    connectNulls
-                  />
-                )}
-                {(activeChannelKey === "all" || activeChannelKey === "pethub") && (
-                  <Line
-                    key="line-pethub-wide"
-                    type="monotone"
-                    dataKey="pethub"
-                    stroke="#06B6D4"
-                    strokeWidth={2}
-                    dot={false}
-                    animationDuration={600}
-                    name="PetHub"
                     connectNulls
                   />
                 )}
@@ -1541,12 +1469,6 @@ export function Retail() {
                 </ResponsiveContainer>
               </div>
             </div>
-
-            {/* PETHUB INACTIVE STRIP */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-              <span className="font-semibold text-slate-700">PetHub Direct Portal: Inactive for retail merchandise.</span>
-              <span className="text-slate-400 font-medium">Channel Active for Service Bookings Only</span>
-            </div>
           </div>
         )}
       </div>
@@ -1594,7 +1516,7 @@ export function Retail() {
               <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
                 Omnichannel Economics & Profit Paradox
               </h2>
-              <InfoTooltip label="Evaluating omnichannel profitability using empirical data from HappyTailsPOS.csv and marketplace seller statements. Marketplace platform fees are computed per order using verified fee schedules: Shopee PH 19%–21% (~19.9% avg: Commission ~10.1% + Service Fee 7.2% + Transaction 2.24% + WHT 0.40%) and TikTok Shop PH 17%–19% (~18.0% avg: Commission ~8.8% + Service Fee 6.5% + Transaction 2.24% + WHT 0.45%). Physical store POS and PetHub have 0% platform take-rate. Online price markup (+17% to +19%) reduces effective wholesale COGS to 60.5% (vs 70.8% in POS)." />
+              <InfoTooltip label="Evaluating omnichannel profitability using empirical data from HappyTailsPOS.csv and marketplace seller statements. Marketplace platform fees are computed per order using verified fee schedules: Shopee PH 19%–21% (~19.9% avg: Commission ~10.1% + Service Fee 7.2% + Transaction 2.24% + WHT 0.40%) and TikTok Shop PH 17%–19% (~18.0% avg: Commission ~8.8% + Service Fee 6.5% + Transaction 2.24% + WHT 0.45%). Physical store POS has 0% platform take-rate. Online price markup (+17% to +19%) reduces effective wholesale COGS to 60.5% (vs 70.8% in POS)." />
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1641,7 +1563,7 @@ export function Retail() {
               current: channelEconomics.totalCommission,
               formatter: (v) => `-₱${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
               icon: <Percent className="w-4 h-4 text-[#E11D48]" />,
-              description: "Total platform fees computed per order using official Shopee PH (19%–21%, ~19.9%) and TikTok Shop PH (17%–19%, ~18.0%) seller fee schedules: Commission Fee (Shopee ~10.1%, TikTok ~8.8%) + Service Fee / FSP (6.5%–7.2%) + Transaction Fee (2.24%) + Withholding Tax (~0.4%–0.5%). Direct channels (POS & PetHub) have 0% platform fee.",
+              description: "Total platform fees computed per order using official Shopee PH (19%–21%, ~19.9%) and TikTok Shop PH (17%–19%, ~18.0%) seller fee schedules: Commission Fee (Shopee ~10.1%, TikTok ~8.8%) + Service Fee / FSP (6.5%–7.2%) + Transaction Fee (2.24%) + Withholding Tax (~0.4%–0.5%). Physical POS has 0% platform fee.",
               extraStats: channelEconomics.channels.map(ch => ({
                 label: ch.channel,
                 value: `-₱${ch.commFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -1693,9 +1615,7 @@ export function Retail() {
           {channelEconomics.channels.map((ch) => (
             <div
               key={ch.channel}
-              className={`woof-profit-channel-card p-4 md:p-5 rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between ${
-                ch.channel.toLowerCase().includes("pethub") ? "md:col-start-2" : ""
-              }`}
+              className="woof-profit-channel-card p-4 md:p-5 rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between"
               style={{
                 borderColor: ch.isPOS ? "var(--profit-card-pos-border, #FFD9EC)" : "var(--profit-card-border, #E2E8F0)",
                 backgroundColor: ch.isPOS ? "var(--profit-card-pos-bg, #FFF9FC)" : "var(--profit-card-bg, #FFFFFF)",
@@ -1706,7 +1626,7 @@ export function Retail() {
                   <div>
                     <div className="font-bold text-sm text-[#223047]">{ch.channel}</div>
                     <div className="text-[10px] text-[#223047] opacity-60">
-                      {ch.isPOS ? "Physical In-Store POS" : ch.channel.includes("PetHub") ? "Direct Booking & App" : "Online Marketplace"}
+                      {ch.isPOS ? "Physical In-Store POS" : "Online Marketplace"}
                     </div>
                   </div>
                   <Badge
