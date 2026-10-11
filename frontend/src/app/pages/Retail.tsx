@@ -102,10 +102,10 @@ const formatChartDate = (value: string) => {
 };
 
 const formatGrowth = (current: number, previous: number) => {
-  if (previous === 0) {
+  if (!previous || !Number.isFinite(previous) || previous <= 0) {
     return {
-      text: current > 0 ? "+100.0% ↑" : "0.0%",
-      className: current > 0 ? "text-xs text-green-600 font-medium hidden md:block" : "text-xs text-gray-500 font-medium hidden md:block",
+      text: "",
+      className: "hidden",
     };
   }
   const change = ((current - previous) / previous) * 100;
@@ -580,7 +580,7 @@ export function Retail() {
     if (!channelForecast?.physical?.historical?.length) {
       return {
         totalRevenue: kpis?.totalRevenue || 0,
-        revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
+        revenueGrowth: { text: "", className: "hidden" },
       };
     }
     const range = activeRange;
@@ -1044,7 +1044,9 @@ export function Retail() {
                 <InfoTooltip label="Total retail product revenue from POS, online, and PetHub transaction history for the selected period." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{retailRevenue}</div>
-              <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
+              {Boolean(aggregatedKpis.revenueGrowth?.text) && (
+                <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
+              )}
             </div>
           </div>
 

@@ -232,10 +232,10 @@ const aggregateTrend = (
 };
 
 const formatGrowth = (current: number, previous: number) => {
-  if (previous === 0) {
+  if (!previous || !Number.isFinite(previous) || previous <= 0) {
     return {
-      text: current > 0 ? "+100.0% ↑" : "0.0%",
-      className: current > 0 ? "text-xs text-green-600 font-medium hidden md:block" : "text-xs text-gray-500 font-medium hidden md:block",
+      text: "",
+      className: "hidden",
     };
   }
   const change = ((current - previous) / previous) * 100;
@@ -804,9 +804,9 @@ export function Cafe() {
       rangeEnd: "",
       prevRangeStart: "",
       prevRangeEnd: "",
-      revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
-      ordersGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
-      checkGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
+      revenueGrowth: { text: "", className: "hidden" },
+      ordersGrowth: { text: "", className: "hidden" },
+      checkGrowth: { text: "", className: "hidden" },
     };
     if (!forecastRun?.historical?.length) {
       return defaultKpis;
@@ -1551,7 +1551,9 @@ export function Cafe() {
                 <InfoTooltip label="Revenue for the selected Cafe timeline and active filter." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{cafeRevenue}</div>
-              <div className={activeKpis.growth.className}>{activeKpis.revenueSubtitle}</div>
+              {Boolean(activeKpis.revenueSubtitle) && (
+                <div className={activeKpis.growth.className}>{activeKpis.revenueSubtitle}</div>
+              )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
@@ -1584,7 +1586,9 @@ export function Cafe() {
                 <InfoTooltip label="Transactions or units for the selected timeline and filter." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{totalOrders.toLocaleString()}</div>
-              <div className="text-xs text-gray-500 font-medium hidden md:block">{activeKpis.ordersSubtitle}</div>
+              {Boolean(activeKpis.ordersSubtitle) && (
+                <div className={activeKpis.ordersGrowth?.className || "text-xs text-gray-500 font-medium hidden md:block"}>{activeKpis.ordersSubtitle}</div>
+              )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
@@ -1617,7 +1621,9 @@ export function Cafe() {
                 <InfoTooltip label="Average Cafe spend per order or unit." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{avgCheck}</div>
-              <div className="text-xs text-gray-500 font-medium hidden md:block">{activeKpis.aovSubtitle}</div>
+              {Boolean(activeKpis.aovSubtitle) && (
+                <div className={activeKpis.checkGrowth?.className || "text-xs text-gray-500 font-medium hidden md:block"}>{activeKpis.aovSubtitle}</div>
+              )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
@@ -2897,7 +2903,7 @@ export function Cafe() {
                 <div className="flex-1 min-w-0 pr-3">
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-[#223047]/40 mb-1">KPI Breakdown</p>
                   <h3 className="text-lg font-bold text-[#223047] leading-tight">{kpi.title}</h3>
-                  {kpi.growth.text && (
+                  {hasPrev && Boolean(kpi.growth.text) && (
                     <span className={`inline-flex items-center gap-1 mt-1.5 text-xs font-bold px-2 py-0.5 rounded-full border ${
                       isUp ? "bg-green-50 border-green-200 text-green-700" :
                       isDown ? "bg-red-50 border-red-200 text-red-700" :

@@ -90,9 +90,9 @@ interface HomeOverview {
     totalOrders: number;
     retailRevenue: number;
     avgOrderValue?: number;
-    aovChangePercent?: number;
-    revenueChangePercent: number;
-    ordersChangePercent: number;
+    aovChangePercent?: number | null;
+    revenueChangePercent: number | null;
+    ordersChangePercent: number | null;
     busiestSector: string;
     pendingSuggestions: number;
   };
@@ -268,22 +268,23 @@ export function Home() {
     const totalRevenue = toNumber(kpis?.totalRevenue);
     const totalOrders = toNumber(kpis?.totalOrders);
     const aovValue = toNumber(kpis?.avgOrderValue || (totalOrders > 0 ? totalRevenue / totalOrders : 0));
-    const revChange = toNumber(kpis?.revenueChangePercent);
-    const ordChange = toNumber(kpis?.ordersChangePercent);
-    const aovChange = toNumber(kpis?.aovChangePercent ?? (
-      ordChange !== -100 ? (((1 + revChange / 100) / (1 + ordChange / 100)) - 1) * 100 : 0
-    ));
+    const hasRevChange = kpis?.revenueChangePercent != null && Number.isFinite(Number(kpis.revenueChangePercent));
+    const revChange = hasRevChange ? toNumber(kpis.revenueChangePercent) : null;
+    const hasOrdChange = kpis?.ordersChangePercent != null && Number.isFinite(Number(kpis.ordersChangePercent));
+    const ordChange = hasOrdChange ? toNumber(kpis.ordersChangePercent) : null;
+    const hasAovChange = kpis?.aovChangePercent != null && Number.isFinite(Number(kpis.aovChangePercent));
+    const aovChange = hasAovChange ? toNumber(kpis.aovChangePercent) : null;
 
     return {
       revenue: formatCurrency(totalRevenue),
       orders: totalOrders.toLocaleString(),
       aov: formatCurrency(aovValue),
-      aovPercent: `${formatPercent(aovChange)} vs previous period`,
-      aovColorClass: aovChange >= 0 ? "text-green-600" : "text-rose-600",
-      revenuePercent: `${formatPercent(revChange)} vs previous period`,
-      ordersPercent: `${formatPercent(ordChange)} vs previous period`,
-      revenueColorClass: revChange >= 0 ? "text-green-600" : "text-rose-600",
-      ordersColorClass: ordChange >= 0 ? "text-green-600" : "text-rose-600",
+      aovPercent: aovChange != null ? `${formatPercent(aovChange)} vs previous period` : null,
+      aovColorClass: aovChange != null && aovChange >= 0 ? "text-green-600" : "text-rose-600",
+      revenuePercent: revChange != null ? `${formatPercent(revChange)} vs previous period` : null,
+      ordersPercent: ordChange != null ? `${formatPercent(ordChange)} vs previous period` : null,
+      revenueColorClass: revChange != null && revChange >= 0 ? "text-green-600" : "text-rose-600",
+      ordersColorClass: ordChange != null && ordChange >= 0 ? "text-green-600" : "text-rose-600",
       busiestSector: kpis?.busiestSector || "None",
       pending: pendingSuggestionsCount,
     };
@@ -1139,7 +1140,9 @@ export function Home() {
                 </span>
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.revenue}</div>
-              <div className={`text-xs ${scaledKPIs.revenueColorClass} font-medium hidden md:block`}>{scaledKPIs.revenuePercent}</div>
+              {scaledKPIs.revenuePercent && (
+                <div className={`text-xs ${scaledKPIs.revenueColorClass} font-medium hidden md:block`}>{scaledKPIs.revenuePercent}</div>
+              )}
             </div>
           </div>
 
@@ -1158,7 +1161,9 @@ export function Home() {
                 </span>
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.orders}</div>
-              <div className={`text-xs ${scaledKPIs.ordersColorClass} font-medium hidden md:block`}>{scaledKPIs.ordersPercent}</div>
+              {scaledKPIs.ordersPercent && (
+                <div className={`text-xs ${scaledKPIs.ordersColorClass} font-medium hidden md:block`}>{scaledKPIs.ordersPercent}</div>
+              )}
             </div>
           </div>
 
@@ -1177,9 +1182,11 @@ export function Home() {
                 </span>
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{scaledKPIs.aov}</div>
-              <div className={`text-xs ${scaledKPIs.aovColorClass} font-medium hidden md:block`}>
-                {scaledKPIs.aovPercent}
-              </div>
+              {scaledKPIs.aovPercent && (
+                <div className={`text-xs ${scaledKPIs.aovColorClass} font-medium hidden md:block`}>
+                  {scaledKPIs.aovPercent}
+                </div>
+              )}
             </div>
           </div>
 

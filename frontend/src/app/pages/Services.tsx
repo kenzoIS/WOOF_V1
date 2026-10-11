@@ -162,10 +162,10 @@ const aggregateServiceHistory = (
 };
 
 const formatGrowth = (current: number, previous: number) => {
-  if (previous === 0) {
+  if (!previous || !Number.isFinite(previous) || previous <= 0) {
     return {
-      text: current > 0 ? "+100.0% ↑" : "0.0%",
-      className: current > 0 ? "text-xs text-green-600 font-medium hidden md:block" : "text-xs text-gray-500 font-medium hidden md:block",
+      text: "",
+      className: "hidden",
     };
   }
   const change = ((current - previous) / previous) * 100;
@@ -671,9 +671,9 @@ export function Services() {
       rangeEnd: "",
       prevRangeStart: "",
       prevRangeEnd: "",
-      revenueGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
-      ordersGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
-      checkGrowth: { text: "0.0%", className: "text-xs text-gray-500 font-medium hidden md:block" },
+      revenueGrowth: { text: "", className: "hidden" },
+      ordersGrowth: { text: "", className: "hidden" },
+      checkGrowth: { text: "", className: "hidden" },
     };
     if (!forecastRun?.historical?.length) {
       return defaultKpis;
@@ -986,7 +986,9 @@ export function Services() {
                 <InfoTooltip label="Total grooming, boarding, and service revenue from uploaded history for the selected period." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{servicesRevenue}</div>
-              <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
+              {Boolean(aggregatedKpis.revenueGrowth?.text) && (
+                <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
+              )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
@@ -1019,7 +1021,9 @@ export function Services() {
                 <InfoTooltip label="Service bookings counted from the selected uploaded transaction history." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeBookings}</div>
-              <div className={aggregatedKpis.ordersGrowth.className}>{aggregatedKpis.ordersGrowth.text}</div>
+              {Boolean(aggregatedKpis.ordersGrowth?.text) && (
+                <div className={aggregatedKpis.ordersGrowth.className}>{aggregatedKpis.ordersGrowth.text}</div>
+              )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
@@ -1052,7 +1056,9 @@ export function Services() {
                 <InfoTooltip label="Average revenue earned per service booking." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">₱{aggregatedKpis.avgOrderValue.toLocaleString()}</div>
-              <div className={aggregatedKpis.checkGrowth.className}>{aggregatedKpis.checkGrowth.text}</div>
+              {Boolean(aggregatedKpis.checkGrowth?.text) && (
+                <div className={aggregatedKpis.checkGrowth.className}>{aggregatedKpis.checkGrowth.text}</div>
+              )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>

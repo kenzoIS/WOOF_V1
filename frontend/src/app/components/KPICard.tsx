@@ -67,7 +67,7 @@ export function KPICard({
           <Icon className="w-6 h-6 text-[#223047]" strokeWidth={2} />
         </div>
 
-        {trend && (
+        {trend && Boolean(trend.value) && trend.value.trim() !== "" && (
           <Badge
             variant="outline"
             className={`gap-1 ${
@@ -85,7 +85,7 @@ export function KPICard({
           </Badge>
         )}
 
-        {badge && !trend && (
+        {badge && (!trend || !trend.value || trend.value.trim() === "") && (
           <Badge className="bg-[#FFF2FA] text-[#223047] border border-[#FFD9EC] hover:bg-[#FFF2FA]">
             {badge}
           </Badge>

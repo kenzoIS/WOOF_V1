@@ -88,7 +88,7 @@ export function KpiDetailModal({ kpi, onClose }: KpiDetailModalProps) {
             <h3 className="text-lg font-bold text-[#223047] leading-tight">
               {kpi.title}
             </h3>
-            {growthText && (
+            {hasPrev && Boolean(growthText) && (
               <span
                 className={`inline-flex items-center gap-1 mt-1.5 text-xs font-bold px-2 py-0.5 rounded-full border ${
                   isUp

@@ -10333,8 +10333,8 @@ Active Recommendations: ${suggestions.length} actions pending.`,
         totalItems: 0,
         retailRevenue: 0,
         avgOrderValue: 0,
-        revenueChangePercent: 0,
-        ordersChangePercent: 0,
+        revenueChangePercent: null,
+        ordersChangePercent: null,
         busiestSector: 'None',
         pendingSuggestions: 0,
       },
@@ -10356,8 +10356,8 @@ Active Recommendations: ${suggestions.length} actions pending.`,
     };
   }
 
-  private percentChange(current: number, previous: number): number {
-    if (!previous) return current > 0 ? 100 : 0;
+  private percentChange(current: number, previous: number): number | null {
+    if (!previous || !Number.isFinite(previous) || previous <= 0) return null;
     const raw = ((current - previous) / previous) * 100;
     return this.round(Math.max(-100, Math.min(100, raw)));
   }
