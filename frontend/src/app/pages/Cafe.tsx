@@ -268,7 +268,7 @@ export function Cafe() {
   const [selectedMenuItem, setSelectedMenuItem] = useState<{ name: string; qtySold: number; category: string; equilibrium: string; trend: number[]; trendByDate?: { date: string; value: number }[]; revenue: number } | null>(null);
   const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
   const [menuFilter, setMenuFilter] = useState("all");
-  const [menuPerformanceMode, setMenuPerformanceMode] = useState<"overall" | "header">("overall");
+  const [menuPerformanceMode, setMenuPerformanceMode] = useState<"live" | "overall">("live");
   const [selectedItems, setSelectedItems] = useState<Record<string, { selected: boolean, discountPercent: number }>>({});
   const [discountValue, setDiscountValue] = useState([15]);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
@@ -294,7 +294,7 @@ export function Cafe() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [menuFilter]);
+  }, [menuFilter, menuPerformanceMode]);
   const [errorModal, setErrorModal] = useState<{ isOpen: boolean; type: ErrorType | null }>({
     isOpen: false,
     type: null,
@@ -323,6 +323,15 @@ export function Cafe() {
   const [customCoAttachEnd, setCustomCoAttachEnd] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedSegmentKey, setSelectedSegmentKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [coAttachPeriod, customCoAttachStart, customCoAttachEnd, selectedCategory, selectedSegmentKey]);
+
+  useEffect(() => {
+    setMenuPerformanceMode("live");
+  }, [coAttachPeriod, customCoAttachStart, customCoAttachEnd, selectedCategory, selectedSegmentKey]);
+
   useEffect(() => {
     setChartGranularity(getDashboardChartView());
   }, []);
@@ -653,32 +662,92 @@ export function Cafe() {
     setCustomForecastEnd(addDays(defaultStart, 13));
   }, [forecastRun?.generatedAt, forecastRangeMode]);
 
-  // Build menu items from API data — maps backend topItems to table shape
+  // Build menu items from API data — maps backend topItems to table shape, filtered by Cafe Live Interactive Filters
   const menuItems = useMemo(() => {
     if (!forecastRun?.topItems?.length && !forecastRun?.itemHistory?.length) return [];
 
     const bounds = getItemHistoryBounds(forecastRun);
     const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
-    const scopedRows =
-      menuPerformanceMode === "header"
-        ? filterByDateRange(
-            forecastRun.itemHistory || [],
-            parseGlobalRange(globalDateRange, latestHistoryDate, bounds),
-          )
-        : forecastRun.itemHistory || [];
-    const sourceItems = scopedRows.length
-      ? aggregateItemHistory(scopedRows)
-      : (forecastRun.topItems || []).map((item) => ({
-          name: item.name || "Unknown Cafe Item",
-          revenue: Math.round(toNumber(item.revenue)),
-          quantity: toNumber(item.quantity),
-          orderCount: toNumber(item.orderCount),
-          avgPrice: toNumber(item.avgPrice),
-          category: item.category || "Cafe",
-          trend: [] as number[],
-        }));
 
-    // Get last 7 days of total revenue to build per-item trend sparklines
+    let activeRange: { start: string; end: string; isCustom: boolean } | null = null;
+    if (menuPerformanceMode !== "overall") {
+      if (coAttachPeriod === "custom" && customCoAttachStart && customCoAttachEnd) {
+        activeRange = {
+          start: customCoAttachStart,
+          end: customCoAttachEnd >= customCoAttachStart ? customCoAttachEnd : customCoAttachStart,
+          isCustom: true,
+        };
+      } else {
+        const rangeMap: Record<string, string> = {
+          "7d": "last-7-days",
+          "30d": "last-30-days",
+          "90d": "last-90-days",
+          "12m": "last-12-months",
+          "all-time": "all-time",
+        };
+        const mapped = rangeMap[coAttachPeriod] || "last-30-days";
+        activeRange = parseGlobalRange(mapped, latestHistoryDate, bounds);
+      }
+    }
+
+    let scopedRows = forecastRun.itemHistory || [];
+    if (activeRange) {
+      scopedRows = filterByDateRange(scopedRows, activeRange);
+    }
+
+    if (menuPerformanceMode !== "overall" && selectedCategory) {
+      scopedRows = scopedRows.filter(
+        (row) => (row.category || "").toLowerCase() === selectedCategory.toLowerCase(),
+      );
+    }
+
+    if (menuPerformanceMode !== "overall" && selectedSegmentKey) {
+      if (selectedSegmentKey === "solo_pet" || selectedSegmentKey === "pet") {
+        scopedRows = scopedRows.filter(
+          (row) => (row.category || "").toLowerCase() === "pet bakery",
+        );
+      } else if (selectedSegmentKey === "solo_human" || selectedSegmentKey === "human") {
+        scopedRows = scopedRows.filter(
+          (row) => (row.category || "").toLowerCase() !== "pet bakery",
+        );
+      }
+    }
+
+    let sourceItems: ReturnType<typeof aggregateItemHistory>;
+    if (forecastRun.itemHistory && forecastRun.itemHistory.length > 0) {
+      sourceItems = aggregateItemHistory(scopedRows);
+    } else {
+      let fallbackRows = forecastRun.topItems || [];
+      if (menuPerformanceMode !== "overall" && selectedCategory) {
+        fallbackRows = fallbackRows.filter(
+          (item) => (item.category || "").toLowerCase() === selectedCategory.toLowerCase(),
+        );
+      }
+      if (menuPerformanceMode !== "overall" && selectedSegmentKey) {
+        if (selectedSegmentKey === "solo_pet" || selectedSegmentKey === "pet") {
+          fallbackRows = fallbackRows.filter(
+            (item) => (item.category || "").toLowerCase() === "pet bakery",
+          );
+        } else if (selectedSegmentKey === "solo_human" || selectedSegmentKey === "human") {
+          fallbackRows = fallbackRows.filter(
+            (item) => (item.category || "").toLowerCase() !== "pet bakery",
+          );
+        }
+      }
+      sourceItems = fallbackRows.map((item) => ({
+        name: item.name || "Unknown Cafe Item",
+        revenue: Math.round(toNumber(item.revenue)),
+        quantity: toNumber(item.quantity),
+        orderCount: toNumber(item.orderCount),
+        avgPrice: toNumber(item.avgPrice),
+        category: item.category || "Cafe",
+        trend: [] as number[],
+        trendByDate: [] as { date: string; value: number }[],
+        byDate: new Map<string, number>(),
+      }));
+    }
+
+    // Get last 7 days of total revenue to build per-item trend sparklines if fallback needed
     const historicalRows = forecastRun.historical || [];
     const last7Days = historicalRows.slice(-7);
     const unitPrice = getCafeForecastUnitPrice(forecastRun);
@@ -686,7 +755,7 @@ export function Cafe() {
       sourceItems.reduce((sum, item) => sum + toNumber(item.quantity), 0) /
       Math.max(sourceItems.length, 1);
 
-    return sourceItems.slice(0, 15).map((item) => {
+    return sourceItems.map((item) => {
       // Scale the cafe's daily revenue shape to this item's proportion
       const itemProportion =
         toNumber(item.revenue) / (toNumber(forecastRun.kpis?.totalRevenue) || 1);
@@ -699,7 +768,7 @@ export function Cafe() {
       const trendByDate: { date: string; value: number }[] =
         (item as any).trendByDate?.length
           ? (item as any).trendByDate
-          : last7Days.map((day, i) => ({
+          : last7Days.map((day) => ({
               date: day.date || "",
               value: Math.max(0, Math.round(getHistoricalRevenue(day, unitPrice) * itemProportion)),
             }));
@@ -722,7 +791,15 @@ export function Cafe() {
         revenue: Math.round(toNumber(item.revenue)),
       };
     });
-  }, [forecastRun, globalDateRange, menuPerformanceMode]);
+  }, [
+    forecastRun,
+    menuPerformanceMode,
+    coAttachPeriod,
+    customCoAttachStart,
+    customCoAttachEnd,
+    selectedCategory,
+    selectedSegmentKey,
+  ]);
 
   // Aggregate Category Revenue Contribution from backend or fallback to items
   const cafeCategoryRevenueData = useMemo(() => {
@@ -1681,23 +1758,6 @@ export function Cafe() {
                     </div>
                   </div>
 
-                  {forecastRun && (
-                    <div className="grid grid-cols-2 gap-2 pt-0.5">
-                      <div className="bg-[#FFF7FB] p-2 rounded-xl border border-[#FFD9EC]/50 text-center">
-                        <span className="text-[10px] text-[#223047]/60 block font-medium">Holdout MASE</span>
-                        <span className="text-sm font-extrabold text-[#223047]">
-                          {formatFixed(forecastRun.mase, 2)}
-                        </span>
-                      </div>
-                      <div className="bg-[#FFF7FB] p-2 rounded-xl border border-[#FFD9EC]/50 text-center">
-                        <span className="text-[10px] text-[#223047]/60 block font-medium">Backtest Accuracy</span>
-                        <span className="text-sm font-extrabold text-emerald-600">
-                          {formatFixed(forecastRun.accuracy, 1)}%
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
                   {forecastRun?.isFallback && (
                     <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px]">
                       <strong>SMA fallback active:</strong> {forecastRun.rejectionReason || "selected model could not run"}
@@ -2038,9 +2098,9 @@ export function Cafe() {
       </div>
 
       {/* ══ INTERACTIVE FILTER BAR FOR CO-ATTACHMENT & CATEGORY REVENUE ══ */}
-      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 md:gap-4 shadow-xs">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm md:text-base font-bold text-[#223047]">
               Interactive Cafe & Basket Intelligence
             </h2>
@@ -2048,12 +2108,12 @@ export function Cafe() {
               Live Interactive Filters
             </Badge>
           </div>
-          <p className="text-xs text-[#223047]/60 mt-0.5">
-            Filter historical dining baskets and category contribution below. The top KPI cards synchronize automatically.
+          <p className="text-xs text-[#223047]/60 mt-0.5 leading-relaxed">
+            Filter historical dining baskets, category contribution, and menu item performance below. Top KPI cards and menu metrics synchronize automatically.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 bg-[#FFF7FB] border border-[#FFD9EC] p-1 rounded-xl">
+        <div className="flex-shrink-0 flex items-center gap-1 bg-[#FFF7FB] border border-[#FFD9EC] p-1 rounded-xl overflow-x-auto">
           {(
             [
               ["7d", "Last 7D"],
@@ -2074,7 +2134,7 @@ export function Cafe() {
                   setCustomCoAttachEnd("");
                 }
               }}
-              className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${
+              className={`text-xs px-2.5 py-1.5 rounded-lg font-semibold whitespace-nowrap transition-all ${
                 coAttachPeriod === key
                   ? "bg-[#F53799] text-white shadow-xs"
                   : "text-[#223047]/70 hover:text-[#223047] hover:bg-[#FFF2FA]"
@@ -2435,26 +2495,35 @@ export function Cafe() {
       {/* MENU PERFORMANCE */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
-              Menu Item Performance
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg md:text-xl lg:text-[22px] font-bold text-[#223047]">
+                Menu Item Performance
+              </h2>
+              {menuPerformanceMode === "live" && (selectedCategory || selectedSegmentKey) && (
+                <Badge className="bg-[#FFF2FA] border border-[#FFD9EC] text-[#F53799] text-[10px] font-semibold hidden sm:inline-flex">
+                  {selectedSegmentKey && (selectedSegmentKey === "solo_pet" ? "Solo Pet" : selectedSegmentKey === "solo_human" ? "Solo Human" : "Dual-Diner")}
+                  {selectedSegmentKey && selectedCategory && " • "}
+                  {selectedCategory}
+                </Badge>
+              )}
+            </div>
             <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
               {[
+                ["live", "Live Filter"],
                 ["overall", "Overall"],
-                ["header", "Header Filter"],
               ].map(([value, label]) => (
                 <Button
                   key={value}
                   size="sm"
                   variant={menuPerformanceMode === value ? "default" : "ghost"}
                   onClick={() => {
-                    setMenuPerformanceMode(value as "overall" | "header");
+                    setMenuPerformanceMode(value as "live" | "overall");
                     setCurrentPage(1);
                   }}
                   className={
                     menuPerformanceMode === value
-                      ? "h-8 bg-[#F53799] hover:bg-[#D42A7D] text-xs"
-                      : "h-8 text-xs hover:bg-[#FFF2FA]"
+                      ? "h-8 bg-[#F53799] hover:bg-[#D42A7D] text-xs text-white"
+                      : "h-8 text-xs hover:bg-[#FFF2FA] text-[#223047]"
                   }
                 >
                   {label}
@@ -2491,7 +2560,14 @@ export function Cafe() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedMenuItems.map((item: any, itemIndex: number) => (
+                {paginatedMenuItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-xs text-[#223047]/60">
+                      No menu items found for the selected filter combination.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginatedMenuItems.map((item: any, itemIndex: number) => (
                   <TableRow
                     key={`menu-item-${item.name}-${itemIndex}`}
                     className="cursor-pointer hover:bg-[#FFF2FA] transition-colors"
@@ -2523,7 +2599,8 @@ export function Cafe() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                ))
+              )}
               </TableBody>
             </Table>
           </div>
@@ -2858,10 +2935,14 @@ export function Cafe() {
       {/* Menu Item Performance Detail Modal */}
       {selectedMenuItem && (() => {
         const item = selectedMenuItem as any;
+        const customDays =
+          coAttachPeriod === "custom" && customCoAttachStart && customCoAttachEnd
+            ? countDays(customCoAttachStart, customCoAttachEnd)
+            : 0;
         const granularity: "daily" | "weekly" | "monthly" =
-          globalDateRange === "last-12-months"
+          coAttachPeriod === "12m" || coAttachPeriod === "all-time" || customDays > 120
             ? "monthly"
-            : globalDateRange === "last-90-days"
+            : coAttachPeriod === "90d" || customDays > 30
               ? "weekly"
               : "daily";
         const granularityLabel =
