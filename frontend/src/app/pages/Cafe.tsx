@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "../compo
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { ModelDetailsModal } from "../components/ModelDetailsModal";
+import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { ForecastRun, getForecast, getNextQuietPeriod, getPastHappyHours, activateHappyHour, getCafeCoAttachment, submitFeedbackRating } from "../lib/api";
 import {
@@ -265,21 +266,7 @@ export function Cafe() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [selectedMenuItem, setSelectedMenuItem] = useState<{ name: string; qtySold: number; category: string; equilibrium: string; trend: number[]; trendByDate?: { date: string; value: number }[]; revenue: number } | null>(null);
-  const [selectedKpi, setSelectedKpi] = useState<{
-    title: string;
-    current: number;
-    previous: number;
-    currentLabel: string;
-    previousLabel: string;
-    rangeStart: string;
-    rangeEnd: string;
-    prevRangeStart: string;
-    prevRangeEnd: string;
-    formatter: (v: number) => string;
-    icon: React.ReactNode;
-    growth: { text: string; className: string };
-    description: string;
-  } | null>(null);
+  const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
   const [menuFilter, setMenuFilter] = useState("all");
   const [menuPerformanceMode, setMenuPerformanceMode] = useState<"overall" | "header">("overall");
   const [selectedItems, setSelectedItems] = useState<Record<string, { selected: boolean, discountPercent: number }>>({});
@@ -1469,16 +1456,6 @@ export function Cafe() {
           <Badge className="bg-[#F53799] text-white hover:bg-[#F53799] px-3 md:px-4 py-1 text-xs md:text-sm">
             Cafe Sector
           </Badge>
-          <Button
-            onClick={handleExportReport}
-            variant="outline"
-            className="border-[#FFD9EC] gap-2 text-xs md:text-sm"
-            size="sm"
-          >
-            <Download className="w-3 h-3 md:w-4 md:h-4" />
-            <span className="hidden sm:inline">Export Report</span>
-            <span className="sm:hidden">Export</span>
-          </Button>
         </div>
       </div>
 
@@ -2876,120 +2853,7 @@ export function Cafe() {
       )}
 
       {/* KPI Detail Modal */}
-      {selectedKpi && (() => {
-        const kpi = selectedKpi;
-        const isUp = kpi.growth.text.startsWith("+");
-        const isDown = kpi.growth.text.startsWith("-");
-        const hasPrev = kpi.previous > 0;
-        const maxBar = Math.max(kpi.current, kpi.previous, 1);
-        const currentPct = Math.round((kpi.current / maxBar) * 100);
-        const prevPct = Math.round((kpi.previous / maxBar) * 100);
-        const diff = kpi.current - kpi.previous;
-
-        return (
-          <div
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setSelectedKpi(null)}
-          >
-            <div
-              className="bg-white border border-[#FFD9EC] rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div
-                className="flex items-start justify-between p-5 pb-4"
-                style={{ background: "linear-gradient(135deg, #FFF7FB 0%, #FFF0F8 100%)", borderBottom: "1px solid #FFD9EC" }}
-              >
-                <div className="flex-1 min-w-0 pr-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#223047]/40 mb-1">KPI Breakdown</p>
-                  <h3 className="text-lg font-bold text-[#223047] leading-tight">{kpi.title}</h3>
-                  {hasPrev && Boolean(kpi.growth.text) && (
-                    <span className={`inline-flex items-center gap-1 mt-1.5 text-xs font-bold px-2 py-0.5 rounded-full border ${
-                      isUp ? "bg-green-50 border-green-200 text-green-700" :
-                      isDown ? "bg-red-50 border-red-200 text-red-700" :
-                      "bg-slate-50 border-slate-200 text-slate-600"
-                    }`}>
-                      {isUp ? <TrendingUp className="w-3 h-3" /> : isDown ? <TrendingDown className="w-3 h-3" /> : null}
-                      {kpi.growth.text} vs prior period
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => setSelectedKpi(null)}
-                  className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#FFD9EC]/60 text-[#223047]/40 hover:text-[#F53799] transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="p-5 space-y-4">
-                {/* Big value display */}
-                <div className="text-4xl font-black text-[#223047] leading-none">
-                  {kpi.formatter(kpi.current)}
-                </div>
-
-                {/* Comparison bars */}
-                {hasPrev && (
-                  <div className="space-y-3">
-                    {/* Current */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs font-semibold text-[#223047]/70">{kpi.currentLabel}</span>
-                        <div className="text-right">
-                          <span className="text-sm font-bold text-[#F53799]">{kpi.formatter(kpi.current)}</span>
-                          {kpi.rangeStart && (
-                            <span className="text-[10px] text-[#223047]/40 ml-1.5">{kpi.rangeStart} – {kpi.rangeEnd}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="h-2.5 bg-[#FFD9EC] rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[#F53799] rounded-full transition-all duration-500"
-                          style={{ width: `${currentPct}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Previous */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs font-semibold text-[#223047]/50">{kpi.previousLabel}</span>
-                        <div className="text-right">
-                          <span className="text-sm font-bold text-[#223047]/60">{kpi.formatter(kpi.previous)}</span>
-                          {kpi.prevRangeStart && (
-                            <span className="text-[10px] text-[#223047]/30 ml-1.5">{kpi.prevRangeStart} – {kpi.prevRangeEnd}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-[#223047]/30 rounded-full transition-all duration-500"
-                          style={{ width: `${prevPct}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Net difference */}
-                    <div className={`flex items-center justify-between text-xs px-3 py-2 rounded-xl border ${
-                      diff >= 0 ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"
-                    }`}>
-                      <span className="font-medium">Net change vs. prior period</span>
-                      <span className="font-bold">
-                        {diff >= 0 ? "+" : ""}{kpi.formatter(Math.abs(diff))}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Description */}
-                <p className="text-xs text-[#223047]/60 leading-relaxed border-t border-[#FFD9EC] pt-3">
-                  {kpi.description}
-                </p>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
 
       {/* Menu Item Performance Detail Modal */}
       {selectedMenuItem && (() => {

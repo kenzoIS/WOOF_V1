@@ -195,7 +195,10 @@ export function Services() {
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [expandedService, setExpandedService] = useState<string | null>(null);
-  const [serviceUtilizationMode, setServiceUtilizationMode] = useState<"overall" | "header">("overall");
+  const [servicesPeriod, setServicesPeriod] = useState<"7d" | "30d" | "90d" | "12m" | "all-time" | "custom">("30d");
+  const [customServicesStart, setCustomServicesStart] = useState<string>("");
+  const [customServicesEnd, setCustomServicesEnd] = useState<string>("");
+  const [selectedService, setSelectedService] = useState<string | null>(null);
   const [globalDateRange, setGlobalDateRange] = useState("last-7-days");
   const [showInfoModal, setShowInfoModal] = useState(false);
 
@@ -658,7 +661,7 @@ export function Services() {
     return { mase: "—", accuracy: "—", smape: "—", mae: "—" };
   }, [chartGranularity, forecastRun]);
 
-  // Aggregated KPI values dynamically calculated from API history based on globalDateRange
+  // Aggregated KPI values dynamically calculated from API history based on servicesPeriod
   const aggregatedKpis = useMemo(() => {
     const defaultKpis = {
       totalRevenue: forecastRun?.kpis?.totalRevenue || 0,
@@ -682,7 +685,22 @@ export function Services() {
       forecastRun.historical[forecastRun.historical.length - 1]?.date ||
       INGESTED_HISTORY_END_DATE;
     const bounds = getItemHistoryBounds(forecastRun);
-    const range = parseGlobalRange(globalDateRange, latestHistoryDate, bounds);
+
+    let range: { start: string; end: string; isCustom: boolean };
+    if (servicesPeriod === "custom" && customServicesStart && customServicesEnd) {
+      range = { start: customServicesStart, end: customServicesEnd, isCustom: true };
+    } else {
+      const rangeMap: Record<string, string> = {
+        "7d": "last-7-days",
+        "30d": "last-30-days",
+        "90d": "last-90-days",
+        "12m": "last-12-months",
+        "all-time": "all-time",
+      };
+      const mapped = rangeMap[servicesPeriod] || "last-30-days";
+      range = parseGlobalRange(mapped, latestHistoryDate, bounds);
+    }
+
     const sliced = filterByDateRange(forecastRun.historical, range);
     const totalRevenue = sliced.reduce((sum, d) => sum + getHistoricalRevenue(d), 0);
     const totalOrders = sliced.reduce((sum, d) => sum + (d.orders || 0), 0);
@@ -712,21 +730,119 @@ export function Services() {
       ordersGrowth: formatGrowth(totalOrders, prevOrders),
       checkGrowth: formatGrowth(avgOrderValue, prevAvgOrderValue),
     };
-  }, [forecastRun, globalDateRange]);
+  }, [forecastRun, servicesPeriod, customServicesStart, customServicesEnd]);
 
-  const servicesRevenue = aggregatedKpis.totalRevenue ? `₱${aggregatedKpis.totalRevenue.toLocaleString()}` : "₱0";
-  const activeBookings = aggregatedKpis.totalOrders || 0;
+  const activeKpis = useMemo(() => {
+    if (selectedService && forecastRun?.itemHistory?.length) {
+      const bounds = getItemHistoryBounds(forecastRun);
+      const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
+      let range: { start: string; end: string; isCustom: boolean };
+      if (servicesPeriod === "custom" && customServicesStart && customServicesEnd) {
+        range = { start: customServicesStart, end: customServicesEnd, isCustom: true };
+      } else {
+        const rangeMap: Record<string, string> = {
+          "7d": "last-7-days",
+          "30d": "last-30-days",
+          "90d": "last-90-days",
+          "12m": "last-12-months",
+          "all-time": "all-time",
+        };
+        const mapped = rangeMap[servicesPeriod] || "last-30-days";
+        range = parseGlobalRange(mapped, latestHistoryDate, bounds);
+      }
+
+      const dayCount = countDays(range.start, range.end);
+      const previousEnd = addDays(range.start, -1);
+      const previousStart = addDays(previousEnd, -(dayCount - 1));
+      const prevRange = { start: previousStart, end: previousEnd, isCustom: range.isCustom };
+
+      const serviceRows = (forecastRun.itemHistory || []).filter(
+        (r) => r.name.toLowerCase() === selectedService.toLowerCase()
+      );
+      const sliced = filterByDateRange(serviceRows, range);
+      const prevSliced = filterByDateRange(serviceRows, prevRange);
+
+      const servRev = sliced.reduce((sum, d) => sum + (Number(d.revenue) || 0), 0);
+      const servOrders = sliced.reduce((sum, d) => sum + (Number(d.orderCount) || 0), 0);
+      const servAov = servOrders > 0 ? Math.round(servRev / servOrders) : 0;
+
+      const prevServRev = prevSliced.reduce((sum, d) => sum + (Number(d.revenue) || 0), 0);
+      const prevServOrders = prevSliced.reduce((sum, d) => sum + (Number(d.orderCount) || 0), 0);
+      const prevServAov = prevServOrders > 0 ? Math.round(prevServRev / prevServOrders) : 0;
+
+      const revGrowth = formatGrowth(servRev, prevServRev);
+      const ordGrowth = formatGrowth(servOrders, prevServOrders);
+      const aovGrowth = formatGrowth(servAov, prevServAov);
+
+      return {
+        totalRevenue: servRev,
+        totalOrders: servOrders,
+        avgOrderValue: servAov,
+        prevRevenue: prevServRev,
+        prevOrders: prevServOrders,
+        prevAvgOrderValue: prevServAov,
+        revenueTitle: `${selectedService} Revenue`,
+        ordersTitle: `${selectedService} Bookings`,
+        aovTitle: `${selectedService} Avg Ticket`,
+        revenueSubtitle: revGrowth.text,
+        ordersSubtitle: ordGrowth.text,
+        aovSubtitle: aovGrowth.text,
+        filterName: selectedService,
+        growth: revGrowth,
+        ordersGrowth: ordGrowth,
+        checkGrowth: aovGrowth,
+        rangeStart: range.start,
+        rangeEnd: range.end,
+        prevRangeStart: previousStart,
+        prevRangeEnd: previousEnd,
+      };
+    }
+
+    return {
+      totalRevenue: aggregatedKpis.totalRevenue,
+      totalOrders: aggregatedKpis.totalOrders,
+      avgOrderValue: aggregatedKpis.avgOrderValue,
+      prevRevenue: aggregatedKpis.prevRevenue,
+      prevOrders: aggregatedKpis.prevOrders,
+      prevAvgOrderValue: aggregatedKpis.prevAvgOrderValue,
+      revenueTitle: "Historical Services Revenue",
+      ordersTitle: "Active Bookings",
+      aovTitle: "Avg Booking Value",
+      revenueSubtitle: aggregatedKpis.revenueGrowth.text,
+      ordersSubtitle: aggregatedKpis.ordersGrowth.text,
+      aovSubtitle: aggregatedKpis.checkGrowth.text,
+      filterName: null,
+      growth: aggregatedKpis.revenueGrowth,
+      ordersGrowth: aggregatedKpis.ordersGrowth,
+      checkGrowth: aggregatedKpis.checkGrowth,
+      rangeStart: aggregatedKpis.rangeStart,
+      rangeEnd: aggregatedKpis.rangeEnd,
+      prevRangeStart: aggregatedKpis.prevRangeStart,
+      prevRangeEnd: aggregatedKpis.prevRangeEnd,
+    };
+  }, [selectedService, servicesPeriod, customServicesStart, customServicesEnd, forecastRun, aggregatedKpis]);
+
+  const servicesRevenue = activeKpis.totalRevenue ? `₱${activeKpis.totalRevenue.toLocaleString()}` : "₱0";
+  const activeBookings = activeKpis.totalOrders || 0;
   const serviceUtilization = useMemo(() => {
     if (!forecastRun?.topItems?.length && !forecastRun?.itemHistory?.length) return [];
     const bounds = getItemHistoryBounds(forecastRun);
     const latestHistoryDate = bounds.max || INGESTED_HISTORY_END_DATE;
-    const scopedRows =
-      serviceUtilizationMode === "header"
-        ? filterByDateRange(
-            forecastRun.itemHistory || [],
-            parseGlobalRange(globalDateRange, latestHistoryDate, bounds),
-          )
-        : forecastRun.itemHistory || [];
+    let range: { start: string; end: string; isCustom: boolean };
+    if (servicesPeriod === "custom" && customServicesStart && customServicesEnd) {
+      range = { start: customServicesStart, end: customServicesEnd, isCustom: true };
+    } else {
+      const rangeMap: Record<string, string> = {
+        "7d": "last-7-days",
+        "30d": "last-30-days",
+        "90d": "last-90-days",
+        "12m": "last-12-months",
+        "all-time": "all-time",
+      };
+      const mapped = rangeMap[servicesPeriod] || "last-30-days";
+      range = parseGlobalRange(mapped, latestHistoryDate, bounds);
+    }
+    const scopedRows = filterByDateRange(forecastRun.itemHistory || [], range);
     const sourceItems = scopedRows.length
       ? aggregateServiceHistory(scopedRows)
       : (forecastRun.topItems || []).map((item) => ({
@@ -752,7 +868,7 @@ export function Services() {
           : last7Days.map((day) => Math.round(day.orders * share)),
       };
     });
-  }, [forecastRun, globalDateRange, serviceUtilizationMode]);
+  }, [forecastRun, servicesPeriod, customServicesStart, customServicesEnd]);
   const sortedServiceUtilization = useMemo(() => {
     if (!sortColumn) return serviceUtilization;
     return [...serviceUtilization].sort((a: any, b: any) => {
@@ -956,24 +1072,58 @@ export function Services() {
       <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
 
       {/* KPI ROW */}
-      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
+      <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3">
+        {/* Interactive Filter Status Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 border-b border-[#FFD9EC]/60">
+          <div className="flex items-center gap-2 text-xs text-[#223047]/70 font-medium">
+            <span>Services Timeline: <strong className="text-[#F53799] uppercase">{servicesPeriod === "all-time" ? "All-Time" : servicesPeriod === "custom" ? "Custom Range" : `Last ${servicesPeriod.toUpperCase()}`}</strong></span>
+            {activeKpis.filterName && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#FFF2FA] border border-[#FFD9EC] text-[#F53799] font-bold">
+                <span>Filtered: {activeKpis.filterName}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedService(null);
+                  }}
+                  className="hover:text-red-500 font-bold ml-1"
+                  title="Clear filter"
+                >
+                  ×
+                </button>
+              </span>
+            )}
+          </div>
+          {activeKpis.filterName && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedService(null);
+              }}
+              className="text-xs text-[#F53799] hover:underline font-semibold"
+            >
+              Reset to All Services Data
+            </button>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          {/* Services Revenue Today */}
+          {/* Services Revenue */}
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
             onClick={() => setSelectedKpi({
-              title: "Historical Services Revenue",
-              current: aggregatedKpis.totalRevenue,
-              previous: aggregatedKpis.prevRevenue,
+              title: activeKpis.revenueTitle,
+              current: activeKpis.totalRevenue,
+              previous: activeKpis.prevRevenue,
               currentLabel: "Current Period",
               previousLabel: "Previous Period",
-              rangeStart: aggregatedKpis.rangeStart || "",
-              rangeEnd: aggregatedKpis.rangeEnd || "",
-              prevRangeStart: aggregatedKpis.prevRangeStart || "",
-              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              rangeStart: activeKpis.rangeStart || "",
+              rangeEnd: activeKpis.rangeEnd || "",
+              prevRangeStart: activeKpis.prevRangeStart || "",
+              prevRangeEnd: activeKpis.prevRangeEnd || "",
               formatter: (v) => `₱${Number(v).toLocaleString()}`,
-              icon: <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-[#F53799]" />,
-              growth: aggregatedKpis.revenueGrowth,
+              icon: <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: activeKpis.growth,
               description: "Total gross revenue generated from pet grooming, boarding, daycare, and wellness service bookings in the selected period. Compared against the prior equivalent timeframe.",
             })}
           >
@@ -982,12 +1132,12 @@ export function Services() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
-                <span>Historical Services Revenue</span>
+                <span>{activeKpis.revenueTitle}</span>
                 <InfoTooltip label="Total grooming, boarding, and service revenue from uploaded history for the selected period." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{servicesRevenue}</div>
-              {Boolean(aggregatedKpis.revenueGrowth?.text) && (
-                <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
+              {Boolean(activeKpis.growth?.text) && (
+                <div className={activeKpis.growth.className}>{activeKpis.growth.text}</div>
               )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
@@ -997,18 +1147,18 @@ export function Services() {
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
             onClick={() => setSelectedKpi({
-              title: "Active Bookings",
-              current: aggregatedKpis.totalOrders,
-              previous: aggregatedKpis.prevOrders,
+              title: activeKpis.ordersTitle,
+              current: activeKpis.totalOrders,
+              previous: activeKpis.prevOrders,
               currentLabel: "Current Period",
               previousLabel: "Previous Period",
-              rangeStart: aggregatedKpis.rangeStart || "",
-              rangeEnd: aggregatedKpis.rangeEnd || "",
-              prevRangeStart: aggregatedKpis.prevRangeStart || "",
-              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              rangeStart: activeKpis.rangeStart || "",
+              rangeEnd: activeKpis.rangeEnd || "",
+              prevRangeStart: activeKpis.prevRangeStart || "",
+              prevRangeEnd: activeKpis.prevRangeEnd || "",
               formatter: (v) => Number(v).toLocaleString(),
-              icon: <Calendar className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />,
-              growth: aggregatedKpis.ordersGrowth,
+              icon: <Calendar className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: activeKpis.ordersGrowth,
               description: "Total completed service bookings recorded across grooming stations and boarding suites.",
             })}
           >
@@ -1017,33 +1167,33 @@ export function Services() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
-                <span>Active Bookings</span>
+                <span>{activeKpis.ordersTitle}</span>
                 <InfoTooltip label="Service bookings counted from the selected uploaded transaction history." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeBookings}</div>
-              {Boolean(aggregatedKpis.ordersGrowth?.text) && (
-                <div className={aggregatedKpis.ordersGrowth.className}>{aggregatedKpis.ordersGrowth.text}</div>
+              {Boolean(activeKpis.ordersGrowth?.text) && (
+                <div className={activeKpis.ordersGrowth.className}>{activeKpis.ordersGrowth.text}</div>
               )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
-          {/* Avg Utilization Rate */}
+          {/* Avg Booking Value */}
           <div
             className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
             onClick={() => setSelectedKpi({
-              title: "Avg Booking Value",
-              current: aggregatedKpis.avgOrderValue,
-              previous: aggregatedKpis.prevAvgOrderValue,
+              title: activeKpis.aovTitle,
+              current: activeKpis.avgOrderValue,
+              previous: activeKpis.prevAvgOrderValue,
               currentLabel: "Current Period",
               previousLabel: "Previous Period",
-              rangeStart: aggregatedKpis.rangeStart || "",
-              rangeEnd: aggregatedKpis.rangeEnd || "",
-              prevRangeStart: aggregatedKpis.prevRangeStart || "",
-              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              rangeStart: activeKpis.rangeStart || "",
+              rangeEnd: activeKpis.rangeEnd || "",
+              prevRangeStart: activeKpis.prevRangeStart || "",
+              prevRangeEnd: activeKpis.prevRangeEnd || "",
               formatter: (v) => `₱${Number(v).toLocaleString()}`,
-              icon: <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-[#06B6D4]" />,
-              growth: aggregatedKpis.checkGrowth,
+              icon: <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: activeKpis.checkGrowth,
               description: "Average revenue realized per individual service appointment (total service revenue ÷ total service bookings).",
             })}
           >
@@ -1052,12 +1202,12 @@ export function Services() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
-                <span>Avg Booking Value</span>
+                <span>{activeKpis.aovTitle}</span>
                 <InfoTooltip label="Average revenue earned per service booking." />
               </div>
-              <div className="text-base md:text-xl font-bold text-[#223047]">₱{aggregatedKpis.avgOrderValue.toLocaleString()}</div>
-              {Boolean(aggregatedKpis.checkGrowth?.text) && (
-                <div className={aggregatedKpis.checkGrowth.className}>{aggregatedKpis.checkGrowth.text}</div>
+              <div className="text-base md:text-xl font-bold text-[#223047]">₱{activeKpis.avgOrderValue.toLocaleString()}</div>
+              {Boolean(activeKpis.checkGrowth?.text) && (
+                <div className={activeKpis.checkGrowth.className}>{activeKpis.checkGrowth.text}</div>
               )}
             </div>
             <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
@@ -1454,6 +1604,79 @@ export function Services() {
         </div>
       </div>
 
+      {/* ══ INTERACTIVE FILTER BAR FOR SERVICES & UTILIZATION ══ */}
+      <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm md:text-base font-bold text-[#223047]">
+              Interactive Services & Utilization Intelligence
+            </h2>
+            <Badge className="bg-[#FFF2FA] border border-[#FFD9EC] text-[#F53799] text-[10px] font-semibold">
+              Live Interactive Filters
+            </Badge>
+          </div>
+          <p className="text-xs text-[#223047]/60 mt-0.5">
+            Filter historical bookings and service utilization below. The top KPI cards synchronize automatically.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 bg-[#FFF7FB] border border-[#FFD9EC] p-1 rounded-xl">
+          {(
+            [
+              ["7d", "Last 7D"],
+              ["30d", "Last 30D"],
+              ["90d", "Last 90D"],
+              ["12m", "Last 12M"],
+              ["all-time", "All-Time"],
+              ["custom", "Custom"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                setServicesPeriod(key);
+                if (key !== "custom") {
+                  setCustomServicesStart("");
+                  setCustomServicesEnd("");
+                }
+              }}
+              className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                servicesPeriod === key
+                  ? "bg-[#F53799] text-white shadow-xs"
+                  : "text-[#223047]/70 hover:text-[#223047] hover:bg-[#FFF2FA]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {servicesPeriod === "custom" && (
+        <div className="bg-[#FFF7FB] border border-[#FFD9EC] rounded-xl p-3 flex flex-wrap items-center gap-3 text-xs text-[#223047]">
+          <span className="font-semibold text-xs">Custom Date Range:</span>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] opacity-70">Start:</label>
+            <input
+              type="date"
+              value={customServicesStart}
+              onChange={(e) => setCustomServicesStart(e.target.value)}
+              className="px-2 py-1 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] opacity-70">End:</label>
+            <input
+              type="date"
+              value={customServicesEnd}
+              onChange={(e) => setCustomServicesEnd(e.target.value)}
+              className="px-2 py-1 bg-white border border-[#FFD9EC] rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#F53799]"
+            />
+          </div>
+        </div>
+      )}
+
       {/* SERVICE UTILIZATION */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -1464,26 +1687,6 @@ export function Services() {
                 </h2>
                 <InfoTooltip label="Real-time capacity and booking status." />
               </div>
-            </div>
-            <div className="flex items-center gap-1 rounded-lg border border-[#FFD9EC] bg-[#FFF7FB] p-1">
-              {[
-                ["overall", "Overall"],
-                ["header", "Header Filter"],
-              ].map(([value, label]) => (
-                <Button
-                  key={value}
-                  size="sm"
-                  variant={serviceUtilizationMode === value ? "default" : "ghost"}
-                  onClick={() => setServiceUtilizationMode(value as "overall" | "header")}
-                  className={
-                    serviceUtilizationMode === value
-                      ? "h-8 bg-[#06B6D4] hover:bg-[#06B6D4] text-xs"
-                      : "h-8 text-xs hover:bg-[#FFF2FA]"
-                  }
-                >
-                  {label}
-                </Button>
-              ))}
             </div>
           </div>
 
@@ -1527,8 +1730,14 @@ export function Services() {
               {sortedServiceUtilization.map((service, serviceIndex) => (
                 <React.Fragment key={`service-${service.service}-${serviceIndex}`}>
                   <TableRow
-                    className="cursor-pointer hover:bg-[#FFF2FA]"
-                    onClick={() => setExpandedService(expandedService === service.service ? null : service.service)}
+                    className={`cursor-pointer transition-colors ${
+                      selectedService === service.service
+                        ? "bg-[#FFF2FA] font-medium"
+                        : "hover:bg-[#FFF7FB]"
+                    }`}
+                    onClick={() => {
+                      setSelectedService(selectedService === service.service ? null : service.service);
+                    }}
                   >
                     <TableCell className="font-semibold text-xs md:text-sm">{service.service}</TableCell>
                     <TableCell>
@@ -1548,7 +1757,13 @@ export function Services() {
                     <TableCell className="text-center text-xs">₱{service.avgPrice.toLocaleString()}</TableCell>
                     <TableCell className="text-center font-semibold text-xs md:text-sm">₱{service.revenue.toLocaleString()}</TableCell>
                     <TableCell className="text-center">
-                      <div className="inline-flex items-center justify-center p-1 rounded hover:bg-[#FFF2FA] text-[#06B6D4] transition-colors">
+                      <div
+                        className="inline-flex items-center justify-center p-1 rounded hover:bg-[#FFF2FA] text-[#06B6D4] transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedService(expandedService === service.service ? null : service.service);
+                        }}
+                      >
                         {expandedService === service.service ? (
                           <ChevronUp className="w-5 h-5" />
                         ) : (

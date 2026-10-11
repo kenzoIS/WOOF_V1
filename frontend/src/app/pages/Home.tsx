@@ -1,7 +1,7 @@
 import { InsightText } from "../components/InsightText";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
-import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun, Layers, Receipt, Sparkles, RotateCcw, Calendar } from "lucide-react";
+import { PawPrint, DollarSign, ShoppingCart, Zap, Check, X, Play, ChevronDown, ChevronRight, ExternalLink, ArrowRight, CloudSun, CloudRain, Sun, Layers, Receipt, Sparkles, RotateCcw, Calendar } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
@@ -10,6 +10,7 @@ import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
 import { getCurrentWeather, getHomeOverview } from "../lib/api";
 import { InfoTooltip } from "../components/InfoTooltip";
+import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
 
@@ -85,11 +86,20 @@ export interface RetailPlatformBreakdown {
 interface HomeOverview {
   anchorDate: string | null;
   heatmapAnchorDate: string | null;
+  window?: {
+    start: string;
+    end: string;
+    previousStart?: string;
+    previousEnd?: string;
+  } | null;
   kpis: {
     totalRevenue: number;
     totalOrders: number;
     retailRevenue: number;
     avgOrderValue?: number;
+    previousRevenue?: number;
+    previousOrders?: number;
+    previousAvgOrderValue?: number;
     aovChangePercent?: number | null;
     revenueChangePercent: number | null;
     ordersChangePercent: number | null;
@@ -157,6 +167,7 @@ export function Home() {
   const [homeError, setHomeError] = useState<string | null>(null);
   const [currentWeather, setCurrentWeather] = useState<CurrentWeather | null>(null);
   const [manilaDateKey, setManilaDateKey] = useState(getManilaDateKey);
+  const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -275,7 +286,24 @@ export function Home() {
     const hasAovChange = kpis?.aovChangePercent != null && Number.isFinite(Number(kpis.aovChangePercent));
     const aovChange = hasAovChange ? toNumber(kpis.aovChangePercent) : null;
 
+    const formatDate = (iso?: string) =>
+      iso ? new Date(iso).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "2-digit" }) : "";
+
+    const prevRevenue = toNumber(kpis?.previousRevenue);
+    const prevOrders = toNumber(kpis?.previousOrders);
+    const prevAov = toNumber(kpis?.previousAvgOrderValue);
+
     return {
+      rawRevenue: totalRevenue,
+      rawOrders: totalOrders,
+      rawAov: aovValue,
+      prevRevenue,
+      prevOrders,
+      prevAov,
+      rangeStart: formatDate(homeOverview?.window?.start),
+      rangeEnd: formatDate(homeOverview?.window?.end),
+      prevRangeStart: formatDate(homeOverview?.window?.previousStart),
+      prevRangeEnd: formatDate(homeOverview?.window?.previousEnd),
       revenue: formatCurrency(totalRevenue),
       orders: totalOrders.toLocaleString(),
       aov: formatCurrency(aovValue),
@@ -285,6 +313,9 @@ export function Home() {
       ordersPercent: ordChange != null ? `${formatPercent(ordChange)} vs previous period` : null,
       revenueColorClass: revChange != null && revChange >= 0 ? "text-green-600" : "text-rose-600",
       ordersColorClass: ordChange != null && ordChange >= 0 ? "text-green-600" : "text-rose-600",
+      revGrowth: revChange != null ? { text: formatPercent(revChange), className: revChange >= 0 ? "text-green-600 font-semibold" : "text-rose-600 font-semibold" } : { text: "", className: "hidden" },
+      ordGrowth: ordChange != null ? { text: formatPercent(ordChange), className: ordChange >= 0 ? "text-green-600 font-semibold" : "text-rose-600 font-semibold" } : { text: "", className: "hidden" },
+      aovGrowth: aovChange != null ? { text: formatPercent(aovChange), className: aovChange >= 0 ? "text-green-600 font-semibold" : "text-rose-600 font-semibold" } : { text: "", className: "hidden" },
       busiestSector: kpis?.busiestSector || "None",
       pending: pendingSuggestionsCount,
     };
@@ -1122,12 +1153,29 @@ export function Home() {
         </div>
       )}
 
+      <KpiDetailModal kpi={selectedKpi} onClose={() => setSelectedKpi(null)} />
+
       {/* SECTION 2 — PRIMARY KPI ROW */}
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           {/* Total Revenue Today */}
           <div
-            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3"
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Total Omnichannel Revenue",
+              current: scaledKPIs.rawRevenue,
+              previous: scaledKPIs.prevRevenue,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: scaledKPIs.rangeStart,
+              rangeEnd: scaledKPIs.rangeEnd,
+              prevRangeStart: scaledKPIs.prevRangeStart,
+              prevRangeEnd: scaledKPIs.prevRangeEnd,
+              formatter: formatCurrency,
+              icon: <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: scaledKPIs.revGrowth,
+              description: "Total revenue across all sales channels (physical POS, Shopee, TikTok Shop) for the active date range. Compared against the previous equivalent period.",
+            })}
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
@@ -1144,11 +1192,27 @@ export function Home() {
                 <div className={`text-xs ${scaledKPIs.revenueColorClass} font-medium hidden md:block`}>{scaledKPIs.revenuePercent}</div>
               )}
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Omnichannel Orders */}
           <div
-            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3"
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Omnichannel Orders",
+              current: scaledKPIs.rawOrders,
+              previous: scaledKPIs.prevOrders,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: scaledKPIs.rangeStart,
+              rangeEnd: scaledKPIs.rangeEnd,
+              prevRangeStart: scaledKPIs.prevRangeStart,
+              prevRangeEnd: scaledKPIs.prevRangeEnd,
+              formatter: (v) => Number(v).toLocaleString(),
+              icon: <ShoppingCart className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: scaledKPIs.ordGrowth,
+              description: "Total completed order volume fulfilled across physical store POS and digital e-commerce channels.",
+            })}
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <ShoppingCart className="w-4 h-4 md:w-5 md:h-5 text-white" />
@@ -1165,11 +1229,27 @@ export function Home() {
                 <div className={`text-xs ${scaledKPIs.ordersColorClass} font-medium hidden md:block`}>{scaledKPIs.ordersPercent}</div>
               )}
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Average Order Value (AOV) */}
           <div
-            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3"
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Average Order Value (AOV)",
+              current: scaledKPIs.rawAov,
+              previous: scaledKPIs.prevAov,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: scaledKPIs.rangeStart,
+              rangeEnd: scaledKPIs.rangeEnd,
+              prevRangeStart: scaledKPIs.prevRangeStart,
+              prevRangeEnd: scaledKPIs.prevRangeEnd,
+              formatter: formatCurrency,
+              icon: <Receipt className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: scaledKPIs.aovGrowth,
+              description: "Average spend per transaction across Cafe, Services, and Retail. Directly measures customer basket size and multi-line cross-selling.",
+            })}
           >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <Receipt className="w-4 h-4 md:w-5 md:h-5 text-white" />
@@ -1188,6 +1268,7 @@ export function Home() {
                 </div>
               )}
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* WOOF Suggestions */}

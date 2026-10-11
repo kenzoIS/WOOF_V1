@@ -1,4 +1,5 @@
 import { BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException, Optional } from '@nestjs/common';
@@ -67,19 +68,9 @@ export class PetHubWebhookService {
   ) {}
 
   async receiveCompletedTransaction(payload: unknown, incomingSecret?: string) {
-    this.assertWebhookSecret(incomingSecret);
-    const body = this.validatePayload(payload);
-
-    this.logger.log(
-      `PetHub webhook received for transaction ${body.transactionId}, but PetHub data ingestion is currently omitted.`,
+    throw new ForbiddenException(
+      'PetHub data ingestion webhook has been permanently disabled. Incoming data is rejected.',
     );
-
-    return {
-      success: true,
-      omitted: true,
-      transactionId: body.transactionId,
-      message: 'PetHub data ingestion is currently omitted per system configuration.',
-    };
   }
 
   private assertWebhookSecret(incomingSecret?: string) {

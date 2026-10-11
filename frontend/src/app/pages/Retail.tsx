@@ -602,6 +602,11 @@ export function Retail() {
 
     return {
       totalRevenue,
+      previousRevenue,
+      rangeStart: range.start,
+      rangeEnd: range.end,
+      prevRangeStart: previousStart,
+      prevRangeEnd: previousEnd,
       revenueGrowth: formatGrowth(totalRevenue, previousRevenue),
     };
   }, [channelForecast, activeRange, kpis]);
@@ -1034,24 +1039,53 @@ export function Retail() {
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
           {/* Retail Revenue Today */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#F53799] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Historical Retail Revenue",
+              current: aggregatedKpis.totalRevenue,
+              previous: aggregatedKpis.previousRevenue,
+              currentLabel: "Current Period",
+              previousLabel: "Previous Period",
+              rangeStart: aggregatedKpis.rangeStart || "",
+              rangeEnd: aggregatedKpis.rangeEnd || "",
+              prevRangeStart: aggregatedKpis.prevRangeStart || "",
+              prevRangeEnd: aggregatedKpis.prevRangeEnd || "",
+              formatter: (v) => `₱${Number(v).toLocaleString()}`,
+              icon: <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              growth: aggregatedKpis.revenueGrowth,
+              description: "Total retail product revenue generated across physical store POS, Shopee, and TikTok Shop channels for the selected period.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#F53799] to-[#D42A7D] flex items-center justify-center flex-shrink-0">
               <DollarSign className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 text-xs text-[#223047] opacity-80 truncate">
                 <span>Historical Retail Revenue</span>
-                <InfoTooltip label="Total retail product revenue from POS, online, and PetHub transaction history for the selected period." />
+                <InfoTooltip label="Total retail product revenue from POS, Shopee, and TikTok Shop transaction history for the selected period." />
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{retailRevenue}</div>
               {Boolean(aggregatedKpis.revenueGrowth?.text) && (
                 <div className={aggregatedKpis.revenueGrowth.className}>{aggregatedKpis.revenueGrowth.text}</div>
               )}
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#F53799] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Active SKUs */}
-          <div className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3">
+          <div
+            className="flex items-center gap-2 md:gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg md:rounded-xl px-3 md:px-4 py-2 md:py-3 cursor-pointer hover:border-[#06B6D4] hover:shadow-sm transition-all group"
+            onClick={() => setSelectedKpi({
+              title: "Active Catalog SKUs",
+              current: activeSKUs,
+              previous: 0,
+              currentLabel: "Catalog SKUs",
+              formatter: (v) => Number(v).toLocaleString(),
+              icon: <Package className="w-4 h-4 md:w-5 md:h-5 text-white" />,
+              description: "Total distinct stock keeping units (SKUs) actively maintained and sold in the retail product catalog.",
+            })}
+          >
             <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg bg-gradient-to-br from-[#06B6D4] to-[#06B6D4] flex items-center justify-center flex-shrink-0">
               <Package className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
@@ -1062,6 +1096,7 @@ export function Retail() {
               </div>
               <div className="text-base md:text-xl font-bold text-[#223047]">{activeSKUs}</div>
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-[#223047]/20 group-hover:text-[#06B6D4] flex-shrink-0 transition-colors" />
           </div>
 
           {/* Stockout Alerts */}

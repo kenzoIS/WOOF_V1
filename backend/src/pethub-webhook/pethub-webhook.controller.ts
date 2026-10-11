@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Headers, Post, UseGuards } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { PetHubWebhookService } from './pethub-webhook.service';
 import { IpWhitelistGuard } from '../common/guards/ip-whitelist.guard';
@@ -16,9 +16,8 @@ export class PetHubWebhookController {
     @Body() payload: unknown,
     @Headers('x-pethub-webhook-secret') secret?: string,
   ) {
-    return this.pethubWebhookService.receiveCompletedTransaction(
-      payload,
-      secret,
+    throw new ForbiddenException(
+      'PetHub data ingestion webhook has been permanently disabled.',
     );
   }
 }

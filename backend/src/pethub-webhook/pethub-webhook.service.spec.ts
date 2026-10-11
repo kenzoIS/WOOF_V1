@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { PetHubWebhookService } from './pethub-webhook.service';
 
 describe('PetHubWebhookService', () => {
@@ -89,26 +89,19 @@ describe('PetHubWebhookService', () => {
     },
   };
 
-  it('omits a valid PetHub webhook payload per configuration', async () => {
+  it('rejects all PetHub webhook payloads as disabled', async () => {
     const { service } = buildService();
 
-    const result = await service.receiveCompletedTransaction(
-      payload,
-      'shared-secret',
-    );
-
-    expect(result).toMatchObject({
-      success: true,
-      omitted: true,
-      transactionId: 'order:ORD-123',
-    });
+    await expect(
+      service.receiveCompletedTransaction(payload, 'shared-secret'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('rejects invalid webhook secrets', async () => {
+  it('rejects webhook requests with ForbiddenException', async () => {
     const { service } = buildService();
 
     await expect(
       service.receiveCompletedTransaction(payload, 'wrong-secret'),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

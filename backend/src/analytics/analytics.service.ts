@@ -623,6 +623,8 @@ export class AnalyticsService {
       window: {
         start: start.toISOString(),
         end: end.toISOString(),
+        previousStart: previousStart.toISOString(),
+        previousEnd: previousEnd.toISOString(),
       },
       kpis: {
         totalRevenue: this.round(totalRevenue),
@@ -631,6 +633,11 @@ export class AnalyticsService {
         totalItems: currentTotals.totalItems,
         retailRevenue: this.round(retailRevenue),
         avgOrderValue: totalOrders ? this.round(totalRevenue / totalOrders) : 0,
+        previousRevenue: this.round(previousTotals.totalRevenue),
+        previousOrders: previousTotals.totalOrders,
+        previousAvgOrderValue: previousTotals.totalOrders
+          ? this.round(previousTotals.totalRevenue / previousTotals.totalOrders)
+          : 0,
         aovChangePercent: this.percentChange(
           totalOrders ? totalRevenue / totalOrders : 0,
           previousTotals.totalOrders
@@ -9398,6 +9405,8 @@ export class AnalyticsService {
         window: {
           start: start.toISOString(),
           end: end.toISOString(),
+          previousStart: previousStart.toISOString(),
+          previousEnd: previousEnd.toISOString(),
         },
         kpis: {
           totalRevenue: this.round(totalRevenue),
@@ -9407,6 +9416,11 @@ export class AnalyticsService {
           retailRevenue: this.round(retailRevenue),
           avgOrderValue: totalOrders
             ? this.round(totalRevenue / totalOrders)
+            : 0,
+          previousRevenue: this.round(prevTotalRevenue),
+          previousOrders: prevOrderIds.size,
+          previousAvgOrderValue: prevOrderIds.size
+            ? this.round(prevTotalRevenue / prevOrderIds.size)
             : 0,
           aovChangePercent: this.percentChange(
             totalOrders ? totalRevenue / totalOrders : 0,

@@ -31,8 +31,14 @@ export function KpiDetailModal({ kpi, onClose }: KpiDetailModalProps) {
     typeof v === "number" ? v.toLocaleString() : String(v ?? "");
   const format = kpi.formatter || defaultFormatter;
 
-  const currentNum = typeof kpi.current === "number" ? kpi.current : parseFloat(String(kpi.current).replace(/[^0-9.-]+/g, "")) || 0;
-  const previousNum = typeof kpi.previous === "number" ? kpi.previous : parseFloat(String(kpi.previous).replace(/[^0-9.-]+/g, "")) || 0;
+  const currentNum =
+    typeof kpi.current === "number"
+      ? kpi.current
+      : parseFloat(String(kpi.current).replace(/[^0-9.-]+/g, "")) || 0;
+  const previousNum =
+    typeof kpi.previous === "number"
+      ? kpi.previous
+      : parseFloat(String(kpi.previous).replace(/[^0-9.-]+/g, "")) || 0;
   const hasPrev = previousNum > 0;
 
   const sanitizeGrowthText = (val: string): string => {
@@ -77,12 +83,12 @@ export function KpiDetailModal({ kpi, onClose }: KpiDetailModalProps) {
           <div className="flex-1 min-w-0 pr-3">
             <div className="flex items-center gap-2 mb-1">
               {kpi.icon && (
-                <div className="w-6 h-6 rounded-md bg-[#F53799]/10 text-[#F53799] flex items-center justify-center">
+                <div className="w-5 h-5 rounded-md bg-[#F53799]/10 text-[#F53799] flex items-center justify-center">
                   {kpi.icon}
                 </div>
               )}
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-[#223047]/50">
-                KPI Performance Breakdown
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-[#223047]/40">
+                KPI Breakdown
               </p>
             </div>
             <h3 className="text-lg font-bold text-[#223047] leading-tight">
@@ -116,19 +122,14 @@ export function KpiDetailModal({ kpi, onClose }: KpiDetailModalProps) {
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Main display */}
-          <div>
-            <span className="text-[11px] font-semibold text-[#223047]/50 uppercase tracking-wider block mb-0.5">
-              Current Metric Value
-            </span>
-            <div className="text-3xl md:text-4xl font-black text-[#223047] leading-none">
-              {format(kpi.current)}
-            </div>
+          {/* Big value display */}
+          <div className="text-4xl font-black text-[#223047] leading-none">
+            {format(kpi.current)}
           </div>
 
           {/* Comparison bars */}
           {hasPrev && (
-            <div className="space-y-3 pt-2">
+            <div className="space-y-3">
               {/* Current */}
               <div>
                 <div className="flex justify-between items-center mb-1">
@@ -187,9 +188,9 @@ export function KpiDetailModal({ kpi, onClose }: KpiDetailModalProps) {
                     : "bg-red-50 border-red-200 text-red-700"
                 }`}
               >
-                <span className="font-medium">Net Change</span>
+                <span className="font-medium">Net change vs. prior period</span>
                 <span className="font-bold">
-                  {diff >= 0 ? "+" : ""}
+                  {diff >= 0 ? "+" : "-"}
                   {format(Math.abs(diff))}
                 </span>
               </div>
@@ -216,13 +217,15 @@ export function KpiDetailModal({ kpi, onClose }: KpiDetailModalProps) {
           )}
 
           {/* Description */}
-          <p className="text-xs text-[#223047]/70 leading-relaxed border-t border-[#FFD9EC] pt-3">
-            {kpi.description}
-          </p>
+          {kpi.description && (
+            <p className="text-xs text-[#223047]/60 leading-relaxed border-t border-[#FFD9EC] pt-3">
+              {kpi.description}
+            </p>
+          )}
 
           <Button
             onClick={onClose}
-            className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-white rounded-xl py-2 text-xs font-semibold"
+            className="w-full bg-[#F53799] hover:bg-[#D42A7D] text-white rounded-xl py-2 text-xs font-semibold transition-colors"
           >
             Understood
           </Button>
