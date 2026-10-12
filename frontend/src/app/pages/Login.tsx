@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
-import { ArrowRight, Eye, EyeOff, KeyRound, Lock, Mail } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Lock, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Toaster } from "../components/ui/sonner";
@@ -10,7 +10,10 @@ import {
   resetDashboardPassword,
   verifyResetOtp,
 } from "../lib/api";
-import loginMockupImg from "../../imports/login mockup.png";
+import loginBgImg from "../../imports/login bg.png";
+import loginElementImg from "../../imports/login element.png";
+import loginMascotImg from "../../imports/login mascot.png";
+import loginPawImg from "../../imports/login paw.png";
 
 type ForgotPasswordStep = "email" | "otp" | "newPassword";
 
@@ -440,60 +443,81 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fff2f8] lg:flex lg:items-center lg:justify-center">
-      <main className="relative hidden aspect-[1672/941] w-full max-w-[1920px] overflow-hidden lg:block" aria-label="WOOF sign in">
-        <img src={loginMockupImg.src} alt="Happy Tails WOOF sign-in" className="h-full w-full select-none" />
+    <div className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_70%_55%,rgba(245,55,153,.06),transparent_35%),#fff8fc] text-[#10162f]">
+      <div
+        className="woof-login-composition relative mx-auto min-h-screen w-full max-w-[1920px] overflow-hidden"
+        style={{ "--woof-login-storefront": `url("${loginBgImg.src}")` } as React.CSSProperties}
+      >
+      <img
+        src={loginElementImg.src}
+        alt=""
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-[-2vh] left-1/2 z-[2] hidden w-[max(100vw,1440px)] max-w-none -translate-x-1/2 select-none xl:block"
+      />
+      <img src={loginElementImg.src} alt="" aria-hidden="true" className="pointer-events-none absolute left-1/2 top-[170px] z-[2] w-[820px] max-w-none -translate-x-1/2 select-none xl:hidden" />
+      <img src={loginPawImg.src} alt="" aria-hidden="true" className="pointer-events-none absolute right-[5%] top-[2%] z-[4] hidden w-14 rotate-[-18deg] select-none opacity-[0.13] xl:block" />
+      <img src={loginPawImg.src} alt="" aria-hidden="true" className="pointer-events-none absolute bottom-[10%] left-[7%] z-[4] hidden w-12 rotate-[18deg] select-none opacity-[0.14] xl:block" />
+      <img src={loginPawImg.src} alt="" aria-hidden="true" className="pointer-events-none absolute bottom-[21%] left-[55%] z-[4] hidden w-10 rotate-[-14deg] select-none opacity-[0.12] xl:block" />
 
-        <form onSubmit={handleLogin} className="absolute inset-0" aria-label="Sign in form">
-          <label htmlFor="desktop-login-email" className="sr-only">Email address</label>
-          <input
-            id="desktop-login-email"
-            type="email"
-            value={email}
-            onChange={(event) => { setEmail(event.target.value); setRequiresTwoFactor(false); setTwoFactorCode(""); }}
-            className="absolute left-[66.55%] top-[41.2%] h-[5.65%] w-[28.85%] rounded-xl border border-transparent bg-transparent px-[3.9%] text-[clamp(10px,1.15vw,18px)] text-[#223047] outline-none transition focus:border-[#f53799] focus:bg-white/45 focus:ring-[0.2vw] focus:ring-[#f53799]/15"
-            disabled={isLoggingIn}
+      <main className="relative flex min-h-screen flex-col xl:block" aria-label="WOOF sign in">
+        <section className="relative flex min-h-[250px] items-center justify-center overflow-hidden px-5 pb-4 pt-7 sm:min-h-[290px] xl:hidden">
+          <img
+            src={loginBgImg.src}
+            alt="Happy Tails Pet Cafe storefront"
+            className="woof-login-storefront relative z-10 mx-auto h-auto max-h-[330px] w-[min(112%,650px)] max-w-none object-contain"
           />
-          <label htmlFor="desktop-login-password" className="sr-only">Password</label>
-          <input
-            id="desktop-login-password"
-            type={showPassword ? "text" : "password"}
-            value={password}
-            onChange={(event) => { setPassword(event.target.value); setRequiresTwoFactor(false); setTwoFactorCode(""); }}
-            className="woof-password-field absolute left-[66.55%] top-[48.05%] h-[5.65%] w-[28.85%] rounded-xl border border-transparent bg-transparent px-[3.9%] pr-[12%] text-[clamp(10px,1.15vw,18px)] text-[#223047] outline-none transition focus:border-[#f53799] focus:bg-white/45 focus:ring-[0.2vw] focus:ring-[#f53799]/15"
-            disabled={isLoggingIn}
-          />
-          <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute left-[92.35%] top-[48.25%] flex h-[5.1%] w-[3.1%] items-center justify-center rounded-full text-transparent outline-none focus:ring-[0.2vw] focus:ring-[#f53799]/40" disabled={isLoggingIn} aria-label={showPassword ? "Hide password" : "Show password"}>
-            {showPassword ? <EyeOff className="h-4 w-4 text-[#7181a1]" /> : <Eye className="h-4 w-4 text-transparent" />}
-          </button>
+        </section>
 
-          {requiresTwoFactor && (
-            <div className="absolute left-[66.55%] top-[54.65%] w-[28.85%] rounded-xl bg-white p-[0.55vw] shadow-lg">
-              <label htmlFor="desktop-two-factor" className="sr-only">Authenticator code</label>
-              <div className="relative">
-                <KeyRound className="absolute left-[5%] top-1/2 h-4 w-4 -translate-y-1/2 text-[#7181a1]" />
-                <input id="desktop-two-factor" type="text" value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Authenticator code" className="w-full rounded-lg border border-[#d9e0ef] py-[0.65vw] pl-[14%] pr-[5%] text-center text-[clamp(10px,1vw,16px)] font-bold tracking-[0.2em] text-[#223047] outline-none focus:border-[#f53799]" disabled={isLoggingIn} inputMode="numeric" maxLength={6} />
+        <img src={loginMascotImg.src} alt="" aria-hidden="true" className="pointer-events-none absolute bottom-[clamp(100px,13vh,150px)] right-[30.5vw] z-[6] hidden w-[clamp(300px,22vw,400px)] select-none xl:block" />
+
+        <section className="relative z-[5] flex justify-center px-4 pb-8 sm:px-6 xl:absolute xl:right-[clamp(45px,5vw,95px)] xl:top-1/2 xl:block xl:w-[clamp(420px,28vw,500px)] xl:-translate-y-1/2 xl:p-0">
+          <div className="w-full rounded-[28px] border border-[#f53799]/15 bg-white/[.96] p-6 shadow-[0_25px_70px_rgba(98,40,75,.13),0_6px_25px_rgba(245,55,153,.08)] backdrop-blur-sm sm:p-8 xl:rounded-[32px] xl:px-[clamp(2.75rem,3vw,3.25rem)] xl:py-[clamp(2.5rem,4vh,3.1rem)]">
+            <header className="mb-6 text-center xl:mb-7">
+              <div className="text-[clamp(2.35rem,4vw,3.6rem)] font-extrabold leading-none tracking-[-.07em] text-[#F53799]">WOOF</div>
+              <p className="mt-2 text-sm font-semibold tracking-[.01em] text-[#10162f] sm:text-base">Cross-Intelligence Platform</p>
+              <h1 className="mt-6 text-2xl font-extrabold tracking-[-.03em] text-[#d91471] sm:text-[1.75rem] xl:text-[clamp(1.85rem,2.15vw,2.35rem)]">Welcome Back</h1>
+            </header>
+
+            <form onSubmit={handleLogin} className="space-y-4" aria-label="Sign in form">
+              <div>
+                <label htmlFor="login-email" className="mb-2 block text-sm font-semibold text-[#223047]">Email address</label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#7181a1]" aria-hidden="true" />
+                  <input id="login-email" name="email" type="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); setRequiresTwoFactor(false); setTwoFactorCode(""); }} placeholder="Enter your email" className="h-14 w-full rounded-2xl border border-[#d9dfe8] bg-[#fcfcfe] py-3 pl-12 pr-4 text-[#223047] outline-none transition placeholder:text-[#7181a1] focus:border-[#F53799] focus:bg-white focus:ring-4 focus:ring-[#F53799]/12" disabled={isLoggingIn} />
+                </div>
               </div>
-            </div>
-          )}
 
-          <button type="button" onClick={() => setShowForgotPassword(true)} className="absolute left-[87.1%] top-[55.55%] h-[3.3%] w-[8.4%] rounded text-transparent outline-none transition hover:bg-[#0c9bbc]/10 focus:ring-[0.2vw] focus:ring-[#0c9bbc]/35" disabled={isLoggingIn} aria-label="Forgot password?">Forgot Password?</button>
-          <Button type="submit" className="absolute left-[66.55%] top-[59.8%] h-[6.1%] w-[28.85%] rounded-full bg-transparent p-0 text-transparent shadow-none hover:bg-[#d6176a]/10 focus-visible:ring-[0.2vw] focus-visible:ring-[#f53799]/40" disabled={isLoggingIn}>
-            {isLoggingIn ? <span className="text-[clamp(10px,1.15vw,18px)] font-bold text-white">Signing In...</span> : <span className="sr-only">Sign In</span>}
-          </Button>
-        </form>
+              <div>
+                <label htmlFor="login-password" className="mb-2 block text-sm font-semibold text-[#223047]">Password</label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#7181a1]" aria-hidden="true" />
+                  <input id="login-password" name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => { setPassword(event.target.value); setRequiresTwoFactor(false); setTwoFactorCode(""); }} placeholder="Enter your password" className="woof-password-field h-14 w-full rounded-2xl border border-[#d9dfe8] bg-[#fcfcfe] py-3 pl-12 pr-12 text-[#223047] outline-none transition placeholder:text-[#7181a1] focus:border-[#F53799] focus:bg-white focus:ring-4 focus:ring-[#F53799]/12" disabled={isLoggingIn} />
+                  <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-[#7181a1] transition hover:bg-[#fff0f7] hover:text-[#F53799] focus:outline-none focus:ring-2 focus:ring-[#F53799]/35" disabled={isLoggingIn} aria-label={showPassword ? "Hide password" : "Show password"}>
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+              </div>
+
+              {requiresTwoFactor && (
+                <div>
+                  <label htmlFor="login-two-factor" className="mb-2 block text-sm font-semibold text-[#223047]">Authenticator code</label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#7181a1]" aria-hidden="true" />
+                    <input id="login-two-factor" name="twoFactorCode" type="text" value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit code" className="h-14 w-full rounded-2xl border border-[#d9dfe8] bg-[#fcfcfe] py-3 pl-12 pr-4 text-center font-bold tracking-[0.2em] text-[#223047] outline-none transition placeholder:font-normal placeholder:tracking-normal focus:border-[#F53799] focus:bg-white focus:ring-4 focus:ring-[#F53799]/12" disabled={isLoggingIn} inputMode="numeric" autoComplete="one-time-code" maxLength={6} />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-0.5">
+                <button type="button" onClick={() => setShowForgotPassword(true)} className="min-h-11 rounded-lg px-1 text-sm font-bold text-[#0c9bbc] transition hover:text-[#087b96] hover:underline focus:outline-none focus:ring-2 focus:ring-[#0c9bbc]/35" disabled={isLoggingIn}>Forgot password?</button>
+              </div>
+              <Button type="submit" className="h-14 w-full rounded-2xl bg-[#F53799] text-base font-bold text-white shadow-[0_12px_24px_rgba(245,55,153,.27)] transition duration-200 hover:-translate-y-0.5 hover:bg-[#df217f] hover:shadow-[0_16px_28px_rgba(245,55,153,.34)] active:translate-y-0 active:scale-[.99] focus-visible:ring-4 focus-visible:ring-[#F53799]/35" disabled={isLoggingIn}>
+                {isLoggingIn ? "Signing In..." : "Sign In"}
+              </Button>
+            </form>
+          </div>
+        </section>
       </main>
-
-      <section className="w-full px-5 py-8 lg:hidden">
-        <img src={loginMockupImg.src} alt="Happy Tails WOOF sign-in" className="mb-6 w-full rounded-3xl shadow-lg" />
-        <form onSubmit={handleLogin} className="space-y-4 rounded-3xl bg-white p-6 shadow-xl">
-          <div className="relative"><Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#7181a1]" /><label htmlFor="mobile-login-email" className="sr-only">Email address</label><input id="mobile-login-email" type="email" value={email} onChange={(event) => { setEmail(event.target.value); setRequiresTwoFactor(false); setTwoFactorCode(""); }} placeholder="Email" className="w-full rounded-xl border border-[#d9e0ef] py-3 pl-12 pr-4 outline-none focus:border-[#f53799]" disabled={isLoggingIn} /></div>
-          <div className="relative"><Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#7181a1]" /><label htmlFor="mobile-login-password" className="sr-only">Password</label><input id="mobile-login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => { setPassword(event.target.value); setRequiresTwoFactor(false); setTwoFactorCode(""); }} placeholder="Password" className="woof-password-field w-full rounded-xl border border-[#d9e0ef] py-3 pl-12 pr-12 outline-none focus:border-[#f53799]" disabled={isLoggingIn} /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7181a1]" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}</button></div>
-          {requiresTwoFactor && <div className="relative"><KeyRound className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#7181a1]" /><label htmlFor="mobile-two-factor" className="sr-only">Authenticator code</label><input id="mobile-two-factor" type="text" value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Authenticator code" className="w-full rounded-xl border border-[#d9e0ef] py-3 pl-12 pr-4 text-center tracking-[0.2em] outline-none focus:border-[#f53799]" disabled={isLoggingIn} inputMode="numeric" maxLength={6} /></div>}
-          <button type="button" onClick={() => setShowForgotPassword(true)} className="block ml-auto text-sm font-semibold text-[#0c9bbc] hover:underline" disabled={isLoggingIn}>Forgot Password?</button>
-          <Button type="submit" className="w-full rounded-full bg-[#ed1979] py-6 text-base font-bold hover:bg-[#d6176a]" disabled={isLoggingIn}>{isLoggingIn ? "Signing In..." : <span className="flex items-center justify-center gap-2">Sign In <ArrowRight className="h-5 w-5" /></span>}</Button>
-        </form>
-      </section>
 
       <ForgotPasswordModal
         isOpen={showForgotPassword}
@@ -501,6 +525,7 @@ export function Login() {
         onPasswordReset={handlePasswordReset}
       />
       <Toaster />
+    </div>
     </div>
   );
 }

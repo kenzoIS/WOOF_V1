@@ -44,6 +44,127 @@ This file records requested revisions, implementation details, verification, and
 - Passed: frontend `npm run build` and type checking.
 - Passed: `git diff --check`.
 
+### Login Storefront Background Visible Right Shift (2026-10-13)
+
+- Replaced the near-equivalent desktop background offset with a materially less-negative, scale-preserving position: `clamp(-240px, -11vw, -150px)` to `clamp(-180px, -7vw, -100px)`. This shifts the storefront background visibly right without changing `background-size: cover`.
+- No foreground, login-card, form, authentication, API, or routing change was made.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Storefront Background 30px Right Nudge (2026-10-13)
+
+- Shifted only the desktop storefront background approximately 30px farther right by changing its position from `clamp(-270px, -12.5vw, -180px)` to `clamp(-240px, -11vw, -150px)`. Background scale and all foreground layers remain unchanged.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Storefront Background Fine Position Nudge (2026-10-13)
+
+- Kept the existing desktop storefront background scale unchanged and moved only its position slightly right, from `clamp(-300px, -14vw, -200px)` to `clamp(-270px, -12.5vw, -180px)`.
+- No zoom, layout, foreground, form, authentication, API, or routing change was made.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Storefront Background Left Offset Correction (2026-10-13)
+
+- Increased the desktop full-bleed storefront background offset from `clamp(-140px, -5vw, -72px)` to `clamp(-300px, -14vw, -200px)`, producing a clearly visible additional left shift on desktop rather than a negligible adjustment.
+- No foreground layout, card, form, authentication, API, or routing behavior was changed.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Mascot Reference Scale and Background Offset (2026-10-13)
+
+- Reduced the desktop mascot from `clamp(460px, 34vw, 620px)` to the mockup-aligned `clamp(300px, 22vw, 400px)`. Its right-edge card alignment and foreground tail-only overlap are preserved.
+- Shifted the full-bleed desktop storefront background farther left from `left top` to `clamp(-140px, -5vw, -72px) top`; the pink foreground element continues to cover the resulting lower decorative transition space.
+- No authentication, form, API, routing, or card-content changes were made.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Mascot Foreground Tail Overlap (2026-10-13)
+
+- Updated only the desktop mascot placement in `frontend/src/app/pages/Login.tsx`. Its scale changed from `clamp(230px, 17vw, 310px)` to approximately double at `clamp(460px, 34vw, 620px)`.
+- Replaced the left-based mascot offset with `right: 30.5vw`, moving the expanded mascot visual left while aligning its right-side tail to just cross the login-card boundary. This avoids placing the mascot body or paws over login controls.
+- Raised the mascot from layer `3` to layer `6`, placing the small tail overlap in front of the login module as requested. Other layout layers and all functionality remain unchanged.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Full-Bleed Storefront Background Fit (2026-10-13)
+
+- Updated the desktop `.woof-login-composition` storefront background from a contained `clamp(1050px, 68vw, 1350px) auto` size and offset position to `background-size: cover` with `background-position: left top`.
+- The `login bg.png` background layer now fills the desktop composition to its page edges instead of reading as a centered/floating storefront image. It remains below the pink wave, mascot, paw prints, and login card.
+- No form, authentication, API, route, session, or card changes were made.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Storefront Background Layer (2026-10-13)
+
+- Converted the desktop `login bg.png` storefront from an independently positioned image into the `woof-login-composition` CSS background layer. It now uses `background-size: clamp(1050px, 68vw, 1350px) auto`, `background-position: clamp(-90px, -3vw, -30px) 42%`, and `no-repeat` to fit the full composition without presenting as a floating middle image.
+- Kept the storefront as the back-most visual asset. The existing foreground hierarchy remains wave (`2`), mascot (`3`), paws (`4`), and login card (`5`).
+- Retained the responsive inline storefront image only below the `1280px` desktop composition breakpoint, where the layout stacks for usability.
+- Login form behavior, authentication, APIs, routes, session handling, and all card content were not changed.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Hero Scale and Bridge Repositioning (2026-10-13)
+
+- Applied the requested non-subtle desktop scale/position correction in `frontend/src/app/pages/Login.tsx`. The storefront changed from `left: -1vw; top: 48%; width: clamp(860px, 61vw, 1180px)` to `left: clamp(-90px, -3vw, -30px); top: 42%; width: clamp(1050px, 68vw, 1350px)`. Its desktop wrapper remains transparent, borderless, shadow-free, and `overflow-visible`; no parent grid or max-width constraint is limiting the image.
+- Repositioned the mascot from `left: clamp(760px, 52vw, 1000px); bottom: clamp(105px, 14vh, 165px); width: clamp(220px, 16vw, 310px)` to `left: clamp(850px, 55vw, 1050px); bottom: clamp(100px, 13vh, 150px); width: clamp(230px, 17vw, 310px)`, bringing it visibly toward the login-card transition while keeping it above the wave.
+- Retained layering: storefront `1`, foreground wave `2`, mascot `3`, paws `4`, login card `5`. The card's existing horizontal position and dimensions were retained because the enlarged storefront and shifted mascot provide the requested reduced visual gap without moving the form toward a collision.
+- Authentication logic and all login functionality were untouched.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Strict Visual Calibration Pass (2026-10-13)
+
+- Refined `frontend/src/app/pages/Login.tsx` against the supplied mockup without changing form/card content or authentication behavior. The transparent, overflow-visible desktop storefront is now anchored at `-1vw`, vertically at `48%`, and scaled with `clamp(860px, 61vw, 1180px)` to maintain the mockup’s bounded hero proportion.
+- Raised the foreground pink wave to `bottom: -2vh`, retaining its layer above the storefront and beneath the mascot.
+- Recalibrated the mascot as a bridge from the wave baseline: `left: clamp(760px, 52vw, 1000px)`, `bottom: clamp(105px, 14vh, 165px)`, and `width: clamp(220px, 16vw, 310px)`. This keeps it beside the login panel without allowing it to cover form controls.
+- Tightened the desktop login-card envelope to `clamp(420px, 28vw, 500px)` with the reference-aligned right inset, while retaining the existing responsive stacked layout below the desktop composition breakpoint.
+- Authentication APIs, handlers, validation, session storage, reset flow, two-factor flow, and routing were untouched.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
+### Login Foreground Wave and Mascot Bridge Calibration (2026-10-13)
+
+- Applied the requested focused composition correction in `frontend/src/app/pages/Login.tsx`: enlarged the desktop storefront to `clamp(980px, 64vw, 1280px)` and shifted it slightly left/up so it fills the hero area rather than reading as an undersized illustration.
+- Reversed the storefront/wave overlap order to match the mockup: storefront is now layer `1`, the pink `login element.png` foreground swoosh is layer `2`, mascot is layer `3`, paws are layer `4`, and the live login card is layer `5`.
+- Moved the mascot toward the login panel (`left: clamp(700px, 47vw, 920px)`) and constrained it to a 230–360px desktop scale, allowing it to bridge the storefront/card gap and stand visibly in front of the foreground wave without obscuring the form.
+- No authentication, routing, API, form, or card-content behavior was changed.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+
 ## 2026-10-06 - Feedback Recalibration Loop
 
 ### Requested
@@ -4410,8 +4531,46 @@ This file records requested revisions, implementation details, verification, and
 ### Verification
 
 - Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `npm.cmd run build` compiled the production bundle and completed Next.js type validation after restoring the locally missing, already-declared `swr` dependency with `npm.cmd install`.
+- Note: Final static page-data collection did not finish within the execution environment's command window; no login-page compilation or type error was reported. Browser automation is unavailable in this environment, so visual breakpoint checks were verified by responsive layout implementation and static review rather than an automated browser run.
+
+### Login Mockup Proportion Calibration (2026-10-13)
+
+- Recalibrated `frontend/src/app/pages/Login.tsx` directly against `login mockup.png`. The previous rigid grid constrained the storefront and login card into isolated columns, causing the undersized storefront and excessive center gap.
+- Replaced that desktop grid composition with a bounded absolute layout: the storefront now uses `clamp(720px, 58vw, 1150px)` from the left edge, the live login card uses `clamp(420px, 29vw, 540px)` from the right edge, and the existing mascot fills the intended visual overlap.
+- Repositioned the supplied pink element as a prominent lower-page bridge and aligned three subtle paw decorations to the mockup composition. Desktop composition activates at `1280px`; narrower screens retain a stacked storefront-to-card flow with a visible transition wave so elements cannot collide.
+- Authentication logic, APIs, form state, validation, two-factor flow, password reset, session persistence, and redirects were not changed.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
+- Passed through compilation and Next.js type validation: `npm.cmd run build`. As noted above, the environment did not complete final static-page collection within the command window; no login-page build error was reported.
+
+### Login Composition Layering Correction (2026-10-13)
+
+- Made a focused positioning-only adjustment in `frontend/src/app/pages/Login.tsx`: moved the storefront slightly left and up, while reducing its desktop maximum width to keep it dominant without pushing into the form area.
+- Moved the mascot out of the clipped storefront container and into the shared desktop composition. It is now explicitly positioned at the lower storefront/card boundary rather than being cut off by the storefront container.
+- Enforced the requested desktop layer order: page background (`0`), pink wave (`1`), storefront (`2`), mascot (`3`), paws (`4`), and login card (`5`). Removed the main wrapper stacking context so these layers resolve across the full composition.
+- Repositioned the three desktop paw accents to the upper-right, lower-left, and lower-center negative-space regions. Authentication and form behavior were not changed.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+- Passed: `git diff --check`.
 - Passed: Frontend production build with `npm.cmd run build`.
 - Passed: Production login-route smoke test with `next start` on port 3003; `/login` returned HTTP 200.
 - Note: The existing development server on port 3002 returned HTTP 500 and could not be used for this check. The dedicated production test server rendered the login route successfully. Browser automation was unavailable because the `agent-browser` executable is not installed in this environment.
 - Passed after the full-mockup integration: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false` and frontend production build with `npm.cmd run build`.
 - Passed after the full-mockup integration: Production `/login` smoke test on port 3004 returned HTTP 200.
+
+### Login Page Code-Built Responsive Redesign (2026-10-13)
+
+- Replaced the login mockup image overlay with a code-built responsive login composition in `frontend/src/app/pages/Login.tsx`.
+- Integrated the supplied storefront (`login bg.png`), pink wave (`login element.png`), and paw (`login paw.png`) assets as responsive decorative layers; the real form is now always rendered as functional DOM controls.
+- Styled the card, WOOF branding, input focus states, password visibility control, two-factor field, recovery link, and loading-safe sign-in button to match the WOOF visual direction. Removed the mockup/social-login-only visual treatment.
+- Preserved the existing login API call, input state, validation toasts, two-factor flow, password reset modal/API calls, session persistence, route prefetching, and successful-login redirect. No backend authentication behavior was changed.
+
+### Verification
+
+- Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
