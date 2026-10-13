@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import useSWR from "swr";
 import * as React from "react";
 import { useRouter } from "next/router";
-import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight, ChevronRight } from "lucide-react";
+import { Scissors, DollarSign, Calendar, TrendingUp, AlertTriangle, Users, Clock, Sun, CloudRain, ChevronDown, ChevronUp, Info, BarChart2, ArrowRight, ChevronRight, RefreshCw } from "lucide-react";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
 import { ThreeZoneForecastChart, ThreeZonePoint, BacktestMetrics, TimeGrain, WeatherOverlayPoint } from "../components/ThreeZoneForecastChart";
 import { Button } from "../components/ui/button";
@@ -305,7 +305,7 @@ export function Services() {
     return params;
   }, [viewMode, customForecastStart, customForecastEnd, forecastMode, weatherScenario, tempOverride, rainChanceOverride, humidityOverride, holidayScenario]);
 
-  const { data: initialForecastRun, error: initialForecastError } = useSWR(
+  const { data: initialForecastRun, error: initialForecastError, isLoading: initialForecastLoading } = useSWR(
     ["forecast", "services", buildServicesForecastParams(), realtimeRefresh],
     ([, , params]) => getForecast("services", params as Record<string, string>)
   );
@@ -1304,7 +1304,11 @@ export function Services() {
         </div>
 
         {/* ══ 90-5-5 MULTI-ZONE FORECAST CHART ════════════════════════════ */}
-        {rawThreeZoneData.length > 0 ? (
+        {initialForecastLoading ? (
+          <div className="flex items-center justify-center h-48 text-sm text-[#223047] opacity-50">
+            <RefreshCw className="w-6 h-6 animate-spin text-[#06B6D4]" />
+          </div>
+        ) : rawThreeZoneData.length > 0 ? (
           <ThreeZoneForecastChart
             rawData={rawThreeZoneData}
             initialSplitDate={academicSplitDate}

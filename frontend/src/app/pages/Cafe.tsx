@@ -594,7 +594,7 @@ export function Cafe() {
   };
 
   // API data state
-  const { data: initialForecastRun, error: initialForecastError } = useSWR(
+  const { data: initialForecastRun, error: initialForecastError, isLoading: initialForecastLoading } = useSWR(
     ["forecast", "cafe", buildCafeForecastParams(), realtimeRefresh],
     ([, , params]) => getForecast("cafe", params as Record<string, string>)
   );
@@ -1542,7 +1542,7 @@ export function Cafe() {
       <div className="woof-kpi-row bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6 space-y-3">
         {/* Interactive Filter Status Bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 border-b border-[#FFD9EC]/60">
-          <div className="flex items-center gap-2 text-xs text-[#223047]/70 font-medium">
+          <div className="flex items-center gap-2 text-xs text-[#223047]/70 dark:text-white/70 font-medium">
             <span>Cafe Timeline: <strong className="text-[#F53799] uppercase">{coAttachPeriod === "all-time" ? "All-Time" : coAttachPeriod === "custom" ? "Custom Range" : `Last ${coAttachPeriod.toUpperCase()}`}</strong></span>
             {activeKpis.filterName && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#FFF2FA] border border-[#FFD9EC] text-[#F53799] font-bold">
@@ -1799,7 +1799,11 @@ export function Cafe() {
 
         <>
             {/* ══ 90-5-5 MULTI-ZONE FORECAST CHART ════════════════════════════ */}
-            {rawThreeZoneData.length > 0 ? (
+            {initialForecastLoading ? (
+              <div className="flex items-center justify-center h-48 text-sm text-[#223047] opacity-50">
+                <RefreshCw className="w-6 h-6 animate-spin text-[#F53799]" />
+              </div>
+            ) : rawThreeZoneData.length > 0 ? (
               <ThreeZoneForecastChart
                 rawData={rawThreeZoneData}
                 initialSplitDate={academicSplitDate}
@@ -2108,7 +2112,7 @@ export function Cafe() {
               Live Interactive Filters
             </Badge>
           </div>
-          <p className="text-xs text-[#223047]/60 mt-0.5 leading-relaxed">
+          <p className="text-xs text-[#223047]/60 dark:text-white/60 mt-0.5 leading-relaxed">
             Filter historical dining baskets, category contribution, and menu item performance below. Top KPI cards and menu metrics synchronize automatically.
           </p>
         </div>
@@ -2192,7 +2196,7 @@ export function Cafe() {
                 </button>
               )}
             </div>
-            <p className="text-xs text-[#223047]/60 mt-1">
+            <p className="text-xs text-[#223047]/60 dark:text-white/60 mt-1">
               Click a segment to isolate basket KPIs above.
             </p>
           </div>
@@ -2244,7 +2248,7 @@ export function Cafe() {
                   </div>
                 </div>
               ) : (
-                <div className="text-[10px] text-[#223047]/30 text-center italic leading-snug px-1">
+                <div className="text-[10px] text-[#223047]/30 dark:text-white/40 text-center italic leading-snug px-1">
                   Click a slice
                   <br />to filter KPIs
                 </div>
