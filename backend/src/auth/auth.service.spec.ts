@@ -1,268 +1,161 @@
 import { ConfigService } from '@nestjs/config';
-import { UnauthorizedException } from '@nestjs/common';
+import { HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
-const sendMail = jest.fn();
-
-jest.mock('nodemailer', () => ({
-  __esModule: true,
-  default: {
-    createTransport: jest.fn(() => ({ sendMail })),
-  },
-}));
-
 describe('AuthService', () => {
-  const listUsers = jest.fn();
-  const createUser = jest.fn();
-  const updateUserById = jest.fn();
   const signInWithPassword = jest.fn();
-
-  const service = () =>
-    new AuthService(
-      {
-        get: jest.fn((key: string) => {
-          if (key === 'WOOF_ADMIN_EMAIL') return 'woofdash@gmail.com';
-          if (key === 'WOOF_ADMIN_PASSWORD') return 'test-initial-password';
-          if (key === 'WOOF_SMTP_USER') return 'woofdash@gmail.com';
-          if (key === 'WOOF_SMTP_APP_PASSWORD') return 'app password';
-          return undefined;
-        }),
-      } as unknown as ConfigService,
-      {
-        client: {
-          auth: {
-            admin: {
-              listUsers,
-              createUser,
-              updateUserById,
-            },
-            signInWithPassword,
-          },
-        },
-      } as any,
-    );
+  const resetPasswordForEmail = jest.fn();
+  const mfa = {
+    listFactors: jest.fn(),
+    getAuthenticatorAssuranceLevel: jest.fn(),
+  };
+  const mfaEnrollmentRateLimit = { assertAllowed: jest.fn() };
+  const service = new AuthService(
+    { get: jest.fn((key: string) => ({ WOOF_ADMIN_EMAIL: 'admin@example.com', SUPABASE_PASSWORD_RECOVERY_REDIRECT_URL: 'https://app.example.com/reset-password' })[key]) } as unknown as ConfigService,
+    { createAuthClient: () => ({ auth: { signInWithPassword, resetPasswordForEmail } }), createSessionClient: () => ({ auth: { mfa } }) } as any,
+    mfaEnrollmentRateLimit as any,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
-    listUsers.mockResolvedValue({ data: { users: [] }, error: null });
-    createUser.mockResolvedValue({
-      data: { user: { id: 'new-user', email: 'woofdash@gmail.com' } },
+    mfaEnrollmentRateLimit.assertAllowed.mockResolvedValue(undefined);
+    mfa.listFactors.mockResolvedValue({ data: { totp: [] }, error: null });
+    mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({
+      data: { currentLevel: 'aal1' },
       error: null,
     });
-    updateUserById.mockResolvedValue({ error: null });
-    signInWithPassword.mockResolvedValue({
+    signInWithPassword.mockResolvedValue({ data: { user: { email: 'admin@example.com' }, session: { access_token: 'test-access-token', expires_at: 1924992000 } }, error: null });
+  });
+
+  it('rejects a non-admin address without querying Supabase', async () => {
+    await expect(service.login('other@example.com', 'password')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(signInWithPassword).not.toHaveBeenCalled();
+  });
+
+  it('marks a password-only session as requiring MFA enrollment without exposing MFA secrets', async () => {
+    const result = await service.login('ADMIN@example.com', 'password');
+    expect(signInWithPassword).toHaveBeenCalledWith({ email: 'admin@example.com', password: 'password' });
+    expect(result).toEqual(expect.objectContaining({
+      email: 'admin@example.com',
+      accessToken: 'test-access-token',
+      mfaRequired: true,
+    }));
+  });
+
+  it('marks an AAL2 session as ready for the dashboard after MFA verification', async () => {
+    mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({
+      data: { currentLevel: 'aal2' },
+      error: null,
+    });
+
+    await expect(service.login('admin@example.com', 'password')).resolves.toEqual(
+      expect.objectContaining({ mfaRequired: false }),
+    );
+  });
+
+  it('stops MFA enrollment verification before creating a challenge when rate-limited', async () => {
+    const setSession = jest.fn().mockResolvedValue({
       data: {
-        session: {
-          access_token: 'supabase-token',
-          expires_at: 1924992000,
-        },
+        user: { id: 'admin-id', email: 'admin@example.com' },
+        session: { access_token: 'session-access', refresh_token: 'session-refresh' },
       },
       error: null,
     });
-    sendMail.mockResolvedValue({});
-  });
+    const challenge = jest.fn();
+    const limited = { assertAllowed: jest.fn().mockRejectedValue(new HttpException('Too many attempts', HttpStatus.TOO_MANY_REQUESTS)) };
+    const authService = new AuthService(
+      { get: jest.fn((key: string) => ({ WOOF_ADMIN_EMAIL: 'admin@example.com' })[key]) } as unknown as ConfigService,
+      {
+        createAuthClient: () => ({ auth: { setSession } }),
+        createSessionClient: () => ({ auth: { mfa: { challenge } } }),
+      } as any,
+      limited as any,
+    );
 
-  it('rejects credentials outside the dashboard admin account', async () => {
     await expect(
-      service().login('wrong@example.com', 'test-initial-password'),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+      authService.verifyMfaEnrollment('access', 'refresh', 'de305d54-75b4-431b-adb2-eb6b9e546014', '123456', '127.0.0.1'),
+    ).rejects.toMatchObject({ status: HttpStatus.TOO_MANY_REQUESTS });
 
-    expect(listUsers).not.toHaveBeenCalled();
+    expect(limited.assertAllowed).toHaveBeenCalledWith('admin-id', '127.0.0.1');
+    expect(challenge).not.toHaveBeenCalled();
   });
 
-  it('creates the Supabase dashboard user before signing in when needed', async () => {
-    const result = await service().login(
-      'woofdash@gmail.com',
-      'test-initial-password',
-    );
-
-    expect(result.email).toBe('woofdash@gmail.com');
-    // @ts-ignore
-    expect(result.accessToken).toBe('supabase-token');
-    expect(createUser).toHaveBeenCalledWith(
-      expect.objectContaining({
-        email: 'woofdash@gmail.com',
-        password: 'test-initial-password',
-        email_confirm: true,
-      }),
-    );
-    expect(signInWithPassword).toHaveBeenCalledWith({
-      email: 'woofdash@gmail.com',
-      password: 'test-initial-password',
-    });
-  });
-
-  it('does not overwrite the Supabase password on normal login', async () => {
-    listUsers.mockResolvedValue({
-      data: { users: [{ id: 'user-1', email: 'woofdash@gmail.com' }] },
+  it('rejects an invalid MFA enrollment code without returning session credentials', async () => {
+    const setSession = jest.fn().mockResolvedValue({
+      data: {
+        user: { id: 'admin-id', email: 'admin@example.com' },
+        session: { access_token: 'session-access', refresh_token: 'session-refresh' },
+      },
       error: null,
     });
+    const challenge = jest.fn().mockResolvedValue({ data: { id: 'challenge-id' }, error: null });
+    const verify = jest.fn().mockResolvedValue({ data: null, error: { message: 'invalid code' } });
+    const authService = new AuthService(
+      { get: jest.fn((key: string) => ({ WOOF_ADMIN_EMAIL: 'admin@example.com' })[key]) } as unknown as ConfigService,
+      {
+        createAuthClient: () => ({ auth: { setSession } }),
+        createSessionClient: () => ({ auth: { mfa: { challenge, verify } } }),
+      } as any,
+      { assertAllowed: jest.fn().mockResolvedValue(undefined) } as any,
+    );
 
-    await service().login(' WOOFDASH@GMAIL.COM ', 'new-password');
-
-    expect(createUser).not.toHaveBeenCalled();
-    expect(updateUserById).not.toHaveBeenCalled();
-    expect(signInWithPassword).toHaveBeenCalledWith({
-      email: 'woofdash@gmail.com',
-      password: 'new-password',
+    await expect(
+      authService.verifyMfaEnrollment('access', 'refresh', 'de305d54-75b4-431b-adb2-eb6b9e546014', '000000', '127.0.0.1'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(verify).toHaveBeenCalledWith({
+      factorId: 'de305d54-75b4-431b-adb2-eb6b9e546014',
+      challengeId: 'challenge-id',
+      code: '000000',
     });
   });
 
-  it('rejects a wrong password before requesting a two-factor code', async () => {
-    listUsers.mockResolvedValue({
+  it('signs out through the authenticated Supabase session client', async () => {
+    const signOut = jest.fn().mockResolvedValue({ error: null });
+    const authService = new AuthService(
+      { get: jest.fn() } as unknown as ConfigService,
+      { createSessionClient: () => ({ auth: { signOut } }) } as any,
+      mfaEnrollmentRateLimit as any,
+    );
+
+    await expect(authService.signOut('access-token')).resolves.toEqual({ success: true });
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a generic successful response for an unrecognised reset address', async () => {
+    await expect(service.requestPasswordReset('other@example.com')).resolves.toEqual({ success: true });
+    expect(resetPasswordForEmail).not.toHaveBeenCalled();
+  });
+
+  it('rotates an expired access session using only the supplied refresh cookie value', async () => {
+    const refreshSession = jest.fn().mockResolvedValue({
       data: {
-        users: [
-          {
-            id: 'user-1',
-            email: 'woofdash@gmail.com',
-            user_metadata: {
-              twoFactor: {
-                enabled: true,
-                secret: 'JBSWY3DPEHPK3PXP',
-              },
+        user: { email: 'admin@example.com' },
+        session: { access_token: 'rotated-access', refresh_token: 'rotated-refresh', expires_at: 1924992000 },
+      },
+      error: null,
+    });
+    const authService = new AuthService(
+      { get: jest.fn((key: string) => ({ WOOF_ADMIN_EMAIL: 'admin@example.com' })[key]) } as unknown as ConfigService,
+      {
+        createAuthClient: () => ({ auth: { refreshSession } }),
+        createSessionClient: () => ({
+          auth: {
+            getUser: jest.fn().mockResolvedValue({ data: { user: null }, error: { message: 'expired' } }),
+            mfa: {
+              getAuthenticatorAssuranceLevel: jest.fn().mockResolvedValue({
+                data: { currentLevel: 'aal2' },
+                error: null,
+              }),
             },
           },
-        ],
-      },
-      error: null,
-    });
-    signInWithPassword.mockResolvedValueOnce({
-      data: { session: null },
-      error: { message: 'Invalid credentials' },
-    });
-
-    await expect(
-      service().login('woofdash@gmail.com', 'wrong-password'),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-
-    expect(signInWithPassword).toHaveBeenCalledWith({
-      email: 'woofdash@gmail.com',
-      password: 'wrong-password',
-    });
-  });
-
-  it('requests two-factor only after the password is valid', async () => {
-    listUsers.mockResolvedValue({
-      data: {
-        users: [
-          {
-            id: 'user-1',
-            email: 'woofdash@gmail.com',
-            user_metadata: {
-              twoFactor: {
-                enabled: true,
-                secret: 'JBSWY3DPEHPK3PXP',
-              },
-            },
-          },
-        ],
-      },
-      error: null,
-    });
-
-    await expect(
-      service().login('woofdash@gmail.com', 'valid-password'),
-    ).resolves.toEqual({
-      requiresTwoFactor: true,
-      email: 'woofdash@gmail.com',
-    });
-
-    expect(signInWithPassword).toHaveBeenCalledWith({
-      email: 'woofdash@gmail.com',
-      password: 'valid-password',
-    });
-  });
-
-  it('sends an OTP and resets the Supabase dashboard password', async () => {
-    listUsers.mockResolvedValue({
-      data: { users: [{ id: 'user-1', email: 'woofdash@gmail.com' }] },
-      error: null,
-    });
-
-    const authService = service();
-
-    await authService.requestPasswordReset('woofdash@gmail.com');
-    const mail = sendMail.mock.calls[0][0];
-    const otp = mail.text.match(/\d{6}/)?.[0];
-
-    expect(otp).toBeDefined();
-    expect(mail.to).toBe('woofdash@gmail.com');
-
-    expect(authService.verifyResetOtp('woofdash@gmail.com', otp!)).toEqual({
-      success: true,
-    });
-
-    await expect(
-      authService.resetPassword('woofdash@gmail.com', otp!, 'changed123'),
-    ).resolves.toEqual({ success: true });
-
-    expect(updateUserById).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({
-        password: 'changed123',
-        email_confirm: true,
-      }),
-    );
-  });
-
-  it('changes the Supabase dashboard password after verifying the current password', async () => {
-    listUsers.mockResolvedValue({
-      data: {
-        users: [
-          {
-            id: 'user-1',
-            email: 'woofdash@gmail.com',
-            user_metadata: { twoFactor: { enabled: true } },
-          },
-        ],
-      },
-      error: null,
-    });
-
-    await expect(
-      service().changePassword(
-        'woofdash@gmail.com',
-        'current-password',
-        'new-password',
-      ),
-    ).resolves.toEqual({ success: true });
-
-    expect(signInWithPassword).toHaveBeenCalledWith({
-      email: 'woofdash@gmail.com',
-      password: 'current-password',
-    });
-    expect(updateUserById).toHaveBeenCalledWith(
-      'user-1',
-      expect.objectContaining({
-        password: 'new-password',
-        email_confirm: true,
-        user_metadata: expect.objectContaining({
-          role: 'dashboard_admin',
-          app: 'woof',
-          twoFactor: { enabled: true },
         }),
-      }),
+      } as any,
+      mfaEnrollmentRateLimit as any,
     );
-  });
 
-  it('rejects change password when the current password is wrong', async () => {
-    listUsers.mockResolvedValue({
-      data: { users: [{ id: 'user-1', email: 'woofdash@gmail.com' }] },
-      error: null,
-    });
-    signInWithPassword.mockResolvedValueOnce({
-      data: { session: null },
-      error: { message: 'Invalid credentials' },
-    });
-
-    await expect(
-      service().changePassword(
-        'woofdash@gmail.com',
-        'wrong-password',
-        'new-password',
-      ),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
-
-    expect(updateUserById).not.toHaveBeenCalled();
+    await expect(authService.getSession('expired-access', 'refresh-cookie-value')).resolves.toEqual(
+      expect.objectContaining({ authenticated: true, accessToken: 'rotated-access', refreshToken: 'rotated-refresh' }),
+    );
+    expect(refreshSession).toHaveBeenCalledWith({ refresh_token: 'refresh-cookie-value' });
   });
 });

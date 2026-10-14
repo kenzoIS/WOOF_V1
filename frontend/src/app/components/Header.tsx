@@ -20,7 +20,7 @@ import {
   getChannelStatus,
   getCurrentWeather,
   getDataRange,
-  recordLoginActivity,
+  logoutDashboard,
   getUserNotifications,
   markNotificationRead,
   markAllNotificationsRead,
@@ -128,7 +128,7 @@ export function Header({ onMenuClick }: HeaderProps) {
       .catch(() => {});
   }, []);
 
-  const userEmail = typeof window !== "undefined" ? (localStorage.getItem("userEmail") || "user@happytails.com") : "user@happytails.com";
+  const userEmail = typeof window !== "undefined" ? (sessionStorage.getItem("woofUserEmail") || "user@happytails.com") : "user@happytails.com";
   const userInitials = userEmail
     .split("@")[0]
     .split(/[._-]+/)
@@ -314,13 +314,10 @@ export function Header({ onMenuClick }: HeaderProps) {
     router.push(notification.targetUrl);
   };
 
-  const handleSignOut = () => {
-    recordLoginActivity("logout", localStorage.getItem("userEmail") || undefined).catch(() => {});
-    localStorage.removeItem("woofAuth");
-    localStorage.removeItem("woofAuthToken");
-    localStorage.removeItem("woofAuthExpiresAt");
-    localStorage.removeItem("userType");
-    localStorage.removeItem("userEmail");
+  const handleSignOut = async () => {
+    await logoutDashboard().catch(() => {});
+    sessionStorage.removeItem("woofSessionActive");
+    sessionStorage.removeItem("woofUserEmail");
     toast.success("Signed out successfully");
     router.push("/login");
   };

@@ -1,0 +1,37 @@
+# Security audit — 2026-10-14
+
+## Scope and architecture
+
+WOOF is a Next.js frontend and NestJS API using MongoDB plus a server-side Supabase service-role client. The browser does not instantiate a Supabase client. Supabase tables observed in repository migrations are `bundle_archives`, `recommendation_feedback`, `audit_logs`, `prescription_drafts`, `active_prescriptions`, and `prescription_recalibration_events`. These hold operational data and audit metadata; this code audit found no application password column or direct browser service-role exposure. Deployed Supabase schema, buckets, and Dashboard MFA configuration cannot be inspected from this repository.
+
+| Severity | Finding | Remediation performed | Verification |
+| --- | --- | --- | --- |
+| Critical | `backend/src/auth/auth.service.ts` implemented custom TOTP, stored the shared secret in `auth.users.user_metadata`, and used a home-grown SHA-1 TOTP verifier. | Replaced it with Supabase MFA enroll/challenge/verify/unenroll calls. Enrollment material is returned only to the active UI and is not persisted or logged by WOOF. | Backend production build succeeds; confirm migration of existing custom factors manually (below). |
+| High | Custom emailed OTP reset flow and administrative password update bypassed Supabase recovery/update flow. | Password recovery now uses `resetPasswordForEmail`; recovery update uses `auth.updateUser` with the Supabase recovery access token. | Backend production build succeeds; configure the allowlisted recovery URL and test in Supabase staging. |
+| High | Supabase access token was returned to JavaScript and stored in `localStorage`. | Login sets an HttpOnly, Secure-in-production, SameSite=Lax cookie; frontend validates `/auth/session` with credentials and no longer stores a token. | Frontend type check succeeds. |
+| High | API CORS reflected arbitrary origins while credentials were enabled; protected API endpoints had no server auth guard. | Added explicit origin allowlist and a global Supabase-session guard for non-auth controllers. | Backend production build succeeds. |
+| Medium | API allowed 100 MB JSON and URL-encoded payloads globally; standard response security headers were absent. | Reduced parser limit to 10 MB and added CSP, framing, MIME, referrer, and permissions headers. Upload limits still require endpoint-specific review. | Backend production build succeeds. |
+| Medium | Supabase RLS state was not represented in migrations for application tables. | Added an idempotent RLS migration enabling and forcing RLS on tables created by repository migrations. No permissive policies were added because browser access is not required. | Apply migration to staging and query `pg_class.relrowsecurity`; test service-role workflows. |
+| Medium | Login, reset, and MFA endpoints are high-value abuse targets. | Added per-route Nest throttles (login 5/min, reset request 3/min, reset/MFA verification 5/min) in addition to the global throttle; proxy trust is opt-in through `TRUST_PROXY`. | Backend build passes; validate actual proxy/IP behavior in staging. |
+| High | Auth clients were initialized with the service-role key, expanding the blast radius of authentication operations. | Auth and per-request validation clients now use `SUPABASE_ANON_KEY`; the service role remains limited to server-side data access. | Backend build and focused auth tests pass. |
+| High | Access-token-only cookie sessions expired without refresh/rotation. | Added HttpOnly refresh-token cookie rotation using Supabase `refreshSession`; neither token is returned to browser JavaScript. | Focused session-refresh test passes; staging verification remains required. |
+| Medium | Security headers were only set by Nest API responses, leaving Next-rendered pages uncovered. | Added Next.js response headers and documented the Pages Router inline-script/style CSP compatibility exception. | Frontend production build passes; inspect production response headers at hosting. |
+| High | Full Supabase RLS/function/view/Storage state is unavailable in this repository. | Added exact SQL inventory and Dashboard steps in `SUPABASE_PRODUCTION_CHECKLIST.md`; no speculative policy was written. | Deployment blocker until staging output and User A/User B tests are reviewed. |
+| High | Recovery used an implicit access token from a URL fragment and posted it to the backend. | Added `@supabase/ssr` server routes that request recovery with PKCE and exchange the one-time authorization code server-side before setting HttpOnly session cookies. | Frontend type/build checks pass; invalid/expired/reused/success flows require live Supabase staging tests. |
+| Medium | Next response headers had not been observed at runtime. | Started an isolated Next server on port 3003 and verified `/login` returns CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and X-Frame-Options. | Local HTTP response verified; HTTPS/HSTS remains hosting configuration. |
+| High | Direct browser-side Supabase MFA enrollment is incompatible with the current backend-issued HttpOnly-only session architecture. | Preserved legacy MFA and the supported server implementation; documented the required official client-session migration rather than exposing enrollment material through a new unsafe path. | Release blocker until client-side Supabase SSR session ownership and MFA flow are implemented/tested. |
+| Critical | Frontend dependency audit identified vulnerable Next.js 15.3.0 transitive framework dependencies. | Updated only the direct Next.js dependency to the audit-recommended 15.5.27 release. | `npm audit --omit=dev --audit-level=high` reports 0 frontend production vulnerabilities; type/build compatibility check was run. |
+
+## Encryption decision
+
+No field identified in the inspected migrations requires application-level encryption. Supabase-managed encryption at rest plus server-only service role and strict RLS is appropriate for the currently observed tables. Do not encrypt passwords; Supabase Auth hashes them. If government IDs, payment data, medical data, or third-party tokens are introduced, encrypt server-side with versioned AES-256-GCM envelope encryption and a managed key before storage.
+
+## Deployment checklist
+
+- Apply `20261014_enable_rls_application_tables.sql` in staging, then production; inventory *all* existing Supabase tables/views/buckets because repository migrations are not a complete database export.
+- In Supabase Auth, enable MFA/TOTP and configure password policy, leaked-password protection, rate limits, and CAPTCHA if available.
+- Add exactly `https://app.example.com/reset-password` (your actual HTTPS URL) to Supabase Auth Redirect URLs and set `SUPABASE_PASSWORD_RECOVERY_REDIRECT_URL` to that exact URL.
+- Set `CORS_ALLOWED_ORIGINS` to the deployed frontend origin(s), never `*`; serve API and frontend over HTTPS.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` only in server secrets. It must not be `NEXT_PUBLIC_*`, committed, logged, or provided to build-time frontend variables.
+- Existing custom TOTP secrets in user metadata cannot be safely migrated into Supabase MFA. Require the administrator to enroll a new factor, verify it, then delete the legacy `twoFactor` metadata through a controlled server-side admin operation after a successful sign-in.
+- Test User A versus User B access for every real table and Storage bucket after the complete production schema inventory; this single-admin app currently permits only the configured admin at the API layer.

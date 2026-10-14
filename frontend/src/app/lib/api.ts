@@ -1,8 +1,8 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/backend-api';
 const DIRECT_UPLOAD_API_BASE =
   process.env.NEXT_PUBLIC_UPLOAD_API_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
-  'http://localhost:3001/api';
+  '/backend-api';
 const API_CACHE_TTL_MS = 10 * 60 * 1000;
 
 type ApiCacheEntry = {
@@ -45,6 +45,7 @@ async function request(
     const fetchOptions = {
       ...options,
       cache: 'no-store' as RequestCache,
+      credentials: 'include' as RequestCredentials,
     };
     return await fetch(`${API_BASE}${path}`, fetchOptions);
   } catch (error) {
@@ -572,9 +573,9 @@ export async function getAuditSummary() {
 }
 
 export interface LoginResponse {
-  accessToken: string;
   email: string;
   expiresAt: string;
+  mfaRequired: boolean;
   requiresTwoFactor?: false;
 }
 
@@ -597,41 +598,35 @@ export async function loginDashboard(
 
 export async function requestPasswordReset(email: string): Promise<{
   success: boolean;
-  expiresInMinutes: number;
 }> {
-  return fetchApi('/auth/forgot-password', {
+  const response = await fetch('/api/auth/request-password-recovery', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
+  if (!response.ok) throw new Error('Unable to start password recovery');
+  return response.json();
 }
 
 export async function verifyResetOtp(
   email: string,
   otp: string,
 ): Promise<{ success: boolean }> {
-  return fetchApi('/auth/verify-reset-otp', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, otp }),
-  });
+  // Kept for API compatibility; recovery verification is performed by Supabase's emailed link.
+  return Promise.resolve({ success: true });
 }
 
 export async function resetDashboardPassword(
-  email: string,
-  otp: string,
   password: string,
 ): Promise<{ success: boolean }> {
   return fetchApi('/auth/reset-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, otp, password }),
+    body: JSON.stringify({ password }),
   });
 }
 
 export async function changeDashboardPassword(input: {
-  email: string;
-  currentPassword: string;
   newPassword: string;
 }): Promise<{ success: boolean }> {
   return fetchApi('/auth/change-password', {
@@ -641,47 +636,15 @@ export async function changeDashboardPassword(input: {
   });
 }
 
-export async function getTwoFactorStatus(email: string): Promise<{
+export async function getTwoFactorStatus(): Promise<{
   enabled: boolean;
   configured: boolean;
+  factorId?: string;
 }> {
   return fetchApi('/auth/2fa/status', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
-  });
-}
-
-export async function setupTwoFactor(email: string): Promise<{
-  secret: string;
-  otpauthUri: string;
-}> {
-  return fetchApi('/auth/2fa/setup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
-  });
-}
-
-export async function enableTwoFactor(
-  email: string,
-  code: string,
-): Promise<{ enabled: boolean }> {
-  return fetchApi('/auth/2fa/enable', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, code }),
-  });
-}
-
-export async function disableTwoFactor(
-  email: string,
-  code: string,
-): Promise<{ enabled: boolean }> {
-  return fetchApi('/auth/2fa/disable', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, code }),
+    body: JSON.stringify({}),
   });
 }
 
@@ -711,6 +674,10 @@ export async function getLoginActivity(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
+}
+
+export async function logoutDashboard(): Promise<{ success: boolean }> {
+  return fetchApi('/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 }
 
 export async function saveAlertThresholds(

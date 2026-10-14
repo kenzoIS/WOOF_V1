@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { SupabaseAuthGuard } from './common/guards/supabase-auth.guard';
 import { GeoBlockMiddleware } from './common/middleware/geo-block.middleware';
 import { CsvModule } from './csv/csv.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -63,6 +64,9 @@ import { AlertsModule } from './alerts/alerts.module';
             'SUPABASE_SERVICE_ROLE_KEY must be configured in backend/.env',
           );
         }
+        if (!config.SUPABASE_ANON_KEY || typeof config.SUPABASE_ANON_KEY !== 'string') {
+          throw new Error('SUPABASE_ANON_KEY must be configured in backend/.env');
+        }
 
         return config;
       },
@@ -99,6 +103,10 @@ import { AlertsModule } from './alerts/alerts.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: SupabaseAuthGuard,
     },
   ],
 })

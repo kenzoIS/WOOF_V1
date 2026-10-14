@@ -7,8 +7,6 @@ import { Toaster } from "../components/ui/sonner";
 import {
   loginDashboard,
   requestPasswordReset,
-  resetDashboardPassword,
-  verifyResetOtp,
 } from "../lib/api";
 import loginBgImg from "../../imports/login bg.png";
 import loginElementImg from "../../imports/login element.png";
@@ -62,10 +60,10 @@ function ForgotPasswordModal({
 
     try {
       await requestPasswordReset(email.trim());
-      toast.success("OTP sent!", {
-        description: "Check your email for the 6-digit OTP code.",
+      toast.success("Check your email", {
+        description: "If the address is eligible, Supabase has sent a secure password-reset link.",
       });
-      setStep("otp");
+      handleClose();
     } catch (error) {
       toast.error("Unable to send OTP", {
         description:
@@ -79,27 +77,7 @@ function ForgotPasswordModal({
   };
 
   const handleOtpSubmit = async () => {
-    if (otp.length !== 6) {
-      toast.error("Please enter a valid 6-digit OTP");
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      await verifyResetOtp(email.trim(), otp);
-      toast.success("OTP verified!");
-      setStep("newPassword");
-    } catch (error) {
-      toast.error("Unable to verify OTP", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "Please check the OTP and try again.",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+    toast.info("Use the secure password-reset link sent to your email.");
   };
 
   const handlePasswordSubmit = async () => {
@@ -121,13 +99,7 @@ function ForgotPasswordModal({
     setIsSubmitting(true);
 
     try {
-      await resetDashboardPassword(email.trim(), otp, newPassword);
-      toast.success("Password reset successful!", {
-        description: "Please log in with your new password.",
-      });
-      resetModal();
-      onClose();
-      onPasswordReset();
+      toast.info("Use the secure password-reset link sent to your email.");
     } catch (error) {
       toast.error("Unable to reset password", {
         description:
@@ -392,11 +364,16 @@ export function Login() {
         return;
       }
 
-      localStorage.removeItem("userType");
-      localStorage.setItem("woofAuth", "true");
-      localStorage.setItem("woofAuthToken", session.accessToken);
-      localStorage.setItem("woofAuthExpiresAt", session.expiresAt);
-      localStorage.setItem("userEmail", session.email);
+      sessionStorage.setItem("woofSessionActive", "true");
+      sessionStorage.setItem("woofUserEmail", session.email);
+
+      // A password-only session is AAL1. Do not render or prefetch dashboard
+      // routes before the user completes first-factor enrollment.
+      if (session.mfaRequired) {
+        router.replace("/mfa-enroll");
+        return;
+      }
+
       toast.success("Welcome back!", {
         description: "Signed in to WOOF.",
       });
@@ -475,7 +452,7 @@ export function Login() {
             <header className="mb-6 text-center xl:mb-7">
               <div className="text-[clamp(2.35rem,4vw,3.6rem)] font-extrabold leading-none tracking-[-.07em] text-[#F53799]">WOOF</div>
               <p className="mt-2 text-sm font-semibold tracking-[.01em] text-[#10162f] sm:text-base">Cross-Intelligence Platform</p>
-              <h1 className="mt-6 text-2xl font-extrabold tracking-[-.03em] text-[#d91471] sm:text-[1.75rem] xl:text-[clamp(1.85rem,2.15vw,2.35rem)]">Welcome Back</h1>
+              <h1 className="mt-6 text-2xl font-extrabold tracking-[-.03em] text-[#F53799] sm:text-[1.75rem] xl:text-[clamp(1.85rem,2.15vw,2.35rem)]">Welcome Back!</h1>
             </header>
 
             <form onSubmit={handleLogin} className="space-y-4" aria-label="Sign in form">

@@ -1,15 +1,11 @@
 import type { SimConfig, SimInputs, SimRun, SimEvent } from "./simulationTypes";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
 async function call<T>(path: string, body?: unknown): Promise<T> {
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem("woofAuthToken")
-      : null;
   const response = await fetch(`${API}/simulation${path}`, {
     method: body ? "POST" : "GET",
     cache: "no-store",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${token || ""}`,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),

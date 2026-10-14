@@ -1,24 +1,26 @@
-import { IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, IsUUID, Matches, MinLength } from 'class-validator';
 
 export class ChangePasswordDto {
-  @IsEmail()
-  email: string;
-
   @IsString()
-  @MinLength(1)
-  currentPassword: string;
-
-  @IsString()
-  @MinLength(6)
+  @MinLength(12)
   newPassword: string;
 }
 
 export class TwoFactorCodeDto {
-  @IsEmail()
-  email: string;
+  @IsString()
+  @MinLength(1)
+  factorId: string;
 
   @IsString()
   @MinLength(6)
+  code: string;
+}
+
+export class VerifyMfaEnrollmentDto {
+  @IsUUID()
+  factorId: string;
+
+  @Matches(/^\d{6}$/)
   code: string;
 }
 

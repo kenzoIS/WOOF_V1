@@ -15,14 +15,7 @@ export class VerifyResetOtpDto {
 }
 
 export class ResetPasswordDto {
-  @IsEmail()
-  email: string;
-
   @IsString()
-  @MinLength(6)
-  otp: string;
-
-  @IsString()
-  @MinLength(6)
+  @MinLength(12)
   password: string;
 }

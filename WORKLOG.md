@@ -52,6 +52,16 @@ This file records requested revisions, implementation details, verification, and
 ### Verification
 
 - Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+
+### Login Welcome Heading Brand Alignment (2026-10-14)
+
+- Updated the login heading to `Welcome Back!` and changed its color to `#F53799`, matching the Sign In button and system primary pink.
+- No authentication, form, API, routing, session, or layout behavior was changed.
+
+### Verification
+
+- Passed: `git diff --check`.
+- TypeScript validation was started with `npx.cmd tsc --noEmit --pretty false`, but the environment did not return a completion result within its execution window.
 - Passed: `git diff --check`.
 
 ### Login Storefront Background 30px Right Nudge (2026-10-13)
@@ -4574,3 +4584,57 @@ This file records requested revisions, implementation details, verification, and
 ### Verification
 
 - Passed: Frontend TypeScript validation with `npx.cmd tsc --noEmit --pretty false`.
+
+### MFA AAL1 Direct Enrollment Redirect (2026-10-15)
+
+- Updated the password-login response to include server-derived `mfaRequired`, based on the Supabase session's current authenticator assurance level.
+- Updated the login page to send AAL1 sessions directly to `/mfa-enroll` before dashboard navigation or route prefetching, eliminating the brief dashboard flash while retaining existing AAL2 API enforcement.
+- Added focused backend authentication coverage for AAL1 enrollment-required and AAL2 dashboard-ready login responses.
+
+### Verification
+
+- Passed: `backend/npm test -- auth/auth.service.spec.ts --runInBand` (5 tests).
+- Passed: `backend/npm run build`.
+
+### Security Continuation Handoff Refresh (2026-10-15)
+
+- Updated `SECURITY_HANDOFF_2026-10-15.md` with the completed MFA enrollment/login hardening, durable verification rate limiting, Settings MFA cleanup, focused test results, required local smoke checks, and remaining staging-first work.
+- The handoff intentionally excludes credentials, tokens, QR/secret data, authenticator codes, and user email addresses.
+- Passed: `frontend/npx tsc --noEmit`.
+- Passed: `frontend/npm run build`.
+
+### MFA Assurance and Session Boundary Tests (2026-10-15)
+
+- Added focused `SupabaseAuthGuard` tests proving that an otherwise valid AAL1 session is denied from protected API routes and an AAL2 admin session is permitted.
+- Added coverage that an expired access cookie is refreshed with the HttpOnly refresh cookie before AAL2 enforcement, with replacement cookies issued by the guard.
+- Added authentication-service coverage for invalid MFA enrollment-code rejection and Supabase session logout, alongside the existing rate-limit and refresh-rotation coverage.
+
+### Verification
+
+- Passed: `backend/npm test -- auth/auth.service.spec.ts auth/mfa-enrollment-rate-limit.service.spec.ts common/guards/supabase-auth.guard.spec.ts --runInBand` (14 tests).
+- Passed: `backend/npm run build`.
+
+### Settings MFA Interface Hardening (2026-10-15)
+
+- Replaced the obsolete Settings 2FA setup/enable/disable UI, which referenced the removed setup endpoint and could expose a shared-secret setup path.
+- Settings now queries only the authenticated Supabase MFA status and shows a protected, checking, or unavailable state without incorrectly presenting MFA as disabled after a request failure.
+- Removed stale frontend client helpers for setup, enabling, and disabling an authenticator. Enrollment remains restricted to the dedicated secure sign-in flow; no authenticator secret, URI, or disable action is available from Settings.
+
+### Verification
+
+- Passed: `frontend/npx tsc --noEmit`.
+- Passed: `frontend/npm run build`.
+
+### Durable MFA Enrollment Verification Rate Limiting (2026-10-15)
+
+- Moved MFA enrollment-code verification from a Next.js API route to the Nest API so it shares the same trusted-proxy configuration and server-side security controls as the rest of the authentication flow.
+- Added a MongoDB-backed fixed-window limiter that is shared across backend instances, limits verification attempts per authenticated account (5 per 10 minutes) and source IP (10 per 10 minutes), and fails closed if the rate-limit record cannot be persisted.
+- The backend verifies the Supabase session before consuming a rate-limit attempt, does not return tokens or MFA material to browser JavaScript, and sets only HttpOnly WOOF session cookies after successful Supabase verification.
+- Removed the former unthrottled Next.js verification endpoint so it cannot bypass the durable limiter.
+
+### Verification
+
+- Passed: `backend/npm test -- auth/auth.service.spec.ts auth/mfa-enrollment-rate-limit.service.spec.ts --runInBand` (9 tests).
+- Passed: `backend/npm run build`.
+- Passed: `frontend/npx tsc --noEmit`.
+- Passed: `frontend/npm run build`.

@@ -3,9 +3,7 @@ import { Settings as SettingsIcon, Download, ChevronDown, CheckCircle2, ShieldAl
 import {
   applyDataRetention,
   changeDashboardPassword,
-  disableTwoFactor,
   downloadSettingsDataExport,
-  enableTwoFactor,
   getAlertThresholds,
   getDataRetentionSettings,
   getExogenousStatus,
@@ -13,7 +11,6 @@ import {
   getTwoFactorStatus,
   saveDataRetentionSettings,
   saveAlertThresholds,
-  setupTwoFactor,
   type ExogenousStatus,
   type LoginActivityEntry,
 } from "../lib/api";
@@ -167,11 +164,7 @@ export function Settings() {
   const [showNewSecurityPassword, setShowNewSecurityPassword] = useState(false);
   const [showConfirmSecurityPassword, setShowConfirmSecurityPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
-  const [twoFactorSecret, setTwoFactorSecret] = useState("");
-  const [twoFactorUri, setTwoFactorUri] = useState("");
-  const [twoFactorCode, setTwoFactorCode] = useState("");
-  const [isUpdatingTwoFactor, setIsUpdatingTwoFactor] = useState(false);
+  const [twoFactorStatus, setTwoFactorStatus] = useState<"loading" | "enabled" | "unavailable">("loading");
   const [loginActivity, setLoginActivity] = useState<LoginActivityEntry[]>([]);
   const [isExportingData, setIsExportingData] = useState(false);
   const [isExportPanelOpen, setIsExportPanelOpen] = useState(false);
@@ -215,9 +208,9 @@ export function Settings() {
     if (typeof window !== "undefined") {
       localStorage.setItem("userEmail", DASHBOARD_SECURITY_EMAIL);
     }
-    getTwoFactorStatus(DASHBOARD_SECURITY_EMAIL)
-      .then((status) => setTwoFactorEnabled(status.enabled))
-      .catch(() => {});
+    getTwoFactorStatus()
+      .then((status) => setTwoFactorStatus(status.enabled ? "enabled" : "unavailable"))
+      .catch(() => setTwoFactorStatus("unavailable"));
     getLoginActivity(DASHBOARD_SECURITY_EMAIL)
       .then(setLoginActivity)
       .catch(() => {});
@@ -492,8 +485,6 @@ export function Settings() {
     setIsChangingPassword(true);
     try {
       await changeDashboardPassword({
-        email: securityEmail,
-        currentPassword,
         newPassword: newSecurityPassword,
       });
       setCurrentPassword("");
@@ -517,72 +508,6 @@ export function Settings() {
 
   const refreshLoginActivity = () => {
     getLoginActivity(securityEmail).then(setLoginActivity).catch(() => {});
-  };
-
-  const handleSetupTwoFactor = async () => {
-    setIsUpdatingTwoFactor(true);
-    try {
-      const setup = await setupTwoFactor(securityEmail);
-      setTwoFactorSecret(setup.secret);
-      setTwoFactorUri(setup.otpauthUri);
-      setTwoFactorCode("");
-      toast.success("Authenticator setup created");
-    } catch (error) {
-      toast.error("Unable to start 2FA setup", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setIsUpdatingTwoFactor(false);
-    }
-  };
-
-  const handleEnableTwoFactor = async () => {
-    if (twoFactorCode.length !== 6) {
-      toast.error("Enter the 6-digit authenticator code");
-      return;
-    }
-
-    setIsUpdatingTwoFactor(true);
-    try {
-      await enableTwoFactor(securityEmail, twoFactorCode);
-      setTwoFactorEnabled(true);
-      setTwoFactorCode("");
-      setTwoFactorSecret("");
-      setTwoFactorUri("");
-      toast.success("2FA enabled");
-    } catch (error) {
-      toast.error("Unable to enable 2FA", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setIsUpdatingTwoFactor(false);
-    }
-  };
-
-  const handleDisableTwoFactor = async () => {
-    if (twoFactorCode.length !== 6) {
-      toast.error("Enter the current 6-digit authenticator code");
-      return;
-    }
-
-    setIsUpdatingTwoFactor(true);
-    try {
-      await disableTwoFactor(securityEmail, twoFactorCode);
-      setTwoFactorEnabled(false);
-      setTwoFactorCode("");
-      setTwoFactorSecret("");
-      setTwoFactorUri("");
-      toast.success("2FA disabled");
-    } catch (error) {
-      toast.error("Unable to disable 2FA", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
-      });
-    } finally {
-      setIsUpdatingTwoFactor(false);
-    }
   };
 
   const handleExportAllChange = (checked: boolean) => {
@@ -1634,75 +1559,24 @@ export function Settings() {
                   <Smartphone className="h-5 w-5 text-[#F53799]" />
                 </div>
                 <div>
-                  <div className="font-bold text-[#223047]">2FA Authenticator</div>
+                  <div className="font-bold text-[#223047]">Google Authenticator</div>
                   <div className="text-xs text-[#223047] opacity-60">
-                    {twoFactorEnabled ? "Required during login." : "Add a 6-digit authenticator code to login."}
+                    {twoFactorStatus === "enabled"
+                      ? "Required during every dashboard sign-in."
+                      : twoFactorStatus === "loading"
+                        ? "Checking multi-factor authentication status…"
+                        : "MFA status could not be confirmed."}
                   </div>
                 </div>
               </div>
-              <Badge className={twoFactorEnabled ? "bg-green-500 text-white hover:bg-green-500" : "bg-[#FFD9EC] text-[#223047] hover:bg-[#FFD9EC]"}>
-                {twoFactorEnabled ? "Enabled" : "Off"}
+              <Badge className={twoFactorStatus === "enabled" ? "bg-green-500 text-white hover:bg-green-500" : "bg-[#FFD9EC] text-[#223047] hover:bg-[#FFD9EC]"}>
+                {twoFactorStatus === "enabled" ? "Protected" : twoFactorStatus === "loading" ? "Checking" : "Unavailable"}
               </Badge>
             </div>
 
-            {!twoFactorEnabled && !twoFactorSecret && (
-              <Button
-                type="button"
-                onClick={handleSetupTwoFactor}
-                disabled={isUpdatingTwoFactor}
-                className="w-full bg-[#F53799] hover:bg-[#D42A7D]"
-              >
-                {isUpdatingTwoFactor ? "Preparing..." : "Set Up Authenticator"}
-              </Button>
-            )}
-
-            {twoFactorSecret && (
-              <div className="space-y-3 rounded-xl border border-[#FFD9EC] bg-white/70 p-4">
-                <div>
-                  <label className={profileLabelClass}>Authenticator Secret</label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={twoFactorSecret}
-                    className={profileInputClass}
-                  />
-                </div>
-                <div>
-                  <label className={profileLabelClass}>Manual Setup URI</label>
-                  <textarea
-                    readOnly
-                    value={twoFactorUri}
-                    className={`${profileInputClass} min-h-[76px] resize-none`}
-                  />
-                </div>
-                <p className="text-xs text-[#223047] opacity-70">
-                  Add this secret in Google Authenticator, Microsoft Authenticator, or any TOTP app, then enter the generated 6-digit code below.
-                </p>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={twoFactorCode}
-                onChange={(event) =>
-                  setTwoFactorCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                placeholder="000000"
-                className={`${profileInputClass} text-center text-base font-bold tracking-widest`}
-                inputMode="numeric"
-                maxLength={6}
-              />
-              <Button
-                type="button"
-                onClick={twoFactorEnabled ? handleDisableTwoFactor : handleEnableTwoFactor}
-                disabled={isUpdatingTwoFactor || (!twoFactorEnabled && !twoFactorSecret)}
-                variant={twoFactorEnabled ? "outline" : "default"}
-                className={twoFactorEnabled ? "woof-security-outline-button border-[#FFD9EC]" : "woof-security-primary-button bg-[#F53799] hover:bg-[#D42A7D]"}
-              >
-                {twoFactorEnabled ? "Disable" : "Enable"}
-              </Button>
-            </div>
+            <p className="rounded-xl border border-[#FFD9EC] bg-white/70 p-4 text-xs leading-relaxed text-[#223047] opacity-75">
+              Authenticator enrollment is presented only during the secure sign-in flow. This page never displays authenticator secrets or allows MFA to be disabled. If you lose access to your authenticator, use the documented administrator recovery process before any factor change is made.
+            </p>
           </div>
 
           <div className="p-4 md:p-6 bg-[#FFF7FB] rounded-xl md:rounded-2xl border border-[#FFD9EC]/50 space-y-4">

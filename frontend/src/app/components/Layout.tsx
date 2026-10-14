@@ -96,13 +96,8 @@ export function Layout({ children }: LayoutProps) {
   }, [sessionTimeoutMinutes]);
 
   const handleSessionExpiredAction = () => {
-    const email = localStorage.getItem("userEmail") || undefined;
-    recordLoginActivity("session_timeout", email).catch(() => {});
-    localStorage.removeItem("woofAuth");
-    localStorage.removeItem("woofAuthToken");
-    localStorage.removeItem("woofAuthExpiresAt");
-    localStorage.removeItem("userType");
-    localStorage.removeItem("userEmail");
+    sessionStorage.removeItem("woofSessionActive");
+    sessionStorage.removeItem("woofUserEmail");
     setShowSessionExpired(false);
     window.location.href = "/login";
   };
