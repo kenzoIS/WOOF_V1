@@ -169,6 +169,7 @@ export function Home() {
   const [currentWeather, setCurrentWeather] = useState<CurrentWeather | null>(null);
   const [manilaDateKey, setManilaDateKey] = useState(getManilaDateKey);
   const [selectedKpi, setSelectedKpi] = useState<KpiDetailData | null>(null);
+  const [mobileHeatmapWindow, setMobileHeatmapWindow] = useState<"morning" | "afternoon">("morning");
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1076,6 +1077,114 @@ export function Home() {
   };
   const heatmapDateLabel = `${displayHeatmapDays[0]?.label || "Today"} – ${displayHeatmapDays[displayHeatmapDays.length - 1]?.label || ""}`;
 
+  const renderSuggestionCard = (
+    suggestion: HomeSuggestion,
+    index: number,
+    isMobile = false
+  ) => (
+    <div
+      key={`${isMobile ? "mobile" : "desktop"}-${suggestion.id}-${index}`}
+      aria-hidden={!isMobile && index >= suggestions.length}
+      className={`${
+        isMobile
+          ? "w-[85vw] max-w-[340px] shrink-0 snap-center p-4 space-y-3"
+          : "w-[280px] md:w-[340px] lg:w-[380px] shrink-0 p-4 md:p-6 lg:p-7 space-y-3 md:space-y-4"
+      } bg-white border border-[#FFD9EC] rounded-2xl md:rounded-[20px] transition-all ${
+        approvedSuggestions.includes(suggestion.id)
+          ? "bg-green-50 border-green-300"
+          : dismissedSuggestions.includes(suggestion.id)
+          ? "opacity-40 line-through"
+          : ""
+      }`}
+    >
+      <div className="flex items-start justify-between">
+        <h3 className="text-base font-bold text-[#223047] flex-1">
+          {suggestion.title}
+        </h3>
+        <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs">
+          {suggestion.confidence}
+        </Badge>
+      </div>
+
+      <div className="space-y-2 text-sm">
+        <div className="flex items-center gap-2 text-[#223047] opacity-60">
+          <span className="font-medium">Trigger:</span>
+          <span>{suggestion.trigger}</span>
+        </div>
+        <div className="flex items-center gap-2 text-[#223047] opacity-60">
+          <span className="font-medium">Discount:</span>
+          <span>{suggestion.discount}</span>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-[#223047] opacity-50 mb-1">
+          Historical evidence
+        </div>
+        <div className="text-xl md:text-2xl font-extrabold text-[#F53799]">
+          {suggestion.historicalEvidence}
+        </div>
+      </div>
+
+      <p className="text-xs text-[#223047] opacity-50" style={{ lineHeight: "1.6" }}>
+        {suggestion.reason}
+      </p>
+
+      {/* Collapsible Dropdown Explanation */}
+      <div className="pt-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => toggleSuggestionExplanation(suggestion.id)}
+          className="w-full justify-between text-xs text-[#F53799] hover:bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg py-1 px-3 h-8"
+        >
+          <span className="font-semibold">Explanation</span>
+          <ChevronDown
+            className={`w-3.5 h-3.5 transition-transform duration-200 ${
+              expandedSuggestions.includes(suggestion.id) ? "rotate-180" : ""
+            }`}
+          />
+        </Button>
+        {expandedSuggestions.includes(suggestion.id) && (
+          <div
+            className="mt-2 p-2 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC] text-xs text-[#223047] opacity-80 animate-in fade-in slide-in-from-top-1 duration-200"
+            style={{ lineHeight: "1.6" }}
+          >
+            {suggestion.detailedExplanation}
+          </div>
+        )}
+      </div>
+
+      {!approvedSuggestions.includes(suggestion.id) &&
+        !dismissedSuggestions.includes(suggestion.id) && (
+          <div className="flex gap-2 pt-2">
+            <Button
+              onClick={() => handleApprove(suggestion.id)}
+              className="flex-1 bg-[#F53799] hover:bg-[#D42A7D]"
+            >
+              <Check className="w-4 h-4 mr-2" />
+              Approve
+            </Button>
+            <Button
+              onClick={() => handleDismiss(suggestion.id)}
+              variant="outline"
+              className="flex-1 border-[#FFD9EC]"
+            >
+              <X className="w-4 h-4 mr-2" />
+              Dismiss
+            </Button>
+          </div>
+        )}
+
+      {approvedSuggestions.includes(suggestion.id) && (
+        <div className="flex items-center justify-center gap-2 py-2 text-green-600 font-semibold">
+          <Check className="w-5 h-5" />
+          <span>Approved & Scheduled</span>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
       {/* PRIORITY ALERT BANNER (Immediately noticeable upon opening WOOF) */}
@@ -1280,7 +1389,8 @@ export function Home() {
             <div className="flex-1 min-w-0">
               <div className="text-xs text-[#223047] opacity-60 truncate flex items-center">
                 <span className="flex items-center gap-1">
-                  Avg Order Value (AOV)
+                  <span className="sm:hidden">Avg Order Value</span>
+                  <span className="hidden sm:inline">Avg Order Value (AOV)</span>
                   <InfoTooltip label="Average spend per transaction across Cafe, Services, and Retail. Directly measures customer basket size and multi-line cross-selling." />
                 </span>
               </div>
@@ -1339,7 +1449,7 @@ export function Home() {
           </div>
 
           {/* Recommended Time Range Filters (Identical to Section 5) */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:flex-wrap">
             {[
               { key: "matched", label: "Matched 1-Year (2025-2026)" },
               { key: "all", label: "All-Time" },
@@ -1354,7 +1464,7 @@ export function Home() {
                   setShowCustomFilterSection4(false);
                   handleApplyGraphFilter(item.key);
                 }}
-                className={`text-xs transition-all ${
+                className={`text-xs shrink-0 whitespace-nowrap transition-all ${
                   homeActiveFilter === item.key
                     ? "bg-[#F53799] hover:bg-[#D42A7D] text-white shadow-xs font-semibold"
                     : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
@@ -1367,7 +1477,7 @@ export function Home() {
               size="sm"
               variant={homeActiveFilter.startsWith("custom:") || showCustomFilterSection4 ? "default" : "outline"}
               onClick={() => setShowCustomFilterSection4((prev) => !prev)}
-              className={`text-xs transition-all ${
+              className={`text-xs shrink-0 whitespace-nowrap transition-all ${
                 homeActiveFilter.startsWith("custom:") || showCustomFilterSection4
                   ? "bg-[#F53799] hover:bg-[#D42A7D] text-white shadow-xs font-semibold"
                   : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
@@ -1696,7 +1806,7 @@ export function Home() {
                   {isRetail && isRetailPlatformsOpen && homeOverview?.retailBreakdown && homeOverview.retailBreakdown.length > 0 && (
                     <div
                       ref={retailDropdownRef}
-                      className="absolute top-[calc(100%+6px)] right-0 z-40 w-72 bg-white/95 backdrop-blur-md border border-[#FFD9EC] rounded-xl p-3 shadow-xl space-y-2 animate-in fade-in-50 duration-200"
+                      className="absolute top-[calc(100%+6px)] right-0 z-40 w-72 max-w-[calc(100vw-3rem)] bg-white/95 backdrop-blur-md border border-[#FFD9EC] rounded-xl p-3 shadow-xl space-y-2 animate-in fade-in-50 duration-200"
                     >
                       <div className="flex items-center justify-between pb-1.5 border-b border-[#FFD9EC]/60">
                         <span className="flex items-center gap-1.5 text-xs font-bold text-[#223047]">
@@ -1861,7 +1971,7 @@ export function Home() {
 
           <div className="flex flex-wrap items-center gap-2">
             {/* Filter buttons */}
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:flex-wrap">
               {[
                 { key: "matched", label: "Matched 1-Year (2025-2026)" },
                 { key: "all", label: "All-Time" },
@@ -1876,7 +1986,7 @@ export function Home() {
                     setShowCustomFilterSection5(false);
                     handleApplyGraphFilter(item.key);
                   }}
-                  className={`text-xs transition-all ${
+                  className={`text-xs shrink-0 whitespace-nowrap transition-all ${
                     homeActiveFilter === item.key
                       ? "bg-[#D42A7D] hover:bg-[#B01E64] text-white shadow-xs font-semibold"
                       : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
@@ -1889,7 +1999,7 @@ export function Home() {
                 size="sm"
                 variant={homeActiveFilter.startsWith("custom:") || showCustomFilterSection5 ? "default" : "outline"}
                 onClick={() => setShowCustomFilterSection5((prev) => !prev)}
-                className={`text-xs transition-all ${
+                className={`text-xs shrink-0 whitespace-nowrap transition-all ${
                   homeActiveFilter.startsWith("custom:") || showCustomFilterSection5
                     ? "bg-[#D42A7D] hover:bg-[#B01E64] text-white shadow-xs font-semibold"
                     : "border-[#FFD9EC] text-[#223047] hover:bg-[#FFF2FA]"
@@ -1963,8 +2073,38 @@ export function Home() {
             Upload POS, Shopee, TikTok, or PetHub transactions to compare channel revenue.
           </div>
         )}
+        {/* Mobile custom progress bars view */}
+        <div className="space-y-3 md:hidden">
+          {separatedEquilibriumData.map((item) => {
+            const maxRev = Math.max(...separatedEquilibriumData.map((d) => d.revenue), 1);
+            const pct = Math.max(4, Math.round((item.revenue / maxRev) * 100));
+            return (
+              <div
+                key={`mobile-bar-${item.category}`}
+                onClick={() => router.push('/retail#retail-revenue-by-channel')}
+                className="p-3 rounded-xl bg-[#FFF7FB] border border-[#FFD9EC]/70 cursor-pointer active:scale-[0.99] transition-all"
+              >
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.fill }} />
+                    <span className="font-bold text-[#223047] truncate">{item.category}</span>
+                  </div>
+                  <span className="font-extrabold text-[#223047] shrink-0 ml-2">{formatCurrency(item.revenue)}</span>
+                </div>
+                <div className="w-full bg-white h-2.5 rounded-full overflow-hidden border border-[#FFD9EC]/50">
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${pct}%`, backgroundColor: item.fill }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop Recharts BarChart */}
         <div 
-          className="w-full cursor-pointer group" 
+          className="w-full cursor-pointer group hidden md:block"
           style={{ height: Math.max(140, separatedEquilibriumData.length * 44 + 32) }}
           title="Click to view Retail Revenue by Channel"
         >
@@ -2079,7 +2219,87 @@ export function Home() {
             </div>
           </div>
 
-          <div className="overflow-x-auto pb-1">
+          {/* Mobile Morning / Afternoon Window Toggle */}
+          <div className="flex items-center gap-1.5 md:hidden bg-[#FFF7FB] border border-[#FFD9EC] p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setMobileHeatmapWindow("morning")}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                mobileHeatmapWindow === "morning"
+                  ? "bg-[#F53799] text-white shadow-xs"
+                  : "text-[#223047]/70 hover:bg-[#FFF2FA]"
+              }`}
+            >
+              Morning (7 AM – 12 PM)
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileHeatmapWindow("afternoon")}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                mobileHeatmapWindow === "afternoon"
+                  ? "bg-[#F53799] text-white shadow-xs"
+                  : "text-[#223047]/70 hover:bg-[#FFF2FA]"
+              }`}
+            >
+              Afternoon (1 PM – 7 PM)
+            </button>
+          </div>
+
+          {/* Mobile 6-Hour Grid (fits 100% within mobile viewport, no horizontal cut-off) */}
+          <div className="md:hidden space-y-2">
+            <div className="grid grid-cols-[4.5rem_repeat(6,minmax(0,1fr))] gap-1 items-center">
+              <div className="text-[11px] font-semibold text-[#223047] opacity-60">Day</div>
+              {(mobileHeatmapWindow === "morning" ? [7, 8, 9, 10, 11, 12] : [13, 14, 15, 16, 17, 18]).map((hour) => (
+                <div key={`m-hdr-${hour}`} className="text-center text-[10px] font-bold text-[#223047] opacity-60">
+                  {hour === 12 ? "12P" : hour < 12 ? `${hour}A` : `${hour - 12}P`}
+                </div>
+              ))}
+            </div>
+            {displayHeatmapDays.map((day, dayIdx) => {
+              const isToday = dayIdx === 0;
+              const hours = mobileHeatmapWindow === "morning" ? [7, 8, 9, 10, 11, 12] : [13, 14, 15, 16, 17, 18];
+              return (
+                <div key={`m-day-${day.date}`} className="grid grid-cols-[4.5rem_repeat(6,minmax(0,1fr))] items-center gap-1">
+                  <div className="flex items-center gap-1 min-w-0 pr-1">
+                    <span className="text-[11px] font-bold text-[#223047] truncate">
+                      {isToday ? "Today" : day.dayLabel}
+                    </span>
+                    {isToday ? (
+                      <span className="px-1 py-0.2 text-[7px] font-bold rounded bg-[#FFF2FA] text-[#F53799] border border-[#FFD9EC]">
+                        NOW
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-[#223047]/50 truncate">
+                        {day.label.replace(day.dayLabel, "").trim()}
+                      </span>
+                    )}
+                  </div>
+                  {hours.map((hour) => {
+                    const revenue = getHeatmapRevenue(day.date, hour);
+                    const intensity = getHeatmapIntensity(day.date, hour);
+                    const hourLabel = hour === 12 ? "12 PM" : hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
+                    const periodEnd = hour + 1;
+                    const intervalLabel = `${hourLabel}–${periodEnd === 12 ? "12 PM" : periodEnd < 12 ? `${periodEnd} AM` : `${periodEnd - 12} PM`}`;
+                    const dayTitle = isToday ? `Today (${day.label})` : day.label;
+                    return (
+                      <div
+                        key={`m-cell-${day.date}-${hour}`}
+                        tabIndex={0}
+                        role="img"
+                        aria-label={`${dayTitle}, ${intervalLabel} forecast ${formatCurrency(revenue)}, ${intensity.toFixed(0)}% intensity`}
+                        onClick={(event) => updateHeatmapTooltip(event, `${dayTitle} · ${intervalLabel}`, revenue, intensity)}
+                        className="h-8 rounded border border-[#FFD9EC] cursor-pointer hover:ring-2 hover:ring-[#F53799] focus:ring-2 focus:ring-[#F53799] transition-all"
+                        style={{ backgroundColor: getHeatmapColor(intensity) }}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop 12-Hour Full Grid */}
+          <div className="hidden md:block overflow-x-auto pb-1">
             <div className="min-w-[760px] space-y-2">
               <div className="grid grid-cols-[6rem_repeat(12,minmax(0,1fr))] gap-1.5 md:gap-2">
                 <div className="text-xs font-semibold text-[#223047] opacity-60">Day</div>
@@ -2192,106 +2412,40 @@ export function Home() {
               </div>
             )}
             {suggestions.length > 0 && (
-              <div
-                className={`flex gap-4 md:gap-6 ${
-                  shouldAnimateSuggestions
-                    ? "w-max animate-woof-suggestion-carousel"
-                    : "flex-wrap"
-                }`}
-              >
-            {carouselSuggestions.map((suggestion, index) => (
-              <div
-                key={`${suggestion.id}-${index}`}
-                aria-hidden={index >= suggestions.length}
-                className={`w-[280px] md:w-[340px] lg:w-[380px] shrink-0 bg-white border border-[#FFD9EC] rounded-2xl md:rounded-[20px] p-4 md:p-6 lg:p-7 space-y-3 md:space-y-4 transition-all ${
-                  approvedSuggestions.includes(suggestion.id)
-                    ? "bg-green-50 border-green-300"
-                    : dismissedSuggestions.includes(suggestion.id)
-                    ? "opacity-40 line-through"
-                    : ""
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <h3 className="text-base font-bold text-[#223047] flex-1">
-                    {suggestion.title}
-                  </h3>
-                  <Badge className="bg-[#06B6D4] text-white hover:bg-[#06B6D4] text-xs">
-                    {suggestion.confidence}
-                  </Badge>
-                </div>
-
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center gap-2 text-[#223047] opacity-60">
-                    <span className="font-medium">Trigger:</span>
-                    <span>{suggestion.trigger}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-[#223047] opacity-60">
-                    <span className="font-medium">Discount:</span>
-                    <span>{suggestion.discount}</span>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-[#223047] opacity-50 mb-1">
-                    Historical evidence
-                  </div>
-                  <div className="text-xl md:text-2xl font-extrabold text-[#F53799]">
-                    {suggestion.historicalEvidence}
-                  </div>
-                </div>
-
-                <p className="text-xs text-[#223047] opacity-50" style={{ lineHeight: "1.6" }}>
-                  {suggestion.reason}
-                </p>
-
-                {/* Collapsible Dropdown Explanation */}
-                <div className="pt-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => toggleSuggestionExplanation(suggestion.id)}
-                    className="w-full justify-between text-xs text-[#F53799] hover:bg-[#FFF2FA] border border-[#FFD9EC] rounded-lg py-1 px-3 h-8"
-                  >
-                    <span className="font-semibold">Explanation</span>
-                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${expandedSuggestions.includes(suggestion.id) ? "rotate-180" : ""}`} />
-                  </Button>
-                  {expandedSuggestions.includes(suggestion.id) && (
-                    <div className="mt-2 p-2 bg-[#FFF7FB] rounded-lg border border-[#FFD9EC] text-xs text-[#223047] opacity-80 animate-in fade-in slide-in-from-top-1 duration-200" style={{ lineHeight: "1.6" }}>
-                      {suggestion.detailedExplanation}
-                    </div>
+              <>
+                {/* Desktop Marquee Carousel */}
+                <div
+                  className={`hidden md:flex gap-4 md:gap-6 ${
+                    shouldAnimateSuggestions
+                      ? "w-max animate-woof-suggestion-carousel"
+                      : "flex-wrap"
+                  }`}
+                >
+                  {carouselSuggestions.map((suggestion, index) =>
+                    renderSuggestionCard(suggestion, index, false)
                   )}
                 </div>
 
-                {!approvedSuggestions.includes(suggestion.id) &&
-                  !dismissedSuggestions.includes(suggestion.id) && (
-                    <div className="flex gap-2 pt-2">
-                      <Button
-                        onClick={() => handleApprove(suggestion.id)}
-                        className="flex-1 bg-[#F53799] hover:bg-[#D42A7D]"
-                      >
-                        <Check className="w-4 h-4 mr-2" />
-                        Approve
-                      </Button>
-                      <Button
-                        onClick={() => handleDismiss(suggestion.id)}
-                        variant="outline"
-                        className="flex-1 border-[#FFD9EC]"
-                      >
-                        <X className="w-4 h-4 mr-2" />
-                        Dismiss
-                      </Button>
-                    </div>
-                  )}
-
-                {approvedSuggestions.includes(suggestion.id) && (
-                  <div className="flex items-center justify-center gap-2 py-2 text-green-600 font-semibold">
-                    <Check className="w-5 h-5" />
-                    <span>Approved & Scheduled</span>
+                {/* Mobile Snap Carousel */}
+                <div className="md:hidden">
+                  <div className="flex overflow-x-auto snap-x snap-mandatory scrollbar-none gap-3 pb-3 -mx-2 px-2">
+                    {suggestions.map((suggestion, index) =>
+                      renderSuggestionCard(suggestion, index, true)
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
-              </div>
+                  <div className="flex items-center justify-center gap-1.5 pt-2">
+                    {suggestions.map((s, idx) => (
+                      <span
+                        key={`dot-${s.id}-${idx}`}
+                        className="w-1.5 h-1.5 rounded-full bg-[#F53799]/40"
+                      />
+                    ))}
+                    <span className="text-[11px] text-[#223047]/60 ml-1.5 font-medium">
+                      Swipe to view {suggestions.length} recommendations
+                    </span>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>
