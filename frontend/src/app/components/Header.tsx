@@ -13,7 +13,21 @@ import {
 } from "./ui/select";
 import { Button } from "./ui/button";
 import { DataIngestion } from "./DataIngestion";
-import { ChannelStatus, DataRange, getAlertThresholds, getChannelStatus, getCurrentWeather, getDataRange, recordLoginActivity } from "../lib/api";
+import {
+  ChannelStatus,
+  DataRange,
+  getAlertThresholds,
+  getChannelStatus,
+  getCurrentWeather,
+  getDataRange,
+  recordLoginActivity,
+  getUserNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+  dismissNotification,
+  recordOpportunityActed,
+  UserNotification,
+} from "../lib/api";
 import {
   HISTORY_START_DATE,
   INGESTED_HISTORY_END_DATE,
@@ -24,15 +38,6 @@ import {
   getSettingsPreferences,
   onSettingsPreferencesChanged,
 } from "../lib/preferences";
-
-interface Notification {
-  id: string;
-  type: "alert" | "suggestion" | "report" | "system";
-  title: string;
-  message: string;
-  time: string;
-  read: boolean;
-}
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -109,7 +114,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [ingestionOpen, setIngestionOpen] = useState(false);
   const ingestionCloseTimer = useRef<number | null>(null);
-  const [notifTab, setNotifTab] = useState<"all" | Notification["type"]>("all");
+  const [notifTab, setNotifTab] = useState<"all" | UserNotification["type"]>("all");
   const [currentWeather, setCurrentWeather] = useState<{
     tempCelsius: number;
     rainfallMm: number;
@@ -133,7 +138,7 @@ export function Header({ onMenuClick }: HeaderProps) {
     .slice(0, 2)
     .toUpperCase() || "WU";
 
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [notificationPreferences, setNotificationPreferences] = useState(
     DEFAULT_SETTINGS_PREFERENCES.notifications,
   );
@@ -154,36 +159,35 @@ export function Header({ onMenuClick }: HeaderProps) {
     });
   }, []);
 
-  // Build dynamic notifications from live API data
+  const fetchUserNotifications = () => {
+    getUserNotifications(userEmail)
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setNotifications(data);
+        }
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
-    let cancelled = false;
+    fetchUserNotifications();
+    const interval = window.setInterval(fetchUserNotifications, 25_000);
+    const handleRealtime = () => fetchUserNotifications();
+    window.addEventListener("woof:realtime", handleRealtime);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("woof:realtime", handleRealtime);
+    };
+  }, [userEmail]);
 
-  const handleSignOut = () => {
-    recordLoginActivity("logout", localStorage.getItem("userEmail") || undefined).catch(() => {});
-    localStorage.removeItem("woofAuth");
-    localStorage.removeItem("woofAuthToken");
-    localStorage.removeItem("woofAuthExpiresAt");
-    localStorage.removeItem("userType");
-    localStorage.removeItem("userEmail");
-    toast.success("Signed out successfully");
-    router.push("/login");
-  };
-
-  const getNotificationColor = (type: string) => {
-    switch (type) {
-      case "alert":
-        return "border-l-[#F53799]";
-      case "suggestion":
-        return "border-l-[#06B6D4]";
-      case "system":
-        return "border-l-[#06B6D4]";
-      default:
-        return "border-l-[#FFD9EC]";
-    }
-  };
+  useEffect(() => {
+    const handleDrawerOpen = () => openIngestionDrawer();
+    window.addEventListener("openDataIngestionDrawer", handleDrawerOpen);
+    return () => window.removeEventListener("openDataIngestionDrawer", handleDrawerOpen);
+  }, []);
 
   function relativeTime(isoString: string | null | undefined): string {
-    if (!isoString) return "Unknown time";
+    if (!isoString) return "Just now";
     const diffMs = Date.now() - new Date(isoString).getTime();
     const diffMin = Math.floor(diffMs / 60_000);
     const diffHr = Math.floor(diffMin / 60);
@@ -192,152 +196,7 @@ export function Header({ onMenuClick }: HeaderProps) {
     if (diffMin < 60) return `${diffMin} min ago`;
     if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
     return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
-    }
-
-    async function buildNotifications() {
-      const built: Notification[] = [];
-      let idCounter = 1;
-
-      // ── AI Suggestion: top bundle candidate from cross-sell ──────────────────
-      try {
-        const bundleRes = await import("../lib/api").then((m) => m.getCrossSellBundles());
-        const topBundle = (bundleRes?.bundleCandidates ?? bundleRes?.candidates ?? [])[0];
-        if (topBundle?.anchorItem && topBundle?.bundleItem) {
-          built.push({
-            id: String(idCounter++),
-            type: "suggestion",
-            title: "New AI Bundle Suggestion",
-            message: `${topBundle.anchorItem} + ${topBundle.bundleItem} bundle opportunity detected${topBundle.synergyScore ? ` (Synergy: ${topBundle.synergyScore}%)` : ""}`,
-            time: relativeTime(bundleRes?.generatedAt ?? null),
-            read: false,
-          });
-        } else if ((bundleRes?.rules ?? []).length > 0) {
-          const topRule = bundleRes.rules[0];
-          built.push({
-            id: String(idCounter++),
-            type: "suggestion",
-            title: "New AI Bundle Suggestion",
-            message: `${topRule.itemA} + ${topRule.itemB} are frequently bought together (Lift: ${Number(topRule.lift ?? 0).toFixed(1)}x)`,
-            time: relativeTime(bundleRes?.generatedAt ?? null),
-            read: false,
-          });
-        }
-      } catch {
-        // silently skip if cross-sell is unavailable
-      }
-
-      // ── Alert: disconnected / pending data channels ──────────────────────────
-      try {
-        const chStatus = await import("../lib/api").then((m) => m.getChannelStatus());
-        const pendingChannels = (chStatus?.channels ?? []).filter((ch: any) => !ch.connected);
-        if (pendingChannels.length > 0) {
-          const names = pendingChannels.map((ch: any) => ch.label ?? ch.channel).join(", ");
-          built.push({
-            id: String(idCounter++),
-            type: "alert",
-            title: "Data Channel Pending",
-            message: `${names} ${pendingChannels.length === 1 ? "is" : "are"} not yet connected — data may be incomplete`,
-            time: relativeTime(chStatus?.serverNow),
-            read: false,
-          });
-        }
-      } catch {
-        // silently skip
-      }
-
-      // ── System: data freshness from latest upload ─────────────────────────────
-      try {
-        const uploads = await import("../lib/api").then((m) => m.getUploads());
-        const latest = Array.isArray(uploads)
-          ? uploads.sort((a: any, b: any) =>
-              new Date(b.uploadedAt ?? b.createdAt ?? 0).getTime() -
-              new Date(a.uploadedAt ?? a.createdAt ?? 0).getTime()
-            )[0]
-          : null;
-        if (latest) {
-          const uploadTime = latest.uploadedAt ?? latest.createdAt ?? null;
-          built.push({
-            id: String(idCounter++),
-            type: "system",
-            title: "Data Synced",
-            message: `Latest ${latest.channel ?? "POS"} upload processed — ${(latest.rowCount ?? latest.count ?? 0).toLocaleString()} records ingested`,
-            time: relativeTime(uploadTime),
-            read: false,
-          });
-        }
-      } catch {
-        // silently skip
-      }
-
-      // ── System: data staleness from data-range ───────────────────────────────
-      try {
-        const range = await import("../lib/api").then((m) => m.getDataRange());
-        if (range?.historyEndDate) {
-          const daysSinceEnd = Math.floor(
-            (Date.now() - new Date(range.historyEndDate).getTime()) / 86_400_000
-          );
-          if (daysSinceEnd > alertThresholds.dataStalenessDays) {
-            built.push({
-              id: String(idCounter++),
-              type: "system",
-              title: "Data May Be Stale",
-              message: `Most recent transaction record is ${daysSinceEnd} day${daysSinceEnd !== 1 ? "s" : ""} old — consider uploading a fresher CSV`,
-              time: relativeTime(range.historyEndDate),
-              read: false,
-            });
-          }
-        }
-      } catch {
-        // silently skip
-      }
-
-      try {
-        const [cafeForecast, servicesForecast] = await Promise.all([
-          import("../lib/api").then((m) => m.getForecast("cafe", { compact: "true" })),
-          import("../lib/api").then((m) => m.getForecast("services", { compact: "true" })),
-        ]);
-        [cafeForecast, servicesForecast].forEach((forecast) => {
-          const accuracy = Number(forecast?.accuracy);
-          if (Number.isFinite(accuracy) && accuracy <= alertThresholds.forecastAccuracyWarning) {
-            built.push({
-              id: String(idCounter++),
-              type: "alert",
-              title: "Forecast Accuracy Warning",
-              message: `${forecast.module} forecast accuracy is ${accuracy.toFixed(1)}%; threshold is ${alertThresholds.forecastAccuracyWarning}%`,
-              time: relativeTime(forecast.generatedAt),
-              read: false,
-            });
-          }
-        });
-      } catch {
-        // silently skip
-      }
-
-      try {
-        const reports = await import("../lib/api").then((m) => m.getSmartReports());
-        const latestReport = Array.isArray(reports) ? reports[0] : null;
-        if (latestReport) {
-          built.push({
-            id: String(idCounter++),
-            type: "report",
-            title: "Smart Report Ready",
-            message: `${latestReport.title ?? "Latest intelligence report"} is available for review`,
-            time: relativeTime(latestReport.generatedAt),
-            read: false,
-          });
-        }
-      } catch {
-        // silently skip
-      }
-
-      if (!cancelled) {
-        setNotifications(built);
-      }
-    }
-
-    buildNotifications();
-    return () => { cancelled = true; };
-  }, [alertThresholds]);
+  }
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -372,7 +231,8 @@ export function Header({ onMenuClick }: HeaderProps) {
     minute: "2-digit",
   });
 
-  const notificationsEnabledForType = (type: Notification["type"]) => {
+  const notificationsEnabledForType = (type: UserNotification["type"]) => {
+    if (type === "opportunity" || type === "info") return true;
     if (type === "alert") return notificationPreferences.alerts;
     if (type === "suggestion") return notificationPreferences.suggestions;
     if (type === "report") return notificationPreferences.reports;
@@ -422,10 +282,36 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const markAsRead = (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    markNotificationRead(id, userEmail).catch(() => {});
   };
 
   const markAllAsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    markAllNotificationsRead(userEmail).catch(() => {});
+  };
+
+  const handleDismissNotification = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    dismissNotification(id, userEmail).catch(() => {});
+  };
+
+  const handleNotificationAction = async (notification: UserNotification) => {
+    markAsRead(notification.id);
+    if (notification.type === "opportunity") {
+      try {
+        await recordOpportunityActed(notification.id, userEmail);
+      } catch {
+        // Non-blocking
+      }
+    }
+    setNotificationOpen(false);
+    if (!notification.targetUrl) return;
+    if (notification.targetUrl.startsWith("action:openIngestionDrawer")) {
+      openIngestionDrawer();
+      return;
+    }
+    router.push(notification.targetUrl);
   };
 
   const handleSignOut = () => {
@@ -441,6 +327,7 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const getNotificationColor = (type: string) => {
     switch (type) {
+      case "opportunity": return "border-l-[#D97706]";
       case "alert": return "border-l-[#F53799]";
       case "suggestion": return "border-l-[#3AE4FA]";
       case "report": return "border-l-[#D42A7D]";
@@ -701,7 +588,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             onClick={() => setNotificationOpen(false)}
           />
           <div
-            className="fixed top-16 right-3 md:right-6 w-[calc(100vw-1.5rem)] md:w-[380px] max-w-[380px] bg-white border border-[#FFD9EC] rounded-2xl shadow-2xl z-50 max-h-[600px] flex flex-col"
+            className="fixed top-16 right-3 md:right-6 w-[calc(100vw-1.5rem)] md:w-[460px] max-w-[460px] bg-white border border-[#FFD9EC] rounded-2xl shadow-2xl z-50 max-h-[620px] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Panel Header */}
@@ -725,27 +612,46 @@ export function Header({ onMenuClick }: HeaderProps) {
               </div>
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-[#FFD9EC]">
+            {/* Tabs (Wrapped Pills so all categories are 100% visible without horizontal cut-off) */}
+            <div className="flex flex-wrap items-center gap-1.5 p-3 bg-[#FFF7FB] border-b border-[#FFD9EC]">
               {([
                 { label: "All", value: "all" },
                 { label: "Alerts", value: "alert" },
-                { label: "AI Suggestions", value: "suggestion" },
+                { label: "Traffic", value: "info" },
+                { label: "Opportunities", value: "opportunity" },
+                { label: "Suggestions", value: "suggestion" },
                 { label: "Reports", value: "report" },
                 { label: "System", value: "system" },
-              ] as const).map(({ label, value }) => (
-                <button
-                  key={value}
-                  onClick={() => setNotifTab(value)}
-                  className={`flex-1 px-2 py-2 text-xs font-medium text-[#223047] border-b-2 transition-all ${
-                    notifTab === value
-                      ? "opacity-100 border-[#F53799]"
-                      : "opacity-60 border-transparent hover:opacity-100 hover:border-[#F53799]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+              ] as const).map(({ label, value }) => {
+                const count =
+                  value === "all"
+                    ? enabledNotifications.length
+                    : enabledNotifications.filter((n) => n.type === value).length;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setNotifTab(value)}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      notifTab === value
+                        ? "bg-[#F53799] text-white shadow-sm"
+                        : "bg-white/80 text-[#223047]/75 hover:text-[#223047] hover:bg-white border border-[#FFD9EC]/60"
+                    }`}
+                  >
+                    <span>{label}</span>
+                    {count > 0 && (
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                          notifTab === value
+                            ? "bg-white/30 text-white"
+                            : "bg-[#F53799]/15 text-[#F53799]"
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Notifications List */}
@@ -757,36 +663,83 @@ export function Header({ onMenuClick }: HeaderProps) {
                     : enabledNotifications.filter((n) => n.type === notifTab);
                 if (visible.length === 0) {
                   return (
-                    <div className="flex flex-col items-center justify-center py-10 text-center text-[#223047] opacity-50">
-                      <Bell className="w-8 h-8 mb-2 opacity-40" />
-                      <p className="text-sm font-medium">No notifications</p>
-                      <p className="text-xs mt-1">{"We'll alert you when there's something new"}</p>
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-[#223047]">
+                      <span className="text-xs font-black uppercase tracking-wider text-[#223047]/70 mb-1">
+                        No Notifications
+                      </span>
+                      <p className="text-xs text-[#223047]/50">
+                        All business operational updates are current.
+                      </p>
                     </div>
                   );
                 }
                 return visible.map((notification) => (
-                  <button
+                  <div
                     key={notification.id}
-                    onClick={() => markAsRead(notification.id)}
-                    className={`w-full p-4 rounded-xl mb-2 text-left transition-all hover:bg-[#FFF7FB] border-l-4 ${
-                      notification.read ? "bg-white" : "bg-[#FFF2FA]"
-                    } ${getNotificationColor(notification.type)}`}
+                    className={`w-full p-3.5 rounded-xl mb-2 text-left transition-all border-l-4 ${
+                      notification.read
+                        ? "bg-white border-[#FFD9EC]"
+                        : "bg-[#FFF7FB] border-[#F53799]"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="text-sm font-semibold text-[#223047]">{notification.title}</h4>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider ${
+                              notification.type === "opportunity"
+                                ? "bg-[#FFFBEB] text-[#92400E] border border-[#FDE68A]"
+                                : notification.type === "info"
+                                  ? "bg-[#F0F9FF] text-[#0369A1] border border-[#BAE6FD]"
+                                  : notification.type === "alert"
+                                    ? "bg-[#FEF2F2] text-[#991B1B] border border-[#EF4444]/30"
+                                    : notification.type === "suggestion"
+                                      ? "bg-[#FDF2F8] text-[#D42A7D] border border-[#F53799]/30"
+                                      : notification.type === "report"
+                                        ? "bg-[#F0FDF4] text-[#166534] border border-[#22C55E]/30"
+                                        : "bg-[#F8FAFC] text-[#475569] border border-[#CBD5E1]"
+                            }`}
+                          >
+                            [{notification.type === "opportunity"
+                              ? "BUSINESS OPPORTUNITY"
+                              : notification.type === "info"
+                                ? "PREDICTED TRAFFIC"
+                                : notification.type.toUpperCase()}]
+                          </span>
+                          <h4 className="text-xs font-bold text-[#223047] leading-snug">
+                            {notification.title}
+                          </h4>
                           {!notification.read && (
-                            <div className="w-2 h-2 bg-[#F53799] rounded-full flex-shrink-0" />
+                            <span className="text-[9px] font-black uppercase text-[#F53799] tracking-wider ml-auto">
+                              UNREAD
+                            </span>
                           )}
                         </div>
-                        <p className="text-xs text-[#223047] opacity-70 mb-2" style={{ lineHeight: "1.6" }}>
+                        <p className="text-xs text-[#223047] opacity-80 mb-2.5 font-normal leading-relaxed">
                           {notification.message}
                         </p>
-                        <span className="text-xs text-[#223047] opacity-50">{notification.time}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#FFD9EC]/40">
+                          <span className="text-[10px] font-mono text-[#223047]/50">
+                            {relativeTime(notification.createdAt)}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleNotificationAction(notification)}
+                              className="rounded bg-[#223047] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#F53799] transition-colors uppercase tracking-wider"
+                            >
+                              {notification.actionLabel || "OPEN"}
+                            </button>
+                            <button
+                              onClick={(e) => handleDismissNotification(notification.id, e)}
+                              className="text-[10px] font-bold text-[#223047]/50 hover:text-red-600 transition-colors uppercase tracking-wider"
+                            >
+                              DISMISS
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 ));
               })()}
             </div>

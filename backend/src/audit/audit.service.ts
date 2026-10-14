@@ -30,7 +30,7 @@ export class AuditService {
       const { error } = await this.supabaseService.client
         .from('audit_logs')
         .insert({
-          actor: 'Owner',
+          actor: input.actor || 'Owner',
           actor_type: input.actorType || 'user',
           action: input.action,
           module: input.module,

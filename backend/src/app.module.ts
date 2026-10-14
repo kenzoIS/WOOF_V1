@@ -21,6 +21,7 @@ import { LlmModule } from './llm/llm.module';
 import { AuditModule } from './audit/audit.module';
 import { SimulationModule } from './simulation/simulation.module';
 import { AuthModule } from './auth/auth.module';
+import { AlertsModule } from './alerts/alerts.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { AuthModule } from './auth/auth.module';
     AuditModule,
     AuthModule,
     SimulationModule,
+    AlertsModule,
   ],
   providers: [
     // ── Security: Apply ThrottlerGuard globally ─────────────────────

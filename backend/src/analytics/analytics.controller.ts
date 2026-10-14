@@ -133,8 +133,15 @@ export class AnalyticsController {
   }
 
   @Get('home')
-  async getHomeOverview(@Query('range') range?: string) {
-    return this.analyticsService.getHomeOverview(range);
+  async getHomeOverview(
+    @Query('range') range?: string,
+    @Query('forceRefresh') forceRefresh?: string,
+  ) {
+    return this.cached(
+      this.key('home', { range: range || 'matched' }),
+      () => this.analyticsService.getHomeOverview(range),
+      { forceRefresh },
+    );
   }
 
   @Get('dashboard/:sector')

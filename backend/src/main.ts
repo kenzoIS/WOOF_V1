@@ -39,14 +39,14 @@ async function bootstrap() {
   // Enable graceful shutdown to release port on restart
   app.enableShutdownHooks();
 
-  const server = await app.listen(port, '0.0.0.0');
+  const server = await app.listen(port);
   
   // Increase server timeouts for large CSV processing
   server.setTimeout(600000); // 10 minutes
   server.keepAliveTimeout = 600000;
   server.headersTimeout = 601000;
 
-  console.log(`🐾 WOOF Backend running on 0.0.0.0:${port}`);
+  console.log(`🐾 WOOF Backend running on port ${port}`);
 }
 
 bootstrap();

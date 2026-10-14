@@ -2371,7 +2371,7 @@ export function AISimulation() {
 
     return {
       window: `${peak.label} - ${nextHour}:00`,
-      detail: `${scaledLoad}% Load (${scaledVisits} visits)`,
+      detail: `${scaledLoad}% Load`,
     };
   }, [todayContext?.hourlyForecast, trafficDemandShift]);
 

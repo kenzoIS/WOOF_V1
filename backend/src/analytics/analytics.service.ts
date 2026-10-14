@@ -3614,6 +3614,10 @@ export class AnalyticsService {
       (a, b) => b.predictedVisits - a.predictedVisits,
     )[0];
     const peakCongestionWindow = `${peakHour.label} - ${String(peakHour.hour + 1).padStart(2, '0')}:00 (${peakHour.capacityUtilizationPercent}% Load, ${peakHour.demandLevel} Demand)`;
+    const totalExpectedVisits = hourlyForecast.reduce(
+      (sum, h) => sum + Number(h.predictedVisits || 0),
+      0,
+    );
 
     const factors = [
       {
@@ -3758,6 +3762,21 @@ export class AnalyticsService {
       recommendation,
       reasoning,
       hourlyForecast,
+      totalExpectedVisits,
+      peakCongestion: {
+        hour: peakHour.hour,
+        label: peakHour.label,
+        startLabel: peakHour.label,
+        endLabel: `${String(peakHour.hour + 1).padStart(2, '0')}:00`,
+        timeWindow: `${peakHour.label} – ${String(peakHour.hour + 1).padStart(2, '0')}:00`,
+        predictedVisits: peakHour.predictedVisits,
+        capacityUtilizationPercent: peakHour.capacityUtilizationPercent,
+        demandLevel: peakHour.demandLevel,
+        scheduledStaff: peakHour.scheduledStaff,
+        recommendedStaff: peakHour.recommendedStaff,
+        staffDelta: Math.max(0, (peakHour.recommendedStaff || 0) - (peakHour.scheduledStaff || 0)),
+        sectorVisits: peakHour.sectorVisits,
+      },
       modelDiagnostics: {
         modelName: 'Data-Driven Context-Aware Synthesis + Erlang C Queuing',
         historicalSampleDays: sampleDaysCount,

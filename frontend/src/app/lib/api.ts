@@ -443,19 +443,19 @@ export interface ExogenousStatus {
   } | null;
 }
 
-async function fetchApi(path: string, options?: RequestInit) {
+async function fetchApi<T = any>(path: string, options?: RequestInit): Promise<T> {
   const canUseCache = shouldCacheRequest(path, options);
   const cacheKey = `${API_BASE}${path}`;
 
   if (canUseCache) {
     const cached = apiCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      return cloneCachedValue(cached.data);
+      return cloneCachedValue(cached.data) as T;
     }
 
     const inFlight = apiInFlight.get(cacheKey);
     if (inFlight) {
-      return cloneCachedValue(await inFlight);
+      return cloneCachedValue(await inFlight) as T;
     }
   }
 
@@ -475,7 +475,7 @@ async function fetchApi(path: string, options?: RequestInit) {
   if (!canUseCache) {
     const data = await promise;
     clearApiCache();
-    return data;
+    return data as T;
   }
 
   apiInFlight.set(cacheKey, promise);
@@ -485,7 +485,7 @@ async function fetchApi(path: string, options?: RequestInit) {
       data,
       expiresAt: Date.now() + API_CACHE_TTL_MS,
     });
-    return cloneCachedValue(data);
+    return cloneCachedValue(data) as T;
   } finally {
     apiInFlight.delete(cacheKey);
   }
@@ -1335,3 +1335,139 @@ export async function triggerModelRecalibration(params?: {
     body: JSON.stringify(params || {}),
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WOOF ALERTS & NOTIFICATIONS SYSTEM (No-Icon, Persistent, Audited)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SystemAlert {
+  id: string;
+  alertKey: string;
+  module: 'services' | 'cafe' | 'retail' | 'pipeline' | 'forecast' | 'general';
+  severity: 'critical' | 'warning' | 'advisory';
+  classification: 'OBSERVED' | 'PREDICTED' | 'FORECAST' | 'SIMULATION' | 'SUSPECTED_RISK';
+  title: string;
+  evidence: string;
+  targetUrl: string;
+  actionLabel: string;
+  status: 'active' | 'acknowledged' | 'resolved';
+  firstTriggeredAt: string;
+  lastEvaluatedAt: string;
+  acknowledgedAt?: string | null;
+  acknowledgedBy?: string | null;
+  snoozeUntil?: string | null;
+  resolvedAt?: string | null;
+  resolutionType?: 'auto' | 'manual' | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UserNotification {
+  id: string;
+  recipientEmail: string;
+  type: 'alert' | 'opportunity' | 'suggestion' | 'report' | 'system' | 'info';
+  title: string;
+  message: string;
+  targetUrl: string;
+  actionLabel: string;
+  read: boolean;
+  readAt?: string | null;
+  dismissed: boolean;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function getActiveAlerts(): Promise<SystemAlert[]> {
+  try {
+    return await fetchApi<SystemAlert[]>('/alerts/active');
+  } catch {
+    return [];
+  }
+}
+
+export async function acknowledgeAlert(
+  id: string,
+  dto: { userEmail?: string; snoozeHours?: number; note?: string } = {},
+): Promise<SystemAlert> {
+  return fetchApi<SystemAlert>(`/alerts/${encodeURIComponent(id)}/acknowledge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+}
+
+export async function resolveAlert(
+  id: string,
+  reason: string,
+  userEmail?: string,
+): Promise<SystemAlert> {
+  return fetchApi<SystemAlert>(`/alerts/${encodeURIComponent(id)}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason, userEmail }),
+  });
+}
+
+export async function getActiveOpportunities(): Promise<UserNotification[]> {
+  try {
+    return await fetchApi<UserNotification[]>('/alerts/opportunities');
+  } catch {
+    return [];
+  }
+}
+
+export async function recordOpportunityActed(
+  id: string,
+  userEmail?: string,
+): Promise<{ success: boolean; notification?: UserNotification }> {
+  return fetchApi<{ success: boolean; notification?: UserNotification }>(
+    `/alerts/opportunities/${encodeURIComponent(id)}/acted`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userEmail }),
+    },
+  );
+}
+
+export async function getUserNotifications(
+  userEmail?: string,
+): Promise<UserNotification[]> {
+  const query = userEmail ? `?userEmail=${encodeURIComponent(userEmail)}` : '';
+  try {
+    return await fetchApi<UserNotification[]>(`/alerts/notifications${query}`);
+  } catch {
+    return [];
+  }
+}
+
+export async function markNotificationRead(
+  id: string,
+  userEmail?: string,
+): Promise<{ success: boolean; id: string }> {
+  return fetchApi(`/alerts/notifications/${encodeURIComponent(id)}/read`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userEmail }),
+  });
+}
+
+export async function markAllNotificationsRead(
+  userEmail?: string,
+): Promise<{ success: boolean; count: number }> {
+  return fetchApi('/alerts/notifications/mark-all-read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userEmail }),
+  });
+}
+
+export async function dismissNotification(
+  id: string,
+  userEmail?: string,
+): Promise<{ success: boolean; id: string }> {
+  const query = userEmail ? `?userEmail=${encodeURIComponent(userEmail)}` : '';
+  return fetchApi(`/alerts/notifications/${encodeURIComponent(id)}${query}`, {
+    method: 'DELETE',
+  });
+}
+

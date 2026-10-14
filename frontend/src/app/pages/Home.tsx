@@ -8,9 +8,10 @@ import { AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tool
 import { toast } from "sonner";
 import { ErrorModal, ErrorType } from "../components/ErrorModal";
 import { SuccessModal, SuccessType } from "../components/SuccessModal";
-import { getCurrentWeather, getHomeOverview } from "../lib/api";
+import { getCurrentWeather, getHomeOverview, getActiveAlerts, getActiveOpportunities, SystemAlert, UserNotification } from "../lib/api";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { KpiDetailModal, KpiDetailData } from "../components/KpiDetailModal";
+import { PriorityAlertBanner } from "../components/PriorityAlertBanner";
 import homeAiImg from "../../imports/no_bg_Home_2.png";
 import homeInsightImg from "../../imports/no_bg_Home-3.png";
 
@@ -497,6 +498,19 @@ export function Home() {
     if (hour < 12) setGreeting("Good morning");
     else if (hour < 18) setGreeting("Good afternoon");
     else setGreeting("Good evening");
+  }, []);
+
+  const [systemAlerts, setSystemAlerts] = useState<SystemAlert[]>([]);
+  const [opportunities, setOpportunities] = useState<UserNotification[]>([]);
+
+  useEffect(() => {
+    getActiveAlerts()
+      .then((data) => setSystemAlerts(Array.isArray(data) ? data : []))
+      .catch(() => {});
+
+    getActiveOpportunities()
+      .then((data) => setOpportunities(Array.isArray(data) ? data : []))
+      .catch(() => {});
   }, []);
   const weatherIcon =
     currentWeather && toNumber(currentWeather.rainfallMm) > 0.5
@@ -1064,6 +1078,14 @@ export function Home() {
 
   return (
     <div className="space-y-6 md:space-y-8 lg:space-y-12">
+      {/* PRIORITY ALERT BANNER (Immediately noticeable upon opening WOOF) */}
+      <PriorityAlertBanner
+        alerts={systemAlerts}
+        onAlertAcknowledged={(id) =>
+          setSystemAlerts((prev) => prev.filter((a) => a.id !== id))
+        }
+      />
+
       {/* SECTION 1 — HERO BANNER */}
       <div
         className="rounded-2xl md:rounded-3xl overflow-hidden relative"
@@ -1146,6 +1168,7 @@ export function Home() {
           </div>
         </div>
       </div>
+
 
       {homeError && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
