@@ -2,9 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
   ListBucketsCommand,
 } from '@aws-sdk/client-s3';
 import { fromIni } from '@aws-sdk/credential-providers';
+import * as crypto from 'crypto';
 
 const BUCKET_NAME = 'woof-data-lake-lucena-prod-1786959360';
 const REGION = 'ap-southeast-2';
@@ -153,6 +157,118 @@ export class AwsService {
       module || 'system',
       payload,
     );
+  }
+
+  // ----------------------------------------------------------------
+  // Audit Logs Archival Layer — 10+ day retention offload
+  // ----------------------------------------------------------------
+
+  async uploadAuditArchive(
+    dateStr: string,
+    records: Record<string, unknown>[],
+    sha256: string,
+  ): Promise<{ uri: string; key: string } | null> {
+    if (!this.s3) return null;
+    const [year, month] = dateStr.split('-');
+    const key = `audit-archives/${year || '2026'}/${month || '10'}/audit_logs_${dateStr}.json`;
+    const body = Buffer.from(JSON.stringify(records, null, 2), 'utf-8');
+
+    try {
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          Body: body,
+          ContentType: 'application/json',
+          Metadata: {
+            'record-count': String(records.length),
+            'sha256': sha256,
+          },
+          ServerSideEncryption: 'AES256',
+        }),
+      );
+      const uri = `s3://${BUCKET_NAME}/${key}`;
+      this.logger.log(`Archived ${records.length} audit logs to ${uri} (${this.humanSize(body.length)})`);
+      return { uri, key };
+    } catch (error) {
+      this.logger.error(
+        `Failed to archive audit logs to S3 (${key}): ${error instanceof Error ? error.message : error}`,
+      );
+      return null;
+    }
+  }
+
+  async verifyAuditArchive(
+    key: string,
+    expectedCount: number,
+    expectedSha256: string,
+  ): Promise<boolean> {
+    if (!this.s3) return false;
+    try {
+      const head = await this.s3.send(
+        new HeadObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+        }),
+      );
+      if (!head.ContentLength || head.ContentLength <= 0) {
+        this.logger.warn(`S3 archive verification failed: empty file for ${key}`);
+        return false;
+      }
+      const metadataSha = head.Metadata?.['sha256'] || head.Metadata?.['sha-256'];
+      if (metadataSha && metadataSha.toLowerCase() !== expectedSha256.toLowerCase()) {
+        this.logger.warn(`S3 archive checksum mismatch for ${key}: expected ${expectedSha256}, got ${metadataSha}`);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to verify S3 archive ${key}: ${error instanceof Error ? error.message : error}`,
+      );
+      return false;
+    }
+  }
+
+  async getAuditArchive(key: string): Promise<Record<string, unknown>[] | null> {
+    if (!this.s3) return null;
+    try {
+      const response = await this.s3.send(
+        new GetObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+        }),
+      );
+      if (!response.Body) return null;
+      const str = await response.Body.transformToString('utf-8');
+      return JSON.parse(str);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to fetch S3 archive ${key}: ${error instanceof Error ? error.message : error}`,
+      );
+      return null;
+    }
+  }
+
+  async listAuditArchives(): Promise<{ key: string; size: number; lastModified?: Date }[]> {
+    if (!this.s3) return [];
+    try {
+      const response = await this.s3.send(
+        new ListObjectsV2Command({
+          Bucket: BUCKET_NAME,
+          Prefix: 'audit-archives/',
+        }),
+      );
+      return (response.Contents || []).map((c) => ({
+        key: c.Key || '',
+        size: c.Size || 0,
+        lastModified: c.LastModified,
+      }));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to list S3 audit archives: ${error instanceof Error ? error.message : error}`,
+      );
+      return [];
+    }
   }
 
   // ----------------------------------------------------------------

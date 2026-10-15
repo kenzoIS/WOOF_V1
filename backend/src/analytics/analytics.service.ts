@@ -3694,40 +3694,40 @@ export class AnalyticsService {
 
     if (this.auditService && options.targetHour !== undefined && options.targetHour !== null) {
       const isWhatIf = options.scenarioMultiplier !== undefined && options.scenarioMultiplier !== 1.0;
-      const shiftPercent = isWhatIf ? Math.round((options.scenarioMultiplier! - 1) * 100) : 0;
-      const scheduledStaffTotal = sectorBreakdown.reduce((sum, s) => sum + s.scheduledStaff, 0);
-      const recommendedStaffTotal = sectorBreakdown.reduce((sum, s) => sum + s.recommendedStaff, 0);
-      const avgCapPct = Math.round(
-        sectorBreakdown.reduce((sum, s) => sum + s.capacityUtilizationPercent, 0) / (sectorBreakdown.length || 1),
-      );
-      const actionName = isWhatIf
-        ? `Simulated What-If Traffic Scenario (${shiftPercent >= 0 ? '+' : ''}${shiftPercent}%)`
-        : `Evaluated Hourly Staffing Plan (${String(targetHour).padStart(2, '0')}:00)`;
-      const targetName = `${effectiveDayOfWeek} @ ${String(targetHour).padStart(2, '0')}:00 | ${options.scenarioLabel || (isWhatIf ? `Demand Shift ${shiftPercent >= 0 ? '+' : ''}${shiftPercent}%` : 'Baseline Shift')}`;
-      const stateBefore = `${totalHistoricalBaseline} baseline visits (${scheduledStaffTotal} scheduled staff)`;
-      const stateAfter = `${totalAdjustedTraffic} predicted visits -> Recommended: ${recommendedStaffTotal} staff (${recommendedStaffTotal - scheduledStaffTotal >= 0 ? '+' : ''}${recommendedStaffTotal - scheduledStaffTotal} gap)`;
+      // Only record explicit What-If simulations, eliminating repetitive logs from routine slider movements or refreshes
+      if (isWhatIf) {
+        const shiftPercent = Math.round((options.scenarioMultiplier! - 1) * 100);
+        const scheduledStaffTotal = sectorBreakdown.reduce((sum, s) => sum + s.scheduledStaff, 0);
+        const recommendedStaffTotal = sectorBreakdown.reduce((sum, s) => sum + s.recommendedStaff, 0);
+        const avgCapPct = Math.round(
+          sectorBreakdown.reduce((sum, s) => sum + s.capacityUtilizationPercent, 0) / (sectorBreakdown.length || 1),
+        );
+        const actionName = `Simulated What-If Traffic Scenario (${shiftPercent >= 0 ? '+' : ''}${shiftPercent}%)`;
+        const targetName = `${effectiveDayOfWeek} @ ${String(targetHour).padStart(2, '0')}:00 | ${options.scenarioLabel || `Demand Shift ${shiftPercent >= 0 ? '+' : ''}${shiftPercent}%`}`;
+        const stateBefore = `${totalHistoricalBaseline} baseline visits (${scheduledStaffTotal} scheduled staff)`;
+        const stateAfter = `${totalAdjustedTraffic} predicted visits -> Recommended: ${recommendedStaffTotal} staff (${recommendedStaffTotal - scheduledStaffTotal >= 0 ? '+' : ''}${recommendedStaffTotal - scheduledStaffTotal} gap)`;
 
-      void this.auditService.record({
-        actor: 'Owner',
-        actorType: 'user',
-        action: actionName,
-        module: 'traffic_optimizer',
-        category: isWhatIf ? 'ai_system' : 'workflow',
-        target: targetName,
-        status: 'success',
-        stateBefore,
-        stateAfter,
-        metadata: {
-          targetHour,
-          dayOfWeek: effectiveDayOfWeek,
-          date: today,
-          weatherCondition: weatherData.condition,
-          historicalBaseline: totalHistoricalBaseline,
-          predictedTraffic: totalAdjustedTraffic,
-          scenarioMultiplier: options.scenarioMultiplier ?? 1.0,
-          scenarioLabel: options.scenarioLabel ?? 'Baseline',
-          scheduledStaff: scheduledStaffTotal,
-          recommendedStaff: recommendedStaffTotal,
+        void this.auditService?.record?.({
+          actor: 'Owner',
+          actorType: 'user',
+          action: actionName,
+          module: 'traffic_optimizer',
+          category: 'ai_system',
+          target: targetName,
+          status: 'success',
+          stateBefore,
+          stateAfter,
+          metadata: {
+            targetHour,
+            dayOfWeek: effectiveDayOfWeek,
+            date: today,
+            weatherCondition: weatherData.condition,
+            historicalBaseline: totalHistoricalBaseline,
+            predictedTraffic: totalAdjustedTraffic,
+            scenarioMultiplier: options.scenarioMultiplier ?? 1.0,
+            scenarioLabel: options.scenarioLabel ?? 'Baseline',
+            scheduledStaff: scheduledStaffTotal,
+            recommendedStaff: recommendedStaffTotal,
           staffGap: recommendedStaffTotal - scheduledStaffTotal,
           capacityUtilizationPercent: avgCapPct,
           headline: recommendation.headline,
@@ -3740,6 +3740,7 @@ export class AnalyticsService {
           })),
         },
       });
+      }
     }
 
     return {
@@ -4549,6 +4550,31 @@ export class AnalyticsService {
 
     await this.markPrescriptionDraftDeployed(`${sourceType}:${sourceId}`);
 
+    if (this.auditService) {
+      void this.auditService.record({
+        action: `Deployed Prescriptive Recommendation: ${title}`,
+        module: 'prescriptions',
+        category: 'workflow',
+        target: `${category} | ${title}`,
+        actor: 'Owner',
+        actorType: 'user',
+        status: 'success',
+        stateBefore: 'draft/pending',
+        stateAfter: 'active',
+        metadata: {
+          prescriptionKey: `${sourceType}:${sourceId}`,
+          category,
+          sourceType,
+          sourceId,
+          title,
+          sector: payload.sector,
+          mechanic: payload.mechanic,
+          confidence: payload.confidence,
+          targetTime: payload.target_time,
+        },
+      });
+    }
+
     return {
       prescription: this.mapActivePrescription(data),
       source: data,
@@ -4792,6 +4818,26 @@ export class AnalyticsService {
       throw new Error(`Failed to save bundle archive: ${error.message}`);
     }
 
+    if (this.auditService) {
+      void this.auditService.record({
+        action: `Created Bundle Archive: ${payload.bundle_name}`,
+        module: 'bundle_engine',
+        category: 'workflow',
+        target: payload.bundle_name,
+        actor: 'Owner',
+        actorType: 'user',
+        status: 'success',
+        stateBefore: 'none',
+        stateAfter: payload.status,
+        metadata: {
+          bundleName: payload.bundle_name,
+          items: payload.items,
+          source: payload.source,
+          discountPercent: payload.discount_percent,
+        },
+      });
+    }
+
     return this.mapBundleArchive(data);
   }
 
@@ -4825,6 +4871,25 @@ export class AnalyticsService {
 
     if (error) {
       throw new Error(`Failed to update bundle archive: ${error.message}`);
+    }
+
+    if (this.auditService) {
+      void this.auditService.record({
+        action: `Updated Bundle Archive Status (${status})`,
+        module: 'bundle_engine',
+        category: 'workflow',
+        target: data?.bundle_name || id,
+        actor: 'Owner',
+        actorType: 'user',
+        status: 'success',
+        stateBefore: 'active',
+        stateAfter: status,
+        metadata: {
+          bundleId: id,
+          bundleName: data?.bundle_name,
+          newStatus: status,
+        },
+      });
     }
 
     return this.mapBundleArchive(data);
@@ -5759,12 +5824,13 @@ export class AnalyticsService {
       await this.auditService.record({
         action: `Generated Happy Hour Recommendation (${itemNames})`,
         module: 'happy_hour',
-        actor: 'Owner',
-        actorType: 'user',
+        actor: 'System',
+        actorType: 'system',
         target: qp?.targetDate ? `${new Date(qp.targetDate).toLocaleDateString()} @ ${qp.targetHour}:00` : 'Happy Hour',
         status: 'success',
         category: 'ai_system',
         metadata: {
+          initiatedBy: 'Daily Happy Hour Cron',
           targetDate: qp?.targetDate,
           targetHour: qp?.targetHour,
           items: qp?.recommendedItems,

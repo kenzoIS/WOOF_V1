@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Activity, Clock, Filter, Search, Zap, X, ChevronRight, CheckCircle2, XCircle, Hourglass, User, Target, Layers, Tag, Timer, CalendarDays, ArrowRight, Info } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -7,9 +6,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { InfoTooltip } from "../components/InfoTooltip";
 import { getAuditLogs, getAuditSummary } from "../lib/api";
 
-type AuditEvent = {
+export type AuditEvent = {
   id: string;
-  actor: string;
+  actor: "Owner" | "System" | string;
+  actor_type?: "user" | "system" | "integration";
   target?: string;
   action: string;
   module: string;
@@ -19,16 +19,33 @@ type AuditEvent = {
   created_at: string;
   status: "success" | "failed" | "pending";
   category: string;
+  metadata?: Record<string, unknown>;
+  isArchived?: boolean;
 };
 
 const formatDuration = (ms?: number) =>
   !Number.isFinite(ms) ? "N/A" : (ms || 0) < 1000 ? `${ms} ms` : `${((ms || 0) / 1000).toFixed(1)} s`;
 
-// Format module key to friendly display name
-const formatModuleName = (mod: string) => {
+const formatModuleName = (mod: string, target?: string) => {
+  if (target && target.toLowerCase().includes("next quiet period")) {
+    return "Cafe";
+  }
+  if (mod === "cafe" || mod === "happy_hour") return "Cafe";
   if (mod === "traffic_optimizer") return "Traffic Optimizer";
-  if (mod === "happy_hour") return "Happy Hour";
+  if (mod === "alerts") return "Alerts & Notifications";
+  if (mod === "prescriptions") return "Prescriptions";
+  if (mod === "bundle_engine") return "Bundle Engine";
+  if (mod === "smart_reports") return "Smart Reports";
+  if (mod === "simulation") return "AI Simulation";
+  if (mod === "data_ingestion" || mod === "csv" || mod === "pipeline") return "Data Ingestion";
+  if (mod === "system_settings" || mod === "settings") return "System Settings";
+  if (mod === "auth" || mod === "security") return "Auth & Security";
   return mod.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+const formatTarget = (target?: string) => {
+  if (!target) return "System";
+  return target.replace(/^Business Opportunity:\s*/i, "").trim() || "System";
 };
 
 const statusClass = (value: string) =>
@@ -38,45 +55,151 @@ const statusClass = (value: string) =>
       ? "bg-yellow-100 text-yellow-700 border-yellow-200"
       : "bg-green-100 text-green-700 border-green-200";
 
-// Derive a human-readable failure reason from the event data
+/**
+ * Accurately extracts the real failure reason recorded with an audit event.
+ * Strictly avoids heuristic guessing or fabricated error explanations.
+ */
 const getFailureReason = (event: AuditEvent): string => {
   if (event.status === "success") return "Action completed successfully.";
   if (event.status === "pending") return "Action is queued and awaiting processing or approval.";
 
-  // Try to infer reason from state transitions and action name
-  const action = event.action.toLowerCase();
-  const stateAfter = (event.state_after || "").toLowerCase();
-  const stateBefore = (event.state_before || "").toLowerCase();
+  const meta = event.metadata || {};
+  const explicitReason =
+    meta.error ||
+    meta.reason ||
+    meta.message ||
+    meta.failureReason ||
+    meta.errorDetails;
 
-  if (stateAfter.includes("error") || stateAfter.includes("failed")) {
-    return `System returned an error state after attempting "${event.action}". Check upstream service availability.`;
+  if (typeof explicitReason === "string" && explicitReason.trim()) {
+    return explicitReason.trim();
   }
-  if (action.includes("auth") || action.includes("login") || action.includes("token")) {
-    return "Authentication or authorization failure. Credentials may have expired or permissions are insufficient.";
+  if (typeof explicitReason === "object" && explicitReason !== null) {
+    return JSON.stringify(explicitReason);
   }
-  if (action.includes("forecast") || action.includes("predict") || action.includes("model")) {
-    return "AI model inference failed. This may be due to insufficient historical data, model timeout, or a missing input parameter.";
+  if (
+    event.state_after &&
+    typeof event.state_after === "string" &&
+    event.state_after.toLowerCase().includes("failed")
+  ) {
+    return event.state_after;
   }
-  if (action.includes("ingest") || action.includes("upload") || action.includes("import")) {
-    return "Data ingestion failed. The file may be malformed, missing required columns, or exceed the allowed size limit.";
-  }
-  if (action.includes("export") || action.includes("download") || action.includes("report")) {
-    return "Export or report generation failed. The system may have timed out or encountered an empty dataset.";
-  }
-  if (action.includes("reorder") || action.includes("order") || action.includes("purchase")) {
-    return "Reorder action failed. This may be due to a payment issue, supplier API timeout, or inventory constraint.";
-  }
-  if (action.includes("delete") || action.includes("remove")) {
-    return "Deletion failed. The resource may be protected, referenced by another record, or already removed.";
-  }
-  if (action.includes("sync") || action.includes("push") || action.includes("publish")) {
-    return "Sync failed. The target system may be offline or returned a rejection response.";
-  }
-  if (stateBefore && stateAfter && stateBefore === stateAfter) {
-    return "Action had no effect — state did not change. A pre-condition may not have been met.";
-  }
-  return "Action failed due to an unspecified system error. Review server logs for the exact exception trace.";
+
+  return "Action recorded as failed without an attached error message.";
 };
+
+/**
+ * Plain, neutral, text-based Action/Event presentation matching WOOF dark navy typography.
+ * Eliminates colorful badges and noisy bracketed labels.
+ */
+function ActionText({ action }: { action: string }) {
+  const label = useMemo(() => {
+    if (!action) return "System Event";
+    if (action === "ALERT_TRIGGERED") return "Alert Triggered";
+    if (action === "ALERT_ACKNOWLEDGED") return "Alert Acknowledged";
+    if (action === "ALERT_RESOLVED") return "Alert Resolved";
+    if (action === "OPPORTUNITY_DETECTED") return "Opportunity Detected";
+    if (action === "OPPORTUNITY_ACTED") return "Opportunity Acted";
+    if (action === "OPPORTUNITY_EXPIRED") return "Opportunity Expired";
+    if (action === "AUDIT_LOGS_ARCHIVED_TO_S3") return "Audit Logs Archived to S3";
+    return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }, [action]);
+
+  return <span className="font-semibold text-xs text-[#223047]">{label}</span>;
+}
+
+/**
+ * Structured Before/After Tracking View:
+ * Parses JSON configurations, numbers, and states into a field-by-field diff comparison table.
+ */
+function StateDiffView({
+  stateBefore,
+  stateAfter,
+}: {
+  stateBefore?: string;
+  stateAfter?: string;
+}) {
+  if (!stateBefore && !stateAfter) return null;
+
+  let beforeObj: Record<string, unknown> | null = null;
+  let afterObj: Record<string, unknown> | null = null;
+
+  try {
+    if (stateBefore?.trim().startsWith("{")) beforeObj = JSON.parse(stateBefore);
+  } catch {}
+  try {
+    if (stateAfter?.trim().startsWith("{")) afterObj = JSON.parse(stateAfter);
+  } catch {}
+
+  if (beforeObj || afterObj) {
+    const allKeys = Array.from(
+      new Set([...Object.keys(beforeObj || {}), ...Object.keys(afterObj || {})]),
+    );
+
+    return (
+      <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3.5 space-y-2">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-[#223047]/50">
+          Structured Parameter Changes (Before vs After)
+        </div>
+        <div className="border border-[#FFD9EC] rounded-lg overflow-hidden bg-white">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-[#FFF2FA] border-b border-[#FFD9EC] text-[10px] uppercase font-bold text-[#223047]">
+              <tr>
+                <th className="p-2">Field</th>
+                <th className="p-2">Previous Value</th>
+                <th className="p-2">New Value</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#FFD9EC]/50 font-mono text-[11px]">
+              {allKeys.map((key) => {
+                const prevVal = beforeObj && beforeObj[key] !== undefined ? JSON.stringify(beforeObj[key]) : "—";
+                const newVal = afterObj && afterObj[key] !== undefined ? JSON.stringify(afterObj[key]) : "—";
+                const isChanged = prevVal !== newVal;
+                return (
+                  <tr key={key} className={isChanged ? "bg-amber-50/50" : ""}>
+                    <td className="p-2 font-semibold text-[#223047]">{key}</td>
+                    <td className="p-2 text-slate-500">{prevVal}</td>
+                    <td
+                      className={`p-2 font-semibold ${
+                        isChanged ? "text-emerald-700" : "text-slate-700"
+                      }`}
+                    >
+                      {newVal}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3.5 space-y-2">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[#223047]/50">
+        State Transition
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+        <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 font-mono">
+          <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+            Previous State
+          </span>
+          <span className="text-slate-700 break-words">{stateBefore || "—"}</span>
+        </div>
+        <div className="p-2.5 rounded-lg border border-[#FFD9EC] bg-white font-mono">
+          <span className="text-[10px] font-bold uppercase text-[#F53799] block mb-1">
+            New State
+          </span>
+          <span className="text-emerald-700 font-semibold break-words">
+            {stateAfter || "—"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Detail Modal ──────────────────────────────────────────────────────────
 function AuditDetailModal({ event, onClose }: { event: AuditEvent; onClose: () => void }) {
@@ -84,11 +207,14 @@ function AuditDetailModal({ event, onClose }: { event: AuditEvent; onClose: () =
   const isFailed = event.status === "failed";
   const isPending = event.status === "pending";
 
-  const StatusIcon = isFailed ? XCircle : isPending ? Hourglass : CheckCircle2;
-  const statusColor = isFailed ? "text-red-600" : isPending ? "text-yellow-600" : "text-green-600";
-  const statusBg = isFailed ? "bg-red-50 border-red-200" : isPending ? "bg-yellow-50 border-yellow-200" : "bg-green-50 border-green-200";
+  const statusColor = isFailed ? "text-red-700" : isPending ? "text-yellow-700" : "text-green-700";
+  const statusBg = isFailed
+    ? "bg-red-50 border-red-200"
+    : isPending
+      ? "bg-yellow-50 border-yellow-200"
+      : "bg-green-50 border-green-200";
 
-  const hasStateDiff = event.state_before || event.state_after;
+  const normalizedActor = event.actor === "Owner" ? "Owner" : "System";
 
   return (
     <div
@@ -103,84 +229,71 @@ function AuditDetailModal({ event, onClose }: { event: AuditEvent; onClose: () =
         {/* Header */}
         <div
           className="flex items-start justify-between p-5 pb-4"
-          style={{ background: "linear-gradient(135deg, #FFF7FB 0%, #FFF0F8 100%)", borderBottom: "1px solid #FFD9EC" }}
+          style={{
+            background: "linear-gradient(135deg, #FFF7FB 0%, #FFF0F8 100%)",
+            borderBottom: "1px solid #FFD9EC",
+          }}
         >
           <div className="flex-1 min-w-0 pr-3">
-            <div className="flex items-center gap-2 mb-1.5">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <Badge className={`${statusClass(event.status)} border text-xs capitalize font-semibold`}>
                 {event.status}
               </Badge>
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/40">{event.category}</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-[#223047]/60">
+                {event.category}
+              </span>
             </div>
-            <h3 className="text-base font-bold text-[#223047] leading-snug">{event.action}</h3>
-            <p className="text-xs text-[#223047]/50 mt-0.5">{formatModuleName(event.module)}</p>
+            <div className="mt-1">
+              <ActionText action={event.action} />
+            </div>
+            <p className="text-xs text-[#223047]/60 mt-1">
+              {formatModuleName(event.module, event.target)}
+            </p>
           </div>
           <button
             onClick={onClose}
-            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-[#FFD9EC]/60 text-[#223047]/40 hover:text-[#F53799] transition-colors"
+            className="flex-shrink-0 px-2.5 py-1 text-xs font-bold text-[#223047]/60 hover:text-[#F53799] border border-[#FFD9EC] hover:border-[#F53799] rounded-lg transition-colors"
           >
-            <X className="w-4 h-4" />
+            Close
           </button>
         </div>
 
         <div className="p-5 space-y-4">
           {/* Status / Failure Banner */}
-          <div className={`flex items-start gap-3 p-3.5 rounded-xl border ${statusBg}`}>
-            <StatusIcon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${statusColor}`} />
-            <div className="text-xs leading-relaxed text-[#223047]/80">
+          <div className={`p-3.5 rounded-xl border ${statusBg}`}>
+            <div className="text-xs leading-relaxed text-[#223047]/90">
               <span className={`font-bold ${statusColor}`}>
-                {isFailed ? "Failure Reason: " : isPending ? "Pending: " : "Success: "}
+                {isFailed ? "Failure Explanation: " : isPending ? "Pending: " : "Status: "}
               </span>
               {failureReason}
             </div>
           </div>
 
-          {/* Meta grid */}
+          {/* Meta grid - Strictly Owner or System, no secondary initiators */}
           <div className="grid grid-cols-2 gap-3">
             {[
-              { Icon: User, label: "Actor", value: event.actor || "Owner" },
-              { Icon: Target, label: "Target", value: event.target || "System" },
-              { Icon: Layers, label: "Module", value: event.module },
-              { Icon: Tag, label: "Category", value: event.category },
-              { Icon: Timer, label: "Duration", value: formatDuration(event.duration_ms) },
-              { Icon: CalendarDays, label: "Timestamp", value: new Date(event.created_at).toLocaleString() },
-            ].map(({ Icon, label, value }) => (
+              { label: "Actor Classification", value: normalizedActor },
+              { label: "Target / Entity", value: formatTarget(event.target) },
+              { label: "Module", value: formatModuleName(event.module, event.target) },
+              { label: "Category", value: event.category },
+              { label: "Duration", value: formatDuration(event.duration_ms) },
+              { label: "Timestamp", value: new Date(event.created_at).toLocaleString() },
+            ].map(({ label, value }) => (
               <div key={label} className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Icon className="w-3 h-3 text-[#F53799]" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/40">{label}</span>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-[#223047]/50 mb-1">
+                  {label}
                 </div>
                 <div className="text-xs font-semibold text-[#223047] break-words">{value}</div>
               </div>
             ))}
           </div>
 
-          {/* State Diff */}
-          {hasStateDiff && (
-            <div className="rounded-xl border border-[#FFD9EC] bg-[#FFF7FB] p-3.5 space-y-2">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Info className="w-3 h-3 text-[#F53799]" />
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-[#223047]/40">State Transition</span>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-mono bg-slate-100 border border-slate-200 text-slate-600 px-2 py-1 rounded-lg">
-                  {event.state_before || "—"}
-                </span>
-                <ArrowRight className="w-3.5 h-3.5 text-[#223047]/30 flex-shrink-0" />
-                <span className={`text-xs font-mono px-2 py-1 rounded-lg border font-semibold ${
-                  isFailed
-                    ? "bg-red-50 border-red-200 text-red-700"
-                    : "bg-green-50 border-green-200 text-green-700"
-                }`}>
-                  {event.state_after || "—"}
-                </span>
-              </div>
-            </div>
-          )}
+          {/* Structured Before/After Tracking */}
+          <StateDiffView stateBefore={event.state_before} stateAfter={event.state_after} />
 
           {/* Event ID */}
-          <div className="text-[10px] text-[#223047]/30 font-mono text-center pt-1">
-            Event ID: {event.id}
+          <div className="text-[10px] text-[#223047]/40 font-mono text-center pt-1">
+            Event Record ID: {event.id}
           </div>
         </div>
       </div>
@@ -191,6 +304,9 @@ function AuditDetailModal({ event, onClose }: { event: AuditEvent; onClose: () =
 // ─── Main Page ─────────────────────────────────────────────────────────────
 export function Audit() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [summary, setSummary] = useState({
     total: 0,
     pendingApprovals: 0,
@@ -198,181 +314,497 @@ export function Audit() {
     systemBottlenecks: 0,
     averageDurationMs: 0,
   });
+
+  // Server-side filter states
   const [search, setSearch] = useState("");
+  const [scopeTab, setScopeTab] = useState<"all" | "alerts" | "automated" | "owner">("all");
+  const [actorFilter, setActorFilter] = useState<"all" | "Owner" | "System">("all");
   const [module, setModule] = useState("all");
   const [status, setStatus] = useState("all");
   const [category, setCategory] = useState("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
 
+  // Synchronize Scope Tabs with Actor/Module Filters
+  const handleScopeTabChange = (tab: "all" | "alerts" | "automated" | "owner") => {
+    setScopeTab(tab);
+    setPage(1);
+    if (tab === "all") {
+      setActorFilter("all");
+      setModule("all");
+    } else if (tab === "alerts") {
+      setModule("alerts");
+      setActorFilter("all");
+    } else if (tab === "automated") {
+      setActorFilter("System");
+      setModule("all");
+    } else if (tab === "owner") {
+      setActorFilter("Owner");
+      setModule("all");
+    }
+  };
+
+  // Server-side paginated & filtered data loader
+  const loadLogs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await getAuditLogs({
+        page,
+        limit: 20,
+        search: search.trim() || undefined,
+        actor: actorFilter !== "all" ? actorFilter : undefined,
+        module: module !== "all" ? module : undefined,
+        status: status !== "all" ? status : undefined,
+        category: category !== "all" ? category : undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+      });
+
+      if (res && Array.isArray(res.events)) {
+        setEvents(res.events);
+        setTotal(res.total || 0);
+        setTotalPages(res.totalPages || 1);
+      } else if (Array.isArray(res)) {
+        setEvents(res);
+        setTotal(res.length);
+        setTotalPages(Math.ceil(res.length / 20) || 1);
+      }
+    } catch (error) {
+      console.error("Failed to load audit logs", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search, actorFilter, module, status, category, startDate, endDate]);
+
+  // Initial summary load
   useEffect(() => {
-    Promise.all([getAuditLogs(), getAuditSummary()])
-      .then(([logs, totals]) => {
-        setEvents(((logs as AuditEvent[]) || []).map((e) => ({ ...e, actor: "Owner" })));
-        setSummary(totals as typeof summary);
-      })
-      .catch((error) => console.error("Failed to load audit logs", error))
-      .finally(() => setLoading(false));
+    getAuditSummary()
+      .then((totals) => setSummary(totals as typeof summary))
+      .catch((err) => console.error("Failed to load audit summary", err));
   }, []);
 
-  const filtered = useMemo(
-    () =>
-      events.filter((event) => {
-        const haystack = `${event.actor} ${event.action} ${event.module} ${event.target || ""}`.toLowerCase();
-        return (
-          (!search || haystack.includes(search.toLowerCase())) &&
-          (module === "all" || event.module === module) &&
-          (status === "all" || event.status === status) &&
-          (category === "all" || event.category === category)
-        );
-      }),
-    [events, search, module, status, category],
-  );
+  // Trigger query on parameter change
+  useEffect(() => {
+    void loadLogs();
+  }, [loadLogs]);
 
+  const clearFilters = () => {
+    setSearch("");
+    setScopeTab("all");
+    setActorFilter("all");
+    setModule("all");
+    setStatus("all");
+    setCategory("all");
+    setStartDate("");
+    setEndDate("");
+    setPage(1);
+  };
+
+  // Deduplicate noisy repetitive automated system evaluations while strictly preserving all Owner actions
+  const displayEvents = useMemo(() => {
+    const result: AuditEvent[] = [];
+    const seenAutomated = new Map<string, number>();
+
+    for (const ev of events) {
+      if (ev.actor === "Owner") {
+        result.push(ev);
+        continue;
+      }
+
+      const key = `${ev.action}:${ev.module}:${ev.target || ""}:${ev.status}`;
+      const evTime = new Date(ev.created_at).getTime();
+      const lastTime = seenAutomated.get(key);
+
+      // Suppress repeated identical automated triggers occurring within 30 minutes of a newer one
+      if (lastTime !== undefined && Math.abs(lastTime - evTime) < 30 * 60 * 1000) {
+        continue;
+      }
+
+      seenAutomated.set(key, evTime);
+      result.push(ev);
+    }
+
+    return result;
+  }, [events]);
+
+  const exportFilteredCsv = () => {
+    if (!displayEvents.length) return;
+    const headers = [
+      "Timestamp",
+      "Actor",
+      "Action",
+      "Module",
+      "Target",
+      "Status",
+      "State Before",
+      "State After",
+      "Duration (ms)",
+      "Category",
+    ];
+    const rows = displayEvents.map((e) => [
+      `"${new Date(e.created_at).toISOString()}"`,
+      `"${(e.actor === "Owner" ? "Owner" : "System").replace(/"/g, '""')}"`,
+      `"${(e.action || "").replace(/"/g, '""')}"`,
+      `"${formatModuleName(e.module, e.target).replace(/"/g, '""')}"`,
+      `"${formatTarget(e.target).replace(/"/g, '""')}"`,
+      `"${e.status || ""}"`,
+      `"${(e.state_before || "").replace(/"/g, '""')}"`,
+      `"${(e.state_after || "").replace(/"/g, '""')}"`,
+      `"${e.duration_ms ?? ""}"`,
+      `"${e.category || ""}"`,
+    ]);
+
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `WOOF_Audit_Logs_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // 3 Clean KPI Cards: Removed "Average Execution Time — 0 ms"
   const kpis = [
-    [Activity, "Pending Approvals", summary.pendingApprovals],
-    [Clock, "Average Duration", formatDuration(summary.averageDurationMs)],
-    [AlertTriangle, "Failed Actions", `${summary.systemBottlenecks} alerts`],
-    [Zap, "Automated Actions", summary.automatedTriggers],
+    { label: "Total Recorded Events", value: summary.total || total },
+    { label: "Automated Triggers", value: summary.automatedTriggers },
+    { label: "Alerts & Security Events", value: `${summary.systemBottlenecks} events` },
   ] as const;
 
   return (
     <div className="space-y-4 md:space-y-6 lg:space-y-8">
       {/* Page Header */}
-      <div className="flex items-center gap-2">
-        <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
-          Audit &amp; Orchestration Logs
-        </h1>
-        <InfoTooltip label="Every API action is recorded with its actor, target, result, and execution time. Click any row for full details." />
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl md:text-3xl lg:text-[36px] font-extrabold text-[#223047]">
+            Audit &amp; Orchestration Logs
+          </h1>
+          <InfoTooltip label="Every operational event, alert evaluation, and owner action is immutably logged with actor, target, state delta, and execution metrics. Click any row for diagnostics." />
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportFilteredCsv}
+            className="px-3.5 py-1.5 rounded-xl border border-[#FFD9EC] bg-white text-xs font-bold text-[#223047] hover:bg-[#FFF7FB] hover:border-[#F53799] transition-colors"
+          >
+            Export Filtered CSV
+          </button>
+        </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards: Clean 3-Card Grid */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          {kpis.map(([Icon, label, value]) => (
-            <div key={label} className="flex items-center gap-3 bg-[#FFF2FA] border border-[#FFD9EC] rounded-xl px-3 py-3">
-              <div className="w-10 h-10 rounded-lg bg-[#F53799] flex items-center justify-center">
-                <Icon className="w-5 h-5 text-white" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+          {kpis.map(({ label, value }) => (
+            <div
+              key={label}
+              className="bg-[#FFF2FA] border border-[#FFD9EC] rounded-xl px-4 py-3.5 flex flex-col justify-between"
+            >
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#223047]/60">
+                {label}
               </div>
-              <div>
-                <div className="text-xs text-[#223047] opacity-80">
-                  {label}
-                </div>
-                <div className="text-xl font-bold text-[#223047]">{value}</div>
-              </div>
+              <div className="text-xl md:text-2xl font-black text-[#223047] mt-1">{value}</div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Filters + Table */}
+      {/* Filter Tabs & Controls */}
       <div className="bg-white border border-[#FFD9EC] rounded-2xl md:rounded-3xl p-4 md:p-8 space-y-5">
-        {/* Filters */}
-        <div className="flex flex-col md:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
-            <Input
-              className="pl-10 border-[#FFD9EC]"
-              placeholder="Search actor, action, module, or target..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <Select value={module} onValueChange={setModule}>
-            <SelectTrigger className="w-full md:w-48 border-[#FFD9EC]">
-              <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="Module" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Modules</SelectItem>
-              {[...new Set(events.map((e) => e.module))].map((value) => (
-                <SelectItem key={value} value={value}>{formatModuleName(value)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="w-full md:w-40 border-[#FFD9EC]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="success">Success</SelectItem>
-              <SelectItem value="failed">Failed</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger className="w-full md:w-44 border-[#FFD9EC]">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="workflow">Workflow</SelectItem>
-              <SelectItem value="ai_system">AI &amp; System</SelectItem>
-              <SelectItem value="security">Security</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Quick Scope Tabs - Wrapped cleanly without scrollbar */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#FFD9EC] pb-3">
+          {[
+            { id: "all", label: "All Logs" },
+            { id: "alerts", label: "Alerts & Lifecycle" },
+            { id: "automated", label: "Automated & AI" },
+            { id: "owner", label: "Owner Operations" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => handleScopeTabChange(tab.id as typeof scopeTab)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                scopeTab === tab.id
+                  ? "bg-[#223047] text-white shadow-sm"
+                  : "bg-[#FFF7FB] text-[#223047]/70 hover:text-[#223047] hover:bg-[#FFD9EC]/50"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+
+          {(search ||
+            actorFilter !== "all" ||
+            module !== "all" ||
+            status !== "all" ||
+            category !== "all" ||
+            startDate ||
+            endDate ||
+            scopeTab !== "all") && (
+            <button
+              onClick={clearFilters}
+              className="ml-auto text-xs font-bold text-[#F53799] hover:underline whitespace-nowrap"
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
 
-        <p className="text-xs md:text-sm text-[#223047] opacity-60">
-          {loading ? "Loading audit events..." : `Showing ${filtered.length} of ${events.length} events`}
-        </p>
+        {/* Filter Controls Toolbar: Dedicated widths ensure Status, Date Range, and all dropdowns never clip */}
+        <div className="flex flex-col md:flex-row flex-wrap xl:flex-nowrap items-stretch md:items-center gap-2.5 w-full">
+          {/* Keyword Search */}
+          <div className="flex-1 min-w-[180px]">
+            <Input
+              className="border-[#FFD9EC] text-xs h-10 w-full bg-white text-[#223047] focus:ring-1 focus:ring-[#F53799]"
+              placeholder="Search action, actor, target, or metadata..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
 
-        {/* Table */}
-        <div className="border border-[#FFD9EC] rounded-xl overflow-hidden overflow-x-auto">
-          <Table>
+          {/* Strict Actor Filter: Strictly Owner vs System */}
+          <div className="w-full sm:w-[130px] shrink-0">
+            <Select
+              value={actorFilter}
+              onValueChange={(val: "all" | "Owner" | "System") => {
+                setActorFilter(val);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="border-[#FFD9EC] text-xs h-10 w-full bg-white text-[#223047]">
+                <SelectValue placeholder="Actor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Actors</SelectItem>
+                <SelectItem value="Owner">Owner</SelectItem>
+                <SelectItem value="System">System</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Module Selector */}
+          <div className="w-full sm:w-[155px] shrink-0">
+            <Select
+              value={module}
+              onValueChange={(val) => {
+                setModule(val);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="border-[#FFD9EC] text-xs h-10 w-full bg-white text-[#223047]">
+                <SelectValue placeholder="Module" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Modules</SelectItem>
+                <SelectItem value="cafe">Cafe</SelectItem>
+                <SelectItem value="traffic_optimizer">Traffic Optimizer</SelectItem>
+                <SelectItem value="alerts">Alerts &amp; Notifications</SelectItem>
+                <SelectItem value="prescriptions">Prescriptions</SelectItem>
+                <SelectItem value="bundle_engine">Bundle Engine</SelectItem>
+                <SelectItem value="smart_reports">Smart Reports</SelectItem>
+                <SelectItem value="simulation">AI Simulation</SelectItem>
+                <SelectItem value="csv">Data Ingestion</SelectItem>
+                <SelectItem value="auth">Auth &amp; Security</SelectItem>
+                <SelectItem value="settings">System Settings</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Status Selector - 130px fixed width prevents 'All Sta' truncation */}
+          <div className="w-full sm:w-[130px] shrink-0">
+            <Select
+              value={status}
+              onValueChange={(val) => {
+                setStatus(val);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="border-[#FFD9EC] text-xs h-10 w-full bg-white text-[#223047]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="success">Success</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Date Range Inputs: 135px width each ensures dd/mm/yyyy never clips */}
+          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+            <Input
+              type="date"
+              className="border-[#FFD9EC] text-xs h-10 px-2.5 w-full sm:w-[135px] bg-white text-[#223047] focus:ring-1 focus:ring-[#F53799]"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(1);
+              }}
+              title="Start Date"
+            />
+            <Input
+              type="date"
+              className="border-[#FFD9EC] text-xs h-10 px-2.5 w-full sm:w-[135px] bg-white text-[#223047] focus:ring-1 focus:ring-[#F53799]"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
+              title="End Date"
+            />
+          </div>
+        </div>
+
+        {/* Record count indicator (Include AWS toggle removed) */}
+        <div className="flex items-center justify-between pt-1 text-xs text-[#223047]/70">
+          <span className="font-semibold text-slate-500">
+            {loading ? "Querying audit logs..." : `Showing ${displayEvents.length} of ${total} records`}
+          </span>
+        </div>
+
+        {/* Table - Fixed 100% to container with zero horizontal scrollbar */}
+        <div className="border border-[#FFD9EC] rounded-xl overflow-hidden w-full bg-white">
+          <Table className="w-full table-fixed" containerClassName="overflow-hidden">
             <TableHeader>
               <TableRow className="bg-[#FFF7FB]">
-                <TableHead>Timestamp</TableHead>
-                <TableHead>Actor</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>Action &amp; Module</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-8" />
+                <TableHead className="w-[14%] px-3 font-bold text-xs text-[#223047] whitespace-nowrap">Timestamp</TableHead>
+                <TableHead className="w-[8%] px-3 font-bold text-xs text-[#223047] whitespace-nowrap">Actor</TableHead>
+                <TableHead className="w-[22%] px-3 font-bold text-xs text-[#223047] whitespace-nowrap">Action / Event</TableHead>
+                <TableHead className="w-[12%] px-3 font-bold text-xs text-[#223047] whitespace-nowrap">Module</TableHead>
+                <TableHead className="w-[16%] px-3 font-bold text-xs text-[#223047] whitespace-nowrap">Target</TableHead>
+                <TableHead className="w-[11%] px-3 font-bold text-xs text-[#223047] whitespace-nowrap">State Transition</TableHead>
+                <TableHead className="w-[10%] px-3 font-bold text-xs text-[#223047] whitespace-nowrap">Status</TableHead>
+                <TableHead className="w-[7%] px-3 text-center text-xs font-bold text-[#223047] whitespace-nowrap">Details</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {displayEvents.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 opacity-60">
-                    {loading ? "Loading..." : "No audit events found"}
+                  <TableCell colSpan={8} className="text-center py-10 text-xs text-[#223047]/50">
+                    {loading ? "Retrieving audit records..." : "No matching audit records found."}
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((event) => (
+                displayEvents.map((event) => (
                   <TableRow
                     key={event.id}
-                    className="cursor-pointer hover:bg-[#FFF2FA] transition-colors group"
+                    className="cursor-pointer hover:bg-[#FFF2FA] transition-colors"
                     onClick={() => setSelectedEvent(event)}
                   >
-                    <TableCell className="text-xs whitespace-nowrap">
-                      {new Date(event.created_at).toLocaleString()}
+                    <TableCell
+                      className="w-[14%] px-3 py-3 text-xs text-[#223047]/80 font-mono truncate"
+                      title={new Date(event.created_at).toLocaleString()}
+                    >
+                      {new Date(event.created_at).toLocaleDateString([], {
+                        month: "2-digit",
+                        day: "2-digit",
+                        year: "2-digit",
+                      })}{" "}
+                      {new Date(event.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </TableCell>
-                    <TableCell className="font-medium text-xs">{event.actor || "Owner"}</TableCell>
-                    <TableCell className="text-xs">{event.target || "System"}</TableCell>
-                    <TableCell className="text-xs">
-                      <div className="font-medium">{event.action}</div>
-                      <div className="opacity-60">{formatModuleName(event.module)}</div>
+
+                    {/* Strict Actor Classification: Strictly Owner or System */}
+                    <TableCell className="w-[8%] px-3 py-3 text-xs font-semibold text-[#223047] whitespace-nowrap">
+                      {event.actor === "Owner" ? "Owner" : "System"}
                     </TableCell>
-                    <TableCell className="text-xs">
-                      {event.state_before || event.state_after
-                        ? `${event.state_before || "—"} → ${event.state_after || "—"}`
-                        : "—"}
+
+                    {/* Action / Event */}
+                    <TableCell className="w-[22%] px-3 py-3 text-xs truncate" title={event.action}>
+                      <ActionText action={event.action} />
                     </TableCell>
-                    <TableCell>
-                      <Badge className={`${statusClass(event.status)} border text-xs capitalize`}>
+
+                    {/* Module */}
+                    <TableCell
+                      className="w-[12%] px-3 py-3 text-xs text-[#223047]/70 font-medium truncate"
+                      title={formatModuleName(event.module, event.target)}
+                    >
+                      {formatModuleName(event.module, event.target)}
+                    </TableCell>
+
+                    {/* Target */}
+                    <TableCell
+                      className="w-[16%] px-3 py-3 text-xs text-[#223047]/70 font-mono truncate"
+                      title={formatTarget(event.target)}
+                    >
+                      {formatTarget(event.target)}
+                    </TableCell>
+
+                    {/* State Transition */}
+                    <TableCell className="w-[11%] px-3 py-3 text-xs truncate">
+                      {event.state_before || event.state_after ? (
+                        <div
+                          className="flex items-center gap-1 font-mono text-[11px] truncate"
+                          title={`${event.state_before || "—"} → ${event.state_after || "—"}`}
+                        >
+                          <span className="text-slate-500 truncate max-w-[55px]">
+                            {event.state_before || "—"}
+                          </span>
+                          <span className="text-slate-400 shrink-0">→</span>
+                          <span className="font-semibold text-slate-700 truncate max-w-[55px]">
+                            {event.state_after || "—"}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </TableCell>
+
+                    {/* Status */}
+                    <TableCell className="w-[10%] px-3 py-3 whitespace-nowrap">
+                      <Badge className={`${statusClass(event.status)} border text-[11px] px-2 py-0.5 capitalize font-semibold`}>
                         {event.status}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-center">
-                      <ChevronRight className="w-4 h-4 text-[#223047]/20 group-hover:text-[#F53799] transition-colors" />
+
+                    {/* Details */}
+                    <TableCell className="w-[7%] px-3 py-3 text-center whitespace-nowrap">
+                      <span className="text-xs font-bold text-[#F53799] hover:underline">
+                        View
+                      </span>
                     </TableCell>
                   </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
+        </div>
+
+        {/* Server-Side Pagination Controls */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-[#FFD9EC] text-xs text-[#223047]/70">
+          <div>
+            Showing {total === 0 ? 0 : (page - 1) * 20 + 1} to{" "}
+            {Math.min(page * 20, total)} of {total} records
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(p - 1, 1))}
+              disabled={page <= 1 || loading}
+              className="px-3 py-1.5 rounded-lg border border-[#FFD9EC] bg-white font-semibold disabled:opacity-40 hover:bg-[#FFF7FB] transition-colors"
+            >
+              Previous
+            </button>
+            <span className="font-mono text-xs px-2 font-bold text-[#223047]">
+              Page {page} of {Math.max(totalPages, 1)}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+              disabled={page >= totalPages || loading}
+              className="px-3 py-1.5 rounded-lg border border-[#FFD9EC] bg-white font-semibold disabled:opacity-40 hover:bg-[#FFF7FB] transition-colors"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

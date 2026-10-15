@@ -563,8 +563,15 @@ export async function getAlertThresholds(): Promise<AlertThresholds> {
   return fetchApi('/settings/alert-thresholds');
 }
 
-export async function getAuditLogs(params?: Record<string, string>) {
-  const query = params ? `?${new URLSearchParams(params).toString()}` : '';
+export async function getAuditLogs(params?: Record<string, string | number | boolean | undefined>) {
+  if (!params) return fetchApi('/audit/logs');
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      sp.append(k, String(v));
+    }
+  }
+  const query = sp.toString() ? `?${sp.toString()}` : '';
   return fetchApi(`/audit/logs${query}`);
 }
 

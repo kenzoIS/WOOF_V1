@@ -400,6 +400,7 @@ export class AlertsService implements OnModuleInit {
             targetUrl: '/traffic-optimizer',
             actionLabel: 'PLAN PROMOTION',
             metadata: {
+              classification: 'PREDICTED',
               targetDate,
               targetHour,
               predictedTrafficDrop: dropPercent,
@@ -448,7 +449,7 @@ export class AlertsService implements OnModuleInit {
               .eq('id', notif.id);
 
             void this.auditService.record({
-              actor: 'Traffic Optimizer',
+              actor: 'System',
               actorType: 'system',
               action: 'OPPORTUNITY_EXPIRED',
               module: 'happy_hour',
@@ -458,6 +459,7 @@ export class AlertsService implements OnModuleInit {
               stateBefore: 'opportunity',
               stateAfter: 'expired',
               metadata: {
+                initiatedBy: 'Traffic Optimizer',
                 notificationId: notif.id,
                 targetDate: tDate,
                 targetHour: tHour,
@@ -549,7 +551,7 @@ export class AlertsService implements OnModuleInit {
 
     // Audit Log: Record state transition
     void this.auditService.record({
-      actor: input.actor || 'WOOF Alert Engine',
+      actor: 'System',
       actorType: 'system',
       action: 'ALERT_TRIGGERED',
       module: input.auditModule || (input.module === 'pipeline' ? 'pipeline' : 'alerts'),
@@ -559,6 +561,7 @@ export class AlertsService implements OnModuleInit {
       stateBefore: 'normal',
       stateAfter: newAlert.severity,
       metadata: {
+        initiatedBy: input.actor || 'WOOF Alert Engine',
         alertId: newAlert.id,
         alertKey: newAlert.alertKey,
         classification: newAlert.classification,
@@ -612,7 +615,7 @@ export class AlertsService implements OnModuleInit {
       alert.alertKey.startsWith('ALERT_STAFF_BOTTLENECK');
 
     void this.auditService.record({
-      actor: isTraffic ? 'Traffic Optimizer' : 'WOOF Alert Engine',
+      actor: 'System',
       actorType: 'system',
       action: 'ALERT_RESOLVED',
       module: isTraffic ? 'traffic_optimizer' : 'alerts',
@@ -622,6 +625,7 @@ export class AlertsService implements OnModuleInit {
       stateBefore: previousStatus,
       stateAfter: 'resolved',
       metadata: {
+        initiatedBy: isTraffic ? 'Traffic Optimizer' : 'WOOF Alert Engine',
         alertId: alert.id,
         alertKey: alert.alertKey,
         affectedSector:
@@ -1010,7 +1014,7 @@ export class AlertsService implements OnModuleInit {
       });
 
     // Audit Log: Prevent duplicate log entries when polling or re-evaluating
-    if (!this.loggedOpportunityKeys.has(input.oppKey)) {
+    if (input.type === 'opportunity' && !this.loggedOpportunityKeys.has(input.oppKey)) {
       this.loggedOpportunityKeys.add(input.oppKey);
 
       const targetH = input.metadata?.targetHour;
@@ -1019,20 +1023,28 @@ export class AlertsService implements OnModuleInit {
           ? `${String(targetH).padStart(2, '0')}:00 - ${String(Number(targetH) + 1).padStart(2, '0')}:00`
           : '';
 
+      const isQuietPeriod =
+        input.oppKey.includes('HAPPY_HOUR') ||
+        (notif.title && notif.title.toLowerCase().includes('quiet period'));
+      const oppModule = isQuietPeriod ? 'cafe' : 'traffic_optimizer';
+      const initiatedBy = isQuietPeriod ? 'Cafe' : 'Traffic Optimizer';
+
       void this.auditService.record({
-        actor: 'Traffic Optimizer',
+        actor: 'System',
         actorType: 'system',
         action: 'OPPORTUNITY_DETECTED',
-        module: 'happy_hour',
+        module: oppModule,
         category: 'workflow',
         target: notif.title,
         status: 'pending',
         stateBefore: 'none',
         stateAfter: 'opportunity',
         metadata: {
+          initiatedBy,
           notificationId: notif.id,
+          opportunityId: notif.id,
           oppKey: input.oppKey,
-          affectedSector: (input.metadata?.sector as string) || 'Cafe',
+          affectedSector: (input.metadata?.sector as string) || (isQuietPeriod ? 'Cafe' : 'General'),
           predictedTimeWindow: windowStr,
           supportingEvidence: notif.message,
           targetDate: input.metadata?.targetDate,
@@ -1073,19 +1085,26 @@ export class AlertsService implements OnModuleInit {
         ? `${String(targetH).padStart(2, '0')}:00 - ${String(Number(targetH) + 1).padStart(2, '0')}:00`
         : '';
 
+    const isQuietPeriod =
+      notif.title && notif.title.toLowerCase().includes('quiet period');
+    const oppModule = isQuietPeriod ? 'cafe' : 'traffic_optimizer';
+    const initiatedBy = isQuietPeriod ? 'Cafe' : 'Traffic Optimizer';
+
     void this.auditService.record({
       actor: userEmail || 'owner@happytails.com',
       actorType: 'user',
       action: 'OPPORTUNITY_ACTED',
-      module: 'happy_hour',
+      module: oppModule,
       category: 'workflow',
       target: notif.title,
       status: 'success',
       stateBefore: 'opportunity',
       stateAfter: 'acted',
       metadata: {
+        initiatedBy,
         notificationId: notif.id,
-        affectedSector: (notif.metadata?.sector as string) || 'Cafe',
+        opportunityId: notif.id,
+        affectedSector: (notif.metadata?.sector as string) || (isQuietPeriod ? 'Cafe' : 'General'),
         predictedTimeWindow: windowStr,
         supportingEvidence: notif.message,
         targetUrl: notif.targetUrl,

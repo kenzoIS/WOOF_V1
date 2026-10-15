@@ -13,10 +13,15 @@ export class SupabaseAuthGuard implements CanActivate {
     const http = context.switchToHttp();
     const request = http.getRequest<{ headers: { cookie?: string } }>();
     const response = http.getResponse<any>();
-    const match = request.headers.cookie?.match(/(?:^|;\s*)woof_session=([^;]+)/);
-    if (!match) throw new UnauthorizedException('Authentication required');
+    const authHeader = (request as any).headers?.authorization;
     let token = '';
-    try { token = decodeURIComponent(match[1]); } catch { throw new UnauthorizedException('Authentication required'); }
+    if (authHeader?.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else {
+      const match = request.headers.cookie?.match(/(?:^|;\s*)woof_session=([^;]+)/);
+      if (!match) throw new UnauthorizedException('Authentication required');
+      try { token = decodeURIComponent(match[1]); } catch { throw new UnauthorizedException('Authentication required'); }
+    }
     let { data, error } = await this.supabase.createSessionClient(token).auth.getUser();
     if (error || !data.user) {
       const refreshMatch = request.headers.cookie?.match(/(?:^|;\s*)woof_refresh=([^;]+)/);

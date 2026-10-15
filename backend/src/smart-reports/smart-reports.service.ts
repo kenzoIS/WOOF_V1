@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -18,6 +19,7 @@ import {
 
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { LlmService } from '../llm/llm.service';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class SmartReportsService {
@@ -27,6 +29,7 @@ export class SmartReportsService {
     private supabaseService: SupabaseService,
     private configService: ConfigService,
     private llmService: LlmService,
+    @Optional() private auditService?: AuditService,
   ) {
     this.supabase = this.supabaseService.client;
   }
@@ -509,6 +512,29 @@ export class SmartReportsService {
       );
     }
 
+    if (this.auditService) {
+      void this.auditService.record({
+        action: `Generated Smart Executive Report: ${title}`,
+        module: 'smart_reports',
+        category: 'ai_system',
+        target: `${title} (${startDateStr} to ${endDateStr})`,
+        actor: 'Owner',
+        actorType: 'user',
+        status: 'success',
+        stateBefore: 'none',
+        stateAfter: 'generated',
+        metadata: {
+          reportId: newReport.id,
+          startDate: startDateStr,
+          endDate: endDateStr,
+          sectors,
+          totalRevenue: Math.round(totalRevenue),
+          trendDirection: extrapolationResult.trendDirection,
+          projectedGrowthRate: extrapolationResult.projectedGrowthRate,
+        },
+      });
+    }
+
     // Attach computed fields that are not persisted as DB columns
     return {
       ...this.mapToCamelCase(newReport),
@@ -656,6 +682,7 @@ export class SmartReportsService {
   }
 
   async deleteReport(id: string): Promise<void> {
+    const report = await this.getReportById(id).catch(() => null);
     const { count, error } = await this.supabase
       .from('smart_reports')
       .delete({ count: 'exact' })
@@ -664,6 +691,24 @@ export class SmartReportsService {
     if (error) throw new InternalServerErrorException(error.message);
     if (count === 0) {
       throw new NotFoundException(`Smart Report with ID "${id}" not found`);
+    }
+
+    if (this.auditService) {
+      void this.auditService.record({
+        action: `Deleted Smart Report: ${report?.title || id}`,
+        module: 'smart_reports',
+        category: 'workflow',
+        target: report?.title || id,
+        actor: 'Owner',
+        actorType: 'user',
+        status: 'success',
+        stateBefore: 'active',
+        stateAfter: 'deleted',
+        metadata: {
+          reportId: id,
+          title: report?.title,
+        },
+      });
     }
   }
 
@@ -696,6 +741,27 @@ export class SmartReportsService {
 
     if (error || !data) {
       throw new InternalServerErrorException(error?.message || 'Update failed');
+    }
+
+    if (this.auditService) {
+      void this.auditService.record({
+        action: 'Submitted Smart Report Feedback',
+        module: 'smart_reports',
+        category: 'workflow',
+        target: report.title,
+        actor: 'Owner',
+        actorType: 'user',
+        status: 'success',
+        stateBefore: 'pending_review',
+        stateAfter: dto.ownerApproved ? 'approved' : 'reviewed',
+        metadata: {
+          reportId: id,
+          title: report.title,
+          accuracyRating: dto.accuracyRating,
+          usefulnessRating: dto.usefulnessRating,
+          ownerApproved: dto.ownerApproved,
+        },
+      });
     }
 
     return this.mapToCamelCase(data);
