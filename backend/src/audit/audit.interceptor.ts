@@ -18,8 +18,10 @@ export class AuditInterceptor implements NestInterceptor {
     const path = request.originalUrl || request.url || '';
     if (path.includes('/audit/')) return next.handle();
 
-    const actor = 'Owner';
-    const actorType = 'user';
+    const user = request.user || request.session?.user;
+    const hasAuth = Boolean(user || request.headers?.['authorization']);
+    const actor = hasAuth ? 'Owner' : 'System';
+    const actorType = hasAuth ? 'user' : 'system';
     const module = path.split('/').filter(Boolean)[1] || 'system';
     const category =
       module === 'auth' || module === 'security'

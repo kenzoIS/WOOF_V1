@@ -1,7 +1,13 @@
-import { Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { MfaEnrollmentRateLimitService } from './mfa-enrollment-rate-limit.service';
+import { AuditService } from '../audit/audit.service';
 
 export interface DashboardSession {
   email: string;
@@ -20,25 +26,99 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly supabase: SupabaseService,
     private readonly mfaEnrollmentRateLimit: MfaEnrollmentRateLimitService,
+    @Optional() private readonly auditService?: AuditService,
   ) {}
 
   async login(email: string, password: string, code?: string): Promise<DashboardSession | { requiresTwoFactor: true; email: string }> {
     const normalizedEmail = email.trim().toLowerCase();
-    if (normalizedEmail !== this.adminEmail()) throw new UnauthorizedException('Invalid credentials');
+    if (normalizedEmail !== this.adminEmail()) {
+      void this.auditService?.record({
+        actor: 'System',
+        actorType: 'system',
+        action: 'Failed Login Attempt',
+        module: 'auth',
+        category: 'security',
+        target: normalizedEmail,
+        status: 'failed',
+        metadata: { email: normalizedEmail, reason: 'Unrecognized administrative account' },
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     const { data, error } = await this.supabase.createAuthClient().auth.signInWithPassword({ email: normalizedEmail, password });
-    if (error || !data.session || !data.user) throw new UnauthorizedException('Invalid credentials');
+    if (error || !data.session || !data.user) {
+      void this.auditService?.record({
+        actor: 'System',
+        actorType: 'system',
+        action: 'Failed Login Attempt',
+        module: 'auth',
+        category: 'security',
+        target: normalizedEmail,
+        status: 'failed',
+        metadata: { email: normalizedEmail, reason: 'Invalid password' },
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     const client = this.sessionClient(data.session.access_token);
     const factors = await client.auth.mfa.listFactors();
     const factor = factors.data?.totp.find((item) => item.status === 'verified');
     if (factor) {
       if (!code?.trim()) return { requiresTwoFactor: true, email: normalizedEmail };
       const { data: challenge, error: challengeError } = await client.auth.mfa.challenge({ factorId: factor.id });
-      if (challengeError || !challenge) throw new UnauthorizedException('Invalid credentials');
+      if (challengeError || !challenge) {
+        void this.auditService?.record({
+          actor: 'System',
+          actorType: 'system',
+          action: 'MFA Verification Failed',
+          module: 'auth',
+          category: 'security',
+          target: normalizedEmail,
+          status: 'failed',
+          metadata: { email: normalizedEmail, reason: 'Failed to create MFA challenge' },
+        });
+        throw new UnauthorizedException('Invalid credentials');
+      }
       const { data: verified, error: verifyError } = await client.auth.mfa.verify({ factorId: factor.id, challengeId: challenge.id, code: code.trim() });
-      if (verifyError || !verified) throw new UnauthorizedException('Invalid credentials');
+      if (verifyError || !verified) {
+        void this.auditService?.record({
+          actor: 'System',
+          actorType: 'system',
+          action: 'MFA Verification Failed',
+          module: 'auth',
+          category: 'security',
+          target: normalizedEmail,
+          status: 'failed',
+          metadata: { email: normalizedEmail, reason: 'Invalid or expired TOTP code' },
+        });
+        throw new UnauthorizedException('Invalid credentials');
+      }
       data.session.access_token = verified.access_token;
       data.session.expires_at = Math.floor(Date.now() / 1000) + verified.expires_in;
+
+      void this.auditService?.record({
+        actor: 'Owner',
+        actorType: 'user',
+        action: 'Owner Logged In (MFA Verified)',
+        module: 'auth',
+        category: 'security',
+        target: normalizedEmail,
+        status: 'success',
+        metadata: { email: normalizedEmail, mfaUsed: true },
+      });
+    } else {
+      void this.auditService?.record({
+        actor: 'Owner',
+        actorType: 'user',
+        action: 'Owner Logged In',
+        module: 'auth',
+        category: 'security',
+        target: normalizedEmail,
+        status: 'success',
+        metadata: { email: normalizedEmail, mfaUsed: false },
+      });
     }
+
     return {
       email: normalizedEmail,
       accessToken: data.session.access_token,
@@ -53,6 +133,15 @@ export class AuthService {
     if (email.trim().toLowerCase() === this.adminEmail()) {
       try {
         await this.supabase.createAuthClient().auth.resetPasswordForEmail(this.adminEmail(), { redirectTo: this.recoveryRedirectUrl() });
+        void this.auditService?.record({
+          actor: 'Owner',
+          actorType: 'user',
+          action: 'Password Reset Requested',
+          module: 'auth',
+          category: 'security',
+          target: this.adminEmail(),
+          status: 'success',
+        });
       } catch {
         // Deliberately suppress provider failures to keep the response non-enumerating.
       }
@@ -65,6 +154,15 @@ export class AuthService {
     const client = this.sessionClient(accessToken);
     const { error: updateError } = await client.auth.updateUser({ password });
     if (updateError) throw new UnauthorizedException('Unable to update password');
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Password Reset Completed',
+      module: 'auth',
+      category: 'security',
+      target: this.adminEmail(),
+      status: 'success',
+    });
     return { success: true };
   }
 
@@ -72,6 +170,15 @@ export class AuthService {
     await this.requireRecentAdminSession(accessToken);
     const { error } = await this.sessionClient(accessToken).auth.updateUser({ password });
     if (error) throw new UnauthorizedException('Unable to update password');
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Changed Account Password',
+      module: 'auth',
+      category: 'security',
+      target: this.adminEmail(),
+      status: 'success',
+    });
     return { success: true };
   }
 
@@ -82,6 +189,17 @@ export class AuthService {
     if (challengeError || !challenge) throw new UnauthorizedException('Invalid authenticator code');
     const { error } = await client.auth.mfa.verify({ factorId, challengeId: challenge.id, code });
     if (error) throw new UnauthorizedException('Invalid authenticator code');
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Enabled Two-Factor Authentication',
+      module: 'auth',
+      category: 'security',
+      target: this.adminEmail(),
+      status: 'success',
+      stateBefore: 'disabled',
+      stateAfter: 'enabled',
+    });
     return { enabled: true };
   }
 
@@ -94,6 +212,17 @@ export class AuthService {
     if (verifyError || !verified) throw new UnauthorizedException('Invalid authenticator code');
     const { error } = await this.sessionClient(verified.access_token).auth.mfa.unenroll({ factorId });
     if (error) throw new InternalServerErrorException('Unable to disable authenticator');
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Disabled Two-Factor Authentication',
+      module: 'auth',
+      category: 'security',
+      target: this.adminEmail(),
+      status: 'success',
+      stateBefore: 'enabled',
+      stateAfter: 'disabled',
+    });
     return { enabled: false };
   }
 
@@ -133,8 +262,28 @@ export class AuthService {
       code,
     });
     if (verifyError || !verified?.access_token || !verified.refresh_token) {
+      void this.auditService?.record({
+        actor: 'System',
+        actorType: 'system',
+        action: 'MFA Enrollment Verification Failed',
+        module: 'auth',
+        category: 'security',
+        target: this.adminEmail(),
+        status: 'failed',
+        metadata: { clientIp },
+      });
       throw new UnauthorizedException('Unable to verify code');
     }
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'MFA Enrollment Completed',
+      module: 'auth',
+      category: 'security',
+      target: this.adminEmail(),
+      status: 'success',
+      metadata: { clientIp },
+    });
     return { accessToken: verified.access_token, refreshToken: verified.refresh_token };
   }
 
@@ -160,7 +309,19 @@ export class AuthService {
       expiresAt: new Date((data.session.expires_at || 0) * 1000).toISOString(),
     };
   }
-  async signOut(accessToken: string) { await this.sessionClient(accessToken).auth.signOut(); return { success: true }; }
+  async signOut(accessToken: string) {
+    await this.sessionClient(accessToken).auth.signOut();
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Owner Logged Out',
+      module: 'auth',
+      category: 'security',
+      target: this.adminEmail(),
+      status: 'success',
+    });
+    return { success: true };
+  }
 
   private async requireAdminSession(accessToken: string) {
     const { data, error } = await this.sessionClient(accessToken).auth.getUser();

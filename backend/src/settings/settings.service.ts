@@ -1,6 +1,7 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { SupabaseService } from '../common/supabase/supabase.service';
 import { ExogenousDataService } from '../common/exogenous-data.service';
+import { AuditService } from '../audit/audit.service';
 
 export type AlertThresholdKey =
   | 'capacityWarning'
@@ -197,6 +198,8 @@ export class SettingsService {
     private readonly supabaseService?: SupabaseService,
     @Optional()
     private readonly exogenousDataService?: ExogenousDataService,
+    @Optional()
+    private readonly auditService?: AuditService,
   ) {}
 
   getAlertThresholds() {
@@ -204,11 +207,25 @@ export class SettingsService {
   }
 
   updateAlertThresholds(input: Partial<AlertThresholds>) {
+    const before = { ...this.alertThresholds };
     this.alertThresholds = this.normalizeAlertThresholds({
       ...this.alertThresholds,
       ...input,
     });
-    return this.getAlertThresholds();
+    const after = this.getAlertThresholds();
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Updated Alert Thresholds',
+      module: 'system_settings',
+      category: 'workflow',
+      target: 'alert_thresholds',
+      status: 'success',
+      stateBefore: JSON.stringify(before),
+      stateAfter: JSON.stringify(after),
+      metadata: { before, after },
+    });
+    return after;
   }
 
   evaluateAlertThresholds(metrics: AlertEvaluationMetrics) {
@@ -256,7 +273,21 @@ export class SettingsService {
   }
 
   updateDataRetentionSettings(input: Partial<{ retentionDays: number }>) {
+    const before = this.dataRetentionDays;
     this.dataRetentionDays = this.normalizeRetentionDays(input.retentionDays);
+    const after = this.dataRetentionDays;
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Updated Data Retention Policy',
+      module: 'system_settings',
+      category: 'workflow',
+      target: 'data_retention',
+      status: 'success',
+      stateBefore: `${before} days`,
+      stateAfter: `${after} days`,
+      metadata: { retentionDaysBefore: before, retentionDaysAfter: after },
+    });
     return this.getDataRetentionSettings();
   }
 
@@ -284,6 +315,21 @@ export class SettingsService {
       ? await this.exogenousDataService.pruneOperationalCaches(cutoff)
       : { weatherCache: 0, holidayCache: 0 };
 
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Executed Data Retention Cleanup',
+      module: 'system_settings',
+      category: 'workflow',
+      target: 'data_retention_cleanup',
+      status: 'success',
+      metadata: {
+        cutoff: cutoff.toISOString(),
+        retentionDays: retention.retentionDays,
+        deleted: { ...targets, ...caches },
+      },
+    });
+
     return {
       ...retention,
       cutoff: cutoff.toISOString(),
@@ -308,6 +354,20 @@ export class SettingsService {
     const generatedAt = new Date().toISOString();
     const selectedTargets = this.resolveExportTargets(options);
     const format: ExportFormat = options.format === 'csv' ? 'csv' : 'json';
+
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Exported System Data',
+      module: 'system_settings',
+      category: 'workflow',
+      target: format.toUpperCase(),
+      status: 'success',
+      metadata: {
+        format,
+        datasets: selectedTargets.map((t) => t.key),
+      },
+    });
 
     if (format === 'csv') {
       return this.buildCsvExport(generatedAt, selectedTargets);

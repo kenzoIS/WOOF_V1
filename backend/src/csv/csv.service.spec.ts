@@ -25,8 +25,19 @@ describe('CsvService flexible uploads', () => {
       error: null,
     })),
   }));
+  const createChainable = () => {
+    const chain: any = {};
+    chain.eq = jest.fn(() => chain);
+    chain.order = jest.fn(() => chain);
+    chain.limit = jest.fn().mockResolvedValue({ data: [], error: null });
+    chain.then = (resolve: any, reject: any) =>
+      Promise.resolve({ data: [], error: null }).then(resolve, reject);
+    return chain;
+  };
+  const selectQuery = jest.fn(() => createChainable());
   const supabaseFrom = jest.fn(() => ({
     insert: insertUploadMetadata,
+    select: selectQuery,
     update: jest.fn(() => ({ eq: updateUploadMetadata })),
     delete: jest.fn(() => ({ eq: deleteUploadMetadata })),
   }));

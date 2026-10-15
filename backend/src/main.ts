@@ -23,11 +23,29 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, callback) => {
-      const allowed = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3002').split(',').map((value) => value.trim());
-      if (!origin || allowed.includes(origin)) return callback(null, true);
+      const allowed = (
+        process.env.CORS_ALLOWED_ORIGINS ||
+        'http://localhost:3002,http://127.0.0.1:3002,http://localhost:3000,http://127.0.0.1:3000'
+      )
+        .split(',')
+        .map((value) => value.trim());
+      if (
+        !origin ||
+        allowed.includes(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
       return callback(new Error('Origin not allowed by CORS'));
     },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+    ],
     exposedHeaders: ['Content-Disposition'],
     credentials: true,
   });
@@ -54,7 +72,7 @@ async function bootstrap() {
   // Enable graceful shutdown to release port on restart
   app.enableShutdownHooks();
 
-  const server = await app.listen(port);
+  const server = await app.listen(port, '0.0.0.0');
   
   // Increase server timeouts for large CSV processing
   server.setTimeout(600000); // 10 minutes

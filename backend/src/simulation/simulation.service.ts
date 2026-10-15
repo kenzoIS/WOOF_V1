@@ -2,10 +2,12 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { AuditService } from '../audit/audit.service';
 import { Transaction } from '../csv/schemas/transaction.schema';
 import {
   ENGINE_VERSION,
@@ -28,6 +30,7 @@ export class SimulationService {
     @InjectModel(Transaction.name) private readonly transactions: Model<any>,
     @InjectModel('SimulationRun') private readonly runs: Model<any>,
     private readonly analytics: AnalyticsService,
+    @Optional() private readonly auditService?: AuditService,
   ) {}
 
   async inputs(
@@ -337,6 +340,19 @@ export class SimulationService {
       whatIf = simulate(body.whatIf);
       advice = recommendations(baseline, whatIf);
     } catch (e) {
+      void this.auditService?.record({
+        actor: 'Owner',
+        actorType: 'user',
+        action: `Failed What-If Simulation: ${body?.whatIf?.name || 'Scenario'}`,
+        module: 'simulation',
+        category: 'ai_system',
+        target: `${body?.whatIf?.name || 'Scenario'} (${body?.whatIf?.date || 'Unknown date'})`,
+        status: 'failed',
+        metadata: {
+          error: e instanceof Error ? e.message : 'The simulation could not run.',
+          userEmail: email,
+        },
+      });
       throw new BadRequestException(
         e instanceof Error ? e.message : 'The simulation could not run.',
       );
@@ -351,6 +367,35 @@ export class SimulationService {
       createdBy: email,
     };
     const saved = await this.runs.create({ ...run, userId });
+
+    const baselineRev = baseline.metrics?.revenue ?? 0;
+    const whatIfRev = whatIf.metrics?.revenue ?? 0;
+    const revDiff = whatIfRev - baselineRev;
+    const revDiffStr = `${revDiff >= 0 ? '+' : ''}₱${revDiff.toLocaleString()}`;
+
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: `Executed What-If Simulation: ${body.whatIf.name || 'Scenario'}`,
+      module: 'simulation',
+      category: 'ai_system',
+      target: `${body.whatIf.name || 'Scenario'} (${body.whatIf.date})`,
+      status: 'success',
+      stateBefore: `Baseline: ₱${baselineRev.toLocaleString()} rev (${baseline.metrics?.served ?? 0} served)`,
+      stateAfter: `What-If: ₱${whatIfRev.toLocaleString()} rev (${whatIf.metrics?.served ?? 0} served, diff ${revDiffStr})`,
+      metadata: {
+        scenarioName: body.whatIf.name,
+        date: body.whatIf.date,
+        engineVersion: ENGINE_VERSION,
+        inputsSource: body.inputs?.source,
+        baselineRevenue: baselineRev,
+        whatIfRevenue: whatIfRev,
+        servedDiff: (whatIf.metrics?.served ?? 0) - (baseline.metrics?.served ?? 0),
+        recommendationsCount: advice.length,
+        userEmail: email,
+      },
+    });
+
     return {
       ...run,
       _id: String(saved._id),
@@ -379,6 +424,28 @@ export class SimulationService {
       );
     const config = structuredClone(saved.whatIf.config);
     config.events.push({ ...event, start: minute });
+
+    const eventDescriptor = event.label || event.effect || 'Event';
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: `Committed Scenario Configuration Change: ${eventDescriptor}`,
+      module: 'simulation',
+      category: 'ai_system',
+      target: `${saved.whatIf.config.name} @ +${minute}m`,
+      status: 'success',
+      stateBefore: `${saved.whatIf.config.events.length} injected events`,
+      stateAfter: `${config.events.length} injected events (added ${eventDescriptor} at +${minute}m)`,
+      metadata: {
+        simulationId: id,
+        eventMinute: minute,
+        eventLabel: event.label,
+        eventEffect: event.effect,
+        eventSector: event.sector,
+        userEmail: email,
+      },
+    });
+
     return this.execute(
       { inputs: saved.inputs, baseline: saved.baseline.config, whatIf: config },
       userId,

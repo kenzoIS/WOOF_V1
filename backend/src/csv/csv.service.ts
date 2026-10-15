@@ -582,6 +582,24 @@ export class CsvService {
       );
     }
 
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Uploaded Historical Data',
+      module: 'data_ingestion',
+      category: 'workflow',
+      target: file.originalname,
+      status: 'success',
+      stateAfter: 'Uploaded',
+      metadata: {
+        uploadId: upload.id,
+        module,
+        recordCount: parsed.transactions.length,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        channel: 'POS',
+      },
+    });
+
     const normalizedSeries = normalizeDailySeries(
       buildDailyValuesFromTransactionLines(parsed.transactions, module),
       module,
@@ -704,12 +722,13 @@ export class CsvService {
               uploadId,
             });
             void this.auditService?.record({
-              actor: 'Owner',
-              actorType: 'user',
-              action: 'Retrained forecasting system',
+              actor: 'System',
+              actorType: 'system',
+              action: 'Precomputed forecast cache',
               module: 'forecasting',
               category: 'ai_system',
               target: module,
+              status: 'success',
               stateBefore: 'Stale',
               stateAfter: 'Updated',
               metadata: { uploadId, trigger: 'new_data_upload' },
@@ -1678,6 +1697,12 @@ export class CsvService {
   }
 
   async deleteUpload(id: string): Promise<{ deleted: boolean }> {
+    const { data: upload } = await this.supabaseService.client
+      .from('csv_uploads')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
     // Delete directly from Supabase fact table using the new column
     await this.supabaseService.client
       .from('fact_cross_channel_transactions')
@@ -1687,7 +1712,26 @@ export class CsvService {
     // Clear from staging DB and upload history
     await this.transactionModel.deleteMany({ csvUploadId: id }).exec();
     await this.supabaseService.client.from('csv_uploads').delete().eq('id', id);
-    
+
+    void this.auditService?.record({
+      actor: 'Owner',
+      actorType: 'user',
+      action: 'Deleted Uploaded Dataset',
+      module: 'data_ingestion',
+      category: 'workflow',
+      target: upload?.filename || id,
+      status: 'success',
+      stateBefore: 'Active',
+      stateAfter: 'Deleted',
+      metadata: {
+        uploadId: id,
+        filename: upload?.filename,
+        channel: upload?.channel,
+        recordCount: upload?.record_count,
+        totalRevenue: upload?.total_revenue,
+      },
+    });
+
     return { deleted: true };
   }
 
