@@ -340,7 +340,13 @@ export class AnalyticsService {
             orders: { $addToSet: '$transactionId' },
           },
         },
-        { $addFields: { orderCount: { $size: '$orders' } } },
+        {
+          $project: {
+            _id: 1,
+            revenue: 1,
+            orderCount: { $size: '$orders' },
+          },
+        },
       ]),
       this.aggregateWithDiskUse([
         { $match: dateFilter },
@@ -469,6 +475,15 @@ export class AnalyticsService {
         },
         { $sort: { revenue: -1 } },
         { $limit: 12 },
+        {
+          $project: {
+            _id: 1,
+            revenue: 1,
+            quantity: 1,
+            orderCount: 1,
+            sampleDays: 1,
+          },
+        },
       ]),
       this.aggregateWithDiskUse([
         {
@@ -513,6 +528,14 @@ export class AnalyticsService {
           },
         },
         { $sort: { revenue: -1 } },
+        {
+          $project: {
+            _id: 1,
+            revenue: 1,
+            orderCount: 1,
+            sampleDays: 1,
+          },
+        },
       ]),
     ]);
 
@@ -550,6 +573,13 @@ export class AnalyticsService {
             orders: { $addToSet: '$transactionId' },
           },
         },
+        {
+          $project: {
+            _id: 1,
+            revenue: 1,
+            orderCount: { $size: '$orders' },
+          },
+        },
       ]),
     ]);
 
@@ -574,7 +604,7 @@ export class AnalyticsService {
 
     for (const r of retailChannelStats) {
       const ch = String(r._id || '').toLowerCase();
-      const ords = Array.isArray(r.orders) ? r.orders.length : 0;
+      const ords = Number(r.orderCount) || (Array.isArray(r.orders) ? r.orders.length : 0);
       if (ch.includes('pos')) retailOrdersByChannelMongo.pos += ords;
       else if (ch.includes('shopee')) retailOrdersByChannelMongo.shopee += ords;
       else if (ch.includes('tiktok')) retailOrdersByChannelMongo.tiktok += ords;
@@ -9017,16 +9047,25 @@ export class AnalyticsService {
         $group: {
           _id: null,
           totalRevenue: { $sum: '$netSales' },
-          totalOrders: { $addToSet: '$transactionId' },
+          transactions: { $addToSet: '$transactionId' },
           totalQuantity: { $sum: '$quantity' },
           totalItems: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalRevenue: 1,
+          totalQuantity: 1,
+          totalItems: 1,
+          totalOrders: { $size: '$transactions' },
         },
       },
     ]);
     const row = rows[0];
     return {
       totalRevenue: Number(row?.totalRevenue) || 0,
-      totalOrders: Array.isArray(row?.totalOrders) ? row.totalOrders.length : 0,
+      totalOrders: Number(row?.totalOrders) || 0,
       totalQuantity: Number(row?.totalQuantity) || 0,
       totalItems: Number(row?.totalItems) || 0,
     };
