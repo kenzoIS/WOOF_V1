@@ -4613,6 +4613,12 @@ This file records requested revisions, implementation details, verification, and
 - Passed: `frontend/npx tsc --noEmit`.
 - Passed: `frontend/npm run build`.
 
+### Production Rollout Handoff (2026-10-15)
+
+- Added `PRODUCTION_ROLLOUT_HANDOFF_2026-10-15.md` for the pending controlled production deployment.
+- It makes Render deployment validation the blocking first phase because the deployed `woof-afpp.onrender.com` service returned 404 for the current code's `/api/auth/session` route.
+- It documents safe deployment/rollback, read-only production configuration inventory, controlled live verification, Supabase Dashboard hardening, and explicitly deferred database/RLS/Storage/RPC changes.
+
 ### Supabase Auth-Key Boundary Restoration (2026-10-15)
 
 - Removed the configuration fallback that substituted `SUPABASE_SERVICE_ROLE_KEY` when `SUPABASE_ANON_KEY` was absent.
