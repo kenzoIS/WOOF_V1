@@ -23,19 +23,10 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, callback) => {
-      const allowed = (
-        process.env.CORS_ALLOWED_ORIGINS ||
-        'http://localhost:3002,http://127.0.0.1:3002,http://localhost:3000,http://127.0.0.1:3000'
-      )
+      const allowed = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3002')
         .split(',')
         .map((value) => value.trim());
-      if (
-        !origin ||
-        allowed.includes(origin) ||
-        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
-      ) {
-        return callback(null, true);
-      }
+      if (!origin || allowed.includes(origin)) return callback(null, true);
       return callback(new Error('Origin not allowed by CORS'));
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

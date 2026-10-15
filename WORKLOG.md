@@ -4619,6 +4619,11 @@ This file records requested revisions, implementation details, verification, and
 - It makes Render deployment validation the blocking first phase because the deployed `woof-afpp.onrender.com` service returned 404 for the current code's `/api/auth/session` route.
 - It documents safe deployment/rollback, read-only production configuration inventory, controlled live verification, Supabase Dashboard hardening, and explicitly deferred database/RLS/Storage/RPC changes.
 
+### Post-Merge CORS Origin Boundary Restoration (2026-10-15)
+
+- Restored exact `CORS_ALLOWED_ORIGINS` matching in `backend/src/main.ts` after the incoming audit/UI merge added a wildcard allowance for every localhost and loopback port.
+- Retained all groupmates' unrelated backend audit/analytics/alerts work and frontend Audit UI updates. This preserves the established production rule that credentialed browser origins must be explicitly configured.
+
 ### Supabase Auth-Key Boundary Restoration (2026-10-15)
 
 - Removed the configuration fallback that substituted `SUPABASE_SERVICE_ROLE_KEY` when `SUPABASE_ANON_KEY` was absent.
