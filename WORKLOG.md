@@ -4613,6 +4613,16 @@ This file records requested revisions, implementation details, verification, and
 - Passed: `frontend/npx tsc --noEmit`.
 - Passed: `frontend/npm run build`.
 
+### Supabase Auth-Key Boundary Restoration (2026-10-15)
+
+- Removed the configuration fallback that substituted `SUPABASE_SERVICE_ROLE_KEY` when `SUPABASE_ANON_KEY` was absent.
+- Backend startup again fails safely when the anon/publishable key is missing, preserving the separation between the server-only service-role client and session/auth clients.
+
+### Verification
+
+- Passed: `backend/npm test -- auth/auth.service.spec.ts auth/mfa-enrollment-rate-limit.service.spec.ts common/guards/supabase-auth.guard.spec.ts --runInBand` (14 tests).
+- Passed: `backend/npm run build`.
+
 ### MFA Assurance and Session Boundary Tests (2026-10-15)
 
 - Added focused `SupabaseAuthGuard` tests proving that an otherwise valid AAL1 session is denied from protected API routes and an AAL2 admin session is permitted.

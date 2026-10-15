@@ -64,9 +64,6 @@ import { AlertsModule } from './alerts/alerts.module';
             'SUPABASE_SERVICE_ROLE_KEY must be configured in backend/.env',
           );
         }
-        if (!config.SUPABASE_ANON_KEY && config.SUPABASE_SERVICE_ROLE_KEY) {
-          config.SUPABASE_ANON_KEY = config.SUPABASE_SERVICE_ROLE_KEY;
-        }
         if (!config.SUPABASE_ANON_KEY || typeof config.SUPABASE_ANON_KEY !== 'string') {
           throw new Error('SUPABASE_ANON_KEY must be configured in backend/.env');
         }
