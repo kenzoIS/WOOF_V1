@@ -2537,11 +2537,11 @@ export function Cafe() {
           </div>
 
           <div className="max-h-[620px] overflow-auto pr-1">
-            <Table>
+            <Table className="min-w-[560px]">
               <TableHeader>
                 <TableRow>
                   <TableHead
-                    className="cursor-pointer hover:bg-[#FFF2FA]"
+                    className="cursor-pointer hover:bg-[#FFF2FA] sticky left-0 bg-white dark:bg-[#1a2333] z-10 min-w-[140px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)]"
                     onClick={() => handleSort("name")}
                   >
                     Item Name {sortColumn === "name" && (sortDirection === "asc" ? "↑" : "↓")}
@@ -2577,7 +2577,7 @@ export function Cafe() {
                     className="cursor-pointer hover:bg-[#FFF2FA] transition-colors"
                     onClick={() => setSelectedMenuItem(item)}
                   >
-                    <TableCell className="font-semibold">{item.name}</TableCell>
+                    <TableCell className="font-semibold sticky left-0 bg-white dark:bg-[#1a2333] z-10 min-w-[140px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.06)]">{item.name}</TableCell>
                     <TableCell className="text-center">{item.qtySold}</TableCell>
                     <TableCell className="text-center">
                       <span className="text-xs px-2 py-0.5 rounded-full bg-[#FFF2FA] text-[#223047] opacity-80">{item.category}</span>
@@ -2610,11 +2610,11 @@ export function Cafe() {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-4 border-t border-[#FFD9EC]">
-              <span className="text-xs text-[#223047] opacity-60">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-[#FFD9EC]">
+              <span className="text-xs text-[#223047] opacity-60 text-center sm:text-left">
                 Showing {Math.min(filteredMenuItems.length, (currentPage - 1) * itemsPerPage + 1)}-{Math.min(filteredMenuItems.length, currentPage * itemsPerPage)} of {filteredMenuItems.length} items
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"

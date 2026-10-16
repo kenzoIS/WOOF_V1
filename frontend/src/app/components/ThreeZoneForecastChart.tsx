@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   ComposedChart,
   Line,
@@ -351,6 +351,16 @@ export function ThreeZoneForecastChart({
   const [yearPreset, setYearPreset] = useState<YearPreset>("all");
   const [splitDate, setSplitDate] = useState<string>(initialSplitDate);
   const [forecastHorizon, setForecastHorizon] = useState<string>(initialForecastHorizon);
+  const chartScrollRef = useRef<HTMLDivElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 640);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
   const weatherOverlayByDate = useMemo(() => {
     return new Map(
       (weatherOverlayData || [])
@@ -533,6 +543,13 @@ export function ThreeZoneForecastChart({
     };
   }, [chartData]);
 
+  // Auto-scroll mobile view to latest forecast projections on data update
+  useEffect(() => {
+    if (chartScrollRef.current) {
+      chartScrollRef.current.scrollLeft = chartScrollRef.current.scrollWidth;
+    }
+  }, [chartData]);
+
   return (
     <div className="space-y-4">
       {/* ── 1. Timeline Window Filter & Granularity Control Bar ── */}
@@ -610,69 +627,83 @@ export function ThreeZoneForecastChart({
         </div>
 
         {/* Responsive Recharts Composed Chart with Shaded Backgrounds */}
-        <ResponsiveContainer width="100%" height={380}>
-          <ComposedChart data={chartData} margin={{ top: 20, right: 45, bottom: 8, left: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--forecast-grid, #e2e8f0)" vertical={false} />
+        <div ref={chartScrollRef} className="overflow-x-auto scrollbar-none -mx-2 px-2 sm:mx-0 sm:px-0">
+          <div className="min-w-[560px] sm:min-w-0 w-full">
+            <ResponsiveContainer width="100%" height={380}>
+              <ComposedChart data={chartData} margin={{ top: 20, right: 35, bottom: 8, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--forecast-grid, #e2e8f0)" vertical={false} />
 
-            {/* ── 1. PAST (Train) Zone Background ── */}
-            {zoneBounds.start && zoneBounds.split && (
-              <ReferenceArea
-                x1={zoneBounds.start}
-                x2={zoneBounds.split}
-                fill="var(--forecast-zone-past, #f0f9ff)"
-                fillOpacity={0.80}
-                stroke="var(--forecast-zone-past-stroke, #bae6fd)"
-                strokeWidth={1}
-                label={{
-                  value: "PAST",
-                  position: "insideTopLeft",
-                  fill: "#0284c7",
-                  fontSize: 11,
-                  fontWeight: 800,
-                  offset: 12,
-                }}
-              />
-            )}
+                {/* ── 1. PAST (Train) Zone Background ── */}
+                {zoneBounds.start && zoneBounds.split && (
+                  <ReferenceArea
+                    x1={zoneBounds.start}
+                    x2={zoneBounds.split}
+                    fill="var(--forecast-zone-past, #f0f9ff)"
+                    fillOpacity={0.80}
+                    stroke="var(--forecast-zone-past-stroke, #bae6fd)"
+                    strokeWidth={1}
+                    label={
+                      !isMobile
+                        ? {
+                            value: "PAST",
+                            position: "insideTopLeft",
+                            fill: "#0284c7",
+                            fontSize: 11,
+                            fontWeight: 800,
+                            offset: 12,
+                          }
+                        : undefined
+                    }
+                  />
+                )}
 
-            {/* ── 2. PRESENT (Test / Holdout) Zone Background ── */}
-            {zoneBounds.split && zoneBounds.horizon && (
-              <ReferenceArea
-                x1={zoneBounds.split}
-                x2={zoneBounds.horizon}
-                fill="var(--forecast-zone-present, #fff7ed)"
-                fillOpacity={0.95}
-                stroke="var(--forecast-zone-present-stroke, #fed7aa)"
-                strokeWidth={1}
-                label={{
-                  value: "PRESENT",
-                  position: "insideTop",
-                  fill: "#ea580c",
-                  fontSize: 11,
-                  fontWeight: 800,
-                  offset: 12,
-                }}
-              />
-            )}
+                {/* ── 2. PRESENT (Test / Holdout) Zone Background ── */}
+                {zoneBounds.split && zoneBounds.horizon && (
+                  <ReferenceArea
+                    x1={zoneBounds.split}
+                    x2={zoneBounds.horizon}
+                    fill="var(--forecast-zone-present, #fff7ed)"
+                    fillOpacity={0.95}
+                    stroke="var(--forecast-zone-present-stroke, #fed7aa)"
+                    strokeWidth={1}
+                    label={
+                      !isMobile
+                        ? {
+                            value: "PRESENT",
+                            position: "insideTop",
+                            fill: "#ea580c",
+                            fontSize: 11,
+                            fontWeight: 800,
+                            offset: 12,
+                          }
+                        : undefined
+                    }
+                  />
+                )}
 
-            {/* ── 3. FUTURE (Forecast) Zone Background ── */}
-            {zoneBounds.horizon && zoneBounds.end && (
-              <ReferenceArea
-                x1={zoneBounds.horizon}
-                x2={zoneBounds.end}
-                fill="var(--forecast-zone-future, #f0fdf4)"
-                fillOpacity={0.90}
-                stroke="var(--forecast-zone-future-stroke, #bbf7d0)"
-                strokeWidth={1}
-                label={{
-                  value: "FUTURE",
-                  position: "insideTop",
-                  fill: "#16a34a",
-                  fontSize: 11,
-                  fontWeight: 800,
-                  offset: 12,
-                }}
-              />
-            )}
+                {/* ── 3. FUTURE (Forecast) Zone Background ── */}
+                {zoneBounds.horizon && zoneBounds.end && (
+                  <ReferenceArea
+                    x1={zoneBounds.horizon}
+                    x2={zoneBounds.end}
+                    fill="var(--forecast-zone-future, #f0fdf4)"
+                    fillOpacity={0.90}
+                    stroke="var(--forecast-zone-future-stroke, #bbf7d0)"
+                    strokeWidth={1}
+                    label={
+                      !isMobile
+                        ? {
+                            value: "FUTURE",
+                            position: "insideTop",
+                            fill: "#16a34a",
+                            fontSize: 11,
+                            fontWeight: 800,
+                            offset: 12,
+                          }
+                        : undefined
+                    }
+                  />
+                )}
 
             {/* Clean Vertical Split Boundary Dashed Lines without any floating labels */}
             <ReferenceLine
@@ -790,17 +821,27 @@ export function ThreeZoneForecastChart({
             )}
 
             {/* Draggable Range Brush / Slider */}
-            <Brush
-              dataKey="date"
-              height={30}
-              stroke={themeColor}
-              fill="var(--card, #FFF7FB)"
-              travellerWidth={10}
-              gap={1}
-              tickFormatter={(val) => formatDateLabel(val, timeGrain)}
-            />
+            {!isMobile && (
+              <Brush
+                dataKey="date"
+                height={30}
+                stroke={themeColor}
+                fill="var(--card, #FFF7FB)"
+                travellerWidth={10}
+                gap={1}
+                tickFormatter={(val) => formatDateLabel(val, timeGrain)}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
+      </div>
+    </div>
+
+        {/* Swipe hint on mobile */}
+        <div className="sm:hidden flex items-center justify-between text-[10px] text-[#223047]/60 pt-0.5 px-1 font-medium">
+          <span>← Swipe left to view history</span>
+          <span className="text-[#10b981] font-bold">Latest Projections →</span>
+        </div>
 
         {/* Legend bar */}
         <div className="flex flex-wrap items-center justify-center gap-6 pt-2 text-xs text-[#223047]">
